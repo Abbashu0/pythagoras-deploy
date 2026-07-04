@@ -1,0 +1,1798 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Pythagoras Platform</title>
+  <script>
+    (function redirectToCurrentApp() {
+      const target = new URL("./index.html", window.location.href);
+      target.hash = window.location.hash;
+      window.location.replace(target.href);
+    })();
+  </script>
+  <noscript>
+    <meta http-equiv="refresh" content="0; url=./index.html">
+  </noscript>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Alexandria:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+:root {
+  color-scheme: dark;
+  --bg: oklch(15% 0.018 255);
+  --surface: oklch(21% 0.02 252);
+  --surface-strong: oklch(24% 0.022 252);
+  --surface-soft: oklch(19% 0.016 252 / 0.78);
+  --fg: oklch(96% 0.004 250);
+  --muted: oklch(72% 0.018 250);
+  --muted-soft: oklch(62% 0.014 250);
+  --border: oklch(31% 0.018 252);
+  --border-strong: oklch(39% 0.02 252);
+  --accent: oklch(74% 0.09 205);
+  --accent-soft: oklch(74% 0.09 205 / 0.16);
+  --nav-surface: oklch(22% 0.016 252 / 0.54);
+  --nav-surface-2: oklch(16% 0.012 252 / 0.72);
+  --nav-fg: oklch(96% 0.004 250);
+  --nav-muted: oklch(66% 0.015 250);
+  --nav-border: oklch(40% 0.02 252 / 0.38);
+  --nav-active-ring: oklch(72% 0.08 205);
+  --nav-active-surface: oklch(27% 0.02 252 / 0.96);
+  --nav-shadow: 0 28px 54px rgba(0, 0, 0, 0.34);
+  --success-soft: oklch(78% 0.05 180 / 0.12);
+  --shadow-lg: 0 32px 80px rgba(0, 0, 0, 0.42);
+  --shadow-md: 0 18px 40px rgba(0, 0, 0, 0.22);
+  --body-glow: color-mix(in oklab, var(--accent) 18%, transparent);
+  --body-top: oklch(12% 0.018 255);
+  --body-bottom: oklch(9% 0.01 255);
+  --radius-xl: 30px;
+  --radius-lg: 24px;
+  --radius-md: 18px;
+  --radius-sm: 14px;
+  --font-ui: "Alexandria", "IBM Plex Sans Arabic", "Noto Sans Arabic", "Segoe UI", Tahoma, sans-serif;
+  --font-mono: "IBM Plex Mono", "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  background:
+    radial-gradient(circle at 50% 0%, var(--body-glow), transparent 34%),
+    linear-gradient(180deg, var(--body-top), var(--body-bottom));
+  color: var(--fg);
+  font-family: var(--font-ui);
+  direction: rtl;
+  transition: background 260ms ease, color 260ms ease;
+}
+
+body[data-theme="light"] {
+  --bg: oklch(95% 0.01 245);
+  --surface: oklch(99% 0.004 250 / 0.82);
+  --surface-strong: oklch(97% 0.008 245);
+  --surface-soft: oklch(98% 0.008 245 / 0.76);
+  --fg: oklch(24% 0.02 245);
+  --muted: oklch(49% 0.014 245);
+  --muted-soft: oklch(58% 0.012 245);
+  --border: oklch(86% 0.008 245);
+  --border-strong: oklch(76% 0.012 245);
+  --accent: oklch(67% 0.09 210);
+  --accent-soft: oklch(67% 0.09 210 / 0.12);
+  --nav-surface: oklch(99% 0.002 250 / 0.7);
+  --nav-surface-2: oklch(93% 0.012 245 / 0.84);
+  --nav-fg: oklch(24% 0.02 245);
+  --nav-muted: oklch(47% 0.014 245);
+  --nav-border: oklch(80% 0.012 245 / 0.7);
+  --nav-active-ring: oklch(67% 0.09 210);
+  --nav-active-surface: oklch(96% 0.01 245 / 0.98);
+  --nav-shadow: 0 22px 42px rgba(21, 29, 43, 0.14);
+  --success-soft: oklch(88% 0.03 180 / 0.6);
+  --shadow-lg: 0 28px 70px rgba(24, 35, 51, 0.12);
+  --shadow-md: 0 16px 34px rgba(24, 35, 51, 0.08);
+  --body-glow: color-mix(in oklab, var(--accent) 11%, transparent);
+  --body-top: oklch(99% 0.004 245);
+  --body-bottom: oklch(92% 0.015 245);
+}
+
+button,
+a,
+input,
+textarea {
+  font: inherit;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button {
+  background: none;
+  border: 0;
+  color: inherit;
+  padding: 0;
+}
+
+.app-stage {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+}
+
+.app-device {
+  position: relative;
+  width: min(100%, 430px);
+  min-height: min(920px, 100dvh - 40px);
+  height: min(920px, 100dvh - 40px);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 16%),
+    var(--bg);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 36px;
+  overflow: hidden;
+  box-shadow: var(--shadow-lg);
+}
+
+.app-device::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at top, rgba(255, 255, 255, 0.06), transparent 28%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 26%);
+}
+
+.app-shell {
+  position: relative;
+  min-height: inherit;
+  height: 100%;
+  isolation: isolate;
+}
+
+.screen {
+  min-height: 100%;
+  height: 100%;
+  padding:
+    calc(18px + env(safe-area-inset-top))
+    18px
+    calc(164px + env(safe-area-inset-bottom));
+  overflow: auto;
+  scrollbar-width: none;
+}
+
+.screen::-webkit-scrollbar {
+  display: none;
+}
+
+.topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.brand-chip,
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.brand-chip {
+  font-family: var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.page-head {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.eyebrow {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.page-title {
+  margin: 0;
+  font-size: clamp(31px, 8vw, 38px);
+  line-height: 1.18;
+  font-weight: 600;
+}
+
+.page-copy {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.9;
+  max-width: 34ch;
+}
+
+.section-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 22px 0 14px;
+}
+
+.section-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.section-meta {
+  color: var(--muted-soft);
+  font-size: 12px;
+}
+
+.featured-card,
+.tool-card,
+.placeholder-card,
+.tests-card {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--surface-soft);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  box-shadow: var(--shadow-md);
+}
+
+.featured-card,
+.placeholder-card,
+.tests-card {
+  border-radius: var(--radius-xl);
+}
+
+.featured-card {
+  display: grid;
+  gap: 18px;
+  padding: 22px;
+  margin-bottom: 18px;
+  background:
+    linear-gradient(180deg, color-mix(in oklab, var(--accent) 12%, transparent), transparent 66%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06), transparent 24%),
+    var(--surface);
+  border-color: color-mix(in oklab, var(--accent) 42%, rgba(255, 255, 255, 0.08));
+  transform: translateZ(0);
+  transition: transform 220ms ease, border-color 220ms ease, box-shadow 220ms ease;
+}
+
+.featured-card:hover,
+.featured-card:focus-visible {
+  transform: translateY(-2px);
+  border-color: color-mix(in oklab, var(--accent) 58%, rgba(255, 255, 255, 0.1));
+  box-shadow: 0 28px 44px rgba(0, 0, 0, 0.3);
+}
+
+.featured-card:active {
+  transform: scale(0.985);
+}
+
+.featured-head,
+.tool-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.icon-wrap {
+  width: 54px;
+  height: 54px;
+  border-radius: 18px;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--fg);
+  flex: 0 0 auto;
+}
+
+.icon-wrap.featured {
+  background: color-mix(in oklab, var(--accent) 18%, rgba(255, 255, 255, 0.04));
+  color: var(--accent);
+  border-color: color-mix(in oklab, var(--accent) 38%, rgba(255, 255, 255, 0.08));
+}
+
+.icon-wrap.placeholder {
+  width: 68px;
+  height: 68px;
+  border-radius: 22px;
+  margin-inline: auto;
+}
+
+.app-icon {
+  width: 24px;
+  height: 24px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.featured-copy,
+.tool-copy {
+  display: grid;
+  gap: 8px;
+}
+
+.featured-title,
+.tool-title,
+.placeholder-title,
+.tests-title {
+  margin: 0;
+  font-size: 21px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.tool-title {
+  font-size: 17px;
+}
+
+.featured-text,
+.tool-text,
+.placeholder-text,
+.tests-text {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.85;
+}
+
+.card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.hint-link {
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.hint-link span {
+  color: var(--accent);
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 1;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+}
+
+.status-badge.is-live {
+  background: var(--success-soft);
+  border-color: color-mix(in oklab, var(--accent) 26%, rgba(255, 255, 255, 0.08));
+  color: var(--fg);
+}
+
+.status-badge.is-soon {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 18px currentColor;
+  opacity: 0.88;
+}
+
+.tools-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.tool-card {
+  display: grid;
+  gap: 14px;
+  width: 100%;
+  padding: 16px;
+  border-radius: var(--radius-lg);
+  text-align: right;
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    background 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.tool-card.available {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent 22%),
+    color-mix(in oklab, var(--accent) 8%, var(--surface-strong));
+  border-color: color-mix(in oklab, var(--accent) 34%, rgba(255, 255, 255, 0.08));
+}
+
+.tool-card.locked {
+  cursor: pointer;
+}
+
+.tool-card:hover,
+.tool-card:focus-visible {
+  transform: translateY(-2px);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.tool-card:active {
+  transform: scale(0.985);
+}
+
+.tool-card.locked .icon-wrap {
+  color: var(--muted);
+}
+
+.tool-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.tool-hint {
+  color: var(--muted-soft);
+  font-size: 12px;
+}
+
+.placeholder-wrap {
+  display: grid;
+  align-content: center;
+  min-height: calc(100dvh - 220px);
+}
+
+.settings-stack {
+  display: grid;
+  gap: 14px;
+}
+
+.settings-card {
+  position: relative;
+  overflow: hidden;
+  padding: 22px;
+  border-radius: var(--radius-xl);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--surface-soft);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  box-shadow: var(--shadow-md);
+  display: grid;
+  gap: 18px;
+}
+
+.settings-card.subtle {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 42%),
+    var(--surface-soft);
+}
+
+.settings-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.settings-copy {
+  display: grid;
+  gap: 8px;
+}
+
+.settings-title {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.35;
+  font-weight: 600;
+}
+
+.settings-text,
+.settings-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.85;
+}
+
+.theme-switcher {
+  display: grid;
+  gap: 10px;
+}
+
+.theme-option {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 20px;
+  text-align: right;
+  cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    background 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.theme-option:hover,
+.theme-option:focus-visible {
+  transform: translateY(-1px);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.theme-option:active {
+  transform: scale(0.988);
+}
+
+.theme-option.is-selected {
+  background: color-mix(in oklab, var(--accent) 10%, var(--surface-strong));
+  border-color: color-mix(in oklab, var(--accent) 34%, rgba(255, 255, 255, 0.08));
+  box-shadow: 0 16px 28px rgba(0, 0, 0, 0.14);
+}
+
+.theme-option-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.theme-option-copy strong {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.theme-option-copy small {
+  color: var(--muted-soft);
+  font-size: 12px;
+}
+
+.theme-swatch {
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  flex: 0 0 auto;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.theme-swatch.dark {
+  background:
+    radial-gradient(circle at 30% 25%, rgba(138, 227, 255, 0.3), transparent 40%),
+    linear-gradient(180deg, #233348, #0d111a);
+}
+
+.theme-swatch.light {
+  background:
+    radial-gradient(circle at 35% 25%, rgba(98, 178, 230, 0.24), transparent 42%),
+    linear-gradient(180deg, #fbfdff, #dfe7f0);
+}
+
+.placeholder-card,
+.tests-card {
+  padding: 24px;
+}
+
+.placeholder-card {
+  display: grid;
+  gap: 16px;
+  text-align: center;
+}
+
+.placeholder-title,
+.tests-title {
+  font-size: 24px;
+}
+
+.placeholder-text,
+.tests-text {
+  font-size: 14px;
+}
+
+.tests-stack {
+  display: grid;
+  gap: 14px;
+}
+
+.tests-card {
+  display: grid;
+  gap: 16px;
+}
+
+.tests-list {
+  display: grid;
+  gap: 10px;
+}
+
+.tests-list-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.tests-list-item::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--accent) 66%, white);
+  box-shadow: 0 0 18px rgba(79, 221, 255, 0.4);
+  flex: 0 0 auto;
+}
+
+.toast {
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  bottom: calc(132px + env(safe-area-inset-bottom));
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(13, 17, 25, 0.9);
+  color: var(--fg);
+  font-size: 13px;
+  line-height: 1.8;
+  opacity: 0;
+  transform: translateY(18px);
+  pointer-events: none;
+  transition: opacity 220ms ease, transform 220ms ease;
+  z-index: 10;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.toast.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.bottom-nav-wrap {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  padding: 0 16px calc(18px + env(safe-area-inset-bottom));
+  background: transparent;
+  pointer-events: none;
+}
+
+.bottom-nav {
+  pointer-events: auto;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  width: 100%;
+  height: 74px;
+  padding: 0 10px;
+  border-radius: 37px;
+  overflow: visible;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.02) 28%, transparent 100%),
+    linear-gradient(180deg, var(--nav-surface), var(--nav-surface-2));
+  border: 1px solid var(--nav-border);
+  box-shadow: var(--nav-shadow);
+  backdrop-filter: blur(28px) saturate(1.1);
+  -webkit-backdrop-filter: blur(28px) saturate(1.1);
+}
+
+.bottom-nav::before {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 50% 0%, color-mix(in oklab, var(--accent) 16%, transparent), transparent 42%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06), transparent 32%);
+  z-index: 0;
+}
+
+.nav-item {
+  flex: 1;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  height: 74px;
+  padding: 0 2px;
+  color: var(--nav-muted);
+  z-index: 2;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    color 240ms ease,
+    opacity 240ms ease;
+}
+
+.nav-item:hover,
+.nav-item:focus-visible {
+  color: var(--nav-fg);
+}
+
+.nav-item:active {
+  opacity: 0.98;
+}
+
+.nav-item.is-active {
+  color: var(--nav-fg);
+}
+
+.nav-orb {
+  position: relative;
+  width: 46px;
+  height: 46px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: currentColor;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0);
+  transition:
+    transform 450ms cubic-bezier(0.34, 1.56, 0.64, 1),
+    background 300ms ease,
+    box-shadow 300ms ease,
+    border-color 300ms ease;
+  will-change: transform;
+}
+
+.nav-orb::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--accent) 18%, rgba(255, 255, 255, 0.08));
+  transform: scale(0);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.nav-orb.is-ripple::after {
+  animation: navRippleOut 400ms ease-out forwards;
+}
+
+.nav-item:not(.is-active):hover .nav-orb,
+.nav-item:not(.is-active):focus-visible .nav-orb {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.06);
+}
+
+.nav-item.is-active .nav-orb {
+  background:
+    radial-gradient(circle at 50% 24%, rgba(255, 255, 255, 0.12), transparent 52%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 35%),
+    var(--nav-active-surface);
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow:
+    0 16px 28px rgba(0, 0, 0, 0.34),
+    0 0 0 1px rgba(255, 255, 255, 0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  color: color-mix(in oklab, var(--fg) 80%, var(--accent) 20%);
+  transform: translateY(-24px);
+}
+
+.nav-item.is-reactivating .nav-orb {
+  animation: navOrbLift 450ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.nav-label {
+  font-size: 11px;
+  line-height: 1.1;
+  white-space: nowrap;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  transition:
+    transform 450ms cubic-bezier(0.34, 1.56, 0.64, 1),
+    opacity 240ms ease,
+    color 240ms ease,
+    font-weight 220ms ease;
+}
+
+.nav-item:not(.is-active) .nav-label {
+  transform: translateY(0);
+}
+
+.nav-item.is-active .nav-label {
+  opacity: 1;
+  transform: translateY(-4px);
+  color: var(--fg);
+  font-weight: 700;
+}
+
+.nav-item.is-reactivating .nav-label {
+  animation: navLabelLift 450ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.nav-item .app-icon {
+  width: 22px;
+  height: 22px;
+  transition:
+    stroke 300ms ease,
+    opacity 300ms ease;
+}
+
+.is-entering {
+  animation: enterScreen 380ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.stagger {
+  opacity: 0;
+  animation: riseIn 560ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes enterScreen {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes riseIn {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes navRippleOut {
+  0% {
+    transform: scale(0);
+    opacity: 0.46;
+  }
+
+  100% {
+    transform: scale(2.15);
+    opacity: 0;
+  }
+}
+
+@keyframes navOrbLift {
+  0% {
+    transform: translateY(0);
+  }
+
+  100% {
+    transform: translateY(-24px);
+  }
+}
+
+@keyframes navLabelLift {
+  0% {
+    transform: translateY(0);
+  }
+
+  100% {
+    transform: translateY(-4px);
+  }
+}
+
+@media (min-width: 860px) {
+  .tools-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .app-stage {
+    padding: 0;
+  }
+
+  .app-device {
+    width: 100%;
+    min-height: 100dvh;
+    height: 100dvh;
+    border-radius: 0;
+    border: 0;
+    box-shadow: none;
+  }
+}
+
+/* ── Home screen ───────────────────────────────── */
+.home-stack { display: grid; gap: 14px; }
+
+.home-greeting {
+  padding: 20px 22px;
+  border-radius: var(--radius-xl);
+  border: 1px solid rgba(255,255,255,0.08);
+  background: var(--surface-soft);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+}
+.greeting-text {
+  font-size: 22px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.greeting-sub {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.home-shortcuts {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.shortcut-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 8px;
+  border-radius: var(--radius-lg);
+  border: 1px solid rgba(255,255,255,0.08);
+  background: var(--surface-soft);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  cursor: pointer;
+  transition: transform 180ms ease, border-color 180ms ease, background 180ms ease;
+  text-align: center;
+}
+.shortcut-card:hover { transform: translateY(-2px); border-color: rgba(255,255,255,0.16); }
+.shortcut-card:active { transform: scale(0.97); }
+.shortcut-label { font-size: 12px; color: var(--muted); font-weight: 500; }
+
+.home-tip {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(255,255,255,0.06);
+  background: rgba(255,255,255,0.03);
+}
+.tip-icon .app-icon { width: 18px; height: 18px; color: var(--accent); flex-shrink: 0; }
+.tip-text { font-size: 13px; color: var(--muted); line-height: 1.7; margin: 0; }
+
+.section-link {
+  font-size: 12px;
+  color: var(--accent);
+  font-weight: 500;
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+/* ── Settings improvements ─────────────────────── */
+.theme-check { margin-right: auto; color: var(--accent); }
+.theme-check .app-icon { width: 18px; height: 18px; }
+
+/* Live preview device */
+.theme-preview-device {
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,0.1);
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+  transition: background 0.3s ease, border-color 0.3s ease;
+}
+.theme-preview-device.is-dark {
+  background: oklch(12% 0.016 255);
+  border-color: rgba(255,255,255,0.08);
+}
+.theme-preview-device.is-light {
+  background: oklch(95% 0.01 245);
+  border-color: rgba(0,0,0,0.08);
+}
+
+.tpd-bar {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  padding: 0 2px;
+}
+.tpd-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  transition: background 0.3s;
+}
+.is-dark .tpd-dot  { background: rgba(255,255,255,0.15); }
+.is-light .tpd-dot { background: rgba(0,0,0,0.15); }
+
+.tpd-card {
+  border-radius: 8px;
+  padding: 10px;
+  display: grid;
+  gap: 6px;
+  transition: background 0.3s;
+}
+.is-dark  .tpd-card { background: oklch(21% 0.02 252); }
+.is-light .tpd-card { background: #fff; }
+
+.tpd-line {
+  height: 6px; border-radius: 3px;
+  transition: background 0.3s;
+}
+.tpd-line.long  { width: 70%; }
+.tpd-line.short { width: 40%; }
+.is-dark  .tpd-line { background: rgba(255,255,255,0.12); }
+.is-light .tpd-line { background: rgba(0,0,0,0.1); }
+
+.tpd-nav {
+  display: flex;
+  justify-content: space-around;
+  padding: 6px 4px 2px;
+}
+.tpd-orb {
+  width: 22px; height: 22px; border-radius: 50%;
+  transition: background 0.3s;
+}
+.is-dark  .tpd-orb         { background: rgba(255,255,255,0.08); }
+.is-light .tpd-orb         { background: rgba(0,0,0,0.06); }
+.is-dark  .tpd-orb.active  { background: oklch(74% 0.09 205 / 0.4); }
+.is-light .tpd-orb.active  { background: oklch(67% 0.09 210 / 0.35); }
+
+/* ── Toast fix: always above navbar ────────────── */
+.toast {
+  bottom: calc(108px + env(safe-area-inset-bottom)) !important;
+}
+
+:root {
+  --nav-surface:        oklch(18% 0.014 252 / 0.38);
+  --nav-surface-2:      oklch(12% 0.010 252 / 0.52);
+  --nav-border:         oklch(55% 0.018 252 / 0.22);
+  --nav-shadow:         0 24px 48px rgba(0,0,0,0.38), 0 2px 8px rgba(0,0,0,0.24);
+  --nav-active-surface: oklch(24% 0.022 252 / 0.92);
+  --nav-icon-size:      24px;
+}
+body[data-theme="light"] {
+  --nav-surface:        oklch(98% 0.004 250 / 0.52);
+  --nav-surface-2:      oklch(92% 0.010 245 / 0.68);
+  --nav-border:         oklch(75% 0.010 245 / 0.50);
+  --nav-shadow:         0 18px 40px rgba(18,28,48,0.12), 0 2px 6px rgba(18,28,48,0.08);
+  --nav-active-surface: oklch(97% 0.008 245 / 0.96);
+}
+.bottom-nav-wrap {
+  position: absolute;
+  inset: auto 0 0;
+  z-index: 20;
+  padding: 0 14px calc(14px + env(safe-area-inset-bottom));
+  pointer-events: none;
+}
+.bottom-nav {
+  pointer-events: auto;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  width: 100%;
+  height: 70px;
+  padding: 0 6px;
+  border-radius: 35px;
+  overflow: visible;
+  background:
+    linear-gradient(160deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.03) 40%, transparent 100%),
+    var(--nav-surface);
+  border: 1px solid var(--nav-border);
+  box-shadow: var(--nav-shadow);
+  backdrop-filter: blur(40px) saturate(1.6) brightness(1.04);
+  -webkit-backdrop-filter: blur(40px) saturate(1.6) brightness(1.04);
+  isolation: isolate;
+}
+.bottom-nav::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(255,255,255,0.13) 0%, rgba(255,255,255,0.04) 18%, transparent 50%);
+  z-index: 0;
+}
+.bottom-nav::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: radial-gradient(ellipse 60% 40% at 50% 0%, color-mix(in oklab, var(--accent) 14%, transparent), transparent 70%);
+  z-index: 0;
+}
+.nav-item {
+  flex: 1;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 70px;
+  padding: 0 2px;
+  color: var(--nav-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  z-index: 2;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  transition: color 260ms ease;
+}
+.nav-item:hover:not(.is-active) { color: var(--nav-fg); }
+.nav-item:active { opacity: 0.92; }
+.nav-item.is-active { color: var(--nav-fg); }
+.nav-orb {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: currentColor;
+  background: transparent;
+  border: 1px solid transparent;
+  transition:
+    transform  460ms cubic-bezier(0.34, 1.52, 0.64, 1),
+    background 280ms ease,
+    border-color 280ms ease,
+    box-shadow 280ms ease;
+  will-change: transform;
+  z-index: 3;
+}
+.nav-orb .app-icon {
+  width: var(--nav-icon-size);
+  height: var(--nav-icon-size);
+  transition: transform 260ms cubic-bezier(0.34,1.4,0.64,1), opacity 240ms ease, stroke 280ms ease;
+  stroke-width: 1.65;
+}
+.nav-item:not(.is-active):hover .nav-orb {
+  background: rgba(255,255,255,0.06);
+  border-color: rgba(255,255,255,0.10);
+}
+body[data-theme="light"] .nav-item:not(.is-active):hover .nav-orb {
+  background: rgba(0,0,0,0.04);
+  border-color: rgba(0,0,0,0.07);
+}
+.nav-item.is-active .nav-orb {
+  transform: translateY(-26px);
+  background:
+    linear-gradient(160deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.06) 50%, transparent 100%),
+    var(--nav-active-surface);
+  border-color: rgba(255,255,255,0.16);
+  box-shadow:
+    0 12px 32px rgba(0,0,0,0.38),
+    0 4px 12px rgba(0,0,0,0.22),
+    0 0 0 1px rgba(255,255,255,0.06),
+    inset 0 1px 0 rgba(255,255,255,0.18),
+    inset 0 -1px 0 rgba(0,0,0,0.12);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  color: var(--accent);
+}
+body[data-theme="light"] .nav-item.is-active .nav-orb {
+  background: linear-gradient(160deg, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.80) 100%);
+  border-color: rgba(255,255,255,0.70);
+  box-shadow:
+    0 10px 28px rgba(18,28,48,0.18),
+    0 3px 8px rgba(18,28,48,0.12),
+    inset 0 1px 0 rgba(255,255,255,1);
+  color: var(--accent);
+}
+.nav-item.is-active .nav-orb .app-icon { transform: scale(1.08); opacity: 1; }
+.nav-orb::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--accent) 22%, rgba(255,255,255,0.10));
+  transform: scale(0);
+  opacity: 0;
+  pointer-events: none;
+}
+.nav-orb.is-ripple::after { animation: navRippleOut 420ms ease-out forwards; }
+.nav-item.is-reactivating .nav-orb { animation: navOrbBounce 460ms cubic-bezier(0.34, 1.52, 0.64, 1); }
+.nav-item.is-reactivating .nav-label { animation: navLabelLift 460ms cubic-bezier(0.34, 1.52, 0.64, 1); }
+.nav-label {
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.015em;
+  white-space: nowrap;
+  line-height: 1;
+  transition:
+    transform  460ms cubic-bezier(0.34, 1.52, 0.64, 1),
+    opacity    240ms ease,
+    color      260ms ease,
+    font-weight 220ms ease;
+}
+.nav-item:not(.is-active) .nav-label { transform: translateY(0); opacity: 0.7; }
+.nav-item.is-active .nav-label { transform: translateY(-5px); opacity: 1; color: var(--fg); font-weight: 600; }
+@keyframes navOrbBounce {
+  0%   { transform: translateY(-22px) scale(0.96); }
+  55%  { transform: translateY(-30px) scale(1.04); }
+  100% { transform: translateY(-26px) scale(1); }
+}
+@keyframes navRippleOut {
+  0%   { transform: scale(0.6); opacity: 0.5; }
+  100% { transform: scale(2.4); opacity: 0; }
+}
+@keyframes navLabelLift {
+  0%   { transform: translateY(0); }
+  100% { transform: translateY(-5px); }
+}
+.toast { bottom: calc(108px + env(safe-area-inset-bottom)) !important; }
+
+  </style>
+</head>
+<body data-view="tools">
+  <div id="app"></div>
+  <script>
+// ── Theme ──────────────────────────────────────────────────────────
+const THEME_KEY = "pythagoras-theme";
+
+// Safe localStorage wrapper (claude.ai sandbox may block it)
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch { /* noop */ } },
+};
+
+const themeLabels = { dark: "داكن", light: "فاتح" };
+
+function getStoredTheme() {
+  const t = store.get(THEME_KEY);
+  return t === "light" ? "light" : "dark";
+}
+
+function applyTheme(theme) {
+  const t = theme === "light" ? "light" : "dark";
+  document.body.dataset.theme = t;
+  document.documentElement.style.colorScheme = t;
+  store.set(THEME_KEY, t);
+  return t;
+}
+
+function syncThemeControls(theme) {
+  document.querySelectorAll("[data-theme-choice]").forEach((btn) => {
+    const sel = btn.getAttribute("data-theme-choice") === theme;
+    btn.classList.toggle("is-selected", sel);
+    btn.setAttribute("aria-pressed", sel ? "true" : "false");
+  });
+  const status = document.querySelector("[data-theme-status]");
+  if (status) status.textContent = `الوضع الحالي: ${themeLabels[theme]}`;
+
+  // live preview swatches
+  const preview = document.querySelector(".theme-preview-device");
+  if (preview) {
+    preview.classList.toggle("is-dark", theme === "dark");
+    preview.classList.toggle("is-light", theme === "light");
+  }
+}
+
+// ── Data ───────────────────────────────────────────────────────────
+const tools = [
+  {
+    id: "tests", title: "الاختبارات", status: "متاح الآن", statusClass: "is-live",
+    hint: "ابدأ من هنا", icon: "tests", available: true, view: "tests",
+    description: "يدخل الطالب إلى بنك الأسئلة والاختبارات المخصصة حسب المادة والفصل والموضوع ونوع السؤال.",
+  },
+  {
+    id: "spaced", title: "التكرار المتباعد", status: "قريبًا", statusClass: "is-soon",
+    hint: "سيتفعّل لاحقًا", icon: "repeat",
+    description: "خطة مراجعة ذكية تساعد الطالب على توزيع المراجعات حسب النسيان والضغط الدراسي.",
+  },
+  {
+    id: "pomodoro", title: "بومودورو", status: "قريبًا", statusClass: "is-soon",
+    hint: "قيد الإعداد", icon: "timer",
+    description: "جلسات تركيز قصيرة بتوقيت هادئ تساعد الطالب على الاستمرار بدون إرهاق.",
+  },
+  {
+    id: "notebook", title: "دفتري", status: "قريبًا", statusClass: "is-soon",
+    hint: "ضمن نفس الهوية", icon: "notebook",
+    description: "مساحة لحفظ الملاحظات السريعة والملخصات وربطها بالدراسة.",
+  },
+  {
+    id: "assistants", title: "المساعدون الأذكياء", status: "قريبًا", statusClass: "is-soon",
+    hint: "شرح موجّه حسب المادة", icon: "brain",
+    description: "مساعدون موجّهون حسب المادة لشرح المفاهيم والإجابة من مصادر موثوقة.",
+  },
+  {
+    id: "lectures", title: "المحاضرات", status: "قريبًا", statusClass: "is-soon",
+    hint: "مواد وروابط مرتبة", icon: "lectures",
+    description: "تنظيم المحاضرات والروابط والمواد التعليمية داخل كل مادة.",
+  },
+  {
+    id: "calendar-tool", title: "التقويم", status: "قريبًا", statusClass: "is-soon",
+    hint: "للمراجعات القادمة", icon: "calendar",
+    description: "تنظيم المواعيد والاختبارات والمراجعات القادمة.",
+  },
+  {
+    id: "notes-tool", title: "الملاحظات", status: "قريبًا", statusClass: "is-soon",
+    hint: "تدوين منظم", icon: "notes",
+    description: "تدوين الأفكار والملخصات الدراسية بطريقة منظمة.",
+  },
+  {
+    id: "tasks-tool", title: "المهام", status: "قريبًا", statusClass: "is-soon",
+    hint: "متابعة يومية", icon: "tasks",
+    description: "تتبع الواجبات والخطوات الدراسية اليومية.",
+  },
+];
+
+const navItems = [
+  { id: "home",     label: "الرئيسية",  icon: "home"       },
+  { id: "tasks",    label: "المهام",    icon: "tasks"      },
+  { id: "tools",    label: "الأدوات",   icon: "spark-grid" },
+  { id: "notes",    label: "الملاحظات", icon: "notes"      },
+  { id: "settings", label: "الإعدادات", icon: "settings"   },
+];
+
+// views that map to a nav tab
+const viewNavMap = {
+  home: "home", tasks: "tasks", tools: "tools",
+  notes: "notes", settings: "settings", tests: "tools",
+};
+
+const screens = {
+  tools:    { title: "الأدوات",    eyebrow: "Pythagoras Tools", stateLabel: "المرحلة الأولى",  copy: "مركز أدواتك الدراسية. ابدأ بالاختبارات، وستصل بقية الأدوات تدريجيًا بنفس التجربة." },
+  home:     { title: "الرئيسية",   eyebrow: "Home",             stateLabel: "نقطة البداية",    copy: "نظرة سريعة على يومك الدراسي — الاختبارات القادمة، آخر المهام، وتقدمك الأسبوعي.", icon: "home" },
+  tasks:    { title: "المهام",     eyebrow: "Tasks",            stateLabel: "قيد البناء",      copy: "سنضيف هنا لاحقًا متابعة يومية واضحة للواجبات والخطوات الدراسية.", icon: "tasks" },
+  notes:    { title: "الملاحظات", eyebrow: "Notes",            stateLabel: "قيد البناء",      copy: "ستتحول هذه الصفحة لاحقًا إلى مساحة تدوين منظمة ومتصلة ببقية الأدوات.", icon: "notes" },
+  settings: { title: "الإعدادات", eyebrow: "Settings",         stateLabel: "قابل للتخصيص",   copy: "اضبط مظهر التطبيق. ستُضاف بقية الإعدادات لاحقًا ضمن نفس الهوية.", icon: "settings" },
+  tests:    { title: "الاختبارات",eyebrow: "Tests",            stateLabel: "الخطوة التالية", copy: "سنبني تجربة الاختبارات في الخطوة التالية بدون التوسع إلى التدفق الكامل الآن.", icon: "tests" },
+};
+
+// ── Icons ──────────────────────────────────────────────────────────
+function icon(name) {
+  const icons = {
+    home: `<path d="M4 10.5 12 4l8 6.5"/><path d="M6.5 9.5V20h11V9.5"/><path d="M9.5 20v-5.5h5V20"/>`,
+    calendar: `<rect x="4" y="5.5" width="16" height="14" rx="3"/><path d="M8 3.5v4"/><path d="M16 3.5v4"/><path d="M4 9.5h16"/>`,
+    "spark-grid": `<rect x="4" y="4" width="7" height="7" rx="2"/><rect x="13" y="4" width="7" height="7" rx="2"/><rect x="4" y="13" width="7" height="7" rx="2"/><path d="M16.25 13.5v2"/><path d="M16.25 19.5v.01"/><path d="M14.25 17.5h4"/>`,
+    notes: `<path d="M7 4h8l4 4v12H7z"/><path d="M15 4v4h4"/><path d="M10 12h5"/><path d="M10 16h5"/>`,
+    tasks: `<path d="M9 7h10"/><path d="M9 12h10"/><path d="M9 17h10"/><path d="m4.5 7 1.5 1.5L8.5 6"/><path d="m4.5 12 1.5 1.5L8.5 11"/><path d="m4.5 17 1.5 1.5L8.5 16"/>`,
+    settings: `<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>`,
+    tests: `<rect x="5" y="4.5" width="14" height="17" rx="3"/><path d="M9 9.5h6"/><path d="M9 13.5h3"/><path d="m9.5 17 1.8 1.8L15.5 14.5"/>`,
+    repeat: `<path d="M17 8h3V5"/><path d="M20 8a7 7 0 0 0-12-3"/><path d="M7 16H4v3"/><path d="M4 16a7 7 0 0 0 12 3"/>`,
+    timer: `<circle cx="12" cy="13" r="7"/><path d="M12 13 15 10"/><path d="M9 3.5h6"/>`,
+    notebook: `<path d="M7 4.5h10a2 2 0 0 1 2 2v13H7z"/><path d="M7 4.5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h1"/><path d="M10 9h6"/><path d="M10 13h6"/>`,
+    brain: `<path d="M10 6.5a3 3 0 0 0-5 2.3A3.4 3.4 0 0 0 7 15v1"/><path d="M14 6.5a3 3 0 0 1 5 2.3A3.4 3.4 0 0 1 17 15v1"/><path d="M12 6v12"/><path d="M9.5 10.5h5"/><path d="M9 19h6"/>`,
+    lectures: `<path d="M5 6.5 12 4l7 2.5v11L12 20l-7-2.5z"/><path d="m10 10 5 3-5 3z"/>`,
+    check: `<path d="M20 6 9 17l-5-5"/>`,
+    sun: `<circle cx="12" cy="12" r="4"/><path d="M12 3v1M12 20v1M4.22 4.22l.7.7M19.08 19.08l.7.7M3 12h1M20 12h1M4.22 19.78l.7-.7M19.08 4.92l.7-.7"/>`,
+    moon: `<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>`,
+  };
+  return `<svg class="app-icon" viewBox="0 0 24 24" aria-hidden="true">${icons[name] || icons["spark-grid"]}</svg>`;
+}
+
+function badge(text, cls) {
+  return `<span class="status-badge ${cls}"><span class="status-dot"></span>${text}</span>`;
+}
+
+// ── Screen builders ────────────────────────────────────────────────
+function pageHead(screen) {
+  return `
+    <div class="topline stagger" style="animation-delay:0ms">
+      <span class="brand-chip">Pythagoras Platform</span>
+      <span class="status-chip">${screen.stateLabel}</span>
+    </div>
+    <header class="page-head stagger" style="animation-delay:50ms">
+      <div class="eyebrow">${screen.eyebrow}</div>
+      <h1 class="page-title">${screen.title}</h1>
+      <p class="page-copy">${screen.copy}</p>
+    </header>`;
+}
+
+function featuredCard() {
+  return `
+    <button type="button" class="featured-card stagger" style="animation-delay:120ms" data-nav-to="tests">
+      <div class="featured-head">
+        <div class="featured-copy">
+          <h2 class="featured-title">الاختبارات جاهزة كبداية إنتاجية</h2>
+          <p class="featured-text">ابدأ من المسار الأوضح الآن: بنك الأسئلة والاختبارات المخصصة حسب المادة والفصل والموضوع ونوع السؤال.</p>
+        </div>
+        <div class="icon-wrap featured">${icon("tests")}</div>
+      </div>
+      <div class="card-foot">
+        ${badge("متاح الآن", "is-live")}
+        <div class="hint-link">ابدأ من هنا <span>←</span></div>
+      </div>
+    </button>`;
+}
+
+function toolCard(tool, delay) {
+  const inner = `
+    <div class="tool-head">
+      <div class="tool-copy">
+        <h3 class="tool-title">${tool.title}</h3>
+        <p class="tool-text">${tool.description}</p>
+      </div>
+      <div class="icon-wrap ${tool.available ? "featured" : ""}">${icon(tool.icon)}</div>
+    </div>
+    <div class="tool-meta">
+      ${badge(tool.status, tool.statusClass)}
+      <span class="tool-hint">${tool.hint}</span>
+    </div>`;
+
+  if (tool.available) {
+    return `<button type="button" class="tool-card available stagger" style="animation-delay:${delay}ms" data-nav-to="tests">${inner}</button>`;
+  }
+  return `<button type="button" class="tool-card locked stagger" style="animation-delay:${delay}ms" data-locked="true" data-tool-name="${tool.title}">${inner}</button>`;
+}
+
+function toolsScreen() {
+  return `
+    ${pageHead(screens.tools)}
+    ${featuredCard()}
+    <div class="section-row stagger" style="animation-delay:170ms">
+      <h2 class="section-title">مركز الأدوات</h2>
+      <span class="section-meta">أداة متاحة + 8 قريبًا</span>
+    </div>
+    <section class="tools-grid" aria-label="قائمة الأدوات">
+      ${tools.map((t, i) => toolCard(t, 210 + i * 30)).join("")}
+    </section>`;
+}
+
+function homeScreen() {
+  const now = new Date();
+  const hour = now.getHours();
+  const greeting = hour < 12 ? "صباح الخير" : hour < 18 ? "مساء الخير" : "مساء النور";
+
+  return `
+    ${pageHead(screens.home)}
+    <div class="home-stack">
+      <div class="home-greeting stagger" style="animation-delay:110ms">
+        <div class="greeting-text">${greeting} 👋</div>
+        <div class="greeting-sub">جاهز لجلسة دراسة اليوم؟</div>
+      </div>
+
+      <button type="button" class="featured-card stagger" style="animation-delay:150ms" data-nav-to="tests">
+        <div class="featured-head">
+          <div class="featured-copy">
+            <h2 class="featured-title">الاختبارات جاهزة</h2>
+            <p class="featured-text">ابدأ بنك الأسئلة الآن وتدرب على مادتك مباشرة.</p>
+          </div>
+          <div class="icon-wrap featured">${icon("tests")}</div>
+        </div>
+        <div class="card-foot">
+          ${badge("متاح الآن", "is-live")}
+          <div class="hint-link">ابدأ <span>←</span></div>
+        </div>
+      </button>
+
+      <div class="section-row stagger" style="animation-delay:200ms">
+        <h2 class="section-title">أدواتك</h2>
+        <button type="button" class="section-link" data-nav-to="tools">عرض الكل ←</button>
+      </div>
+
+      <div class="home-shortcuts stagger" style="animation-delay:240ms">
+        ${[
+          { id: "tasks",    label: "المهام",    icon: "tasks"   },
+          { id: "notes",    label: "الملاحظات", icon: "notes"   },
+          { id: "settings", label: "الإعدادات", icon: "settings"},
+        ].map(s => `
+          <button type="button" class="shortcut-card" data-nav-to="${s.id}">
+            <div class="icon-wrap">${icon(s.icon)}</div>
+            <span class="shortcut-label">${s.label}</span>
+          </button>`).join("")}
+      </div>
+
+      <div class="home-tip stagger" style="animation-delay:280ms">
+        <span class="tip-icon">${icon("brain")}</span>
+        <p class="tip-text">نصيحة: خصّص 25 دقيقة لكل جلسة دراسية مع استراحة قصيرة بعدها.</p>
+      </div>
+    </div>`;
+}
+
+function placeholderScreen(view) {
+  const screen = screens[view];
+  return `
+    ${pageHead(screen)}
+    <div class="placeholder-wrap">
+      <section class="placeholder-card stagger" style="animation-delay:120ms">
+        <div class="icon-wrap placeholder featured">${icon(screen.icon)}</div>
+        <h2 class="placeholder-title">هذه الصفحة قيد البناء</h2>
+        <p class="placeholder-text">سنبني تجربة ${screen.title} لاحقًا ضمن نفس هوية التطبيق.</p>
+      </section>
+    </div>`;
+}
+
+function settingsScreen() {
+  const theme = document.body.dataset.theme || getStoredTheme();
+  return `
+    ${pageHead(screens.settings)}
+    <div class="settings-stack">
+      <section class="settings-card stagger" style="animation-delay:120ms">
+        <div class="settings-head">
+          <div class="icon-wrap featured">${icon("settings")}</div>
+          <div class="settings-copy">
+            <h2 class="settings-title">مظهر التطبيق</h2>
+            <p class="settings-text">اختر الوضع الذي تريد. التغيير يُطبّق فورًا.</p>
+          </div>
+        </div>
+
+        <div class="theme-preview-device ${theme === "light" ? "is-light" : "is-dark"}">
+          <div class="tpd-bar">
+            <div class="tpd-dot"></div><div class="tpd-dot"></div><div class="tpd-dot"></div>
+          </div>
+          <div class="tpd-card">
+            <div class="tpd-line long"></div>
+            <div class="tpd-line short"></div>
+          </div>
+          <div class="tpd-nav">
+            <div class="tpd-orb active"></div>
+            <div class="tpd-orb"></div>
+            <div class="tpd-orb"></div>
+          </div>
+        </div>
+
+        <div class="theme-switcher" role="group" aria-label="تبديل الثيم">
+          <button type="button" class="theme-option ${theme === "dark" ? "is-selected" : ""}" data-theme-choice="dark" aria-pressed="${theme === "dark"}">
+            <span class="theme-swatch dark"></span>
+            <span class="theme-option-copy">
+              <strong>داكن</strong>
+              <small>هدوء أعلى وتركيز بصري أقوى</small>
+            </span>
+            <span class="theme-check">${theme === "dark" ? icon("check") : ""}</span>
+          </button>
+          <button type="button" class="theme-option ${theme === "light" ? "is-selected" : ""}" data-theme-choice="light" aria-pressed="${theme === "light"}">
+            <span class="theme-swatch light"></span>
+            <span class="theme-option-copy">
+              <strong>فاتح</strong>
+              <small>سطح أنظف للقراءة اليومية</small>
+            </span>
+            <span class="theme-check">${theme === "light" ? icon("check") : ""}</span>
+          </button>
+        </div>
+        <p class="settings-note" data-theme-status>الوضع الحالي: ${themeLabels[theme]}</p>
+      </section>
+
+      <section class="settings-card subtle stagger" style="animation-delay:180ms">
+        <h3 class="section-title">قادمًا لاحقًا</h3>
+        <p class="settings-text">إعدادات الخطوط، شدة الحركة، والتخصيصات الدراسية.</p>
+      </section>
+    </div>`;
+}
+
+function testsScreen() {
+  return `
+    ${pageHead(screens.tests)}
+    <div class="tests-stack">
+      <section class="tests-card stagger" style="animation-delay:120ms">
+        <div class="featured-head">
+          <div class="featured-copy">
+            <h2 class="tests-title">سنبني تجربة الاختبارات في الخطوة التالية</h2>
+            <p class="tests-text">هنا سيختار الطالب المادة ثم يدخل إلى بنك الأسئلة أو يصنع اختبارًا مخصصًا.</p>
+          </div>
+          <div class="icon-wrap featured">${icon("tests")}</div>
+        </div>
+        <div class="card-foot">
+          ${badge("الخطوة التالية", "is-live")}
+          <span class="tool-hint">جاهز للتوسع لاحقًا</span>
+        </div>
+      </section>
+      <section class="tests-card stagger" style="animation-delay:170ms">
+        <h3 class="section-title">ما سيأتي لاحقًا</h3>
+        <div class="tests-list">
+          <div class="tests-list-item">اختيار المادة والوصول إلى بنك الأسئلة أو إنشاء اختبار مخصص.</div>
+          <div class="tests-list-item">فصل المسارات بين التصفح، الاختبار النشط، والتدريب على الرسومات.</div>
+          <div class="tests-list-item">الحفاظ على نفس اللغة البصرية الهادئة في كل الصفحات.</div>
+        </div>
+      </section>
+    </div>`;
+}
+
+// ── Nav ────────────────────────────────────────────────────────────
+function nav(view) {
+  const activeId = viewNavMap[view] || "tools";
+  return `
+    <div class="bottom-nav-wrap">
+      <nav class="bottom-nav" aria-label="التنقل الرئيسي">
+        ${navItems.map((item) => {
+          const isActive = activeId === item.id;
+          return `
+            <button type="button" class="nav-item${isActive ? " is-active" : ""}"
+              data-nav-id="${item.id}" data-nav-to="${item.id}"
+              ${isActive ? 'aria-current="page"' : ""}>
+              <span class="nav-orb">${icon(item.icon)}</span>
+              <span class="nav-label">${item.label}</span>
+            </button>`;
+        }).join("")}
+      </nav>
+    </div>`;
+}
+
+// ── Routing (hash-based) ───────────────────────────────────────────
+function pushRoute(view) {
+  const hash = "#" + view;
+  try {
+    if (window.location.hash !== hash) {
+      window.history.pushState({ view }, "", hash);
+    }
+  } catch { /* sandbox may block */ }
+}
+
+function viewFromHash() {
+  const hash = window.location.hash.replace("#", "");
+  return screens[hash] ? hash : "tools";
+}
+
+// ── Render ─────────────────────────────────────────────────────────
+function render(view) {
+  const app = document.getElementById("app");
+  if (!app) return;
+
+  document.body.dataset.view = view;
+  document.title = `Pythagoras | ${(screens[view] || screens.tools).title}`;
+
+  let content;
+  if      (view === "tools")    content = toolsScreen();
+  else if (view === "home")     content = homeScreen();
+  else if (view === "tests")    content = testsScreen();
+  else if (view === "settings") content = settingsScreen();
+  else                          content = placeholderScreen(view);
+
+  app.innerHTML = `
+    <div class="app-stage">
+      <div class="app-device">
+        <div class="app-shell">
+          <main class="screen is-entering" id="screen-content">${content}</main>
+          <div class="toast" id="toast" role="status" aria-live="polite"></div>
+          ${nav(view)}
+        </div>
+      </div>
+    </div>`;
+}
+
+// ── Nav animations ─────────────────────────────────────────────────
+function triggerNavRipple(orb) {
+  if (!orb) return;
+  orb.classList.remove("is-ripple");
+  void orb.offsetWidth;
+  orb.classList.add("is-ripple");
+  orb.addEventListener("animationend", () => orb.classList.remove("is-ripple"), { once: true });
+}
+
+function triggerNavActivation(item) {
+  if (!item) return;
+  const orb = item.querySelector(".nav-orb");
+  document.querySelectorAll(".nav-item").forEach(i => i.classList.remove("is-reactivating"));
+  if (orb) orb.classList.remove("is-ripple");
+  void item.offsetWidth;
+  item.classList.add("is-reactivating");
+  triggerNavRipple(orb);
+  const clear = () => item.classList.remove("is-reactivating");
+  item.addEventListener("animationend", clear, { once: true });
+  setTimeout(clear, 480);
+}
+
+// ── Toast ──────────────────────────────────────────────────────────
+let toastTimer = null;
+function showToast(msg) {
+  const toast = document.getElementById("toast");
+  if (!toast) return;
+  toast.textContent = msg;
+  toast.classList.add("is-visible");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toast.classList.remove("is-visible"), 2400);
+}
+
+// ── renderView ─────────────────────────────────────────────────────
+let currentView = "tools";
+
+function renderView(nextView, navId) {
+  currentView = nextView;
+  render(nextView);
+  bindInteractions(nextView);
+  pushRoute(nextView);
+
+  requestAnimationFrame(() => {
+    const id = navId || viewNavMap[nextView] || nextView;
+    const activeNav = document.querySelector(`.nav-item[data-nav-id="${id}"]`);
+    triggerNavActivation(activeNav);
+  });
+}
+
+// ── Bind ───────────────────────────────────────────────────────────
+function bindInteractions(view) {
+  // nav buttons
+  document.querySelectorAll(".nav-item[data-nav-to]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const target = btn.getAttribute("data-nav-to");
+      if (target === view) {
+        triggerNavActivation(btn);
+        return;
+      }
+      renderView(target, btn.getAttribute("data-nav-id") || target);
+    });
+  });
+
+  // any other data-nav-to buttons (cards, shortcuts)
+  document.querySelectorAll("[data-nav-to]:not(.nav-item)").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const target = btn.getAttribute("data-nav-to");
+      if (target) renderView(target, viewNavMap[target] || target);
+    });
+  });
+
+  // locked tools
+  document.querySelectorAll("[data-locked='true']").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      showToast(`${btn.getAttribute("data-tool-name")} ستصل قريبًا ضمن نفس تجربة فيثاغورس.`);
+    });
+  });
+
+  // theme
+  document.querySelectorAll("[data-theme-choice]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const t = applyTheme(btn.getAttribute("data-theme-choice"));
+      syncThemeControls(t);
+      // re-render settings to update check icon + preview
+      if (view === "settings") {
+        const content = document.getElementById("screen-content");
+        if (content) {
+          content.innerHTML = settingsScreen();
+          bindInteractions("settings");
+        }
+      }
+      showToast(`تم تفعيل الوضع ${themeLabels[t]}.`);
+    });
+  });
+
+  syncThemeControls(document.body.dataset.theme || getStoredTheme());
+}
+
+// ── Boot ───────────────────────────────────────────────────────────
+applyTheme(getStoredTheme());
+
+// start from hash if present, else tools (not home — tools is the main screen)
+const startView = viewFromHash() || "tools";
+currentView = startView;
+render(startView);
+bindInteractions(startView);
+
+window.addEventListener("popstate", () => {
+  const v = viewFromHash();
+  currentView = v;
+  render(v);
+  bindInteractions(v);
+});
+  </script>
+</body>
+</html>

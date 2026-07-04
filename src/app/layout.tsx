@@ -1,0 +1,33 @@
+import type { Metadata } from "next";
+import { Geist, Geist_Mono } from "next/font/google";
+import "./globals.css";
+import { Toaster } from "@/components/ui/toaster";
+
+const geistSans = Geist({
+  variable: "--font-geist-sans",
+  subsets: ["latin"],
+});
+
+const geistMono = Geist_Mono({
+  variable: "--font-geist-mono",
+  subsets: ["latin"],
+});
+
+export const metadata: Metadata = {
+  title: "Pythagoras Platform",
+  description: "Pythagoras Platform (منصة فيثاغورس) — Arabic study hub for 6th-grade scientific stream.",
+};
+
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
+  return (
+    <html lang="en" suppressHydrationWarning>
+      <body style={{ margin: 0, padding: 0, overflow: 'hidden' }}>
+        {children}
+      </body>
+    </html>
+  );
+}

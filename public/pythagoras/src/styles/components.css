@@ -1,0 +1,244 @@
+.topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.topline.has-back {
+  position: relative;
+  padding-left: 62px;
+}
+
+.app-floating-back-layer {
+  position: absolute;
+  top: calc(18px + env(safe-area-inset-top));
+  left: 18px;
+  z-index: 28;
+  pointer-events: none;
+  display: inline-flex;
+}
+
+.app-floating-back-slot {
+  display: inline-flex;
+  pointer-events: auto;
+  position: relative;
+  z-index: 1;
+}
+
+.app-back-button {
+  appearance: none;
+  background: none;
+  border: 0;
+}
+
+.brand-chip,
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.brand-chip {
+  font-family: var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.page-head {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 20px;
+  justify-items: center;
+  text-align: center;
+}
+
+.eyebrow {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.page-title {
+  margin: 0;
+  font-size: clamp(31px, 8vw, 38px);
+  line-height: 1.18;
+  font-weight: 600;
+  text-align: center;
+}
+
+.page-copy {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.9;
+  max-width: 34ch;
+  text-align: center;
+}
+
+.section-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 22px 0 14px;
+}
+
+.section-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.section-meta {
+  color: var(--muted-soft);
+  font-size: 12px;
+}
+
+.featured-card,
+.tool-card,
+.placeholder-card,
+.tests-card {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--surface-soft);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  box-shadow: var(--shadow-md);
+}
+
+.featured-card,
+.placeholder-card,
+.tests-card {
+  border-radius: var(--radius-xl);
+}
+
+.icon-wrap {
+  width: 54px;
+  height: 54px;
+  border-radius: 18px;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--fg);
+  flex: 0 0 auto;
+}
+
+.icon-wrap.featured {
+  background: color-mix(in oklab, var(--accent) 14%, rgba(255, 255, 255, 0.04));
+  color: var(--accent);
+  border-color: color-mix(in oklab, var(--accent) 32%, rgba(255, 255, 255, 0.08));
+}
+
+.icon-wrap.placeholder {
+  width: 68px;
+  height: 68px;
+  border-radius: 22px;
+  margin-inline: auto;
+}
+
+.app-icon {
+  width: 24px;
+  height: 24px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.hint-link {
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.hint-link span {
+  color: var(--accent);
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 1;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+}
+
+.status-badge.is-live {
+  background: var(--success-soft);
+  border-color: color-mix(in oklab, var(--accent) 24%, rgba(255, 255, 255, 0.08));
+  color: var(--fg);
+}
+
+.status-badge.is-soon {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 18px currentColor;
+  opacity: 0.88;
+}
+
+.toast {
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  bottom: calc(108px + env(safe-area-inset-bottom)) !important;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent 70%),
+    color-mix(in oklab, var(--surface) 90%, rgba(13, 17, 25, 0.92));
+  color: var(--fg);
+  font-size: 13px;
+  line-height: 1.8;
+  opacity: 0;
+  transform: translateY(18px);
+  pointer-events: none;
+  transition: opacity 220ms ease, transform 220ms ease;
+  z-index: 10;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+body[data-theme="light"] .toast {
+  border-color: color-mix(in oklab, var(--accent) 14%, var(--border));
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.7), transparent 70%),
+    color-mix(in oklab, var(--surface) 94%, white);
+  color: var(--fg);
+  box-shadow: 0 18px 40px rgba(24, 35, 51, 0.12);
+}
+
+.toast.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
