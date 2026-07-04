@@ -1,0 +1,63 @@
+:root {
+  color-scheme: dark;
+  --bg: oklch(15% 0.018 255);
+  --surface: oklch(21% 0.02 252);
+  --surface-strong: oklch(24% 0.022 252);
+  --surface-soft: oklch(19% 0.016 252 / 0.78);
+  --fg: oklch(96% 0.004 250);
+  --muted: oklch(72% 0.018 250);
+  --muted-soft: oklch(62% 0.014 250);
+  --border: oklch(31% 0.018 252);
+  --border-strong: oklch(39% 0.02 252);
+  --accent: oklch(69% 0.095 232);
+  --accent-soft: oklch(69% 0.095 232 / 0.15);
+  --nav-surface: oklch(18% 0.014 252 / 0.38);
+  --nav-surface-2: oklch(12% 0.010 252 / 0.52);
+  --nav-fg: oklch(96% 0.004 250);
+  --nav-muted: oklch(66% 0.015 250);
+  --nav-border: oklch(55% 0.018 252 / 0.22);
+  --nav-active-ring: oklch(70% 0.072 216);
+  --nav-active-surface: oklch(24% 0.022 252 / 0.92);
+  --nav-shadow: 0 24px 48px rgba(0, 0, 0, 0.38), 0 2px 8px rgba(0, 0, 0, 0.24);
+  --nav-icon-size: 24px;
+  --success-soft: oklch(62% 0.058 232 / 0.13);
+  --shadow-lg: 0 32px 80px rgba(0, 0, 0, 0.42);
+  --shadow-md: 0 18px 40px rgba(0, 0, 0, 0.22);
+  --body-glow: color-mix(in oklab, var(--accent) 9%, transparent);
+  --body-top: oklch(12% 0.018 255);
+  --body-bottom: oklch(9% 0.01 255);
+  --radius-xl: 30px;
+  --radius-lg: 24px;
+  --radius-md: 18px;
+  --radius-sm: 14px;
+  --font-ui: "Alexandria", "IBM Plex Sans Arabic", "Noto Sans Arabic", "Segoe UI", Tahoma, sans-serif;
+  --font-mono: "IBM Plex Mono", "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+}
+
+body[data-theme="light"] {
+  --bg: oklch(95% 0.01 245);
+  --surface: oklch(99% 0.004 250 / 0.82);
+  --surface-strong: oklch(97% 0.008 245);
+  --surface-soft: oklch(98% 0.008 245 / 0.76);
+  --fg: oklch(24% 0.02 245);
+  --muted: oklch(49% 0.014 245);
+  --muted-soft: oklch(58% 0.012 245);
+  --border: oklch(86% 0.008 245);
+  --border-strong: oklch(76% 0.012 245);
+  --accent: oklch(57% 0.128 236);
+  --accent-soft: oklch(57% 0.128 236 / 0.16);
+  --nav-surface: oklch(98% 0.004 250 / 0.52);
+  --nav-surface-2: oklch(92% 0.010 245 / 0.68);
+  --nav-fg: oklch(24% 0.02 245);
+  --nav-muted: oklch(47% 0.014 245);
+  --nav-border: oklch(75% 0.010 245 / 0.50);
+  --nav-active-ring: oklch(63% 0.11 216);
+  --nav-active-surface: oklch(97% 0.008 245 / 0.96);
+  --nav-shadow: 0 18px 40px rgba(18, 28, 48, 0.12), 0 2px 6px rgba(18, 28, 48, 0.08);
+  --success-soft: oklch(84% 0.05 236 / 0.75);
+  --shadow-lg: 0 28px 70px rgba(24, 35, 51, 0.12);
+  --shadow-md: 0 16px 34px rgba(24, 35, 51, 0.08);
+  --body-glow: color-mix(in oklab, var(--accent) 11%, transparent);
+  --body-top: oklch(99% 0.004 245);
+  --body-bottom: oklch(92% 0.015 245);
+}
