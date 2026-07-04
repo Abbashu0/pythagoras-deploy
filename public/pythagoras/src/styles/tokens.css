@@ -35,31 +35,39 @@
 }
 
 body[data-theme="light"] {
-  --bg: oklch(95% 0.01 245);
-  --surface: oklch(99% 0.004 250 / 0.82);
-  --surface-strong: oklch(97% 0.008 245);
-  --surface-soft: oklch(98% 0.008 245 / 0.76);
-  --fg: oklch(24% 0.02 245);
-  --muted: oklch(49% 0.014 245);
-  --muted-soft: oklch(58% 0.012 245);
-  --border: oklch(86% 0.008 245);
-  --border-strong: oklch(76% 0.012 245);
-  --accent: oklch(57% 0.128 236);
-  --accent-soft: oklch(57% 0.128 236 / 0.16);
-  --nav-surface: oklch(98% 0.004 250 / 0.52);
-  --nav-surface-2: oklch(92% 0.010 245 / 0.68);
-  --nav-fg: oklch(24% 0.02 245);
-  --nav-muted: oklch(47% 0.014 245);
-  --nav-border: oklch(75% 0.010 245 / 0.50);
-  --nav-active-ring: oklch(63% 0.11 216);
-  --nav-active-surface: oklch(97% 0.008 245 / 0.96);
-  --nav-shadow: 0 18px 40px rgba(18, 28, 48, 0.12), 0 2px 6px rgba(18, 28, 48, 0.08);
-  --success-soft: oklch(84% 0.05 236 / 0.75);
-  --shadow-lg: 0 28px 70px rgba(24, 35, 51, 0.12);
-  --shadow-md: 0 16px 34px rgba(24, 35, 51, 0.08);
-  --body-glow: color-mix(in oklab, var(--accent) 11%, transparent);
-  --body-top: oklch(99% 0.004 245);
-  --body-bottom: oklch(92% 0.015 245);
+  /* Warmer, softer paper background with a hint of warmth */
+  --bg: oklch(96% 0.012 75);
+  --surface: oklch(99% 0.006 75 / 0.88);
+  --surface-strong: oklch(98% 0.010 70);
+  --surface-soft: oklch(97% 0.012 70 / 0.78);
+  /* Darker foreground for crisp readability on warm paper */
+  --fg: oklch(22% 0.020 260);
+  --muted: oklch(44% 0.014 260);
+  --muted-soft: oklch(54% 0.012 260);
+  /* Stronger borders for clearer card separation */
+  --border: oklch(88% 0.010 70);
+  --border-strong: oklch(78% 0.014 70);
+  /* Deeper indigo accent — richer than the previous pale teal */
+  --accent: oklch(50% 0.155 250);
+  --accent-soft: oklch(50% 0.155 250 / 0.14);
+  /* Nav: warm frosted glass with stronger shadow for depth */
+  --nav-surface: oklch(99% 0.006 75 / 0.72);
+  --nav-surface-2: oklch(94% 0.014 70 / 0.82);
+  --nav-fg: oklch(22% 0.020 260);
+  --nav-muted: oklch(46% 0.014 260);
+  --nav-border: oklch(78% 0.012 70 / 0.60);
+  --nav-active-ring: oklch(55% 0.150 250);
+  --nav-active-surface: oklch(96% 0.014 70 / 0.96);
+  --nav-shadow: 0 22px 48px rgba(35, 28, 18, 0.16), 0 4px 10px rgba(35, 28, 18, 0.10);
+  --success-soft: oklch(82% 0.06 240 / 0.70);
+  /* Layered shadows for premium depth */
+  --shadow-lg: 0 32px 64px rgba(35, 28, 18, 0.14), 0 8px 18px rgba(35, 28, 18, 0.06);
+  --shadow-md: 0 18px 38px rgba(35, 28, 18, 0.10), 0 4px 10px rgba(35, 28, 18, 0.05);
+  /* Subtle warm glow at the top of the page */
+  --body-glow: color-mix(in oklab, var(--accent) 14%, transparent);
+  /* Warm paper gradient: soft cream at top → warmer sand at bottom */
+  --body-top: oklch(99% 0.008 70);
+  --body-bottom: oklch(93% 0.018 65);
 }
 
 /* شفق — Aurora: cosmic violet with vibrant magenta-pink accent */

@@ -323,8 +323,9 @@
 
 .theme-swatch.light {
   background:
-    radial-gradient(circle at 35% 25%, rgba(98, 178, 230, 0.24), transparent 42%),
-    linear-gradient(180deg, #fbfdff, #dfe7f0);
+    radial-gradient(circle at 30% 20%, rgba(79, 124, 255, 0.28), transparent 45%),
+    radial-gradient(circle at 80% 90%, rgba(255, 200, 140, 0.30), transparent 50%),
+    linear-gradient(180deg, #fffaf2, #f0e6d6);
 }
 
 .theme-swatch.aurora {
