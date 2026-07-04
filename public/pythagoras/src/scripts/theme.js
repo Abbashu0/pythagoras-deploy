@@ -3,6 +3,12 @@ import { icon } from "./icons.js";
 
 export const THEME_KEY = "pythagoras-theme";
 
+const VALID_THEMES = ["dark", "light", "aurora"];
+
+function normalizeTheme(theme) {
+  return VALID_THEMES.includes(theme) ? theme : "dark";
+}
+
 const store = {
   get(key) {
     try {
@@ -21,22 +27,24 @@ const store = {
 };
 
 export function getStoredTheme() {
-  const theme = store.get(THEME_KEY);
-  return theme === "light" ? "light" : "dark";
+  return normalizeTheme(store.get(THEME_KEY));
 }
 
 export function applyTheme(theme) {
-  const nextTheme = theme === "light" ? "light" : "dark";
+  const nextTheme = normalizeTheme(theme);
   document.body.dataset.theme = nextTheme;
-  document.body.classList.toggle("dark", nextTheme === "dark");
-  document.documentElement.style.colorScheme = nextTheme;
+  document.body.classList.toggle("dark", nextTheme !== "light");
+  document.documentElement.style.colorScheme =
+    nextTheme === "light" ? "light" : "dark";
   store.set(THEME_KEY, nextTheme);
   return nextTheme;
 }
 
 export function syncThemeControls(theme) {
+  const activeTheme = normalizeTheme(theme);
+
   document.querySelectorAll("[data-theme-choice]").forEach((button) => {
-    const isSelected = button.getAttribute("data-theme-choice") === theme;
+    const isSelected = button.getAttribute("data-theme-choice") === activeTheme;
     button.classList.toggle("is-selected", isSelected);
     button.setAttribute("aria-pressed", isSelected ? "true" : "false");
 
@@ -48,12 +56,13 @@ export function syncThemeControls(theme) {
 
   const status = document.querySelector("[data-theme-status]");
   if (status) {
-    status.textContent = `الوضع الحالي: ${themeLabels[theme]}`;
+    status.textContent = `الوضع الحالي: ${themeLabels[activeTheme]}`;
   }
 
   const preview = document.querySelector(".theme-preview-device");
   if (preview) {
-    preview.classList.toggle("is-dark", theme === "dark");
-    preview.classList.toggle("is-light", theme === "light");
+    preview.classList.toggle("is-dark", activeTheme === "dark");
+    preview.classList.toggle("is-light", activeTheme === "light");
+    preview.classList.toggle("is-aurora", activeTheme === "aurora");
   }
 }

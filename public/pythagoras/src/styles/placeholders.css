@@ -327,6 +327,13 @@
     linear-gradient(180deg, #fbfdff, #dfe7f0);
 }
 
+.theme-swatch.aurora {
+  background:
+    radial-gradient(circle at 30% 25%, rgba(255, 110, 199, 0.45), transparent 45%),
+    radial-gradient(circle at 75% 80%, rgba(170, 130, 255, 0.35), transparent 50%),
+    linear-gradient(180deg, #2a0f4a, #14071f);
+}
+
 .theme-check {
   margin-right: auto;
   color: var(--accent);
@@ -357,6 +364,11 @@
   border-color: rgba(0, 0, 0, 0.08);
 }
 
+.theme-preview-device.is-aurora {
+  background: oklch(13% 0.040 300);
+  border-color: rgba(255, 110, 199, 0.18);
+}
+
 .tpd-bar {
   display: flex;
   gap: 5px;
@@ -379,6 +391,10 @@
   background: rgba(0, 0, 0, 0.15);
 }
 
+.is-aurora .tpd-dot {
+  background: rgba(255, 175, 220, 0.22);
+}
+
 .tpd-card {
   border-radius: 8px;
   padding: 10px;
@@ -393,6 +409,10 @@
 
 .is-light .tpd-card {
   background: #fff;
+}
+
+.is-aurora .tpd-card {
+  background: oklch(22% 0.040 298);
 }
 
 .tpd-line {
@@ -417,6 +437,10 @@
   background: rgba(0, 0, 0, 0.1);
 }
 
+.is-aurora .tpd-line {
+  background: rgba(255, 175, 220, 0.18);
+}
+
 .tpd-nav {
   display: flex;
   justify-content: space-around;
@@ -438,12 +462,20 @@
   background: rgba(0, 0, 0, 0.06);
 }
 
+.is-aurora .tpd-orb {
+  background: rgba(255, 175, 220, 0.12);
+}
+
 .is-dark .tpd-orb.active {
   background: oklch(74% 0.09 205 / 0.4);
 }
 
 .is-light .tpd-orb.active {
   background: oklch(67% 0.09 210 / 0.35);
+}
+
+.is-aurora .tpd-orb.active {
+  background: oklch(73% 0.180 350 / 0.45);
 }
 
 .home-stack {

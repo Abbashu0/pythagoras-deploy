@@ -1,4 +1,4 @@
-export const themeLabels = { dark: "داكن", light: "فاتح" };
+export const themeLabels = { dark: "داكن", light: "فاتح", aurora: "شفق" };
 
 export const tools = [
   {

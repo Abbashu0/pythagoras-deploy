@@ -61,3 +61,34 @@ body[data-theme="light"] {
   --body-top: oklch(99% 0.004 245);
   --body-bottom: oklch(92% 0.015 245);
 }
+
+/* شفق — Aurora: cosmic violet with vibrant magenta-pink accent */
+body[data-theme="aurora"] {
+  color-scheme: dark;
+  --bg: oklch(16% 0.035 300);
+  --surface: oklch(22% 0.040 298);
+  --surface-strong: oklch(25% 0.045 298);
+  --surface-soft: oklch(20% 0.032 298 / 0.80);
+  --fg: oklch(96% 0.008 300);
+  --muted: oklch(74% 0.030 300);
+  --muted-soft: oklch(64% 0.024 300);
+  --border: oklch(32% 0.040 298);
+  --border-strong: oklch(40% 0.045 298);
+  --accent: oklch(73% 0.180 350);
+  --accent-soft: oklch(73% 0.180 350 / 0.18);
+  --nav-surface: oklch(19% 0.030 300 / 0.40);
+  --nav-surface-2: oklch(13% 0.020 300 / 0.55);
+  --nav-fg: oklch(96% 0.008 300);
+  --nav-muted: oklch(68% 0.025 300);
+  --nav-border: oklch(55% 0.040 300 / 0.24);
+  --nav-active-ring: oklch(72% 0.150 330);
+  --nav-active-surface: oklch(25% 0.045 298 / 0.94);
+  --nav-shadow: 0 24px 48px rgba(40, 8, 60, 0.45), 0 2px 8px rgba(40, 8, 60, 0.30);
+  --nav-icon-size: 24px;
+  --success-soft: oklch(72% 0.090 330 / 0.16);
+  --shadow-lg: 0 32px 80px rgba(40, 8, 60, 0.48);
+  --shadow-md: 0 18px 40px rgba(40, 8, 60, 0.26);
+  --body-glow: color-mix(in oklab, var(--accent) 12%, transparent);
+  --body-top: oklch(13% 0.040 300);
+  --body-bottom: oklch(10% 0.025 305);
+}

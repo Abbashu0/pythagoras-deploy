@@ -32,7 +32,7 @@ export function settingsScreen() {
             <div class="appearance-card-panel-inner">
               <p class="appearance-card-note">التغيير يُطبّق فورًا ويُبقي التجربة هادئة وواضحة.</p>
 
-              <div class="theme-preview-device ${theme === "light" ? "is-light" : "is-dark"}">
+              <div class="theme-preview-device ${theme === "light" ? "is-light" : theme === "aurora" ? "is-aurora" : "is-dark"}">
                 <div class="tpd-bar">
                   <div class="tpd-dot"></div><div class="tpd-dot"></div><div class="tpd-dot"></div>
                 </div>
@@ -63,6 +63,14 @@ export function settingsScreen() {
                     <small>سطح أنظف للقراءة اليومية</small>
                   </span>
                   <span class="theme-check">${theme === "light" ? icon("check") : ""}</span>
+                </button>
+                <button type="button" class="theme-option ${theme === "aurora" ? "is-selected" : ""}" data-theme-choice="aurora" aria-pressed="${theme === "aurora"}">
+                  <span class="theme-swatch aurora"></span>
+                  <span class="theme-option-copy">
+                    <strong>شفق</strong>
+                    <small>بنفسج كوني بلمسة وردية مميّزة</small>
+                  </span>
+                  <span class="theme-check">${theme === "aurora" ? icon("check") : ""}</span>
                 </button>
               </div>
 
