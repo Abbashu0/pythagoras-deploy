@@ -165,6 +165,7 @@ export function BannerEditor({ banner, onPatch, onClose }: Props) {
             </h4>
             <UploadArea
               currentImage={banner.image}
+              bannerType={banner.bannerType}
               onUploaded={(dataUrl) =>
                 onPatch(banner.id, {
                   image: dataUrl,

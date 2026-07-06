@@ -24,16 +24,20 @@ import { UploadCloud, ImageIcon, AlertCircle } from "lucide-react";
 import {
   ACCEPTED_IMAGE_TYPES,
   MAX_IMAGE_BYTES,
-  RECOMMENDED_BANNER,
+  RECOMMENDED_BANNER_FULL,
+  RECOMMENDED_BANNER_SPLIT,
+  BannerType,
 } from "@/lib/admin/banner-model";
 
 interface Props {
   onUploaded: (dataUrl: string) => void;
   currentImage?: string;
   onClear?: () => void;
+  /** Which recommended size hint to show. Defaults to "full". */
+  bannerType?: BannerType;
 }
 
-export function UploadArea({ onUploaded, currentImage, onClear }: Props) {
+export function UploadArea({ onUploaded, currentImage, onClear, bannerType = "full" }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -142,14 +146,20 @@ export function UploadArea({ onUploaded, currentImage, onClear }: Props) {
         />
       </div>
 
-      {/* Recommended size hint */}
-      <div className="flex items-center gap-2 rounded-lg bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-        <ImageIcon className="h-3.5 w-3.5 flex-shrink-0" />
-        <span>
-          الحجم الموصى به: {RECOMMENDED_BANNER.width}×{RECOMMENDED_BANNER.height}px
-          (نسبة {RECOMMENDED_BANNER.aspectRatio}) — تصدير 2× retina.
-        </span>
-      </div>
+      {/* Recommended size hint — adapts to the current banner type */}
+      {(() => {
+        const rec = bannerType === "split" ? RECOMMENDED_BANNER_SPLIT : RECOMMENDED_BANNER_FULL;
+        const typeLabel = bannerType === "split" ? "مقسّم" : "كامل";
+        return (
+          <div className="flex items-center gap-2 rounded-lg bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+            <ImageIcon className="h-3.5 w-3.5 flex-shrink-0" />
+            <span>
+              الحجم الموصى به (بانر {typeLabel}): {rec.width}×{rec.height}px
+              (نسبة {rec.aspectRatio}) — تصدير {rec.retinaScale}× retina.
+            </span>
+          </div>
+        );
+      })()}
 
       {error && (
         <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">

@@ -38,7 +38,8 @@ import { useAdminStore } from "@/lib/admin/use-admin-store";
 import { getAdminStore } from "@/lib/admin/admin-store";
 import {
   MAX_BANNERS,
-  RECOMMENDED_BANNER,
+  RECOMMENDED_BANNER_FULL,
+  RECOMMENDED_BANNER_SPLIT,
   BANNER_TRANSFORM_DEFAULT,
   BannerInput,
 } from "@/lib/admin/banner-model";
@@ -199,7 +200,7 @@ export default function AdminPage() {
         </section>
       </div>
 
-      {/* ---------- Recommended banner size (always visible) ---------- */}
+      {/* ---------- Recommended banner sizes (always visible) ---------- */}
       <section className="mt-8 rounded-xl border bg-card p-5">
         <div className="flex items-start gap-3">
           <div className="grid place-items-center rounded-lg bg-blue-500/10 p-2 text-blue-600 dark:text-blue-400">
@@ -207,35 +208,91 @@ export default function AdminPage() {
           </div>
           <div className="flex-1">
             <h2 className="text-sm font-semibold text-foreground">
-              الحجم الرسمي للبانر
+              الأحجام الرسمية للبانرات
             </h2>
             <p className="mt-1 text-xs text-muted-foreground">
-              استخدم هذه الأبعاد عند تصميم البانرات. الصور ستحافظ على نسبة الأبعاد دون تمديد.
+              كل نوع بانر له حجمه الخاص. صدّر الصور بدقة 2× retina لوضوح أعلى على شاشات الـ DPI العالية.
+              الكاروسيل يستخدم <code className="rounded bg-muted px-1 text-[10px]">object-fit: cover</code> فالصورة
+              تملأ المنطقة دون تمديد، مع قص طفيف إذا اختلفت النسبة.
             </p>
-            <div className="mt-3 grid grid-cols-2 gap-4 sm:grid-cols-4">
-              <div className="rounded-lg border bg-muted/30 px-3 py-2">
-                <div className="text-[10px] uppercase tracking-wider text-muted-foreground">العرض</div>
-                <div className="text-sm font-semibold text-foreground">
-                  {RECOMMENDED_BANNER.width}px
+
+            <div className="mt-4 grid gap-4 md:grid-cols-2">
+              {/* Full banner size */}
+              <div className="rounded-lg border border-blue-500/20 bg-blue-500/5 p-4">
+                <div className="mb-3 flex items-center gap-2">
+                  <span className="rounded-full bg-blue-500/15 px-2 py-0.5 text-[10px] font-medium text-blue-600 dark:text-blue-400">
+                    بانر كامل
+                  </span>
+                  <span className="text-xs text-muted-foreground">Full Banner</span>
                 </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">العرض</div>
+                    <div className="text-lg font-bold text-foreground">
+                      {RECOMMENDED_BANNER_FULL.width}<span className="text-xs font-normal text-muted-foreground">px</span>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">الارتفاع</div>
+                    <div className="text-lg font-bold text-foreground">
+                      {RECOMMENDED_BANNER_FULL.height}<span className="text-xs font-normal text-muted-foreground">px</span>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">نسبة الأبعاد</div>
+                    <div className="text-sm font-semibold text-foreground">
+                      {RECOMMENDED_BANNER_FULL.aspectRatio}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">الجودة</div>
+                    <div className="text-sm font-semibold text-foreground">
+                      {RECOMMENDED_BANNER_FULL.retinaScale}× retina
+                    </div>
+                  </div>
+                </div>
+                <p className="mt-3 text-[11px] leading-snug text-muted-foreground">
+                  الصورة تملأ الإطار بالكامل. كل النص والعلامة وزر الإجراء يكون داخل الصورة نفسها.
+                </p>
               </div>
-              <div className="rounded-lg border bg-muted/30 px-3 py-2">
-                <div className="text-[10px] uppercase tracking-wider text-muted-foreground">الارتفاع</div>
-                <div className="text-sm font-semibold text-foreground">
-                  {RECOMMENDED_BANNER.height}px
+
+              {/* Split banner size */}
+              <div className="rounded-lg border border-purple-500/20 bg-purple-500/5 p-4">
+                <div className="mb-3 flex items-center gap-2">
+                  <span className="rounded-full bg-purple-500/15 px-2 py-0.5 text-[10px] font-medium text-purple-600 dark:text-purple-400">
+                    بانر مقسّم
+                  </span>
+                  <span className="text-xs text-muted-foreground">Split Banner</span>
                 </div>
-              </div>
-              <div className="rounded-lg border bg-muted/30 px-3 py-2">
-                <div className="text-[10px] uppercase tracking-wider text-muted-foreground">نسبة الأبعاد</div>
-                <div className="text-sm font-semibold text-foreground">
-                  {RECOMMENDED_BANNER.aspectRatio}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">العرض</div>
+                    <div className="text-lg font-bold text-foreground">
+                      {RECOMMENDED_BANNER_SPLIT.width}<span className="text-xs font-normal text-muted-foreground">px</span>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">الارتفاع</div>
+                    <div className="text-lg font-bold text-foreground">
+                      {RECOMMENDED_BANNER_SPLIT.height}<span className="text-xs font-normal text-muted-foreground">px</span>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">نسبة الأبعاد</div>
+                    <div className="text-sm font-semibold text-foreground">
+                      {RECOMMENDED_BANNER_SPLIT.aspectRatio}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">الجودة</div>
+                    <div className="text-sm font-semibold text-foreground">
+                      {RECOMMENDED_BANNER_SPLIT.retinaScale}× retina
+                    </div>
+                  </div>
                 </div>
-              </div>
-              <div className="rounded-lg border bg-muted/30 px-3 py-2">
-                <div className="text-[10px] uppercase tracking-wider text-muted-foreground">الجودة</div>
-                <div className="text-sm font-semibold text-foreground">
-                  {RECOMMENDED_BANNER.retinaScale}× retina
-                </div>
+                <p className="mt-3 text-[11px] leading-snug text-muted-foreground">
+                  الصورة تملأ الجانب الأيسر (42% من الإطار). العنوان والوصف يُعرضان على اليمين.
+                </p>
               </div>
             </div>
           </div>

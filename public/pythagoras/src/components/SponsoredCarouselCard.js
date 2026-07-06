@@ -39,32 +39,63 @@ const BANNER_RETINA_SCALE = 2;
 function reportRecommendedBannerSize() {
   // Defer to next frame so the carousel DOM is laid out before we measure.
   requestAnimationFrame(() => {
+    // Measure BOTH the full frame (for full-banner images) AND the 42% visual
+    // panel (for split-banner images). Designers need to know which size to
+    // export depending on the banner type they're creating.
+    const frame = document.querySelector(".sponsored-carousel-frame");
     const visual = document.querySelector(".sponsored-slide-visual");
-    if (!visual) return;
-    const rect = visual.getBoundingClientRect();
-    if (rect.width === 0 || rect.height === 0) return;
+    if (!frame) return;
 
-    const cssWidth = Math.round(rect.width);
-    const cssHeight = Math.round(rect.height);
-    const retinaWidth = cssWidth * BANNER_RETINA_SCALE;
-    const retinaHeight = cssHeight * BANNER_RETINA_SCALE;
+    const measure = (el, label) => {
+      if (!el) return null;
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return null;
+      const cssWidth = Math.round(rect.width);
+      const cssHeight = Math.round(rect.height);
+      const retinaWidth = cssWidth * BANNER_RETINA_SCALE;
+      const retinaHeight = cssHeight * BANNER_RETINA_SCALE;
+      const gcd = (a, b) => (b === 0 ? a : gcd(b, a % b));
+      const g = gcd(cssWidth, cssHeight);
+      const ratioW = cssWidth / g;
+      const ratioH = cssHeight / g;
+      return { cssWidth, cssHeight, retinaWidth, retinaHeight, ratioW, ratioH, label };
+    };
 
-    // Reduce aspect ratio to simplest integer terms (e.g. 154:146 → 77:73).
-    const gcd = (a, b) => (b === 0 ? a : gcd(b, a % b));
-    const g = gcd(cssWidth, cssHeight);
-    const ratioW = cssWidth / g;
-    const ratioH = cssHeight / g;
+    const fullSize = measure(frame, "FULL banner (image fills entire frame)");
+    const splitSize = measure(visual, "SPLIT banner (image fills 42% visual panel)");
 
     // eslint-disable-next-line no-console
     console.log(
-      `%c[SponsoredCarousel] Recommended banner size:%c
-  Width:       ${retinaWidth}px (CSS: ${cssWidth}px @1x)
-  Height:      ${retinaHeight}px (CSS: ${cssHeight}px @1x)
-  Aspect ratio: ${ratioW}:${ratioH}
-  Export at ${retinaWidth}×${retinaHeight}px (2x retina) preserving ${ratioW}:${ratioH}.`,
+      `%c[SponsoredCarousel] Recommended banner sizes:%c`,
       "color: #4f9cff; font-weight: 600;",
       "color: inherit; font-weight: 400;"
     );
+
+    if (fullSize) {
+      // eslint-disable-next-line no-console
+      console.log(
+        `  %cFull Banner%c (image fills entire frame):
+    Width:       ${fullSize.retinaWidth}px (CSS: ${fullSize.cssWidth}px @1x)
+    Height:      ${fullSize.retinaHeight}px (CSS: ${fullSize.cssHeight}px @1x)
+    Aspect ratio: ${fullSize.ratioW}:${fullSize.ratioH}
+    Export at ${fullSize.retinaWidth}×${fullSize.retinaHeight}px (${BANNER_RETINA_SCALE}x retina).`,
+        "color: #4f9cff; font-weight: 600;",
+        "color: inherit; font-weight: 400;"
+      );
+    }
+
+    if (splitSize) {
+      // eslint-disable-next-line no-console
+      console.log(
+        `  %cSplit Banner%c (image fills 42% visual panel):
+    Width:       ${splitSize.retinaWidth}px (CSS: ${splitSize.cssWidth}px @1x)
+    Height:      ${splitSize.retinaHeight}px (CSS: ${splitSize.cssHeight}px @1x)
+    Aspect ratio: ${splitSize.ratioW}:${splitSize.ratioH}
+    Export at ${splitSize.retinaWidth}×${splitSize.retinaHeight}px (${BANNER_RETINA_SCALE}x retina).`,
+        "color: #a855f7; font-weight: 600;",
+        "color: inherit; font-weight: 400;"
+      );
+    }
   });
 }
 

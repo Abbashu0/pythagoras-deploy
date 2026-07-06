@@ -77,21 +77,41 @@ export const BANNER_TRANSFORM_DEFAULT: BannerImageTransform = {
 export const MAX_BANNERS = 5;
 
 /**
- * Recommended banner export size.
+ * Recommended banner export sizes.
  *
- * Derived from the student app's SponsoredCarouselCard layout:
- *   - frame aspect-ratio: 5/2
- *   - visual panel: 42% of frame width, 100% of frame height
+ * Each banner type has its own recommended export size because the image
+ * fills a different area of the carousel frame:
  *
- * At a typical ~366px frame width, the visual panel renders at ~154×146 CSS px.
- * We recommend 2x retina exports → 308×292px.
+ *   - Full banner:  image fills the ENTIRE frame (aspect-ratio 5/2)
+ *                   → 366×146 CSS px → 732×292 retina (5:2 ratio)
+ *
+ *   - Split banner: image fills only the 42% left visual panel
+ *                   → 154×146 CSS px → 308×292 retina (~1:1 ratio)
+ *
+ * Designers should export at the retina size for crispness on high-DPI screens.
+ * The carousel always uses `object-fit: cover` so the image fills the area
+ * without stretching — slight cropping may occur if the exact ratio isn't used.
  */
-export const RECOMMENDED_BANNER = {
+export const RECOMMENDED_BANNER_FULL = {
+  width: 732,
+  height: 293,
+  aspectRatio: "5:2",
+  retinaScale: 2,
+} as const;
+
+export const RECOMMENDED_BANNER_SPLIT = {
   width: 308,
   height: 292,
   aspectRatio: "77:73",
   retinaScale: 2,
 } as const;
+
+/**
+ * @deprecated Use RECOMMENDED_BANNER_FULL or RECOMMENDED_BANNER_SPLIT instead.
+ * Kept for backward compatibility with code that still references the old
+ * single-size constant.
+ */
+export const RECOMMENDED_BANNER = RECOMMENDED_BANNER_SPLIT;
 
 export const ACCEPTED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"] as const;
 export const MAX_IMAGE_BYTES = 4 * 1024 * 1024; // 4 MB
