@@ -14,6 +14,7 @@ import {
   getSubjectByView,
   getViewMeta,
   themeLabels,
+  densityLabels,
   viewNavMap,
 } from "./data.js";
 import {
@@ -36,6 +37,11 @@ import {
 } from "./questionBankFilters.js";
 import { pushRoute, viewFromHash } from "./router.js";
 import { applyTheme, getStoredTheme, syncThemeControls } from "./theme.js";
+import {
+  applyDensity,
+  getStoredDensity,
+  syncDensityControls,
+} from "./density.js";
 import { showToast } from "./toast.js";
 
 let currentView = "tools";
@@ -673,6 +679,40 @@ function bindThemeInteractions() {
   });
 
   syncThemeControls(document.body.dataset.theme || getStoredTheme());
+
+  bindDensityInteractions();
+}
+
+function bindDensityInteractions() {
+  const DENSITY_ORDER = ["compact", "comfortable", "spacious"];
+
+  // Click on density option buttons
+  document.querySelectorAll("[data-density-choice]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const next = applyDensity(button.getAttribute("data-density-choice"));
+      syncDensityControls(next);
+      showToast(`حجم العرض: ${densityLabels[next]}.`);
+    });
+  });
+
+  // Range input — drag the slider
+  const input = document.querySelector("[data-density-input]");
+  if (input) {
+    input.addEventListener("input", (event) => {
+      const idx = Number(event.target.value);
+      const next = DENSITY_ORDER[idx] || "comfortable";
+      applyDensity(next);
+      syncDensityControls(next);
+    });
+    input.addEventListener("change", (event) => {
+      const idx = Number(event.target.value);
+      const next = DENSITY_ORDER[idx] || "comfortable";
+      showToast(`حجم العرض: ${densityLabels[next]}.`);
+    });
+  }
+
+  syncDensityControls(getStoredDensity());
 }
 
 function bindTestsFeatureInteractions() {
@@ -991,6 +1031,7 @@ function bindInteractions(view) {
 }
 
 applyTheme(getStoredTheme());
+applyDensity(getStoredDensity());
 
 const startView = viewFromHash() || "tools";
 refreshView(startView, { activateNav: false });

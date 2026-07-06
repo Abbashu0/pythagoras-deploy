@@ -8,6 +8,13 @@ body {
   min-height: 100%;
 }
 
+html {
+  /* The density slider sets --density-multiplier (0.92 / 1 / 1.12) on :root.
+     Because all sizes in this app use rem/em, scaling the root font-size
+     proportionally scales every text element, card padding, gap, etc. */
+  font-size: calc(16px * var(--density-multiplier, 1));
+}
+
 body {
   background:
     radial-gradient(circle at 50% 0%, var(--body-glow), transparent 34%),

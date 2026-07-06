@@ -1,5 +1,7 @@
 :root {
   color-scheme: dark;
+  /* Density scale — applied to body font-size; cards & headings use em units so they scale together */
+  --density-multiplier: 1;
   --bg: oklch(15% 0.018 255);
   --surface: oklch(21% 0.02 252);
   --surface-strong: oklch(24% 0.022 252);

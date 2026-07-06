@@ -1,10 +1,30 @@
 import { pageHead } from "../components/PageHeader.js";
-import { screens, themeLabels } from "../scripts/data.js";
+import { screens, themeLabels, densityLabels } from "../scripts/data.js";
 import { getStoredTheme } from "../scripts/theme.js";
+import { getStoredDensity } from "../scripts/density.js";
 import { icon } from "../scripts/icons.js";
+
+const DENSITY_OPTIONS = [
+  { id: "compact", label: "مدمج", hint: "أكثر محتوى في نفس المساحة" },
+  { id: "comfortable", label: "مريح", hint: "التوازن الافتراضي للقراءة" },
+  { id: "spacious", label: "واسع", hint: "خطوط أكبر وبطاقات أفسح" },
+];
+
+function densitySliderIndex(density) {
+  const idx = DENSITY_OPTIONS.findIndex((o) => o.id === density);
+  return idx >= 0 ? idx : 1;
+}
+
+function densitySliderPct(density) {
+  const idx = densitySliderIndex(density);
+  // 0% left, 50% middle, 100% right
+  return (idx / (DENSITY_OPTIONS.length - 1)) * 100;
+}
 
 export function settingsScreen() {
   const theme = document.body.dataset.theme || getStoredTheme();
+  const density = getStoredDensity();
+  const densityPct = densitySliderPct(density);
 
   return `
     ${pageHead(screens.settings)}
@@ -75,6 +95,66 @@ export function settingsScreen() {
               </div>
 
               <p class="settings-note" data-theme-status>الوضع الحالي: ${themeLabels[theme]}</p>
+
+              <div class="appearance-divider" aria-hidden="true"></div>
+
+              <div class="density-block" data-density-block>
+                <div class="density-head">
+                  <span class="density-title">حجم العرض</span>
+                  <span class="density-hint">${DENSITY_OPTIONS[densitySliderIndex(density)].hint}</span>
+                </div>
+
+                <div
+                  class="density-slider"
+                  role="group"
+                  aria-label="حجم العرض"
+                  data-density-slider
+                  style="--density-thumb-pct: ${densityPct}%"
+                >
+                  <span class="density-letter density-letter-sm" aria-hidden="true">A</span>
+
+                  <div class="density-track-wrap">
+                    <div class="density-track" aria-hidden="true"></div>
+                    <div class="density-fill" aria-hidden="true"></div>
+                    <div class="density-ticks" aria-hidden="true">
+                      ${DENSITY_OPTIONS.map((_, i) => `<span class="density-tick ${i === densitySliderIndex(density) ? "is-active" : ""}" data-density-tick="${i}"></span>`).join("")}
+                    </div>
+                    <div
+                      class="density-thumb"
+                      aria-hidden="true"
+                      style="left: ${densityPct}%"
+                    ></div>
+                  </div>
+
+                  <span class="density-letter density-letter-lg" aria-hidden="true">A</span>
+
+                  <input
+                    type="range"
+                    min="0"
+                    max="${DENSITY_OPTIONS.length - 1}"
+                    step="1"
+                    value="${densitySliderIndex(density)}"
+                    class="density-input"
+                    aria-label="حجم العرض"
+                    data-density-input
+                  />
+                </div>
+
+                <div class="density-options" role="radiogroup" aria-label="أحجام العرض">
+                  ${DENSITY_OPTIONS.map((opt) => `
+                    <button
+                      type="button"
+                      class="density-option ${density === opt.id ? "is-selected" : ""}"
+                      data-density-choice="${opt.id}"
+                      aria-pressed="${density === opt.id}"
+                      role="radio"
+                      aria-checked="${density === opt.id}"
+                    >${opt.label}</button>
+                  `).join("")}
+                </div>
+
+                <p class="settings-note" data-density-status>الحجم الحالي: ${densityLabels[density]}</p>
+              </div>
             </div>
           </div>
         </div>
@@ -82,7 +162,7 @@ export function settingsScreen() {
 
       <section class="settings-card subtle stagger" style="animation-delay:180ms">
         <h3 class="section-title">قادمًا لاحقًا</h3>
-        <p class="settings-text">إعدادات الخطوط، شدة الحركة، والتخصيصات الدراسية.</p>
+        <p class="settings-text">شدة الحركة، إعدادات الخطوط، والتخصيصات الدراسية.</p>
       </section>
     </div>`;
 }
