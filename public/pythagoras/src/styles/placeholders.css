@@ -689,10 +689,8 @@
   transition: transform 200ms ease, background 200ms ease;
 }
 
-.density-tick.is-active {
-  background: var(--accent);
-  transform: scale(1.4);
-}
+/* Active tick is NOT highlighted — the thumb already shows the position,
+   and adding color here creates a confusing extra "blue dot". */
 
 .density-thumb {
   position: absolute;
@@ -750,6 +748,9 @@
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
+  /* Match the slider's LTR direction so button order aligns with thumb position:
+     leftmost button = compact (smallest), rightmost = spacious (largest). */
+  direction: ltr;
 }
 
 .density-option {

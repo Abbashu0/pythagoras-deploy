@@ -94,7 +94,7 @@ export function settingsScreen() {
                 </button>
               </div>
 
-              <p class="settings-note" data-theme-status>الوضع الحالي: ${themeLabels[theme]}</p>
+              <p class="settings-note" data-theme-status style="display:none">الوضع الحالي: ${themeLabels[theme]}</p>
 
               <div class="appearance-divider" aria-hidden="true"></div>
 
@@ -152,7 +152,7 @@ export function settingsScreen() {
                   `).join("")}
                 </div>
 
-                <p class="settings-note" data-density-status>الحجم الحالي: ${densityLabels[density]}</p>
+                <p class="settings-note" data-density-status style="display:none">الحجم الحالي: ${densityLabels[density]}</p>
               </div>
             </div>
           </div>
