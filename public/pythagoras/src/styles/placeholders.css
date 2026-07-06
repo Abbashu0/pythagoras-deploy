@@ -894,6 +894,11 @@
 .sponsored-slide-full {
   display: block;
   padding: 0;
+  /* CRITICAL: position:relative so the absolute-positioned <img> inside
+     positions relative to THIS slide, not the frame. Without this, all 5
+     full-banner images stack on top of each other at the frame's position. */
+  position: relative;
+  overflow: hidden;
 }
 
 .sponsored-slide-image-full {
