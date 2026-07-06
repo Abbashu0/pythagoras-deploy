@@ -88,7 +88,20 @@ export function sponsoredCarouselCard(banners) {
         <div class="sponsored-carousel-track" data-sponsored-track>
           ${slides
             .map(
-              (slide, i) => `
+              (slide, i) => {
+                // Determine if `image` is a real uploaded image (data URL or http URL)
+                // vs. a CSS gradient string. The admin store keeps uploaded images
+                // as data URLs; the seed data uses gradient strings.
+                const isImage = typeof slide.image === "string" &&
+                  (slide.image.startsWith("data:") || slide.image.startsWith("http"));
+                const transform = slide.transform || { offsetX: 0, offsetY: 0, scale: 1 };
+                const visualStyle = isImage
+                  ? ""  // image is rendered via <img>, no background needed
+                  : `background: ${slide.image || slide.gradient || "linear-gradient(135deg, #4f9cff, #2a6fcc)"};`;
+                const visualInner = isImage
+                  ? `<img class="sponsored-slide-image" src="${slide.image}" alt="${slide.title}" draggable="false" style="object-position: ${50 + transform.offsetX}% ${50 + transform.offsetY}%; transform: scale(${transform.scale});" />`
+                  : `<span class="sponsored-slide-glyph">${icon(slide.iconKey)}</span>`;
+                return `
             <article
               class="sponsored-slide"
               data-sponsored-slide
@@ -98,15 +111,16 @@ export function sponsoredCarouselCard(banners) {
               tabindex="0"
               aria-label="${slide.title}: ${slide.subtitle}"
             >
-              <div class="sponsored-slide-visual" style="background: ${slide.image}">
-                <span class="sponsored-slide-glyph">${icon(slide.iconKey)}</span>
+              <div class="sponsored-slide-visual" style="${visualStyle}">
+                ${visualInner}
               </div>
               <div class="sponsored-slide-copy">
                 <span class="sponsored-eyebrow">محتوى مميّز</span>
                 <h3 class="sponsored-title">${slide.title}</h3>
                 <p class="sponsored-subtitle">${slide.subtitle}</p>
               </div>
-            </article>`
+            </article>`;
+              }
             )
             .join("")}
         </div>

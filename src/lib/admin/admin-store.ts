@@ -40,6 +40,7 @@ class AdminStore {
   private banners: SponsoredBanner[] = [];
   private history: ActivityHistoryEntry[] = [];
   private listeners: Set<Listener> = new Set();
+  private hasLoadedFromStorage = false;
   // Cached snapshot — useSyncExternalStore requires getSnapshot to return a
   // stable reference when nothing has changed, otherwise it loops forever.
   private snapshot: {
@@ -49,10 +50,49 @@ class AdminStore {
   } = { banners: [], history: [], canAddMore: true };
 
   constructor() {
-    if (typeof window !== "undefined") {
-      this.load();
-    } else {
+    // IMPORTANT: do NOT load from localStorage in the constructor.
+    // The store singleton is created during SSR (where there's no localStorage)
+    // AND on the client during hydration. If we load here, the server snapshot
+    // returns 0 banners while the client returns 5 → hydration mismatch.
+    //
+    // Instead, we start with an empty snapshot (0 banners) on BOTH sides so
+    // the initial render matches, then call `loadFromStorage()` from a
+    // `useEffect` in the admin page (client-only, after hydration).
+    this.rebuildSnapshot();
+  }
+
+  /**
+   * Load banners + history from localStorage. Called once on the client
+   * AFTER hydration completes (via useEffect in the admin page).
+   * Returns true if data was loaded, false if empty (caller can seed).
+   */
+  loadFromStorage(): boolean {
+    if (this.hasLoadedFromStorage) return this.banners.length > 0;
+    this.hasLoadedFromStorage = true;
+    if (typeof window === "undefined") return false;
+    try {
+      const b = localStorage.getItem(BANNERS_KEY);
+      const h = localStorage.getItem(HISTORY_KEY);
+      if (b) {
+        this.banners = JSON.parse(b) as SponsoredBanner[];
+        this.banners.sort((a, b) => a.displayOrder - b.displayOrder);
+      } else {
+        // First visit — seed with the default 5 banners so the dashboard
+        // isn't empty on first load.
+        this.banners = this.seedBanners();
+        this.persist();
+      }
+      if (h) {
+        this.history = JSON.parse(h) as ActivityHistoryEntry[];
+      }
       this.rebuildSnapshot();
+      this.emit();
+      return this.banners.length > 0;
+    } catch {
+      this.banners = this.seedBanners();
+      this.rebuildSnapshot();
+      this.emit();
+      return true;
     }
   }
 
@@ -62,24 +102,6 @@ class AdminStore {
       history: this.history,
       canAddMore: this.banners.length < MAX_BANNERS,
     };
-  }
-
-  // ---------- Persistence ----------
-  private load() {
-    try {
-      const b = localStorage.getItem(BANNERS_KEY);
-      const h = localStorage.getItem(HISTORY_KEY);
-      this.banners = b ? (JSON.parse(b) as SponsoredBanner[]) : this.seedBanners();
-      this.history = h ? (JSON.parse(h) as ActivityHistoryEntry[]) : [];
-      // Ensure sorted by displayOrder
-      this.banners.sort((a, b) => a.displayOrder - b.displayOrder);
-      this.rebuildSnapshot();
-      this.persist();
-    } catch {
-      this.banners = this.seedBanners();
-      this.history = [];
-      this.rebuildSnapshot();
-    }
   }
 
   private persist() {

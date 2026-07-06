@@ -298,50 +298,116 @@ export const sponsoredBanners = [
     id: "bio-review",
     iconKey: "biology",
     image: "linear-gradient(135deg, oklch(58% 0.13 145), oklch(48% 0.10 165))",
+    gradient: "linear-gradient(135deg, oklch(58% 0.13 145), oklch(48% 0.10 165))",
     title: "مراجعة الأحياء",
     subtitle: "ملخص شامل للفصول الأربعة مع نماذج وزارية",
     destination: "tests-biology",
     enabled: true,
     displayOrder: 1,
+    transform: { offsetX: 0, offsetY: 0, scale: 1 },
   },
   {
     id: "math-course",
     iconKey: "math",
     image: "linear-gradient(135deg, oklch(60% 0.16 25), oklch(50% 0.18 15))",
+    gradient: "linear-gradient(135deg, oklch(60% 0.16 25), oklch(50% 0.18 15))",
     title: "دورة الرياضيات",
     subtitle: "تفاضل وتكامل شرح كامل بمستوى السادس علمي",
     destination: "tests-math",
     enabled: true,
     displayOrder: 2,
+    transform: { offsetX: 0, offsetY: 0, scale: 1 },
   },
   {
     id: "chemistry-course",
     iconKey: "chemistry",
     image: "linear-gradient(135deg, oklch(62% 0.14 280), oklch(52% 0.16 270))",
+    gradient: "linear-gradient(135deg, oklch(62% 0.14 280), oklch(52% 0.16 270))",
     title: "كورس الكيمياء",
     subtitle: "التفاعلات والحسابات الكيميائية بأسلوب مبسّط",
     destination: "tests-chemistry",
     enabled: true,
     displayOrder: 3,
+    transform: { offsetX: 0, offsetY: 0, scale: 1 },
   },
   {
     id: "physics-course",
     iconKey: "physics",
     image: "linear-gradient(135deg, oklch(60% 0.14 220), oklch(50% 0.16 240))",
+    gradient: "linear-gradient(135deg, oklch(60% 0.14 220), oklch(50% 0.16 240))",
     title: "دورة الفيزياء",
     subtitle: "الميكانيك والكهرباء بحلول مسائل خطوة بخطوة",
     destination: "tests-physics",
     enabled: true,
     displayOrder: 4,
+    transform: { offsetX: 0, offsetY: 0, scale: 1 },
   },
   {
     id: "teacher-course",
     iconKey: "lectures",
     image: "linear-gradient(135deg, oklch(60% 0.18 350), oklch(50% 0.16 340))",
+    gradient: "linear-gradient(135deg, oklch(60% 0.18 350), oklch(50% 0.16 340))",
     title: "كورس المعلم",
     subtitle: "جلسات مكثفة مع نخبة من المعلمين قبل الامتحان",
     destination: "tests",
     enabled: true,
     displayOrder: 5,
+    transform: { offsetX: 0, offsetY: 0, scale: 1 },
   },
 ];
+
+/**
+ * Admin store key — MUST stay in sync with src/lib/admin/admin-store.ts.
+ * The student app reads what the admin dashboard writes, so they share
+ * the exact same localStorage key.
+ */
+const ADMIN_BANNERS_KEY = "pythagoras-admin-banners";
+
+/**
+ * Returns the live list of sponsored banners.
+ *
+ * Priority:
+ *   1. Banners saved by the Admin Dashboard (localStorage `pythagoras-admin-banners`).
+ *      Only enabled banners are returned, sorted by displayOrder.
+ *   2. If localStorage is empty (first visit, never opened admin), fall back to
+ *      the hard-coded `sponsoredBanners` seed above so the Home page is never blank.
+ *
+ * When the backend arrives, this function will fetch from the API instead of
+ * localStorage — the SponsoredCarouselCard widget won't change.
+ *
+ * Also normalizes the banner shape so the student app handles both the admin's
+ * full SponsoredBanner (with `image`, `gradient`, `transform`) and the simpler
+ * seed shape (where `image` holds the gradient string).
+ */
+export function getSponsoredBanners() {
+  try {
+    const raw = localStorage.getItem(ADMIN_BANNERS_KEY);
+    if (!raw) return sponsoredBanners.slice();
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || parsed.length === 0) return sponsoredBanners.slice();
+    // Filter enabled, sort by displayOrder, normalize shape
+    return parsed
+      .filter((b) => b && b.enabled !== false)
+      .sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0))
+      .map((b) => ({
+        id: b.id,
+        iconKey: b.iconKey || "tests",
+        // Admin store keeps `image` (data URL or empty) and `gradient` separately.
+        // Student app's SponsoredCarouselCard uses `image` as the CSS background.
+        // If admin uploaded a real image, use it; otherwise fall back to gradient.
+        image:
+          b.image && b.image.length > 0
+            ? b.image
+            : b.gradient || "linear-gradient(135deg, #4f9cff, #2a6fcc)",
+        gradient: b.gradient || b.image,
+        title: b.title || "",
+        subtitle: b.subtitle || "",
+        destination: b.destination || "tests",
+        enabled: b.enabled !== false,
+        displayOrder: b.displayOrder || 1,
+        transform: b.transform || { offsetX: 0, offsetY: 0, scale: 1 },
+      }));
+  } catch {
+    return sponsoredBanners.slice();
+  }
+}

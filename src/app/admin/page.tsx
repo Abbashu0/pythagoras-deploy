@@ -32,7 +32,7 @@
  *     duplicateBanner) are the contract with the future backend.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ImagePlus, Layers, Info } from "lucide-react";
 import { useAdminStore } from "@/lib/admin/use-admin-store";
 import { getAdminStore } from "@/lib/admin/admin-store";
@@ -55,6 +55,14 @@ export default function AdminPage() {
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+
+  // Load banners from localStorage AFTER hydration completes.
+  // The store starts empty on both server and client (0 banners) so SSR HTML
+  // matches the initial client render — no hydration mismatch. Then this
+  // effect runs client-only and populates the store from localStorage.
+  useEffect(() => {
+    store.loadFromStorage();
+  }, [store]);
 
   const selectedBanner = banners.find((b) => b.id === selectedId) || null;
   const deleteBannerObj = banners.find((b) => b.id === deleteTarget) || null;

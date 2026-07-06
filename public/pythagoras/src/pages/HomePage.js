@@ -1,12 +1,17 @@
 import { badge, icon } from "../scripts/icons.js";
 import { pageHead } from "../components/PageHeader.js";
-import { screens, sponsoredBanners } from "../scripts/data.js";
+import { screens, getSponsoredBanners } from "../scripts/data.js";
 import { sponsoredCarouselCard } from "../components/SponsoredCarouselCard.js";
 
 export function homeScreen() {
   const now = new Date();
   const hour = now.getHours();
   const greeting = hour < 12 ? "صباح الخير" : hour < 18 ? "مساء الخير" : "مساء النور";
+
+  // Read live banners from the admin store (localStorage) on every render so
+  // edits made in /admin are reflected immediately after a page refresh.
+  // Falls back to the hard-coded seed if the admin store is empty.
+  const banners = getSponsoredBanners();
 
   return `
     ${pageHead(screens.home)}
@@ -16,7 +21,7 @@ export function homeScreen() {
         <div class="greeting-sub">جاهز لجلسة دراسة اليوم؟</div>
       </div>
 
-      ${sponsoredCarouselCard(sponsoredBanners)}
+      ${sponsoredCarouselCard(banners)}
 
       <button type="button" class="featured-card stagger" style="animation-delay:150ms" data-nav-to="tests">
         <div class="featured-head">
