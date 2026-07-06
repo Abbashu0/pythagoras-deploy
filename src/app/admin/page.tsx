@@ -76,6 +76,7 @@ export default function AdminPage() {
   const handleUploadNew = (dataUrl: string) => {
     if (!canAddMore) return;
     const input: BannerInput = {
+      bannerType: "full",  // new banners default to full-banner mode
       image: dataUrl,
       gradient: "linear-gradient(135deg, #4f9cff, #2a6fcc)",
       iconKey: "tests",

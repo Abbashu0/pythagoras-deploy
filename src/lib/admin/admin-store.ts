@@ -74,8 +74,18 @@ class AdminStore {
       const b = localStorage.getItem(BANNERS_KEY);
       const h = localStorage.getItem(HISTORY_KEY);
       if (b) {
-        this.banners = JSON.parse(b) as SponsoredBanner[];
+        const parsed = JSON.parse(b) as SponsoredBanner[];
+        // Migrate older banners that don't have a `bannerType` field yet —
+        // treat them as "split" (the original layout) since they have
+        // title/subtitle/icon set up for the split layout.
+        this.banners = parsed.map((banner) => ({
+          ...banner,
+          bannerType: banner.bannerType ?? "split",
+          transform: banner.transform || { offsetX: 0, offsetY: 0, scale: 1 },
+        }));
         this.banners.sort((a, b) => a.displayOrder - b.displayOrder);
+        // Re-persist to write the migrated bannerType back to localStorage
+        this.persist();
       } else {
         // First visit — seed with the default 5 banners so the dashboard
         // isn't empty on first load.
@@ -119,12 +129,13 @@ class AdminStore {
     // Same 5 dummy banners used by the student app, so the dashboard starts
     // with something concrete to edit. These get overwritten by the student
     // app's data when the backend arrives.
+    // All seeds are "split" type (they have title/subtitle/icon).
     const seeds: BannerInput[] = [
-      { title: "مراجعة الأحياء", subtitle: "ملخص شامل للفصول الأربعة مع نماذج وزارية", iconKey: "biology", gradient: "linear-gradient(135deg, oklch(58% 0.13 145), oklch(48% 0.10 165))", destination: "tests-biology", enabled: true, displayOrder: 1, image: "" },
-      { title: "دورة الرياضيات", subtitle: "تفاضل وتكامل شرح كامل بمستوى السادس علمي", iconKey: "math", gradient: "linear-gradient(135deg, oklch(60% 0.16 25), oklch(50% 0.18 15))", destination: "tests-math", enabled: true, displayOrder: 2, image: "" },
-      { title: "كورس الكيمياء", subtitle: "التفاعلات والحسابات الكيميائية بأسلوب مبسّط", iconKey: "chemistry", gradient: "linear-gradient(135deg, oklch(62% 0.14 280), oklch(52% 0.16 270))", destination: "tests-chemistry", enabled: true, displayOrder: 3, image: "" },
-      { title: "دورة الفيزياء", subtitle: "الميكانيك والكهرباء بحلول مسائل خطوة بخطوة", iconKey: "physics", gradient: "linear-gradient(135deg, oklch(60% 0.14 220), oklch(50% 0.16 240))", destination: "tests-physics", enabled: true, displayOrder: 4, image: "" },
-      { title: "كورس المعلم", subtitle: "جلسات مكثفة مع نخبة من المعلمين قبل الامتحان", iconKey: "lectures", gradient: "linear-gradient(135deg, oklch(60% 0.18 350), oklch(50% 0.16 340))", destination: "tests", enabled: true, displayOrder: 5, image: "" },
+      { bannerType: "split", title: "مراجعة الأحياء", subtitle: "ملخص شامل للفصول الأربعة مع نماذج وزارية", iconKey: "biology", gradient: "linear-gradient(135deg, oklch(58% 0.13 145), oklch(48% 0.10 165))", destination: "tests-biology", enabled: true, displayOrder: 1, image: "" },
+      { bannerType: "split", title: "دورة الرياضيات", subtitle: "تفاضل وتكامل شرح كامل بمستوى السادس علمي", iconKey: "math", gradient: "linear-gradient(135deg, oklch(60% 0.16 25), oklch(50% 0.18 15))", destination: "tests-math", enabled: true, displayOrder: 2, image: "" },
+      { bannerType: "split", title: "كورس الكيمياء", subtitle: "التفاعلات والحسابات الكيميائية بأسلوب مبسّط", iconKey: "chemistry", gradient: "linear-gradient(135deg, oklch(62% 0.14 280), oklch(52% 0.16 270))", destination: "tests-chemistry", enabled: true, displayOrder: 3, image: "" },
+      { bannerType: "split", title: "دورة الفيزياء", subtitle: "الميكانيك والكهرباء بحلول مسائل خطوة بخطوة", iconKey: "physics", gradient: "linear-gradient(135deg, oklch(60% 0.14 220), oklch(50% 0.16 240))", destination: "tests-physics", enabled: true, displayOrder: 4, image: "" },
+      { bannerType: "split", title: "كورس المعلم", subtitle: "جلسات مكثفة مع نخبة من المعلمين قبل الامتحان", iconKey: "lectures", gradient: "linear-gradient(135deg, oklch(60% 0.18 350), oklch(50% 0.16 340))", destination: "tests", enabled: true, displayOrder: 5, image: "" },
     ];
     return seeds.map(makeBanner);
   }

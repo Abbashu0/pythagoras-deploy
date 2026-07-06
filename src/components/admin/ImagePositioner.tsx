@@ -30,6 +30,12 @@ interface Props {
   onChange: (next: BannerImageTransform) => void;
   /** Width of the preview frame (matches student app ~154px visual panel). */
   previewWidth?: number;
+  /**
+   * When true (full-banner mode), the safe-area overlay covers the entire frame
+   * because the image fills edge-to-edge. When false (split mode, default),
+   * the overlay shows only the 42% left visual panel boundary.
+   */
+  fullFrame?: boolean;
 }
 
 const MIN_SCALE = 1;
@@ -43,6 +49,7 @@ export function ImagePositioner({
   value,
   onChange,
   previewWidth = 320,
+  fullFrame = false,
 }: Props) {
   const frameRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -186,15 +193,25 @@ export function ImagePositioner({
                 transformOrigin: "center",
               }}
             />
-            {/* Safe-area overlay — shows the visual panel boundary (42% left in LTR) */}
-            <div
-              className="pointer-events-none absolute inset-y-0 left-0 border-r-2 border-dashed border-white/30"
-              style={{ width: "42%" }}
-            >
-              <span className="absolute bottom-1 left-1 rounded bg-black/50 px-1.5 py-0.5 text-[10px] text-white">
-                المنطقة الظاهرة في الكاروسيل
-              </span>
-            </div>
+            {/* Safe-area overlay.
+                - Full-banner mode: dashed border around the entire frame (image fills edge-to-edge).
+                - Split mode: dashed border on the 42% left visual panel only. */}
+            {fullFrame ? (
+              <div className="pointer-events-none absolute inset-0 border-2 border-dashed border-white/30">
+                <span className="absolute bottom-1 left-1 rounded bg-black/50 px-1.5 py-0.5 text-[10px] text-white">
+                  المنطقة الظاهرة في الكاروسيل (الإطار كامل)
+                </span>
+              </div>
+            ) : (
+              <div
+                className="pointer-events-none absolute inset-y-0 left-0 border-r-2 border-dashed border-white/30"
+                style={{ width: "42%" }}
+              >
+                <span className="absolute bottom-1 left-1 rounded bg-black/50 px-1.5 py-0.5 text-[10px] text-white">
+                  المنطقة الظاهرة في الكاروسيل
+                </span>
+              </div>
+            )}
           </>
         ) : (
           <div className="grid h-full place-items-center text-xs text-muted-foreground">

@@ -95,6 +95,31 @@ export function sponsoredCarouselCard(banners) {
                 const isImage = typeof slide.image === "string" &&
                   (slide.image.startsWith("data:") || slide.image.startsWith("http"));
                 const transform = slide.transform || { offsetX: 0, offsetY: 0, scale: 1 };
+                const isFull = slide.bannerType === "full";
+
+                // ---------- FULL BANNER ----------
+                // One image fills the entire frame edge-to-edge. No title, no
+                // subtitle, no icon. Everything is inside the image itself.
+                if (isFull) {
+                  const fullContent = isImage
+                    ? `<img class="sponsored-slide-image sponsored-slide-image-full" src="${slide.image}" alt="${slide.title || "banner"}" draggable="false" style="object-position: ${50 + transform.offsetX}% ${50 + transform.offsetY}%; transform: scale(${transform.scale});" />`
+                    : `<div class="sponsored-slide-full-placeholder" style="background: ${slide.image || slide.gradient || "linear-gradient(135deg, #4f9cff, #2a6fcc)"};"></div>`;
+                  return `
+            <article
+              class="sponsored-slide sponsored-slide-full"
+              data-sponsored-slide
+              data-id="${slide.id}"
+              data-index="${i}"
+              role="button"
+              tabindex="0"
+              aria-label="${slide.title || "بانر إعلاني"}"
+            >
+              ${fullContent}
+            </article>`;
+                }
+
+                // ---------- SPLIT BANNER ----------
+                // Image on the left visual panel (42%) + title/subtitle on the right (58%).
                 const visualStyle = isImage
                   ? ""  // image is rendered via <img>, no background needed
                   : `background: ${slide.image || slide.gradient || "linear-gradient(135deg, #4f9cff, #2a6fcc)"};`;

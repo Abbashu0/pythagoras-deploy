@@ -296,6 +296,7 @@ export const SponsoredBanner = {
 export const sponsoredBanners = [
   {
     id: "bio-review",
+    bannerType: "split",
     iconKey: "biology",
     image: "linear-gradient(135deg, oklch(58% 0.13 145), oklch(48% 0.10 165))",
     gradient: "linear-gradient(135deg, oklch(58% 0.13 145), oklch(48% 0.10 165))",
@@ -308,6 +309,7 @@ export const sponsoredBanners = [
   },
   {
     id: "math-course",
+    bannerType: "split",
     iconKey: "math",
     image: "linear-gradient(135deg, oklch(60% 0.16 25), oklch(50% 0.18 15))",
     gradient: "linear-gradient(135deg, oklch(60% 0.16 25), oklch(50% 0.18 15))",
@@ -320,6 +322,7 @@ export const sponsoredBanners = [
   },
   {
     id: "chemistry-course",
+    bannerType: "split",
     iconKey: "chemistry",
     image: "linear-gradient(135deg, oklch(62% 0.14 280), oklch(52% 0.16 270))",
     gradient: "linear-gradient(135deg, oklch(62% 0.14 280), oklch(52% 0.16 270))",
@@ -332,6 +335,7 @@ export const sponsoredBanners = [
   },
   {
     id: "physics-course",
+    bannerType: "split",
     iconKey: "physics",
     image: "linear-gradient(135deg, oklch(60% 0.14 220), oklch(50% 0.16 240))",
     gradient: "linear-gradient(135deg, oklch(60% 0.14 220), oklch(50% 0.16 240))",
@@ -344,6 +348,7 @@ export const sponsoredBanners = [
   },
   {
     id: "teacher-course",
+    bannerType: "split",
     iconKey: "lectures",
     image: "linear-gradient(135deg, oklch(60% 0.18 350), oklch(50% 0.16 340))",
     gradient: "linear-gradient(135deg, oklch(60% 0.18 350), oklch(50% 0.16 340))",
@@ -391,6 +396,9 @@ export function getSponsoredBanners() {
       .sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0))
       .map((b) => ({
         id: b.id,
+        // Pass bannerType through so the carousel renderer can switch layout.
+        // Default to "split" for older banners that don't have the field.
+        bannerType: b.bannerType || "split",
         iconKey: b.iconKey || "tests",
         // Admin store keeps `image` (data URL or empty) and `gradient` separately.
         // Student app's SponsoredCarouselCard uses `image` as the CSS background.

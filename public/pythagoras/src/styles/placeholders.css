@@ -883,6 +883,26 @@
   transition: transform 200ms ease;
 }
 
+/* ---------- Full Banner layout ----------
+   One image fills the entire carousel frame edge-to-edge.
+   No split, no title, no icon. The image IS the banner. */
+.sponsored-slide-full {
+  display: block;
+  padding: 0;
+}
+
+.sponsored-slide-image-full {
+  /* Inherits from .sponsored-slide-image but explicitly: full frame cover */
+  border-radius: 0;
+}
+
+.sponsored-slide-full-placeholder {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
 .sponsored-slide-glyph .app-icon {
   width: 36px;
   height: 36px;

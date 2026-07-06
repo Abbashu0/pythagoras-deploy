@@ -17,8 +17,30 @@ export interface BannerImageTransform {
   scale: number;
 }
 
+/**
+ * Banner layout mode.
+ *
+ *   - "full":  One single image fills the entire carousel frame edge-to-edge.
+ *              No title, no subtitle, no icon. Everything (text, branding, CTA)
+ *              is designed inside the image itself. Used for teacher ads,
+ *              sponsored courses, external promotions, marketing campaigns.
+ *              This is the DEFAULT for new banners.
+ *
+ *   - "split": Image on one side (left visual panel) + editable title/subtitle
+ *              on the other side. Used for internal platform announcements.
+ *              This is the original banner layout.
+ *
+ * Future banner types can be added by extending this union — the renderer
+ * switches on `bannerType` and the editor shows/hides fields accordingly.
+ */
+export type BannerType = "full" | "split";
+
+export const DEFAULT_BANNER_TYPE: BannerType = "full";
+
 export interface SponsoredBanner {
   id: string;
+  /** Layout mode — controls how the carousel renders this banner. */
+  bannerType: BannerType;
   /** Data URL or remote URL of the banner image. Empty string = placeholder gradient. */
   image: string;
   /** If image is empty, this gradient is used as the visual background. */
@@ -40,9 +62,10 @@ export interface SponsoredBanner {
 
 export type BannerInput = Omit<
   SponsoredBanner,
-  "id" | "createdAt" | "updatedAt" | "transform"
+  "id" | "createdAt" | "updatedAt" | "transform" | "bannerType"
 > & {
   transform?: Partial<BannerImageTransform>;
+  bannerType?: BannerType;
 };
 
 export const BANNER_TRANSFORM_DEFAULT: BannerImageTransform = {
@@ -80,6 +103,7 @@ export function makeBanner(input: BannerInput): SponsoredBanner {
       typeof crypto !== "undefined" && "randomUUID" in crypto
         ? crypto.randomUUID()
         : `banner-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    bannerType: input.bannerType ?? DEFAULT_BANNER_TYPE,
     transform: { ...BANNER_TRANSFORM_DEFAULT, ...(input.transform || {}) },
     createdAt: now,
     updatedAt: now,

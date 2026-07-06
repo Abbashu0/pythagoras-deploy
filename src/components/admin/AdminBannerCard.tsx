@@ -113,10 +113,14 @@ export function AdminBannerCard({
         className="flex min-w-0 flex-1 flex-col items-start gap-1 text-right"
       >
         <span className="w-full truncate text-sm font-medium text-foreground">
-          {banner.title || "بدون عنوان"}
+          {banner.bannerType === "full"
+            ? (banner.title || "بانر كامل — بدون عنوان")
+            : (banner.title || "بدون عنوان")}
         </span>
         <span className="w-full truncate text-xs text-muted-foreground">
-          {banner.subtitle || "بدون وصف"}
+          {banner.bannerType === "full"
+            ? "صورة كاملة — النص داخل الصورة"
+            : (banner.subtitle || "بدون وصف")}
         </span>
         <div className="flex items-center gap-1.5">
           <Badge
@@ -128,6 +132,9 @@ export function AdminBannerCard({
             }
           >
             {banner.enabled ? "مفعّل" : "معطّل"}
+          </Badge>
+          <Badge variant="outline" className="text-[10px]">
+            {banner.bannerType === "full" ? "كامل" : "مقسّم"}
           </Badge>
           {banner.image && banner.image.length > 0 ? (
             <Badge variant="outline" className="text-[10px]">

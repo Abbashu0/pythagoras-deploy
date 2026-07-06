@@ -5,21 +5,26 @@
  * -------------
  * Side panel for editing a single SponsoredBanner.
  *
- * Editable fields (per spec):
- *   - Image (via UploadArea + ImagePositioner)
- *   - Title
- *   - Subtitle
- *   - Enabled / Disabled (Switch)
+ * The editor adapts to `banner.bannerType`:
  *
- * Everything else (id, displayOrder, destination, transform, timestamps) is
- * managed by the store or hidden from this v1.
+ *   - "full":  Shows only Image Upload + Image Positioner + Enabled toggle.
+ *              Title/subtitle are hidden because the full-banner layout
+ *              embeds all text inside the image itself.
  *
- * The editor is a controlled component: it reads `banner` and emits patches
- * via `onPatch`. The parent wires those patches to `adminStore.updateBanner`.
+ *   - "split": Shows the full editor: Image Upload + Positioner + Title +
+ *              Subtitle + Enabled toggle (the original layout).
+ *
+ * The Banner Type selector at the top lets the admin switch between modes
+ * instantly. Switching type patches the store, which re-renders the editor
+ * and the live preview.
+ *
+ * Architecture: controlled component — reads `banner`, emits patches via
+ * `onPatch`. No local state beyond title/subtitle draft inputs (to avoid
+ * caret jumps during typing).
  */
 
 import { useCallback, useState } from "react";
-import { X, Save } from "lucide-react";
+import { X, Save, ImageIcon, LayoutGrid, LayoutPanelTop } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -29,6 +34,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   SponsoredBanner,
   BannerImageTransform,
+  BannerType,
   BANNER_TRANSFORM_DEFAULT,
 } from "@/lib/admin/banner-model";
 import { UploadArea } from "./UploadArea";
@@ -40,6 +46,26 @@ interface Props {
   onClose: () => void;
 }
 
+const TYPE_OPTIONS: {
+  value: BannerType;
+  label: string;
+  description: string;
+  icon: typeof LayoutGrid;
+}[] = [
+  {
+    value: "full",
+    label: "بانر كامل",
+    description: "صورة واحدة تملأ الإطار بالكامل — كل النص داخل الصورة",
+    icon: LayoutPanelTop,
+  },
+  {
+    value: "split",
+    label: "بانر مقسّم",
+    description: "صورة على جانب + عنوان ووصف قابلين للتعديل",
+    icon: LayoutGrid,
+  },
+];
+
 export function BannerEditor({ banner, onPatch, onClose }: Props) {
   // Local draft state so typing in inputs feels instant (no debounce flicker).
   // We sync to the store on every change via onPatch, but inputs read from
@@ -48,7 +74,6 @@ export function BannerEditor({ banner, onPatch, onClose }: Props) {
   const [subtitle, setSubtitle] = useState(banner?.subtitle ?? "");
 
   // Re-sync local state when banner changes (e.g. user selects another row)
-  // Using key= on the parent is the canonical React way, but to be defensive:
   const bannerId = banner?.id;
   const [lastSyncedId, setLastSyncedId] = useState<string | null>(bannerId ?? null);
   if (bannerId && bannerId !== lastSyncedId) {
@@ -79,6 +104,8 @@ export function BannerEditor({ banner, onPatch, onClose }: Props) {
     );
   }
 
+  const isFull = banner.bannerType === "full";
+
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
@@ -86,7 +113,7 @@ export function BannerEditor({ banner, onPatch, onClose }: Props) {
         <div className="space-y-0.5">
           <h3 className="text-sm font-semibold text-foreground">محرر البانر</h3>
           <p className="text-xs text-muted-foreground">
-            الموضع #{banner.displayOrder}
+            الموضع #{banner.displayOrder} · {isFull ? "بانر كامل" : "بانر مقسّم"}
           </p>
         </div>
         <Button variant="ghost" size="icon" onClick={onClose} className="h-8 w-8">
@@ -96,7 +123,42 @@ export function BannerEditor({ banner, onPatch, onClose }: Props) {
 
       <ScrollArea className="flex-1">
         <div className="space-y-5 p-4">
-          {/* Upload section */}
+          {/* ---------- Banner Type selector ---------- */}
+          <section className="space-y-2">
+            <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              نوع البانر
+            </Label>
+            <div className="grid grid-cols-2 gap-2">
+              {TYPE_OPTIONS.map((opt) => {
+                const Icon = opt.icon;
+                const isSelected = banner.bannerType === opt.value;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => onPatch(banner.id, { bannerType: opt.value })}
+                    className={`flex flex-col items-start gap-1.5 rounded-lg border p-3 text-right transition-all ${
+                      isSelected
+                        ? "border-primary bg-primary/5 ring-1 ring-primary/30"
+                        : "border-border hover:border-primary/40 hover:bg-muted/30"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Icon
+                        className={`h-4 w-4 ${isSelected ? "text-primary" : "text-muted-foreground"}`}
+                      />
+                      <span className="text-sm font-medium text-foreground">{opt.label}</span>
+                    </div>
+                    <p className="text-[11px] leading-snug text-muted-foreground">
+                      {opt.description}
+                    </p>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+
+          {/* ---------- Upload section (always shown) ---------- */}
           <section className="space-y-3">
             <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               صورة البانر
@@ -118,7 +180,7 @@ export function BannerEditor({ banner, onPatch, onClose }: Props) {
             />
           </section>
 
-          {/* Image positioning */}
+          {/* ---------- Image positioning (always shown when image exists) ---------- */}
           {banner.image && (
             <section className="space-y-3">
               <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
@@ -130,48 +192,65 @@ export function BannerEditor({ banner, onPatch, onClose }: Props) {
                 value={banner.transform}
                 onChange={onTransformChange}
                 previewWidth={320}
+                // For full banners, the image fills the entire frame — show the
+                // full-frame safe area. For split, the default 42% panel overlay applies.
+                fullFrame={isFull}
               />
             </section>
           )}
 
-          {/* Title */}
-          <section className="space-y-2">
-            <Label htmlFor="banner-title" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              العنوان
-            </Label>
-            <Input
-              id="banner-title"
-              value={title}
-              onChange={(e) => {
-                setTitle(e.target.value);
-                onPatch(banner.id, { title: e.target.value });
-              }}
-              placeholder="مثال: مراجعة الأحياء"
-              dir="rtl"
-              maxLength={60}
-            />
-          </section>
+          {/* ---------- Split-only fields: Title + Subtitle ---------- */}
+          {!isFull && (
+            <>
+              <section className="space-y-2">
+                <Label htmlFor="banner-title" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  العنوان
+                </Label>
+                <Input
+                  id="banner-title"
+                  value={title}
+                  onChange={(e) => {
+                    setTitle(e.target.value);
+                    onPatch(banner.id, { title: e.target.value });
+                  }}
+                  placeholder="مثال: مراجعة الأحياء"
+                  dir="rtl"
+                  maxLength={60}
+                />
+              </section>
 
-          {/* Subtitle */}
-          <section className="space-y-2">
-            <Label htmlFor="banner-subtitle" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              الوصف
-            </Label>
-            <Textarea
-              id="banner-subtitle"
-              value={subtitle}
-              onChange={(e) => {
-                setSubtitle(e.target.value);
-                onPatch(banner.id, { subtitle: e.target.value });
-              }}
-              placeholder="مثال: ملخص شامل للفصول الأربعة"
-              dir="rtl"
-              rows={3}
-              maxLength={120}
-            />
-          </section>
+              <section className="space-y-2">
+                <Label htmlFor="banner-subtitle" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  الوصف
+                </Label>
+                <Textarea
+                  id="banner-subtitle"
+                  value={subtitle}
+                  onChange={(e) => {
+                    setSubtitle(e.target.value);
+                    onPatch(banner.id, { subtitle: e.target.value });
+                  }}
+                  placeholder="مثال: ملخص شامل للفصول الأربعة"
+                  dir="rtl"
+                  rows={3}
+                  maxLength={120}
+                />
+              </section>
+            </>
+          )}
 
-          {/* Enabled toggle */}
+          {/* ---------- Full-banner hint ---------- */}
+          {isFull && (
+            <div className="flex items-start gap-2 rounded-lg border border-blue-500/20 bg-blue-500/5 px-3 py-2.5 text-xs text-blue-600 dark:text-blue-400">
+              <ImageIcon className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
+              <span>
+                في البانر الكامل، كل النص والعلامة التجارية وزر الإجراء تكون
+                مصمّمة داخل الصورة نفسها. ارفع صورة جاهزة بالأبعاد الموصى بها.
+              </span>
+            </div>
+          )}
+
+          {/* ---------- Enabled toggle (always shown) ---------- */}
           <section className="flex items-center justify-between rounded-lg border bg-card px-3 py-2.5">
             <div className="space-y-0.5">
               <Label htmlFor="banner-enabled" className="text-sm font-medium text-foreground">
