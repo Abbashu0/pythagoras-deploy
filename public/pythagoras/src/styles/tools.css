@@ -42,13 +42,13 @@
 .placeholder-title,
 .tests-title {
   margin: 0;
-  font-size: 21px;
+  font-size: 1.3125rem;
   font-weight: 600;
   line-height: 1.35;
 }
 
 .tool-title {
-  font-size: 17px;
+  font-size: 1.0625rem;
 }
 
 .featured-text,
@@ -57,7 +57,7 @@
 .tests-text {
   margin: 0;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 0.8125rem;
   line-height: 1.85;
 }
 
@@ -124,5 +124,5 @@
 
 .tool-hint {
   color: var(--muted-soft);
-  font-size: 12px;
+  font-size: 0.75rem;
 }

@@ -172,7 +172,7 @@ body[data-theme="light"] .nav-item.is-active .nav-orb {
 }
 
 .nav-label {
-  font-size: 10.5px;
+  font-size: 0.6562rem;
   font-weight: 500;
   letter-spacing: 0.015em;
   white-space: nowrap;

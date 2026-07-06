@@ -17,12 +17,12 @@
 
 .placeholder-title,
 .tests-title {
-  font-size: 24px;
+  font-size: 1.5rem;
 }
 
 .placeholder-text,
 .tests-text {
-  font-size: 14px;
+  font-size: 0.875rem;
 }
 
 .tests-stack {
@@ -45,7 +45,7 @@
   align-items: center;
   gap: 10px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 .tests-list-item::before {
@@ -141,14 +141,14 @@
 }
 
 .appearance-card-title {
-  font-size: 22px;
+  font-size: 1.375rem;
   line-height: 1.2;
   font-weight: 600;
 }
 
 .appearance-card-description {
   color: var(--muted);
-  font-size: 13px;
+  font-size: 0.8125rem;
   line-height: 1.8;
 }
 
@@ -216,7 +216,7 @@
 .appearance-card-note {
   margin: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 0.75rem;
   line-height: 1.8;
 }
 
@@ -239,7 +239,7 @@
 
 .settings-title {
   margin: 0;
-  font-size: 22px;
+  font-size: 1.375rem;
   line-height: 1.35;
   font-weight: 600;
 }
@@ -248,7 +248,7 @@
 .settings-note {
   margin: 0;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 0.8125rem;
   line-height: 1.85;
 }
 
@@ -297,13 +297,13 @@
 }
 
 .theme-option-copy strong {
-  font-size: 15px;
+  font-size: 0.9375rem;
   font-weight: 600;
 }
 
 .theme-option-copy small {
   color: var(--muted-soft);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .theme-swatch {
@@ -494,13 +494,13 @@
 }
 
 .greeting-text {
-  font-size: 22px;
+  font-size: 1.375rem;
   font-weight: 600;
   margin-bottom: 4px;
 }
 
 .greeting-sub {
-  font-size: 14px;
+  font-size: 0.875rem;
   color: var(--muted);
 }
 
@@ -536,7 +536,7 @@
 }
 
 .shortcut-label {
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--muted);
   font-weight: 500;
 }
@@ -559,14 +559,14 @@
 }
 
 .tip-text {
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--muted);
   line-height: 1.7;
   margin: 0;
 }
 
 .section-link {
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--accent);
   font-weight: 500;
   cursor: pointer;
@@ -599,13 +599,13 @@
 }
 
 .density-title {
-  font-size: 15px;
+  font-size: 0.9375rem;
   font-weight: 600;
   color: var(--fg);
 }
 
 .density-hint {
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--muted);
   line-height: 1.6;
 }
@@ -617,7 +617,10 @@
   align-items: center;
   gap: 14px;
   padding: 16px 6px 22px;
-  /* height reserved for ticks row below the track */
+  /* Force LTR so small A is on the visual left, large A on the visual right,
+     matching the standard A...A text-size slider convention. The surrounding
+     UI stays RTL; only the slider itself is LTR. */
+  direction: ltr;
 }
 
 .density-letter {
@@ -629,11 +632,11 @@
 }
 
 .density-letter-sm {
-  font-size: 14px;
+  font-size: 0.875rem;
 }
 
 .density-letter-lg {
-  font-size: 22px;
+  font-size: 1.375rem;
 }
 
 .density-track-wrap {
@@ -694,6 +697,11 @@
 .density-thumb {
   position: absolute;
   top: 50%;
+  /* Position is driven by --density-thumb-pct set on the slider container.
+     translateX(-50%) keeps the thumb centered on the percentage point.
+     In RTL the visual layout is flipped automatically because the slider
+     container inherits dir=rtl from body. */
+  left: var(--density-thumb-pct, 50%);
   width: 22px;
   height: 22px;
   border-radius: 50%;
@@ -750,7 +758,7 @@
   border: 1px solid var(--border);
   background: var(--surface-soft);
   color: var(--muted);
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 500;
   font-family: var(--font-ui);
   cursor: pointer;

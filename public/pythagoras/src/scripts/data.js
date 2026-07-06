@@ -1,9 +1,9 @@
 export const themeLabels = { dark: "داكن", light: "فاتح", aurora: "شفق" };
 
 export const densityLabels = {
-  compact: "مدمج",
-  comfortable: "مريح",
-  spacious: "واسع",
+  compact: "صغير",
+  comfortable: "قياسي",
+  spacious: "كبير",
 };
 
 export const tools = [

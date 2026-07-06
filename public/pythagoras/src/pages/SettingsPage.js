@@ -5,9 +5,9 @@ import { getStoredDensity } from "../scripts/density.js";
 import { icon } from "../scripts/icons.js";
 
 const DENSITY_OPTIONS = [
-  { id: "compact", label: "مدمج", hint: "أكثر محتوى في نفس المساحة" },
-  { id: "comfortable", label: "مريح", hint: "التوازن الافتراضي للقراءة" },
-  { id: "spacious", label: "واسع", hint: "خطوط أكبر وبطاقات أفسح" },
+  { id: "compact", label: "صغير", hint: "أكثر محتوى في نفس المساحة" },
+  { id: "comfortable", label: "قياسي", hint: "التوازن الافتراضي للقراءة" },
+  { id: "spacious", label: "كبير", hint: "خطوط أكبر وبطاقات أفسح" },
 ];
 
 function densitySliderIndex(density) {
@@ -122,7 +122,6 @@ export function settingsScreen() {
                     <div
                       class="density-thumb"
                       aria-hidden="true"
-                      style="left: ${densityPct}%"
                     ></div>
                   </div>
 

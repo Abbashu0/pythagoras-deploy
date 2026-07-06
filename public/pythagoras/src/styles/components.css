@@ -43,7 +43,7 @@
   border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: 999px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .brand-chip {
@@ -63,14 +63,14 @@
 .eyebrow {
   color: var(--muted);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 0.6875rem;
   letter-spacing: 0.18em;
   text-transform: uppercase;
 }
 
 .page-title {
   margin: 0;
-  font-size: clamp(31px, 8vw, 38px);
+  font-size: clamp(1.9375rem, 8vw, 2.375rem);
   line-height: 1.18;
   font-weight: 600;
   text-align: center;
@@ -79,7 +79,7 @@
 .page-copy {
   margin: 0;
   color: var(--muted);
-  font-size: 14px;
+  font-size: 0.875rem;
   line-height: 1.9;
   max-width: 34ch;
   text-align: center;
@@ -95,13 +95,13 @@
 
 .section-title {
   margin: 0;
-  font-size: 15px;
+  font-size: 0.9375rem;
   font-weight: 600;
 }
 
 .section-meta {
   color: var(--muted-soft);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .featured-card,
@@ -167,7 +167,7 @@
 
 .hint-link {
   color: var(--fg);
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 500;
 }
 
@@ -181,7 +181,7 @@
   gap: 7px;
   padding: 7px 10px;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: 0.75rem;
   line-height: 1;
   border: 1px solid rgba(255, 255, 255, 0.08);
   color: var(--muted);
@@ -218,7 +218,7 @@
     linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent 70%),
     color-mix(in oklab, var(--surface) 90%, rgba(13, 17, 25, 0.92));
   color: var(--fg);
-  font-size: 13px;
+  font-size: 0.8125rem;
   line-height: 1.8;
   opacity: 0;
   transform: translateY(18px);
