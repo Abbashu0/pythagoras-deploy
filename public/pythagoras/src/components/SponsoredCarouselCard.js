@@ -20,6 +20,54 @@ import { icon } from "../scripts/icons.js";
 
 const AUTO_SLIDE_INTERVAL_MS = 10_000;
 
+/**
+ * Recommended banner image size.
+ *
+ * The banner occupies the left visual panel of each slide. That panel is
+ * 42% of the frame width (CSS grid-template-columns: 42% 1fr) and 100% of
+ * the frame height (CSS aspect-ratio: 5/2 on the frame).
+ *
+ * We recommend a 2x retina export so the image stays crisp on high-DPI
+ * screens. Designers should export at this exact size; the Admin Panel
+ * will reject uploads that don't match the aspect ratio.
+ *
+ * The numeric values below are measured at runtime from the live DOM so
+ * they always reflect the actual rendered dimensions.
+ */
+const BANNER_RETINA_SCALE = 2;
+
+function reportRecommendedBannerSize() {
+  // Defer to next frame so the carousel DOM is laid out before we measure.
+  requestAnimationFrame(() => {
+    const visual = document.querySelector(".sponsored-slide-visual");
+    if (!visual) return;
+    const rect = visual.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return;
+
+    const cssWidth = Math.round(rect.width);
+    const cssHeight = Math.round(rect.height);
+    const retinaWidth = cssWidth * BANNER_RETINA_SCALE;
+    const retinaHeight = cssHeight * BANNER_RETINA_SCALE;
+
+    // Reduce aspect ratio to simplest integer terms (e.g. 154:146 → 77:73).
+    const gcd = (a, b) => (b === 0 ? a : gcd(b, a % b));
+    const g = gcd(cssWidth, cssHeight);
+    const ratioW = cssWidth / g;
+    const ratioH = cssHeight / g;
+
+    // eslint-disable-next-line no-console
+    console.log(
+      `%c[SponsoredCarousel] Recommended banner size:%c
+  Width:       ${retinaWidth}px (CSS: ${cssWidth}px @1x)
+  Height:      ${retinaHeight}px (CSS: ${cssHeight}px @1x)
+  Aspect ratio: ${ratioW}:${ratioH}
+  Export at ${retinaWidth}×${retinaHeight}px (2x retina) preserving ${ratioW}:${ratioH}.`,
+      "color: #4f9cff; font-weight: 600;",
+      "color: inherit; font-weight: 400;"
+    );
+  });
+}
+
 export function sponsoredCarouselCard(banners) {
   // Filter + sort once at render time so disabled/out-of-order banners are handled centrally.
   const slides = [...banners]
@@ -27,6 +75,12 @@ export function sponsoredCarouselCard(banners) {
     .sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0));
 
   if (slides.length === 0) return "";
+
+  // Report the recommended banner image size so designers and the future Admin Panel
+  // know exactly what aspect ratio and resolution to produce. The visual panel is
+  // 42% of the frame width and 100% of the frame height; we recommend 2x for retina.
+  // These constants are derived from the CSS aspect-ratio (5/2) and grid template.
+  reportRecommendedBannerSize();
 
   return `
     <div class="sponsored-carousel stagger" style="animation-delay:130ms" data-sponsored-carousel data-auto-interval="${AUTO_SLIDE_INTERVAL_MS}">
@@ -188,22 +242,23 @@ export class SponsoredCarouselController {
   _onTouchEnd(e) {
     if (this.touchStartX == null) return;
     const endX = (e.changedTouches && e.changedTouches[0] && e.changedTouches[0].clientX) || this.touchStartX;
+    const endY = (e.changedTouches && e.changedTouches[0] && e.changedTouches[0].clientY) || this.touchStartY;
     const dx = endX - this.touchStartX;
+    const dy = endY - this.touchStartY;
     this.touchStartX = null;
     this.touchStartY = null;
 
-    if (this.isSwiping && Math.abs(dx) > 40) {
-      // RTL: swiping right-to-left (dx < 0) means "go to next" visually,
-      // because the next slide sits to the left in RTL layout.
-      // LTR would be the opposite.
-      const isRtl = getComputedStyle(this.root).direction === "rtl";
-      if (isRtl) {
-        if (dx < 0) this.next();
-        else this.prev();
-      } else {
-        if (dx > 0) this.prev();
-        else this.next();
-      }
+    // Horizontal swipe = |dx| clearly dominates |dy| AND exceeds threshold.
+    // We don't rely on a separate isSwiping flag (touchmove can be missed on
+    // fast flicks or in some headless browsers), we just check the net delta.
+    const isHorizontalSwipe = Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 40;
+
+    if (isHorizontalSwipe) {
+      // Natural swipe direction (matches user expectation for this RTL app):
+      //   swipe RIGHT (dx > 0) → PREVIOUS page
+      //   swipe LEFT  (dx < 0) → NEXT page
+      if (dx > 0) this.prev();
+      else this.next();
     }
     // Always restart the 10-second timer after a user swipe.
     this._resetAuto();

@@ -786,8 +786,8 @@
 .sponsored-carousel {
   position: relative;
   display: grid;
-  gap: 14px;
-  padding: 18px;
+  gap: 10px;
+  padding: 12px;
   margin-bottom: 18px;
   border-radius: var(--radius-xl);
   border: 1px solid color-mix(in oklab, var(--accent) 18%, var(--border));
@@ -803,8 +803,10 @@
   position: relative;
   border-radius: var(--radius-lg);
   overflow: hidden;
-  /* Fixed aspect keeps slide height close to the featured-card visual weight */
-  aspect-ratio: 16 / 9;
+  /* Compact 5:2 aspect ratio (~30% shorter than the original 16:9).
+     Keeps the slide visually balanced against the other Home cards
+     without sacrificing readability of title + subtitle. */
+  aspect-ratio: 5 / 2;
   background: var(--surface-soft);
 }
 
@@ -868,22 +870,22 @@
 }
 
 .sponsored-slide-glyph .app-icon {
-  width: 48px;
-  height: 48px;
+  width: 36px;
+  height: 36px;
   stroke-width: 1.6;
 }
 
 .sponsored-slide-copy {
   display: grid;
   align-content: center;
-  gap: 6px;
-  padding: 14px 16px;
+  gap: 4px;
+  padding: 10px 14px;
   text-align: start;
 }
 
 .sponsored-eyebrow {
   font-family: var(--font-mono);
-  font-size: 0.625rem;
+  font-size: 0.5625rem;
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--accent);
@@ -892,7 +894,7 @@
 
 .sponsored-title {
   margin: 0;
-  font-size: 1.0625rem;
+  font-size: 0.9375rem;
   font-weight: 600;
   line-height: 1.3;
   color: var(--fg);
@@ -900,8 +902,8 @@
 
 .sponsored-subtitle {
   margin: 0;
-  font-size: 0.8125rem;
-  line-height: 1.55;
+  font-size: 0.75rem;
+  line-height: 1.5;
   color: var(--muted);
 }
 
@@ -909,13 +911,13 @@
   display: flex;
   justify-content: center;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   padding: 0;
 }
 
 .sponsored-dot {
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   padding: 0;
   border: 0;
@@ -928,7 +930,7 @@
 }
 
 .sponsored-dot.is-active {
-  width: 22px;
+  width: 18px;
   border-radius: 999px;
   background: var(--accent);
   opacity: 1;
