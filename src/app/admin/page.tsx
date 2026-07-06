@@ -33,7 +33,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { ImagePlus, Layers, Info } from "lucide-react";
+import { ImagePlus, Layers, Info, AlertTriangle } from "lucide-react";
 import { useAdminStore } from "@/lib/admin/use-admin-store";
 import { getAdminStore } from "@/lib/admin/admin-store";
 import {
@@ -96,6 +96,22 @@ export default function AdminPage() {
 
   return (
     <div className="mx-auto max-w-[1400px] px-6 py-8">
+      {/* ---------- Storage error warning (shows when localStorage is full) ---------- */}
+      {store.lastStorageError && (
+        <div className="mb-6 flex items-start gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4">
+          <AlertTriangle className="mt-0.5 h-5 w-5 flex-shrink-0 text-destructive" />
+          <div className="flex-1">
+            <h3 className="text-sm font-semibold text-destructive">تحذير: مساحة التخزين ممتلئة</h3>
+            <p className="mt-1 text-xs text-destructive/80">
+              {store.lastStorageError}
+              <br />
+              التغييرات الأخيرة لم تُحفظ بشكل صحيح. قد تختفي بعض البانرات عند إعادة تحميل الصفحة.
+              احذف بانراً غير ضروري أو تأكد من أن الصور مضغوطة (يتم الضغط تلقائياً عند الرفع).
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* ---------- Header ---------- */}
       <header className="mb-8">
         <div className="flex items-center gap-3">

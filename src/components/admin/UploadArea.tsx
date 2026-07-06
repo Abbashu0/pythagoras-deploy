@@ -3,24 +3,25 @@
 /**
  * UploadArea
  * -----------
- * Drag & drop + click-to-browse image uploader with validation and preview.
+ * Drag & drop + click-to-browse image uploader with validation, compression,
+ * and preview.
  *
- * Validation:
- *   - Accepted types: PNG, JPG, WEBP
- *   - Max size: 4 MB (RECOMMENDED_BANNER.MAX_IMAGE_BYTES)
- *   - Errors surfaced via `onError` callback AND inline alert
- *
- * On valid file:
- *   - Converts to data URL
- *   - Calls `onUploaded(dataUrl)` so parent can wire it into the editor
+ * Flow:
+ *   1. User drops/selects a file
+ *   2. Validate type (PNG/JPG/WEBP) and size (max 4MB raw)
+ *   3. COMPRESS the image to the recommended banner dimensions (732×293 for
+ *      full, 308×292 for split) as JPEG quality 0.85. This reduces a 3MB
+ *      photo to ~100KB, preventing localStorage quota issues.
+ *   4. Pass the compressed data URL to `onUploaded`
  *
  * Architecture:
  *   - Pure UI component — no store coupling. Parent decides what to do with
- *     the uploaded data URL (typically: set as banner.image in the editor).
+ *     the uploaded data URL.
+ *   - The `bannerType` prop controls which compression target is used.
  */
 
 import { useCallback, useRef, useState } from "react";
-import { UploadCloud, ImageIcon, AlertCircle } from "lucide-react";
+import { UploadCloud, ImageIcon, AlertCircle, Loader2 } from "lucide-react";
 import {
   ACCEPTED_IMAGE_TYPES,
   MAX_IMAGE_BYTES,
@@ -28,12 +29,13 @@ import {
   RECOMMENDED_BANNER_SPLIT,
   BannerType,
 } from "@/lib/admin/banner-model";
+import { compressImage, getCompressionTarget } from "@/lib/admin/image-compress";
 
 interface Props {
   onUploaded: (dataUrl: string) => void;
   currentImage?: string;
   onClear?: () => void;
-  /** Which recommended size hint to show. Defaults to "full". */
+  /** Which recommended size + compression target to use. Defaults to "full". */
   bannerType?: BannerType;
 }
 
@@ -41,6 +43,7 @@ export function UploadArea({ onUploaded, currentImage, onClear, bannerType = "fu
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [compressing, setCompressing] = useState(false);
 
   const validate = useCallback((file: File): string | null => {
     if (!ACCEPTED_IMAGE_TYPES.includes(file.type as typeof ACCEPTED_IMAGE_TYPES[number])) {
@@ -55,23 +58,42 @@ export function UploadArea({ onUploaded, currentImage, onClear, bannerType = "fu
   }, []);
 
   const handleFile = useCallback(
-    (file: File) => {
+    async (file: File) => {
       const err = validate(file);
       if (err) {
         setError(err);
         return;
       }
       setError(null);
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result === "string") {
-          onUploaded(reader.result);
+      setCompressing(true);
+      try {
+        // Compress the image to the recommended banner dimensions.
+        // This prevents localStorage quota issues when storing 5 banners.
+        const target = getCompressionTarget(bannerType);
+        const compressed = await compressImage(file, target);
+        onUploaded(compressed);
+      } catch (compressionErr) {
+        // If compression fails, try passing the raw data URL as a fallback
+        // (might still work if the image is small enough)
+        try {
+          const reader = new FileReader();
+          reader.onload = () => {
+            if (typeof reader.result === "string") {
+              onUploaded(reader.result);
+            } else {
+              setError("تعذّر قراءة الملف. حاول مجددًا.");
+            }
+          };
+          reader.onerror = () => setError("تعذّر قراءة الملف. حاول مجددًا.");
+          reader.readAsDataURL(file);
+        } catch {
+          setError("تعذّر معالجة الصورة. حاول بصورة أخرى.");
         }
-      };
-      reader.onerror = () => setError("تعذّر قراءة الملف. حاول مجددًا.");
-      reader.readAsDataURL(file);
+      } finally {
+        setCompressing(false);
+      }
     },
-    [onUploaded, validate]
+    [onUploaded, validate, bannerType]
   );
 
   const onDrop = useCallback(
@@ -98,18 +120,20 @@ export function UploadArea({ onUploaded, currentImage, onClear, bannerType = "fu
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (file) handleFile(file);
-      // Reset input so the same file can be selected again after removal
       e.target.value = "";
     },
     [handleFile]
   );
+
+  const rec = bannerType === "split" ? RECOMMENDED_BANNER_SPLIT : RECOMMENDED_BANNER_FULL;
+  const typeLabel = bannerType === "split" ? "مقسّم" : "كامل";
 
   return (
     <div className="space-y-3">
       <div
         role="button"
         tabIndex={0}
-        onClick={() => inputRef.current?.click()}
+        onClick={() => !compressing && inputRef.current?.click()}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
@@ -120,46 +144,54 @@ export function UploadArea({ onUploaded, currentImage, onClear, bannerType = "fu
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
         className={`group relative flex cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed p-8 text-center transition-colors ${
-          dragging
+          compressing
+            ? "border-primary/50 bg-primary/5 opacity-70"
+            : dragging
             ? "border-primary bg-primary/5"
             : "border-border hover:border-primary/50 hover:bg-muted/30"
         }`}
         style={{ minHeight: 180 }}
       >
-        <div className="grid place-items-center rounded-full bg-primary/10 p-3 text-primary transition-transform group-hover:scale-110">
-          <UploadCloud className="h-7 w-7" />
-        </div>
-        <div className="space-y-1">
-          <p className="text-sm font-medium text-foreground">
-            اسحب الصورة هنا أو اضغط للاختيار
-          </p>
-          <p className="text-xs text-muted-foreground">
-            PNG · JPG · WEBP — الحد الأقصى 4 ميجابايت
-          </p>
-        </div>
+        {compressing ? (
+          <>
+            <Loader2 className="h-7 w-7 animate-spin text-primary" />
+            <p className="text-sm font-medium text-foreground">جارٍ ضغط الصورة…</p>
+          </>
+        ) : (
+          <>
+            <div className="grid place-items-center rounded-full bg-primary/10 p-3 text-primary transition-transform group-hover:scale-110">
+              <UploadCloud className="h-7 w-7" />
+            </div>
+            <div className="space-y-1">
+              <p className="text-sm font-medium text-foreground">
+                اسحب الصورة هنا أو اضغط للاختيار
+              </p>
+              <p className="text-xs text-muted-foreground">
+                PNG · JPG · WEBP — الحد الأقصى 4 ميجابايت
+              </p>
+            </div>
+          </>
+        )}
         <input
           ref={inputRef}
           type="file"
           accept={ACCEPTED_IMAGE_TYPES.join(",")}
           onChange={onInputChange}
           className="hidden"
+          disabled={compressing}
         />
       </div>
 
       {/* Recommended size hint — adapts to the current banner type */}
-      {(() => {
-        const rec = bannerType === "split" ? RECOMMENDED_BANNER_SPLIT : RECOMMENDED_BANNER_FULL;
-        const typeLabel = bannerType === "split" ? "مقسّم" : "كامل";
-        return (
-          <div className="flex items-center gap-2 rounded-lg bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-            <ImageIcon className="h-3.5 w-3.5 flex-shrink-0" />
-            <span>
-              الحجم الموصى به (بانر {typeLabel}): {rec.width}×{rec.height}px
-              (نسبة {rec.aspectRatio}) — تصدير {rec.retinaScale}× retina.
-            </span>
-          </div>
-        );
-      })()}
+      <div className="flex items-center gap-2 rounded-lg bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+        <ImageIcon className="h-3.5 w-3.5 flex-shrink-0" />
+        <span>
+          الحجم الموصى به (بانر {typeLabel}): {rec.width}×{rec.height}px
+          (نسبة {rec.aspectRatio}) — تصدير {rec.retinaScale}× retina.
+          <br />
+          يتم ضغط الصور تلقائياً عند الرفع لتوفير المساحة.
+        </span>
+      </div>
 
       {error && (
         <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">

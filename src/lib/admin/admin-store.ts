@@ -114,15 +114,37 @@ class AdminStore {
     };
   }
 
+  /**
+   * Last quota error message, or null if no error.
+   * The admin UI reads this to show a warning banner when localStorage is full.
+   */
+  lastStorageError: string | null = null;
+
   private persist() {
     if (typeof window === "undefined") return;
     try {
-      localStorage.setItem(BANNERS_KEY, JSON.stringify(this.banners));
+      const bannersJson = JSON.stringify(this.banners);
+      localStorage.setItem(BANNERS_KEY, bannersJson);
       localStorage.setItem(HISTORY_KEY, JSON.stringify(this.history));
-    } catch {
-      // localStorage might be full (large data URLs) — fail silently
+      this.lastStorageError = null;
+    } catch (err) {
+      // QuotaExceededError — localStorage is full (typically ~5MB).
+      // This happens when banner images are too large.
+      // We DON'T silently swallow this anymore — surface it to the UI.
+      const isQuota =
+        err instanceof DOMException &&
+        (err.name === "QuotaExceededError" ||
+          err.name === "NS_ERROR_DOM_QUOTA_REACHED" ||
+          err.code === 22 ||
+          err.code === 1014);
+      this.lastStorageError = isQuota
+        ? "امتلأت مساحة التخزين المحلية. احذف بانراً قديماً أو استخدم صوراً أصغر."
+        : `خطأ في الحفظ: ${err instanceof Error ? err.message : String(err)}`;
+      // eslint-disable-next-line no-console
+      console.warn("[AdminStore] persist failed:", this.lastStorageError, err);
     }
     this.rebuildSnapshot();
+    this.emit();
   }
 
   private seedBanners(): SponsoredBanner[] {
