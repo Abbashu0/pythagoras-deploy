@@ -42,9 +42,11 @@ import {
   getStoredDensity,
   syncDensityControls,
 } from "./density.js";
+import { SponsoredCarouselController } from "../components/SponsoredCarouselCard.js";
 import { showToast } from "./toast.js";
 
 let currentView = "tools";
+let sponsoredCarouselController = null;
 const NAV_STATE_KEY = "pythagoras-last-view-by-tab";
 const QUESTION_BANK_STICKY_TOP = 58;
 const QUESTION_BANK_DEFAULT_VIEW_MODE = "list";
@@ -1028,6 +1030,22 @@ function bindInteractions(view) {
   bindSettingsAppearanceInteractions(view);
   bindQuestionBankInteractions(view);
   bindQuestionDetailInteractions(view);
+  bindSponsoredCarousel();
+}
+
+function bindSponsoredCarousel() {
+  // Always tear down the previous controller first — render() replaces the entire
+  // #screen-content subtree, so any prior carousel DOM is gone and its listeners
+  // would otherwise leak.
+  if (sponsoredCarouselController) {
+    sponsoredCarouselController.destroy();
+    sponsoredCarouselController = null;
+  }
+
+  const root = document.querySelector("[data-sponsored-carousel]");
+  if (!root) return;
+
+  sponsoredCarouselController = new SponsoredCarouselController(root);
 }
 
 applyTheme(getStoredTheme());

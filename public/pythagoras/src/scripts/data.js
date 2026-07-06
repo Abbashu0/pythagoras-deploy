@@ -270,3 +270,78 @@ testSubjects.forEach((subject) => {
   viewNavMap[getTestsSubjectView(subject.id)] = "tools";
   viewNavMap[getQuestionBankView(subject.id)] = "tools";
 });
+
+/**
+ * SponsoredBanner model.
+ *
+ * Each banner represents a single slide in the SponsoredCarouselCard on the Home page.
+ *
+ * Fields:
+ * - id:           stable unique identifier (used as React-like key + logged on tap)
+ * - image:        CSS background value (gradient or url) for the slide's left visual panel
+ * - iconKey:      icon key from icons.js — used as the focal glyph inside the visual panel
+ * - title:        headline shown on the right panel (e.g. "مراجعة الأحياء")
+ * - subtitle:     supporting line under the title
+ * - destination:  route or URL the banner should navigate to (not wired yet — taps only log id)
+ * - enabled:      when false, the banner is filtered out before render
+ * - displayOrder: integer controlling sort order (1 = first)
+ *
+ * Today these 5 objects are local. Tomorrow they will arrive from an Admin Panel
+ * with the exact same shape — the SponsoredCarouselCard widget will not need to change.
+ */
+export const SponsoredBanner = {
+  fields: ["id", "image", "iconKey", "title", "subtitle", "destination", "enabled", "displayOrder"],
+};
+
+export const sponsoredBanners = [
+  {
+    id: "bio-review",
+    iconKey: "biology",
+    image: "linear-gradient(135deg, oklch(58% 0.13 145), oklch(48% 0.10 165))",
+    title: "مراجعة الأحياء",
+    subtitle: "ملخص شامل للفصول الأربعة مع نماذج وزارية",
+    destination: "tests-biology",
+    enabled: true,
+    displayOrder: 1,
+  },
+  {
+    id: "math-course",
+    iconKey: "math",
+    image: "linear-gradient(135deg, oklch(60% 0.16 25), oklch(50% 0.18 15))",
+    title: "دورة الرياضيات",
+    subtitle: "تفاضل وتكامل شرح كامل بمستوى السادس علمي",
+    destination: "tests-math",
+    enabled: true,
+    displayOrder: 2,
+  },
+  {
+    id: "chemistry-course",
+    iconKey: "chemistry",
+    image: "linear-gradient(135deg, oklch(62% 0.14 280), oklch(52% 0.16 270))",
+    title: "كورس الكيمياء",
+    subtitle: "التفاعلات والحسابات الكيميائية بأسلوب مبسّط",
+    destination: "tests-chemistry",
+    enabled: true,
+    displayOrder: 3,
+  },
+  {
+    id: "physics-course",
+    iconKey: "physics",
+    image: "linear-gradient(135deg, oklch(60% 0.14 220), oklch(50% 0.16 240))",
+    title: "دورة الفيزياء",
+    subtitle: "الميكانيك والكهرباء بحلول مسائل خطوة بخطوة",
+    destination: "tests-physics",
+    enabled: true,
+    displayOrder: 4,
+  },
+  {
+    id: "teacher-course",
+    iconKey: "lectures",
+    image: "linear-gradient(135deg, oklch(60% 0.18 350), oklch(50% 0.16 340))",
+    title: "كورس المعلم",
+    subtitle: "جلسات مكثفة مع نخبة من المعلمين قبل الامتحان",
+    destination: "tests",
+    enabled: true,
+    displayOrder: 5,
+  },
+];

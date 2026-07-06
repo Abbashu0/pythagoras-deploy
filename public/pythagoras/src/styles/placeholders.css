@@ -776,3 +776,174 @@
   background: color-mix(in oklab, var(--accent) 14%, var(--surface));
   color: var(--accent);
 }
+
+/* ============================================
+   Sponsored Carousel Card — Home page
+   Inherits featured-card design language: same
+   radius, shadow, surface tokens, padding rhythm.
+   ============================================ */
+
+.sponsored-carousel {
+  position: relative;
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  margin-bottom: 18px;
+  border-radius: var(--radius-xl);
+  border: 1px solid color-mix(in oklab, var(--accent) 18%, var(--border));
+  background:
+    linear-gradient(180deg, color-mix(in oklab, var(--accent) 6%, transparent), transparent 60%),
+    var(--surface);
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+  transform: translateZ(0);
+}
+
+.sponsored-carousel-frame {
+  position: relative;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  /* Fixed aspect keeps slide height close to the featured-card visual weight */
+  aspect-ratio: 16 / 9;
+  background: var(--surface-soft);
+}
+
+.sponsored-carousel-track {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  transition: transform 360ms cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
+  /* Each slide is exactly 100% of the frame */
+}
+
+.sponsored-carousel-track > * {
+  flex: 0 0 100%;
+  width: 100%;
+  height: 100%;
+}
+
+.sponsored-slide {
+  display: grid;
+  grid-template-columns: 42% 1fr;
+  align-items: stretch;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  outline: none;
+  /* Disable default tap highlight on mobile */
+  -webkit-tap-highlight-color: transparent;
+}
+
+.sponsored-slide:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  border-radius: var(--radius-lg);
+}
+
+.sponsored-slide-visual {
+  position: relative;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+
+.sponsored-slide-visual::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  /* Subtle radial sheen to keep the icon legible on any gradient */
+  background: radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.22), transparent 60%);
+}
+
+.sponsored-slide-glyph {
+  position: relative;
+  z-index: 1;
+  color: rgba(255, 255, 255, 0.95);
+  filter: drop-shadow(0 6px 16px rgba(0, 0, 0, 0.25));
+}
+
+.sponsored-slide-glyph .app-icon {
+  width: 48px;
+  height: 48px;
+  stroke-width: 1.6;
+}
+
+.sponsored-slide-copy {
+  display: grid;
+  align-content: center;
+  gap: 6px;
+  padding: 14px 16px;
+  text-align: start;
+}
+
+.sponsored-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--accent);
+  opacity: 0.85;
+}
+
+.sponsored-title {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--fg);
+}
+
+.sponsored-subtitle {
+  margin: 0;
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.sponsored-indicators {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 7px;
+  padding: 0;
+}
+
+.sponsored-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  padding: 0;
+  border: 0;
+  background: color-mix(in oklab, var(--fg) 22%, var(--border-strong));
+  cursor: pointer;
+  transition: width 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    background 280ms ease,
+    opacity 280ms ease;
+  opacity: 0.7;
+}
+
+.sponsored-dot.is-active {
+  width: 22px;
+  border-radius: 999px;
+  background: var(--accent);
+  opacity: 1;
+}
+
+/* Light theme tweaks for better contrast on warm paper */
+body[data-theme="light"] .sponsored-carousel {
+  border-color: color-mix(in oklab, var(--accent) 22%, rgba(35, 28, 18, 0.10));
+}
+
+body[data-theme="light"] .sponsored-slide-copy {
+  /* Slightly deeper title color for readability */
+  color: var(--fg);
+}
+
+body[data-theme="light"] .sponsored-dot {
+  background: rgba(35, 28, 18, 0.20);
+}
