@@ -18,7 +18,28 @@ import { icon } from "../scripts/icons.js";
  * via the `destination` field — see SponsoredBanner model).
  */
 
-const AUTO_SLIDE_INTERVAL_MS = 10_000;
+const DEFAULT_AUTO_SLIDE_INTERVAL_MS = 10_000;
+const CAROUSEL_SETTINGS_KEY = "pythagoras-admin-carousel-settings";
+
+/**
+ * Read the auto-slide interval from the admin store (localStorage).
+ * Falls back to 10 seconds if not set. The admin dashboard writes this
+ * value via the Carousel Settings panel.
+ */
+function getAutoSlideInterval() {
+  try {
+    const raw = localStorage.getItem(CAROUSEL_SETTINGS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (typeof parsed.autoSlideInterval === "number" && parsed.autoSlideInterval >= 1000) {
+        return parsed.autoSlideInterval;
+      }
+    }
+  } catch {
+    // noop
+  }
+  return DEFAULT_AUTO_SLIDE_INTERVAL_MS;
+}
 
 /**
  * Recommended banner image size.
@@ -114,7 +135,7 @@ export function sponsoredCarouselCard(banners) {
   reportRecommendedBannerSize();
 
   return `
-    <div class="sponsored-carousel stagger" style="animation-delay:130ms" data-sponsored-carousel data-auto-interval="${AUTO_SLIDE_INTERVAL_MS}">
+    <div class="sponsored-carousel stagger" style="animation-delay:130ms" data-sponsored-carousel data-auto-interval="${getAutoSlideInterval()}">
       <div class="sponsored-carousel-frame">
         <div class="sponsored-carousel-track" data-sponsored-track>
           ${slides
