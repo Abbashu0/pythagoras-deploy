@@ -163,7 +163,11 @@ export function useFlipReorder<T>(
         cleanupTimerRef.current = null;
       }
     };
-    // We intentionally spread `items` as the dependency array so the
-    // effect re-runs whenever any item changes (reorder, add, remove).
-  }, items);
+    // We pass `[items]` (NOT spreading `items`) as the dependency array.
+    // Spreading would change the array SIZE between renders (e.g. from []
+    // to [5 items] when data loads from localStorage), which React rejects
+    // with "changed size between renders". Wrapping in a single-element
+    // array keeps the dependency array size constant at 1, while still
+    // re-running the effect whenever `items` changes by reference.
+  }, [items]);
 }
