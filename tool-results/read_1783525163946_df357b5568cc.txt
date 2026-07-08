@@ -1,0 +1,1062 @@
+     1→     1→import { renderAppShell } from "../components/AppShell.js";
+     2→     2→import { homeScreen } from "../pages/HomePage.js";
+     3→     3→import { placeholderScreen } from "../pages/PlaceholderPage.js";
+     4→     4→import { questionBankScreen, renderQuestionBankResults } from "../pages/QuestionBankPage.js?v=20260613c";
+     5→     5→import { questionDetailScreen } from "../pages/QuestionDetailPage.js";
+     6→     6→import { settingsScreen } from "../pages/SettingsPage.js";
+     7→     7→import { subjectTestsScreen } from "../pages/SubjectTestsPage.js";
+     8→     8→import { testsSubjectsScreen } from "../pages/TestsSubjectsPage.js";
+     9→     9→import { toolsScreen } from "../pages/ToolsPage.js";
+    10→    10→import {
+    11→    11→  getBiologyQuestionDetailFromView,
+    12→    12→  getQuestionBankSubjectByView,
+    13→    13→  getQuestionBankView,
+    14→    14→  getSubjectByView,
+    15→    15→  getViewMeta,
+    16→    16→  themeLabels,
+    17→    17→  densityLabels,
+    18→    18→  viewNavMap,
+    19→    19→} from "./data.js";
+    20→    20→import {
+    21→    21→  getBiologyQuestionBankSnapshot,
+    22→    22→  getBiologyQuestionByGlobalOrder,
+    23→    23→  getQuestionBankQuery,
+    24→    24→  loadBiologyOriginalQuestionBank,
+    25→    25→  setQuestionBankQuery,
+    26→    26→} from "./biologyQuestionBank.js";
+    27→    27→import { icon } from "./icons.js";
+    28→    28→import { bindNavigationInteractions, triggerNavActivation } from "./navigation.js";
+    29→    29→import {
+    30→    30→  QUESTION_BANK_SOURCE_OPTIONS,
+    31→    31→  applyQuestionBankFilters,
+    32→    32→  buildQuestionBankFilterOptions,
+    33→    33→  createDefaultQuestionBankFilters,
+    34→    34→  getQuestionTypeLabel,
+    35→    35→  hasActiveQuestionBankFilters,
+    36→    36→  normalizeQuestionBankFilters,
+    37→    37→} from "./questionBankFilters.js";
+    38→    38→import { pushRoute, viewFromHash } from "./router.js";
+    39→    39→import { applyTheme, getStoredTheme, syncThemeControls } from "./theme.js";
+    40→    40→import {
+    41→    41→  applyDensity,
+    42→    42→  getStoredDensity,
+    43→    43→  syncDensityControls,
+    44→    44→} from "./density.js";
+    45→    45→import { SponsoredCarouselController } from "../components/SponsoredCarouselCard.js";
+    46→    46→import { showToast } from "./toast.js";
+    47→    47→
+    48→    48→let currentView = "tools";
+    49→    49→let sponsoredCarouselController = null;
+    50→    50→const NAV_STATE_KEY = "pythagoras-last-view-by-tab";
+    51→    51→const QUESTION_BANK_STICKY_TOP = 58;
+    52→    52→const QUESTION_BANK_DEFAULT_VIEW_MODE = "list";
+    53→    53→
+    54→    54→const defaultViewByNavTab = {
+    55→    55→  home: "home",
+    56→    56→  tools: "tools",
+    57→    57→  tasks: "tasks",
+    58→    58→  notes: "notes",
+    59→    59→  settings: "settings",
+    60→    60→};
+    61→    61→
+    62→    62→const lastViewByNavTab = {
+    63→    63→  ...defaultViewByNavTab,
+    64→    64→  ...readStoredNavState(),
+    65→    65→};
+    66→    66→
+    67→    67→const questionBankViewState = {};
+    68→    68→let questionBankStickyObserver = null;
+    69→    69→let questionBankOutsidePointerCleanup = null;
+    70→    70→
+    71→    71→function readStoredNavState() {
+    72→    72→  try {
+    73→    73→    const raw = window.localStorage.getItem(NAV_STATE_KEY);
+    74→    74→    if (!raw) {
+    75→    75→      return null;
+    76→    76→    }
+    77→    77→
+    78→    78→    const parsed = JSON.parse(raw);
+    79→    79→    return typeof parsed === "object" && parsed ? parsed : null;
+    80→    80→  } catch {
+    81→    81→    return null;
+    82→    82→  }
+    83→    83→}
+    84→    84→
+    85→    85→function storeNavState() {
+    86→    86→  try {
+    87→    87→    window.localStorage.setItem(NAV_STATE_KEY, JSON.stringify(lastViewByNavTab));
+    88→    88→  } catch {
+    89→    89→    // noop
+    90→    90→  }
+    91→    91→}
+    92→    92→
+    93→    93→function getQuestionBankStateEntry(subjectId) {
+    94→    94→  if (!questionBankViewState[subjectId]) {
+    95→    95→    questionBankViewState[subjectId] = {
+    96→    96→      scrollTop: 0,
+    97→    97→      expandedSearch: false,
+    98→    98→      lastOpenedQuestionView: null,
+    99→    99→      pendingRestore: false,
+   100→   100→      viewMode: QUESTION_BANK_DEFAULT_VIEW_MODE,
+   101→   101→      filters: null,
+   102→   102→      isFilterPanelOpen: false,
+   103→   103→      openAccordion: null,
+   104→   104→      useQuestionFallbackOnRestore: false,
+   105→   105→    };
+   106→   106→  }
+   107→   107→
+   108→   108→  return questionBankViewState[subjectId];
+   109→   109→}
+   110→   110→
+   111→   111→function getScreenScrollContainer() {
+   112→   112→  const screen = document.getElementById("screen-content");
+   113→   113→  return screen?.classList.contains("screen") ? screen : document.querySelector(".screen");
+   114→   114→}
+   115→   115→
+   116→   116→function saveQuestionBankViewState(subjectId, extra = {}) {
+   117→   117→  const entry = getQuestionBankStateEntry(subjectId);
+   118→   118→  const shell = document.querySelector("[data-question-search-shell]");
+   119→   119→  const input = document.querySelector("[data-question-search-input]");
+   120→   120→  const scrollContainer = getScreenScrollContainer();
+   121→   121→
+   122→   122→  if (input) {
+   123→   123→    setQuestionBankQuery(subjectId, input.value);
+   124→   124→  }
+   125→   125→
+   126→   126→  entry.scrollTop = scrollContainer?.scrollTop || 0;
+   127→   127→  entry.expandedSearch = Boolean(
+   128→   128→    shell?.classList.contains("is-expanded")
+   129→   129→    || shell?.classList.contains("has-value")
+   130→   130→    || document.activeElement === input,
+   131→   131→  );
+   132→   132→
+   133→   133→  Object.assign(entry, extra);
+   134→   134→  return entry;
+   135→   135→}
+   136→   136→
+   137→   137→function markQuestionBankRestore(view) {
+   138→   138→  const subject = getQuestionBankSubjectByView(view);
+   139→   139→  if (!subject) {
+   140→   140→    return;
+   141→   141→  }
+   142→   142→
+   143→   143→  const entry = getQuestionBankStateEntry(subject.id);
+   144→   144→  entry.pendingRestore = true;
+   145→   145→  entry.useQuestionFallbackOnRestore = true;
+   146→   146→}
+   147→   147→
+   148→   148→function prepareQuestionBankRestore(fromView, toView) {
+   149→   149→  if (!isBiologyDetailView(fromView)) {
+   150→   150→    return;
+   151→   151→  }
+   152→   152→
+   153→   153→  if (getQuestionBankSubjectByView(toView)) {
+   154→   154→    markQuestionBankRestore(toView);
+   155→   155→  }
+   156→   156→}
+   157→   157→
+   158→   158→function restoreQuestionBankViewState(subjectId, options = {}) {
+   159→   159→  const entry = getQuestionBankStateEntry(subjectId);
+   160→   160→  if (!entry.pendingRestore) {
+   161→   161→    return;
+   162→   162→  }
+   163→   163→
+   164→   164→  const scrollContainer = getScreenScrollContainer();
+   165→   165→  if (!scrollContainer) {
+   166→   166→    return;
+   167→   167→  }
+   168→   168→
+   169→   169→  const restore = () => {
+   170→   170→    const targetScrollTop = Math.max(0, entry.scrollTop || 0);
+   171→   171→    scrollContainer.scrollTop = targetScrollTop;
+   172→   172→
+   173→   173→    if (options.allowQuestionFallback && entry.useQuestionFallbackOnRestore && entry.lastOpenedQuestionView) {
+   174→   174→      const questionCard = document.querySelector(`[data-question-detail-view="${entry.lastOpenedQuestionView}"]`);
+   175→   175→      const delta = Math.abs((scrollContainer.scrollTop || 0) - targetScrollTop);
+   176→   176→      if (questionCard && delta > 120) {
+   177→   177→        questionCard.scrollIntoView({ block: "center" });
+   178→   178→      }
+   179→   179→    }
+   180→   180→
+   181→   181→    entry.pendingRestore = false;
+   182→   182→    entry.useQuestionFallbackOnRestore = false;
+   183→   183→  };
+   184→   184→
+   185→   185→  requestAnimationFrame(() => {
+   186→   186→    requestAnimationFrame(restore);
+   187→   187→  });
+   188→   188→}
+   189→   189→
+   190→   190→function escapeHtml(value = "") {
+   191→   191→  return String(value)
+   192→   192→    .replaceAll("&", "&amp;")
+   193→   193→    .replaceAll("<", "&lt;")
+   194→   194→    .replaceAll(">", "&gt;")
+   195→   195→    .replaceAll('"', "&quot;")
+   196→   196→    .replaceAll("'", "&#39;");
+   197→   197→}
+   198→   198→
+   199→   199→function isQuestionBankView(view) {
+   200→   200→  return Boolean(getQuestionBankSubjectByView(view));
+   201→   201→}
+   202→   202→
+   203→   203→function getQuestionBankSnapshotBySubject(subjectId) {
+   204→   204→  if (subjectId === "biology") {
+   205→   205→    return getBiologyQuestionBankSnapshot();
+   206→   206→  }
+   207→   207→
+   208→   208→  return {
+   209→   209→    status: "ready",
+   210→   210→    records: [],
+   211→   211→  };
+   212→   212→}
+   213→   213→
+   214→   214→function getQuestionBankEntryWithRecords(subjectId, records = []) {
+   215→   215→  const entry = getQuestionBankStateEntry(subjectId);
+   216→   216→
+   217→   217→  if (records.length) {
+   218→   218→    if (!entry.filters) {
+   219→   219→      entry.filters = createDefaultQuestionBankFilters(records);
+   220→   220→    } else {
+   221→   221→      entry.filters = normalizeQuestionBankFilters(records, entry.filters);
+   222→   222→    }
+   223→   223→  }
+   224→   224→
+   225→   225→  entry.viewMode = entry.viewMode === "icons" ? "icons" : QUESTION_BANK_DEFAULT_VIEW_MODE;
+   226→   226→  return entry;
+   227→   227→}
+   228→   228→
+   229→   229→function summarizeSelectedOptions(selectedIds, options) {
+   230→   230→  const available = Array.isArray(options) ? options : [];
+   231→   231→  const selected = available.filter((option) => selectedIds.includes(option.id));
+   232→   232→
+   233→   233→  if (!available.length || selected.length === available.length) {
+   234→   234→    return "الكل";
+   235→   235→  }
+   236→   236→
+   237→   237→  if (selected.length === 1) {
+   238→   238→    return selected[0].label;
+   239→   239→  }
+   240→   240→
+   241→   241→  if (selected.length === 2) {
+   242→   242→    return `${selected[0].label} + ${selected[1].label}`;
+   243→   243→  }
+   244→   244→
+   245→   245→  return `${selected.length} محددة`;
+   246→   246→}
+   247→   247→
+   248→   248→function renderQuestionBankMenuOption(option, group, selectedIds) {
+   249→   249→  const isSelected = selectedIds.includes(option.id);
+   250→   250→
+   251→   251→  return `
+   252→   252→    <button
+   253→   253→      type="button"
+   254→   254→      class="question-bank-option-row${isSelected ? " is-selected" : ""}"
+   255→   255→      data-filter-group="${group}"
+   256→   256→      data-filter-option="${escapeAttribute(option.id)}"
+   257→   257→      aria-pressed="${isSelected ? "true" : "false"}"
+   258→   258→    >
+   259→   259→      <span class="question-bank-option-copy">${escapeHtml(option.label)}</span>
+   260→   260→      <span class="question-bank-option-check" aria-hidden="true">${isSelected ? icon("check") : ""}</span>
+   261→   261→    </button>`;
+   262→   262→}
+   263→   263→
+   264→   264→function renderQuestionBankAccordion(title, group, options, selectedIds, openAccordion) {
+   265→   265→  const isOpen = openAccordion === group;
+   266→   266→  const summary = summarizeSelectedOptions(selectedIds, options);
+   267→   267→
+   268→   268→  return `
+   269→   269→    <section class="question-bank-panel-section${isOpen ? " is-open" : ""}">
+   270→   270→      <button
+   271→   271→        type="button"
+   272→   272→        class="question-bank-panel-row"
+   273→   273→        data-question-bank-accordion="${group}"
+   274→   274→        aria-expanded="${isOpen ? "true" : "false"}"
+   275→   275→      >
+   276→   276→        <span class="question-bank-panel-row-copy">
+   277→   277→          <strong>${title}</strong>
+   278→   278→          <span>${escapeHtml(summary)}</span>
+   279→   279→        </span>
+   280→   280→        <span class="question-bank-panel-chevron" aria-hidden="true">${icon("chevron")}</span>
+   281→   281→      </button>
+   282→   282→      <div class="question-bank-panel-options" ${isOpen ? "" : "hidden"}>
+   283→   283→        ${options.map((option) => renderQuestionBankMenuOption(option, group, selectedIds)).join("")}
+   284→   284→      </div>
+   285→   285→    </section>`;
+   286→   286→}
+   287→   287→
+   288→   288→function renderQuestionBankMenuOverlay(subject, state) {
+   289→   289→  if (!subject || subject.id !== "biology" || state.status !== "ready") {
+   290→   290→    return "";
+   291→   291→  }
+   292→   292→
+   293→   293→  const entry = getQuestionBankStateEntry(subject.id);
+   294→   294→  const options = state.options;
+   295→   295→  const filters = state.filters;
+   296→   296→  const isOpen = Boolean(entry.isFilterPanelOpen);
+   297→   297→
+   298→   298→  return `
+   299→   299→    <div class="app-question-bank-tools-layer${isOpen ? " is-open" : ""}">
+   300→   300→      <button
+   301→   301→        type="button"
+   302→   302→        class="question-bank-panel-dismiss"
+   303→   303→        data-question-bank-panel-dismiss
+   304→   304→        aria-label="إغلاق خيارات بنك الأسئلة"
+   305→   305→      ></button>
+   306→   306→      <div class="question-bank-floating-tools">
+   307→   307→        <button
+   308→   308→          type="button"
+   309→   309→          class="question-bank-menu-button"
+   310→   310→          data-question-bank-menu-toggle
+   311→   311→          aria-label="خيارات بنك الأسئلة"
+   312→   312→          aria-expanded="${isOpen ? "true" : "false"}"
+   313→   313→        >
+   314→   314→          <span class="question-bank-menu-button-icon">${icon("more-horizontal")}</span>
+   315→   315→          ${state.hasActiveFilters ? '<span class="question-bank-menu-button-badge" aria-hidden="true"></span>' : ""}
+   316→   316→        </button>
+   317→   317→        <section
+   318→   318→          class="question-bank-menu-panel${isOpen ? " is-open" : ""}"
+   319→   319→          aria-label="لوحة خيارات بنك الأسئلة"
+   320→   320→          aria-hidden="${isOpen ? "false" : "true"}"
+   321→   321→          ${isOpen ? "" : "inert"}
+   322→   322→        >
+   323→   323→          <div class="question-bank-menu-panel-scroll">
+   324→   324→            <div class="question-bank-panel-section is-static">
+   325→   325→              <div class="question-bank-panel-heading">
+   326→   326→                <strong>طريقة العرض</strong>
+   327→   327→                <button type="button" class="question-bank-panel-reset" data-question-bank-reset-filters>إعادة ضبط</button>
+   328→   328→              </div>
+   329→   329→              <div class="question-bank-view-switch" role="tablist" aria-label="طريقة عرض الأسئلة">
+   330→   330→                <button
+   331→   331→                  type="button"
+   332→   332→                  class="question-bank-view-option${state.viewMode === "list" ? " is-active" : ""}"
+   333→   333→                  data-question-bank-view-mode="list"
+   334→   334→                  aria-pressed="${state.viewMode === "list" ? "true" : "false"}"
+   335→   335→                >
+   336→   336→                  <span>${icon("list")}</span>
+   337→   337→                  <span>List</span>
+   338→   338→                </button>
+   339→   339→                <button
+   340→   340→                  type="button"
+   341→   341→                  class="question-bank-view-option${state.viewMode === "icons" ? " is-active" : ""}"
+   342→   342→                  data-question-bank-view-mode="icons"
+   343→   343→                  aria-pressed="${state.viewMode === "icons" ? "true" : "false"}"
+   344→   344→                >
+   345→   345→                  <span>${icon("grid")}</span>
+   346→   346→                  <span>Icons</span>
+   347→   347→                </button>
+   348→   348→              </div>
+   349→   349→            </div>
+   350→   350→
+   351→   351→            ${renderQuestionBankAccordion("حسب المصدر", "sourceIds", options.sources, filters.sourceIds, entry.openAccordion)}
+   352→   352→            ${renderQuestionBankAccordion("حسب الفصل", "chapterIds", options.chapters, filters.chapterIds, entry.openAccordion)}
+   353→   353→            ${renderQuestionBankAccordion("حسب الموضوع", "topicIds", options.topics, filters.topicIds, entry.openAccordion)}
+   354→   354→            ${renderQuestionBankAccordion("حسب نوع السؤال", "questionTypeIds", options.questionTypes, filters.questionTypeIds, entry.openAccordion)}
+   355→   355→          </div>
+   356→   356→        </section>
+   357→   357→      </div>
+   358→   358→    </div>`;
+   359→   359→}
+   360→   360→
+   361→   361→function cleanupQuestionBankStickyObserver() {
+   362→   362→  if (questionBankStickyObserver) {
+   363→   363→    questionBankStickyObserver.disconnect();
+   364→   364→    questionBankStickyObserver = null;
+   365→   365→  }
+   366→   366→}
+   367→   367→
+   368→   368→function cleanupQuestionBankOutsidePointerListener() {
+   369→   369→  if (typeof questionBankOutsidePointerCleanup === "function") {
+   370→   370→    questionBankOutsidePointerCleanup();
+   371→   371→    questionBankOutsidePointerCleanup = null;
+   372→   372→  }
+   373→   373→}
+   374→   374→
+   375→   375→function bindQuestionBankStickyState() {
+   376→   376→  cleanupQuestionBankStickyObserver();
+   377→   377→
+   378→   378→  const sticky = document.querySelector("[data-question-search-sticky]");
+   379→   379→  const sentinel = document.querySelector("[data-question-search-sentinel]");
+   380→   380→  const scrollContainer = getScreenScrollContainer();
+   381→   381→
+   382→   382→  if (!sticky || !sentinel || !scrollContainer || !("IntersectionObserver" in window)) {
+   383→   383→    return;
+   384→   384→  }
+   385→   385→
+   386→   386→  questionBankStickyObserver = new IntersectionObserver(
+   387→   387→    ([entry]) => {
+   388→   388→      sticky.classList.toggle("is-stuck", !entry.isIntersecting);
+   389→   389→    },
+   390→   390→    {
+   391→   391→      root: scrollContainer,
+   392→   392→      threshold: 0,
+   393→   393→      rootMargin: `-${QUESTION_BANK_STICKY_TOP}px 0px 0px 0px`,
+   394→   394→    },
+   395→   395→  );
+   396→   396→
+   397→   397→  questionBankStickyObserver.observe(sentinel);
+   398→   398→}
+   399→   399→
+   400→   400→function escapeAttribute(value = "") {
+   401→   401→  return String(value)
+   402→   402→    .replaceAll("&", "&amp;")
+   403→   403→    .replaceAll('"', "&quot;")
+   404→   404→    .replaceAll("<", "&lt;")
+   405→   405→    .replaceAll(">", "&gt;");
+   406→   406→}
+   407→   407→
+   408→   408→function isBiologyDetailView(view) {
+   409→   409→  return getBiologyQuestionDetailFromView(view) !== null;
+   410→   410→}
+   411→   411→
+   412→   412→function getNavTabForView(view) {
+   413→   413→  if (getSubjectByView(view) || getQuestionBankSubjectByView(view) || isBiologyDetailView(view)) {
+   414→   414→    return "tools";
+   415→   415→  }
+   416→   416→
+   417→   417→  return viewNavMap[view] || (defaultViewByNavTab[view] ? view : null);
+   418→   418→}
+   419→   419→
+   420→   420→function getActiveNavId(view) {
+   421→   421→  return getNavTabForView(view) || view;
+   422→   422→}
+   423→   423→
+   424→   424→function rememberViewForTab(view) {
+   425→   425→  const navTab = getNavTabForView(view);
+   426→   426→  if (!navTab) {
+   427→   427→    return;
+   428→   428→  }
+   429→   429→
+   430→   430→  lastViewByNavTab[navTab] = view;
+   431→   431→  storeNavState();
+   432→   432→}
+   433→   433→
+   434→   434→function resolveNavTarget(tabId) {
+   435→   435→  return lastViewByNavTab[tabId] || defaultViewByNavTab[tabId] || tabId;
+   436→   436→}
+   437→   437→
+   438→   438→function getBackFallback(view) {
+   439→   439→  if (isBiologyDetailView(view)) {
+   440→   440→    return getQuestionBankView("biology");
+   441→   441→  }
+   442→   442→
+   443→   443→  const questionBankSubject = getQuestionBankSubjectByView(view);
+   444→   444→  if (questionBankSubject) {
+   445→   445→    return `tests-${questionBankSubject.id}`;
+   446→   446→  }
+   447→   447→
+   448→   448→  if (getSubjectByView(view)) {
+   449→   449→    return "tests";
+   450→   450→  }
+   451→   451→
+   452→   452→  if (view === "tests") {
+   453→   453→    return "tools";
+   454→   454→  }
+   455→   455→
+   456→   456→  return null;
+   457→   457→}
+   458→   458→
+   459→   459→function getBackButtonLabel(view) {
+   460→   460→  const target = getBackFallback(view);
+   461→   461→  if (!target) {
+   462→   462→    return "الرجوع";
+   463→   463→  }
+   464→   464→
+   465→   465→  return `الرجوع إلى ${getViewMeta(target).title}`;
+   466→   466→}
+   467→   467→
+   468→   468→function renderBackButtonOverlay(view) {
+   469→   469→  const target = getBackFallback(view);
+   470→   470→  if (!target) {
+   471→   471→    return "";
+   472→   472→  }
+   473→   473→
+   474→   474→  return `
+   475→   475→    <div class="app-floating-back-layer">
+   476→   476→      <button
+   477→   477→        id="pythagoras-back-button"
+   478→   478→        type="button"
+   479→   479→        class="app-floating-back-slot liquidGlass-wrapper back-btn app-back-button"
+   480→   480→        data-go-back="${escapeAttribute(target)}"
+   481→   481→        aria-label="${escapeAttribute(getBackButtonLabel(view))}"
+   482→   482→      >
+   483→   483→        <span class="liquidGlass-effect" aria-hidden="true"></span>
+   484→   484→        <span class="liquidGlass-tint" aria-hidden="true"></span>
+   485→   485→        <span class="liquidGlass-shine" aria-hidden="true"></span>
+   486→   486→        <span class="liquidGlass-text app-back-button__text">
+   487→   487→          <svg class="app-back-button__icon" viewBox="0 0 24 24" aria-hidden="true">
+   488→   488→            <path d="M19 12H7"></path>
+   489→   489→            <path d="m12 7-5 5 5 5"></path>
+   490→   490→          </svg>
+   491→   491→        </span>
+   492→   492→      </button>
+   493→   493→    </div>`;
+   494→   494→}
+   495→   495→
+   496→   496→function buildQuestionBankState(subject) {
+   497→   497→  const snapshot = getQuestionBankSnapshotBySubject(subject.id);
+   498→   498→  const query = getQuestionBankQuery(subject.id);
+   499→   499→  const entry = getQuestionBankEntryWithRecords(subject.id, snapshot.records || []);
+   500→   500→
+   501→   501→  if (subject.id !== "biology") {
+   502→   502→    return {
+   503→   503→      status: "ready",
+   504→   504→      query,
+   505→   505→      viewMode: entry.viewMode,
+   506→   506→      results: [],
+   507→   507→      filters: entry.filters,
+   508→   508→      options: {
+   509→   509→        sources: [],
+   510→   510→        chapters: [],
+   511→   511→        topics: [],
+   512→   512→        questionTypes: [],
+   513→   513→      },
+   514→   514→      hasActiveFilters: false,
+   515→   515→    };
+   516→   516→  }
+   517→   517→
+   518→   518→  if (snapshot.status !== "ready") {
+   519→   519→    return {
+   520→   520→      status: snapshot.status,
+   521→   521→      query,
+   522→   522→      viewMode: entry.viewMode,
+   523→   523→      results: [],
+   524→   524→      filters: entry.filters,
+   525→   525→      options: {
+   526→   526→        sources: QUESTION_BANK_SOURCE_OPTIONS,
+   527→   527→        chapters: [],
+   528→   528→        topics: [],
+   529→   529→        questionTypes: [],
+   530→   530→      },
+   531→   531→      hasActiveFilters: false,
+   532→   532→    };
+   533→   533→  }
+   534→   534→
+   535→   535→  const filters = normalizeQuestionBankFilters(snapshot.records, entry.filters);
+   536→   536→  entry.filters = filters;
+   537→   537→
+   538→   538→  return {
+   539→   539→    status: snapshot.status,
+   540→   540→    query,
+   541→   541→    viewMode: entry.viewMode,
+   542→   542→    filters,
+   543→   543→    options: buildQuestionBankFilterOptions(snapshot.records, filters.chapterIds),
+   544→   544→    hasActiveFilters: hasActiveQuestionBankFilters(snapshot.records, filters),
+   545→   545→    results: applyQuestionBankFilters(snapshot.records, { query, filters }),
+   546→   546→  };
+   547→   547→}
+   548→   548→
+   549→   549→function buildBiologyDetailState(globalOrder) {
+   550→   550→  const snapshot = getBiologyQuestionBankSnapshot();
+   551→   551→
+   552→   552→  return {
+   553→   553→    status: snapshot.status,
+   554→   554→    record: snapshot.status === "ready" ? getBiologyQuestionByGlobalOrder(globalOrder) : null,
+   555→   555→  };
+   556→   556→}
+   557→   557→
+   558→   558→function renderContent(view) {
+   559→   559→  const subject = getSubjectByView(view);
+   560→   560→  const questionBankSubject = getQuestionBankSubjectByView(view);
+   561→   561→  const biologyQuestionGlobal = getBiologyQuestionDetailFromView(view);
+   562→   562→
+   563→   563→  if (view === "tools") {
+   564→   564→    return toolsScreen();
+   565→   565→  }
+   566→   566→
+   567→   567→  if (view === "home") {
+   568→   568→    return homeScreen();
+   569→   569→  }
+   570→   570→
+   571→   571→  if (view === "tests") {
+   572→   572→    return testsSubjectsScreen();
+   573→   573→  }
+   574→   574→
+   575→   575→  if (biologyQuestionGlobal !== null) {
+   576→   576→    return questionDetailScreen(biologyQuestionGlobal, buildBiologyDetailState(biologyQuestionGlobal));
+   577→   577→  }
+   578→   578→
+   579→   579→  if (questionBankSubject) {
+   580→   580→    return questionBankScreen(questionBankSubject, buildQuestionBankState(questionBankSubject));
+   581→   581→  }
+   582→   582→
+   583→   583→  if (subject) {
+   584→   584→    return subjectTestsScreen(subject);
+   585→   585→  }
+   586→   586→
+   587→   587→  if (view === "settings") {
+   588→   588→    return settingsScreen();
+   589→   589→  }
+   590→   590→
+   591→   591→  return placeholderScreen(view);
+   592→   592→}
+   593→   593→
+   594→   594→function renderOverlay(view) {
+   595→   595→  const overlays = [renderBackButtonOverlay(view)];
+   596→   596→  const questionBankSubject = getQuestionBankSubjectByView(view);
+   597→   597→
+   598→   598→  if (questionBankSubject) {
+   599→   599→    overlays.push(renderQuestionBankMenuOverlay(questionBankSubject, buildQuestionBankState(questionBankSubject)));
+   600→   600→  }
+   601→   601→
+   602→   602→  return overlays.filter(Boolean).join("");
+   603→   603→}
+   604→   604→
+   605→   605→function render(view) {
+   606→   606→  const app = document.getElementById("app");
+   607→   607→  if (!app) {
+   608→   608→    return;
+   609→   609→  }
+   610→   610→
+   611→   611→  cleanupQuestionBankStickyObserver();
+   612→   612→  cleanupQuestionBankOutsidePointerListener();
+   613→   613→  rememberViewForTab(view);
+   614→   614→  document.body.dataset.view = view;
+   615→   615→  document.title = `Pythagoras | ${getViewMeta(view).title}`;
+   616→   616→  app.innerHTML = renderAppShell(view, renderContent(view), renderOverlay(view));
+   617→   617→}
+   618→   618→
+   619→   619→function activateCurrentNav(view) {
+   620→   620→  requestAnimationFrame(() => {
+   621→   621→    const activeNav = document.querySelector(`.nav-item[data-nav-id="${getActiveNavId(view)}"]`);
+   622→   622→    triggerNavActivation(activeNav);
+   623→   623→  });
+   624→   624→}
+   625→   625→
+   626→   626→function refreshView(view = currentView, options = {}) {
+   627→   627→  currentView = view;
+   628→   628→  render(view);
+   629→   629→  bindInteractions(view);
+   630→   630→
+   631→   631→  if (options.activateNav !== false) {
+   632→   632→    activateCurrentNav(view);
+   633→   633→  }
+   634→   634→}
+   635→   635→
+   636→   636→function renderView(nextView, navId) {
+   637→   637→  prepareQuestionBankRestore(currentView, nextView);
+   638→   638→  refreshView(nextView, { activateNav: false });
+   639→   639→  pushRoute(nextView);
+   640→   640→
+   641→   641→  requestAnimationFrame(() => {
+   642→   642→    const activeId = navId || getActiveNavId(nextView);
+   643→   643→    const activeNav = document.querySelector(`.nav-item[data-nav-id="${activeId}"]`);
+   644→   644→    triggerNavActivation(activeNav);
+   645→   645→  });
+   646→   646→}
+   647→   647→
+   648→   648→function ensureBiologyQuestionBankLoaded() {
+   649→   649→  const snapshot = getBiologyQuestionBankSnapshot();
+   650→   650→  if (snapshot.status === "loading" || snapshot.status === "ready") {
+   651→   651→    return;
+   652→   652→  }
+   653→   653→
+   654→   654→  loadBiologyOriginalQuestionBank()
+   655→   655→    .catch((error) => {
+   656→   656→      console.warn("Failed to load biology question bank", error);
+   657→   657→    })
+   658→   658→    .finally(() => {
+   659→   659→      if (currentView === "question-bank-biology" || isBiologyDetailView(currentView)) {
+   660→   660→        refreshView(currentView, { activateNav: false });
+   661→   661→      }
+   662→   662→    });
+   663→   663→}
+   664→   664→
+   665→   665→function bindLockedToolInteractions() {
+   666→   666→  document.querySelectorAll("[data-locked='true']").forEach((button) => {
+   667→   667→    button.addEventListener("click", () => {
+   668→   668→      showToast(`${button.getAttribute("data-tool-name")} ستصل قريبًا ضمن نفس تجربة فيثاغورس.`);
+   669→   669→    });
+   670→   670→  });
+   671→   671→}
+   672→   672→
+   673→   673→function bindThemeInteractions() {
+   674→   674→  document.querySelectorAll("[data-theme-choice]").forEach((button) => {
+   675→   675→    button.addEventListener("click", (event) => {
+   676→   676→      event.stopPropagation();
+   677→   677→      const nextTheme = applyTheme(button.getAttribute("data-theme-choice"));
+   678→   678→      syncThemeControls(nextTheme);
+   679→   679→      showToast(`تم تفعيل الوضع ${themeLabels[nextTheme]}.`);
+   680→   680→    });
+   681→   681→  });
+   682→   682→
+   683→   683→  syncThemeControls(document.body.dataset.theme || getStoredTheme());
+   684→   684→
+   685→   685→  bindDensityInteractions();
+   686→   686→}
+   687→   687→
+   688→   688→function bindDensityInteractions() {
+   689→   689→  const DENSITY_ORDER = ["compact", "comfortable", "spacious"];
+   690→   690→
+   691→   691→  // Click on density option buttons
+   692→   692→  document.querySelectorAll("[data-density-choice]").forEach((button) => {
+   693→   693→    button.addEventListener("click", (event) => {
+   694→   694→      event.stopPropagation();
+   695→   695→      const next = applyDensity(button.getAttribute("data-density-choice"));
+   696→   696→      syncDensityControls(next);
+   697→   697→      showToast(`حجم العرض: ${densityLabels[next]}.`);
+   698→   698→    });
+   699→   699→  });
+   700→   700→
+   701→   701→  // Range input — drag the slider
+   702→   702→  const input = document.querySelector("[data-density-input]");
+   703→   703→  if (input) {
+   704→   704→    input.addEventListener("input", (event) => {
+   705→   705→      const idx = Number(event.target.value);
+   706→   706→      const next = DENSITY_ORDER[idx] || "comfortable";
+   707→   707→      applyDensity(next);
+   708→   708→      syncDensityControls(next);
+   709→   709→    });
+   710→   710→    input.addEventListener("change", (event) => {
+   711→   711→      const idx = Number(event.target.value);
+   712→   712→      const next = DENSITY_ORDER[idx] || "comfortable";
+   713→   713→      showToast(`حجم العرض: ${densityLabels[next]}.`);
+   714→   714→    });
+   715→   715→  }
+   716→   716→
+   717→   717→  syncDensityControls(getStoredDensity());
+   718→   718→}
+   719→   719→
+   720→   720→function bindTestsFeatureInteractions() {
+   721→   721→  document.querySelectorAll("[data-tests-action-message]").forEach((button) => {
+   722→   722→    button.addEventListener("click", () => {
+   723→   723→      showToast(button.getAttribute("data-tests-action-message"));
+   724→   724→    });
+   725→   725→  });
+   726→   726→}
+   727→   727→
+   728→   728→function goBack(fallbackView) {
+   729→   729→  const target = fallbackView || getBackFallback(currentView) || "tools";
+   730→   730→  renderView(target, getActiveNavId(target));
+   731→   731→}
+   732→   732→
+   733→   733→function bindBackInteractions() {
+   734→   734→  document.querySelectorAll("[data-go-back]").forEach((button) => {
+   735→   735→    button.addEventListener("click", () => {
+   736→   736→      goBack(button.getAttribute("data-go-back"));
+   737→   737→    });
+   738→   738→  });
+   739→   739→}
+   740→   740→
+   741→   741→function bindSettingsAppearanceInteractions(view) {
+   742→   742→  if (view !== "settings") {
+   743→   743→    return;
+   744→   744→  }
+   745→   745→
+   746→   746→  const card = document.querySelector("[data-appearance-card]");
+   747→   747→  const toggle = document.querySelector("[data-appearance-toggle]");
+   748→   748→  if (!card || !toggle) {
+   749→   749→    return;
+   750→   750→  }
+   751→   751→
+   752→   752→  toggle.addEventListener("click", () => {
+   753→   753→    const isExpanded = card.classList.toggle("is-expanded");
+   754→   754→    toggle.setAttribute("aria-expanded", isExpanded ? "true" : "false");
+   755→   755→  });
+   756→   756→}
+   757→   757→
+   758→   758→function bindQuestionSearchShell(subjectId) {
+   759→   759→  const shell = document.querySelector("[data-question-search-shell]");
+   760→   760→  const input = document.querySelector("[data-question-search-input]");
+   761→   761→  if (!shell || !input) {
+   762→   762→    return { shell: null, input: null };
+   763→   763→  }
+   764→   764→
+   765→   765→  const entry = getQuestionBankStateEntry(subjectId);
+   766→   766→
+   767→   767→  const syncState = () => {
+   768→   768→    const hasValue = input.value.trim().length > 0;
+   769→   769→    shell.classList.toggle("has-value", hasValue);
+   770→   770→    if (!hasValue && document.activeElement !== input) {
+   771→   771→      shell.classList.remove("is-expanded");
+   772→   772→    }
+   773→   773→    entry.expandedSearch = shell.classList.contains("is-expanded") || hasValue;
+   774→   774→    return hasValue;
+   775→   775→  };
+   776→   776→
+   777→   777→  const expand = () => {
+   778→   778→    shell.classList.add("is-expanded");
+   779→   779→  };
+   780→   780→
+   781→   781→  if (getQuestionBankQuery(subjectId).trim()) {
+   782→   782→    shell.classList.add("is-expanded");
+   783→   783→    shell.classList.add("has-value");
+   784→   784→  } else if (entry.pendingRestore && entry.expandedSearch) {
+   785→   785→    shell.classList.add("is-expanded");
+   786→   786→  }
+   787→   787→
+   788→   788→  shell.addEventListener("pointerdown", (event) => {
+   789→   789→    if (event.target !== input) {
+   790→   790→      event.preventDefault();
+   791→   791→    }
+   792→   792→    expand();
+   793→   793→    setTimeout(() => input.focus(), 10);
+   794→   794→  });
+   795→   795→
+   796→   796→  input.addEventListener("focus", expand);
+   797→   797→  input.addEventListener("input", syncState);
+   798→   798→  input.addEventListener("blur", () => {
+   799→   799→    setTimeout(syncState, 90);
+   800→   800→  });
+   801→   801→
+   802→   802→  syncState();
+   803→   803→  return { shell, input };
+   804→   804→}
+   805→   805→
+   806→   806→function updateQuestionBankView(subjectId, mutateEntry) {
+   807→   807→  const entry = saveQuestionBankViewState(subjectId, {
+   808→   808→    pendingRestore: true,
+   809→   809→    useQuestionFallbackOnRestore: false,
+   810→   810→  });
+   811→   811→  mutateEntry(entry);
+   812→   812→  refreshView(currentView, { activateNav: false });
+   813→   813→}
+   814→   814→
+   815→   815→function toggleFilterSelection(selectedIds, optionId, allowedIds) {
+   816→   816→  const current = Array.isArray(selectedIds) ? [...selectedIds] : [];
+   817→   817→  const filteredCurrent = current.filter((id) => allowedIds.includes(id));
+   818→   818→  const isSelected = filteredCurrent.includes(optionId);
+   819→   819→
+   820→   820→  if (isSelected) {
+   821→   821→    if (filteredCurrent.length === 1) {
+   822→   822→      return filteredCurrent;
+   823→   823→    }
+   824→   824→
+   825→   825→    return filteredCurrent.filter((id) => id !== optionId);
+   826→   826→  }
+   827→   827→
+   828→   828→  return [...filteredCurrent, optionId];
+   829→   829→}
+   830→   830→
+   831→   831→function bindQuestionBankInteractions(view) {
+   832→   832→  const subject = getQuestionBankSubjectByView(view);
+   833→   833→  if (!subject) {
+   834→   834→    return;
+   835→   835→  }
+   836→   836→
+   837→   837→  bindQuestionBankStickyState();
+   838→   838→  const { input } = bindQuestionSearchShell(subject.id);
+   839→   839→  const resultsContainer = document.querySelector("[data-question-bank-results]");
+   840→   840→
+   841→   841→  if (!resultsContainer) {
+   842→   842→    return;
+   843→   843→  }
+   844→   844→
+   845→   845→  const renderResults = () => {
+   846→   846→    const state = buildQuestionBankState(subject);
+   847→   847→    resultsContainer.innerHTML = renderQuestionBankResults(subject, state);
+   848→   848→  };
+   849→   849→
+   850→   850→  if (input) {
+   851→   851→    input.addEventListener("input", () => {
+   852→   852→      setQuestionBankQuery(subject.id, input.value);
+   853→   853→      renderResults();
+   854→   854→    });
+   855→   855→  }
+   856→   856→
+   857→   857→  resultsContainer.addEventListener("click", (event) => {
+   858→   858→    const resetButton = event.target.closest("[data-question-bank-reset-filters]");
+   859→   859→    if (resetButton && subject.id === "biology") {
+   860→   860→      updateQuestionBankView(subject.id, (entry) => {
+   861→   861→        const snapshot = getQuestionBankSnapshotBySubject(subject.id);
+   862→   862→        if (snapshot.status === "ready") {
+   863→   863→          entry.filters = createDefaultQuestionBankFilters(snapshot.records);
+   864→   864→        }
+   865→   865→        entry.isFilterPanelOpen = false;
+   866→   866→        entry.openAccordion = null;
+   867→   867→      });
+   868→   868→      return;
+   869→   869→    }
+   870→   870→
+   871→   871→    const button = event.target.closest("[data-question-detail-view]");
+   872→   872→    if (!button) {
+   873→   873→      return;
+   874→   874→    }
+   875→   875→
+   876→   876→    const detailView = button.getAttribute("data-question-detail-view");
+   877→   877→    if (detailView) {
+   878→   878→      saveQuestionBankViewState(subject.id, {
+   879→   879→        lastOpenedQuestionView: detailView,
+   880→   880→        isFilterPanelOpen: false,
+   881→   881→        openAccordion: null,
+   882→   882→      });
+   883→   883→      renderView(detailView, "tools");
+   884→   884→    }
+   885→   885→  });
+   886→   886→
+   887→   887→  const menuToggle = document.querySelector("[data-question-bank-menu-toggle]");
+   888→   888→  const panelDismiss = document.querySelector("[data-question-bank-panel-dismiss]");
+   889→   889→  const menuPanel = document.querySelector(".question-bank-menu-panel");
+   890→   890→
+   891→   891→  if (menuToggle && subject.id === "biology") {
+   892→   892→    menuToggle.addEventListener("click", () => {
+   893→   893→      updateQuestionBankView(subject.id, (entry) => {
+   894→   894→        entry.isFilterPanelOpen = !entry.isFilterPanelOpen;
+   895→   895→        if (!entry.isFilterPanelOpen) {
+   896→   896→          entry.openAccordion = null;
+   897→   897→        }
+   898→   898→      });
+   899→   899→    });
+   900→   900→  }
+   901→   901→
+   902→   902→  if (panelDismiss && subject.id === "biology") {
+   903→   903→    panelDismiss.addEventListener("click", () => {
+   904→   904→      updateQuestionBankView(subject.id, (entry) => {
+   905→   905→        entry.isFilterPanelOpen = false;
+   906→   906→        entry.openAccordion = null;
+   907→   907→      });
+   908→   908→    });
+   909→   909→  }
+   910→   910→
+   911→   911→  if (menuPanel && subject.id === "biology") {
+   912→   912→    menuPanel.addEventListener("click", (event) => {
+   913→   913→      const accordionButton = event.target.closest("[data-question-bank-accordion]");
+   914→   914→      if (accordionButton) {
+   915→   915→        const group = accordionButton.getAttribute("data-question-bank-accordion");
+   916→   916→        updateQuestionBankView(subject.id, (entry) => {
+   917→   917→          entry.isFilterPanelOpen = true;
+   918→   918→          entry.openAccordion = entry.openAccordion === group ? null : group;
+   919→   919→        });
+   920→   920→        return;
+   921→   921→      }
+   922→   922→
+   923→   923→      const viewModeButton = event.target.closest("[data-question-bank-view-mode]");
+   924→   924→      if (viewModeButton) {
+   925→   925→        const nextMode = viewModeButton.getAttribute("data-question-bank-view-mode");
+   926→   926→        updateQuestionBankView(subject.id, (entry) => {
+   927→   927→          entry.isFilterPanelOpen = true;
+   928→   928→          entry.viewMode = nextMode === "icons" ? "icons" : "list";
+   929→   929→        });
+   930→   930→        return;
+   931→   931→      }
+   932→   932→
+   933→   933→      const resetButton = event.target.closest("[data-question-bank-reset-filters]");
+   934→   934→      if (resetButton) {
+   935→   935→        updateQuestionBankView(subject.id, (entry) => {
+   936→   936→          const snapshot = getQuestionBankSnapshotBySubject(subject.id);
+   937→   937→          if (snapshot.status === "ready") {
+   938→   938→            entry.filters = createDefaultQuestionBankFilters(snapshot.records);
+   939→   939→          }
+   940→   940→          entry.isFilterPanelOpen = true;
+   941→   941→          entry.openAccordion = null;
+   942→   942→        });
+   943→   943→        return;
+   944→   944→      }
+   945→   945→
+   946→   946→      const optionButton = event.target.closest("[data-filter-group][data-filter-option]");
+   947→   947→      if (!optionButton) {
+   948→   948→        return;
+   949→   949→      }
+   950→   950→
+   951→   951→      const group = optionButton.getAttribute("data-filter-group");
+   952→   952→      const optionId = optionButton.getAttribute("data-filter-option");
+   953→   953→
+   954→   954→      updateQuestionBankView(subject.id, (entry) => {
+   955→   955→        const snapshot = getQuestionBankSnapshotBySubject(subject.id);
+   956→   956→        if (snapshot.status !== "ready") {
+   957→   957→          return;
+   958→   958→        }
+   959→   959→
+   960→   960→        const currentFilters = normalizeQuestionBankFilters(snapshot.records, entry.filters || {});
+   961→   961→        const currentOptions = buildQuestionBankFilterOptions(snapshot.records, currentFilters.chapterIds);
+   962→   962→        const optionMap = {
+   963→   963→          sourceIds: currentOptions.sources.map((item) => item.id),
+   964→   964→          chapterIds: currentOptions.chapters.map((item) => item.id),
+   965→   965→          topicIds: currentOptions.topics.map((item) => item.id),
+   966→   966→          questionTypeIds: currentOptions.questionTypes.map((item) => item.id),
+   967→   967→        };
+   968→   968→
+   969→   969→        if (!optionMap[group]) {
+   970→   970→          return;
+   971→   971→        }
+   972→   972→
+   973→   973→        currentFilters[group] = toggleFilterSelection(currentFilters[group], optionId, optionMap[group]);
+   974→   974→
+   975→   975→        if (group === "chapterIds") {
+   976→   976→          currentFilters.topicIds = normalizeQuestionBankFilters(snapshot.records, currentFilters).topicIds;
+   977→   977→        }
+   978→   978→
+   979→   979→        entry.filters = normalizeQuestionBankFilters(snapshot.records, currentFilters);
+   980→   980→        entry.isFilterPanelOpen = true;
+   981→   981→        entry.openAccordion = group;
+   982→   982→      });
+   983→   983→    });
+   984→   984→  }
+   985→   985→
+   986→   986→  const entry = getQuestionBankStateEntry(subject.id);
+   987→   987→  if (entry.isFilterPanelOpen) {
+   988→   988→    const handler = (event) => {
+   989→   989→      if (event.target.closest(".question-bank-floating-tools")) {
+   990→   990→        return;
+   991→   991→      }
+   992→   992→
+   993→   993→      cleanupQuestionBankOutsidePointerListener();
+   994→   994→      updateQuestionBankView(subject.id, (nextEntry) => {
+   995→   995→        nextEntry.isFilterPanelOpen = false;
+   996→   996→        nextEntry.openAccordion = null;
+   997→   997→      });
+   998→   998→    };
+   999→   999→
+  1000→  1000→    document.addEventListener("pointerdown", handler, true);
+  1001→  1001→    questionBankOutsidePointerCleanup = () => {
+  1002→  1002→      document.removeEventListener("pointerdown", handler, true);
+  1003→  1003→    };
+  1004→  1004→  }
+  1005→  1005→
+  1006→  1006→  if (subject.id === "biology") {
+  1007→  1007→    ensureBiologyQuestionBankLoaded();
+  1008→  1008→  }
+  1009→  1009→
+  1010→  1010→  const snapshot = buildQuestionBankState(subject);
+  1011→  1011→  if (snapshot.status === "ready" || subject.id !== "biology") {
+  1012→  1012→    restoreQuestionBankViewState(subject.id, { allowQuestionFallback: true });
+  1013→  1013→  }
+  1014→  1014→}
+  1015→  1015→
+  1016→  1016→function bindQuestionDetailInteractions(view) {
+  1017→  1017→  if (!isBiologyDetailView(view)) {
+  1018→  1018→    return;
+  1019→  1019→  }
+  1020→  1020→
+  1021→  1021→  ensureBiologyQuestionBankLoaded();
+  1022→  1022→}
+  1023→  1023→
+  1024→  1024→function bindInteractions(view) {
+  1025→  1025→  bindNavigationInteractions(view, renderView, resolveNavTarget);
+  1026→  1026→  bindBackInteractions();
+  1027→  1027→  bindLockedToolInteractions();
+  1028→  1028→  bindTestsFeatureInteractions();
+  1029→  1029→  bindThemeInteractions();
+  1030→  1030→  bindSettingsAppearanceInteractions(view);
+  1031→  1031→  bindQuestionBankInteractions(view);
+  1032→  1032→  bindQuestionDetailInteractions(view);
+  1033→  1033→  bindSponsoredCarousel();
+  1034→  1034→}
+  1035→  1035→
+  1036→  1036→function bindSponsoredCarousel() {
+  1037→  1037→  // Always tear down the previous controller first — render() replaces the entire
+  1038→  1038→  // #screen-content subtree, so any prior carousel DOM is gone and its listeners
+  1039→  1039→  // would otherwise leak.
+  1040→  1040→  if (sponsoredCarouselController) {
+  1041→  1041→    sponsoredCarouselController.destroy();
+  1042→  1042→    sponsoredCarouselController = null;
+  1043→  1043→  }
+  1044→  1044→
+  1045→  1045→  const root = document.querySelector("[data-sponsored-carousel]");
+  1046→  1046→  if (!root) return;
+  1047→  1047→
+  1048→  1048→  sponsoredCarouselController = new SponsoredCarouselController(root);
+  1049→  1049→}
+  1050→  1050→
+  1051→  1051→applyTheme(getStoredTheme());
+  1052→  1052→applyDensity(getStoredDensity());
+  1053→  1053→
+  1054→  1054→const startView = viewFromHash() || "tools";
+  1055→  1055→refreshView(startView, { activateNav: false });
+  1056→  1056→
+  1057→  1057→window.addEventListener("popstate", () => {
+  1058→  1058→  const view = viewFromHash();
+  1059→  1059→  prepareQuestionBankRestore(currentView, view);
+  1060→  1060→  refreshView(view, { activateNav: false });
+  1061→  1061→});
+  1062→  1062→

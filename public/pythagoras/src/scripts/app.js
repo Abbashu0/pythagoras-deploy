@@ -1,5 +1,7 @@
 import { renderAppShell } from "../components/AppShell.js";
 import { homeScreen } from "../pages/HomePage.js";
+import { lecturesScreen } from "../pages/LecturesPage.js";
+import { materialsScreen } from "../pages/MaterialsPage.js";
 import { placeholderScreen } from "../pages/PlaceholderPage.js";
 import { questionBankScreen, renderQuestionBankResults } from "../pages/QuestionBankPage.js?v=20260613c";
 import { questionDetailScreen } from "../pages/QuestionDetailPage.js";
@@ -53,9 +55,9 @@ const QUESTION_BANK_DEFAULT_VIEW_MODE = "list";
 
 const defaultViewByNavTab = {
   home: "home",
+  materials: "materials",
   tools: "tools",
-  tasks: "tasks",
-  notes: "notes",
+  lectures: "lectures",
   settings: "settings",
 };
 
@@ -411,7 +413,7 @@ function isBiologyDetailView(view) {
 
 function getNavTabForView(view) {
   if (getSubjectByView(view) || getQuestionBankSubjectByView(view) || isBiologyDetailView(view)) {
-    return "tools";
+    return "materials";
   }
 
   return viewNavMap[view] || (defaultViewByNavTab[view] ? view : null);
@@ -446,11 +448,11 @@ function getBackFallback(view) {
   }
 
   if (getSubjectByView(view)) {
-    return "tests";
+    return "materials";
   }
 
   if (view === "tests") {
-    return "tools";
+    return "materials";
   }
 
   return null;
@@ -568,8 +570,23 @@ function renderContent(view) {
     return homeScreen();
   }
 
+  if (view === "materials") {
+    return materialsScreen();
+  }
+
+  if (view === "lectures") {
+    return lecturesScreen();
+  }
+
   if (view === "tests") {
     return testsSubjectsScreen();
+  }
+
+  // Redirect legacy nav tabs that no longer have their own screen.
+  // Old "tasks" / "notes" routes land on the Materials page so any
+  // stale bookmarks or saved state still take the user somewhere useful.
+  if (view === "tasks" || view === "notes") {
+    return materialsScreen();
   }
 
   if (biologyQuestionGlobal !== null) {
@@ -880,7 +897,7 @@ function bindQuestionBankInteractions(view) {
         isFilterPanelOpen: false,
         openAccordion: null,
       });
-      renderView(detailView, "tools");
+      renderView(detailView, "materials");
     }
   });
 

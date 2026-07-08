@@ -8,17 +8,6 @@ export const densityLabels = {
 
 export const tools = [
   {
-    id: "tests",
-    title: "الاختبارات",
-    status: "متاح الآن",
-    statusClass: "is-live",
-    hint: "ابدأ من هنا",
-    icon: "tests",
-    available: true,
-    view: "tests",
-    description: "بنك اسئلة و اختبارات مخصصة حسب المادة والفصل والموضوع ونوع السؤال.",
-  },
-  {
     id: "spaced",
     title: "التكرار المتباعد",
     status: "قريبًا",
@@ -67,19 +56,19 @@ export const tools = [
 
 export const navItems = [
   { id: "home", label: "الرئيسية", icon: "home" },
-  { id: "tasks", label: "المهام", icon: "tasks" },
-  { id: "tools", label: "الأدوات", icon: "spark-grid" },
-  { id: "notes", label: "الملاحظات", icon: "notes" },
+  { id: "materials", label: "المواد", icon: "book" },
+  { id: "tools", label: "الأدوات", icon: "toolbox" },
+  { id: "lectures", label: "المحاضرات", icon: "play" },
   { id: "settings", label: "الإعدادات", icon: "settings" },
 ];
 
 export const viewNavMap = {
   home: "home",
-  tasks: "tasks",
+  materials: "materials",
   tools: "tools",
-  notes: "notes",
+  lectures: "lectures",
   settings: "settings",
-  tests: "tools",
+  tests: "materials",
 };
 
 export const screens = {
@@ -116,6 +105,20 @@ export const screens = {
     stateLabel: "قابل للتخصيص",
     copy: "اضبط مظهر التطبيق. ستُضاف بقية الإعدادات لاحقًا ضمن نفس الهوية.",
     icon: "settings",
+  },
+  materials: {
+    title: "المواد",
+    eyebrow: "Materials",
+    stateLabel: "كل المواد",
+    copy: "تصفح جميع المواد الدراسية واختر المادة للوصول إلى الاختبارات والأسئلة.",
+    icon: "book",
+  },
+  lectures: {
+    title: "المحاضرات",
+    eyebrow: "Lectures",
+    stateLabel: "قريباً",
+    copy: "ستتوفر المحاضرات والفيديوهات التعليمية قريباً.",
+    icon: "play",
   },
   tests: {
     title: "الاختبارات",
@@ -188,6 +191,18 @@ export const testSubjects = [
     description: "اختبارات التربية الإسلامية ستُضاف لاحقًا ضمن المنصة.",
     pageDescription: "أنشئ اختبارًا مخصصًا أو افتح بنك الأسئلة الخاص بهذه المادة.",
     stateLabel: "قيد التجهيز",
+    hasDiagramPractice: false,
+  },
+  {
+    id: "french",
+    name: "اللغة الفرنسية",
+    title: "اللغة الفرنسية",
+    icon: "french",
+    description: "اختبارات اللغة الفرنسية ستُضاف لاحقًا ضمن نفس تجربة الاختبارات.",
+    pageDescription: "أنشئ اختبارًا مخصصًا أو افتح بنك الأسئلة الخاص بهذه المادة.",
+    stateLabel: "قيد التجهيز",
+    available: false,
+    color: "#3b82f6",
     hasDiagramPractice: false,
   },
 ];
@@ -267,8 +282,8 @@ export function getViewMeta(view) {
 }
 
 testSubjects.forEach((subject) => {
-  viewNavMap[getTestsSubjectView(subject.id)] = "tools";
-  viewNavMap[getQuestionBankView(subject.id)] = "tools";
+  viewNavMap[getTestsSubjectView(subject.id)] = "materials";
+  viewNavMap[getQuestionBankView(subject.id)] = "materials";
 });
 
 /**

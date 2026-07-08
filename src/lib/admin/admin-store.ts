@@ -360,6 +360,33 @@ class AdminStore {
     this.history = [entry, ...this.history].slice(0, HISTORY_CAP);
   }
 
+  /**
+   * Append an activity history entry from an EXTERNAL store (NavStore,
+   * MaterialsStore, ToolsStore). This is the SHARED history channel —
+   * every admin sub-system logs through here so a single
+   * `ActivityHistory` panel on the right side of the page shows entries
+   * from every manager.
+   *
+   * The caller supplies everything except `id` and `at` (we generate
+   * those). The entry is prepended, capped, persisted, and emitted in
+   * one shot — callers do NOT need to call `persist()`/`emit()`.
+   */
+  appendHistoryEntry(
+    entry: Omit<ActivityHistoryEntry, "id" | "at">
+  ) {
+    const fullEntry: ActivityHistoryEntry = {
+      ...entry,
+      id:
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `log-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      at: new Date().toISOString(),
+    };
+    this.history = [fullEntry, ...this.history].slice(0, HISTORY_CAP);
+    this.persist();
+    this.emit();
+  }
+
   // ---------- Mutations ----------
   /**
    * Add a new banner. Logs an "uploaded" entry with the banner's thumbnail.

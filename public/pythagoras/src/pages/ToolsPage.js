@@ -7,7 +7,7 @@ export function toolsScreen() {
     ${pageHead(screens.tools)}
     <div class="section-row stagger" style="animation-delay:120ms">
       <h2 class="section-title">مركز الأدوات</h2>
-      <span class="section-meta">أداة متاحة + 5 قريبًا</span>
+      <span class="section-meta">5 أدوات قريبًا</span>
     </div>
     <section class="tools-grid" aria-label="قائمة الأدوات">
       ${tools.map((tool, index) => toolCard(tool, 160 + index * 30)).join("")}

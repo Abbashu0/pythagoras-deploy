@@ -1,0 +1,30 @@
+import { pageHead } from "../components/PageHeader.js";
+import { badge, icon } from "../scripts/icons.js";
+import { getTestsSubjectView, screens, testSubjects } from "../scripts/data.js";
+
+function subjectCard(subject, delay) {
+  return `
+    <button type="button" class="subject-card stagger" style="animation-delay:${delay}ms" data-nav-to="${getTestsSubjectView(subject.id)}">
+      <div class="subject-card-head">
+        <div class="subject-card-copy">
+          <h2 class="subject-card-title">${subject.title}</h2>
+          <p class="subject-card-text">${subject.description}</p>
+        </div>
+        <div class="icon-wrap featured subject-card-icon">${icon(subject.icon)}</div>
+      </div>
+      <div class="subject-card-foot">
+        ${badge(subject.stateLabel, "is-soon")}
+        <span class="subject-card-arrow">${icon("chevron")}</span>
+      </div>
+    </button>`;
+}
+
+export function materialsScreen() {
+  return `
+    ${pageHead(screens.materials)}
+    <div class="tests-subjects-stack">
+      <section class="subjects-grid" aria-label="المواد الدراسية">
+        ${testSubjects.map((subject, index) => subjectCard(subject, 120 + index * 35)).join("")}
+      </section>
+    </div>`;
+}

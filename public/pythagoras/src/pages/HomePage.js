@@ -44,8 +44,8 @@ export function homeScreen() {
 
       <div class="home-shortcuts stagger" style="animation-delay:240ms">
         ${[
-          { id: "tasks", label: "المهام", icon: "tasks" },
-          { id: "notes", label: "الملاحظات", icon: "notes" },
+          { id: "materials", label: "المواد", icon: "book" },
+          { id: "lectures", label: "المحاضرات", icon: "play" },
           { id: "settings", label: "الإعدادات", icon: "settings" },
         ].map((shortcut) => `
           <button type="button" class="shortcut-card" data-nav-to="${shortcut.id}">
