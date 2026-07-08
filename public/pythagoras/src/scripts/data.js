@@ -434,3 +434,108 @@ export function getSponsoredBanners() {
     return sponsoredBanners.slice();
   }
 }
+
+// ============================================
+// Live getters — read from admin localStorage
+// with fallback to hardcoded defaults.
+// Same pattern as getSponsoredBanners().
+// ============================================
+
+const ADMIN_NAV_KEY = "pythagoras-admin-nav-items";
+const ADMIN_MATERIALS_KEY = "pythagoras-admin-materials";
+const ADMIN_TOOLS_KEY = "pythagoras-admin-tools";
+
+/**
+ * Returns the live nav items from the admin store.
+ * Falls back to the hardcoded navItems if localStorage is empty.
+ * The admin Navigation Manager writes to this key.
+ */
+export function getNavItems() {
+  try {
+    const raw = localStorage.getItem(ADMIN_NAV_KEY);
+    if (!raw) return navItems.slice();
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || parsed.length === 0) return navItems.slice();
+    return parsed
+      .filter((item) => item && item.enabled !== false)
+      .sort((a, b) => (a.order || 0) - (b.order || 0))
+      .map((item) => ({
+        id: item.id,
+        label: item.label || "",
+        icon: item.icon || "home",
+      }));
+  } catch {
+    return navItems.slice();
+  }
+}
+
+/**
+ * Returns the live test subjects (materials) from the admin store.
+ * Falls back to the hardcoded testSubjects if localStorage is empty.
+ * The admin Materials Manager writes to this key.
+ * Merges admin data with the hardcoded subjects so we don't lose
+ * description/pageDescription/etc. fields that the admin doesn't manage yet.
+ */
+export function getTestSubjects() {
+  try {
+    const raw = localStorage.getItem(ADMIN_MATERIALS_KEY);
+    if (!raw) return testSubjects.slice();
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || parsed.length === 0) return testSubjects.slice();
+    // Build a map of hardcoded subjects for merging extra fields
+    const hardcodedMap = new Map(testSubjects.map((s) => [s.id, s]));
+    return parsed
+      .filter((item) => item && item.available !== false)
+      .sort((a, b) => (a.order || 0) - (b.order || 0))
+      .map((item) => {
+        const hardcoded = hardcodedMap.get(item.id);
+        return {
+          id: item.id,
+          title: item.label || hardcoded?.title || item.id,
+          name: item.label || hardcoded?.name || item.label || item.id,
+          icon: item.icon || hardcoded?.icon || "tests",
+          description: hardcoded?.description || "",
+          pageDescription: hardcoded?.pageDescription || "",
+          stateLabel: hardcoded?.stateLabel || "قيد التجهيز",
+          hasDiagramPractice: hardcoded?.hasDiagramPractice || false,
+          available: item.available !== false,
+          color: hardcoded?.color,
+        };
+      });
+  } catch {
+    return testSubjects.slice();
+  }
+}
+
+/**
+ * Returns the live tools from the admin store.
+ * Falls back to the hardcoded tools if localStorage is empty.
+ * The admin Tools Manager writes to this key.
+ * Merges admin data with hardcoded tools for description/status fields.
+ */
+export function getTools() {
+  try {
+    const raw = localStorage.getItem(ADMIN_TOOLS_KEY);
+    if (!raw) return tools.slice();
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || parsed.length === 0) return tools.slice();
+    const hardcodedMap = new Map(tools.map((t) => [t.id, t]));
+    return parsed
+      .sort((a, b) => (a.order || 0) - (b.order || 0))
+      .map((item) => {
+        const hardcoded = hardcodedMap.get(item.id);
+        return {
+          id: item.id,
+          title: item.label || hardcoded?.title || item.id,
+          status: hardcoded?.status || (item.available ? "متاح الآن" : "قريبًا"),
+          statusClass: hardcoded?.statusClass || (item.available ? "is-live" : "is-soon"),
+          hint: hardcoded?.hint || "",
+          icon: item.icon || hardcoded?.icon || "repeat",
+          description: hardcoded?.description || "",
+          available: item.available,
+        };
+      });
+  } catch {
+    return tools.slice();
+  }
+}

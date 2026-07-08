@@ -1,6 +1,6 @@
 import { pageHead } from "../components/PageHeader.js";
 import { badge, icon } from "../scripts/icons.js";
-import { getTestsSubjectView, screens, testSubjects } from "../scripts/data.js";
+import { getTestsSubjectView, screens, getTestSubjects } from "../scripts/data.js";
 
 function subjectCard(subject, delay) {
   return `
@@ -24,7 +24,7 @@ export function materialsScreen() {
     ${pageHead(screens.materials)}
     <div class="tests-subjects-stack">
       <section class="subjects-grid" aria-label="المواد الدراسية">
-        ${testSubjects.map((subject, index) => subjectCard(subject, 120 + index * 35)).join("")}
+        ${getTestSubjects().map((subject, index) => subjectCard(subject, 120 + index * 35)).join("")}
       </section>
     </div>`;
 }

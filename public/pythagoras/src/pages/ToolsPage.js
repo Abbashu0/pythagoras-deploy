@@ -1,6 +1,6 @@
 import { pageHead } from "../components/PageHeader.js";
 import { toolCard } from "../components/ToolCard.js";
-import { screens, tools } from "../scripts/data.js";
+import { screens, getTools } from "../scripts/data.js";
 
 export function toolsScreen() {
   return `
@@ -10,6 +10,6 @@ export function toolsScreen() {
       <span class="section-meta">5 أدوات قريبًا</span>
     </div>
     <section class="tools-grid" aria-label="قائمة الأدوات">
-      ${tools.map((tool, index) => toolCard(tool, 160 + index * 30)).join("")}
+      ${getTools().map((tool, index) => toolCard(tool, 160 + index * 30)).join("")}
     </section>`;
 }
