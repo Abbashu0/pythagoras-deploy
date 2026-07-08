@@ -120,3 +120,121 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* ============================================================ */
+/* Admin dashboard utility classes                              */
+/* ============================================================ */
+
+/* Custom slim scrollbar for admin scrollable regions (activity log, etc.) */
+.admin-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--muted-foreground) 30%, transparent) transparent;
+}
+.admin-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.admin-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.admin-scroll::-webkit-scrollbar-thumb {
+  background-color: color-mix(in oklab, var(--muted-foreground) 30%, transparent);
+  border-radius: 999px;
+}
+.admin-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in oklab, var(--muted-foreground) 50%, transparent);
+}
+
+/* Slide-in animation for activity log entries (newest entry animates from top) */
+@keyframes admin-log-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.admin-log-entry {
+  animation: admin-log-slide-in 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Sticky save/discard bar — slides up from the bottom of the editor panel */
+@keyframes admin-save-bar-enter {
+  from {
+    opacity: 0;
+    transform: translateY(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.admin-save-bar {
+  animation: admin-save-bar-enter 200ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Banner card used as a FLIP reorder item —
+   `useFlipReorder` toggles inline `transition`/`transform` styles, but we
+   set a sensible default here too so any non-FLIP transitions still feel
+   smooth. */
+.admin-reorder-item {
+  will-change: transform;
+}
+
+/* ============================================================ */
+/* Admin dashboard — section cards (the /admin landing grid)    */
+/* ============================================================ */
+
+/* Base card style for a clickable dashboard section tile.
+   Hover lifts the card, draws a primary-tinted border, and reveals
+   the "فتح" (open) affordance in the corner. */
+.admin-section-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: var(--card);
+  padding: 1.25rem;
+  text-align: inherit;
+  cursor: pointer;
+  transition:
+    transform 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    background 180ms ease;
+}
+.admin-section-card:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in oklab, var(--primary) 35%, var(--border));
+  box-shadow: 0 14px 28px -18px rgba(0, 0, 0, 0.18);
+}
+.admin-section-card:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+/* Disabled / "coming soon" cards keep the cursor and dim slightly so the
+   user gets a visual hint that the section is not interactive in the
+   navigational sense (still clickable to show the toast). */
+.admin-section-card[data-available="false"] {
+  opacity: 0.92;
+}
+
+/* "فتح" (open) affordance — sits in the top-left corner of the card and
+   slides in on hover. In RTL the corner reads naturally as the "forward"
+   direction. */
+.admin-section-card .admin-section-open {
+  opacity: 0;
+  transform: translateX(-4px);
+  transition:
+    opacity 180ms ease,
+    transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.admin-section-card:hover .admin-section-open,
+.admin-section-card:focus-visible .admin-section-open {
+  opacity: 1;
+  transform: translateX(0);
+}

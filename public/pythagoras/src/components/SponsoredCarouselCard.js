@@ -133,7 +133,7 @@ export function sponsoredCarouselCard(banners) {
                 // subtitle, no icon. Everything is inside the image itself.
                 if (isFull) {
                   const fullContent = isImage
-                    ? `<img class="sponsored-slide-image sponsored-slide-image-full" src="${slide.image}" alt="${slide.title || "banner"}" draggable="false" style="object-position: ${50 + transform.offsetX}% ${50 + transform.offsetY}%; transform: scale(${transform.scale});" />`
+                    ? `<img class="sponsored-slide-image sponsored-slide-image-full" src="${slide.image}" alt="${slide.title || "banner"}" draggable="false" style="transform: translate(${transform.offsetX}%, ${transform.offsetY}%) scale(${transform.scale});" />`
                     : `<div class="sponsored-slide-full-placeholder" style="background: ${slide.image || slide.gradient || "linear-gradient(135deg, #4f9cff, #2a6fcc)"};"></div>`;
                   return `
             <article
@@ -155,7 +155,7 @@ export function sponsoredCarouselCard(banners) {
                   ? ""  // image is rendered via <img>, no background needed
                   : `background: ${slide.image || slide.gradient || "linear-gradient(135deg, #4f9cff, #2a6fcc)"};`;
                 const visualInner = isImage
-                  ? `<img class="sponsored-slide-image" src="${slide.image}" alt="${slide.title}" draggable="false" style="object-position: ${50 + transform.offsetX}% ${50 + transform.offsetY}%; transform: scale(${transform.scale});" />`
+                  ? `<img class="sponsored-slide-image" src="${slide.image}" alt="${slide.title}" draggable="false" style="transform: translate(${transform.offsetX}%, ${transform.offsetY}%) scale(${transform.scale});" />`
                   : `<span class="sponsored-slide-glyph">${icon(slide.iconKey)}</span>`;
                 return `
             <article
@@ -180,14 +180,14 @@ export function sponsoredCarouselCard(banners) {
             )
             .join("")}
         </div>
-      </div>
-      <div class="sponsored-indicators" data-sponsored-indicators aria-hidden="true">
-        ${slides
-          .map(
-            (_, i) =>
-              `<button type="button" class="sponsored-dot${i === 0 ? " is-active" : ""}" data-sponsored-dot data-dot-index="${i}" aria-label="الشريحة ${i + 1}"></button>`
-          )
-          .join("")}
+        <div class="sponsored-indicators" data-sponsored-indicators aria-hidden="true">
+          ${slides
+            .map(
+              (_, i) =>
+                `<button type="button" class="sponsored-dot${i === 0 ? " is-active" : ""}" data-sponsored-dot data-dot-index="${i}" aria-label="الشريحة ${i + 1}"></button>`
+            )
+            .join("")}
+        </div>
       </div>
     </div>`;
 }

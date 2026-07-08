@@ -5,46 +5,98 @@
  * -------------
  * Side panel for editing a single SponsoredBanner.
  *
- * The editor adapts to `banner.bannerType`:
+ * Implements a "pending save" pattern:
+ *   - Local `draft` state holds the working copy (typed in inputs are NOT
+ *     pushed to the store until the user clicks Save).
+ *   - A `dirty` Set tracks which fields have changed relative to the
+ *     original banner.
+ *   - The Save bar only appears when there are unsaved changes.
+ *   - Save goes through a state machine:
+ *         idle → saving (1.2s simulated latency) → saved (2s green) → idle
+ *                                       └→ error (3s red) → idle
  *
- *   - "full":  Shows only Image Upload + Image Positioner + Enabled toggle.
- *              Title/subtitle are hidden because the full-banner layout
- *              embeds all text inside the image itself.
+ * The editor adapts to `draft.bannerType`:
  *
- *   - "split": Shows the full editor: Image Upload + Positioner + Title +
- *              Subtitle + Enabled toggle (the original layout).
+ *   - "full":  Image Upload + Image Positioner + Enabled toggle.
+ *              Title/subtitle are hidden (text lives inside the image).
  *
- * The Banner Type selector at the top lets the admin switch between modes
- * instantly. Switching type patches the store, which re-renders the editor
- * and the live preview.
+ *   - "split": Image Upload + Positioner + Title + Subtitle + Enabled toggle.
  *
- * Architecture: controlled component — reads `banner`, emits patches via
- * `onPatch`. No local state beyond title/subtitle draft inputs (to avoid
- * caret jumps during typing).
+ * Switching banner type marks `bannerType` dirty — the user must Save to
+ * commit the change.
+ *
+ * Props:
+ *   - banner:               the banner being edited (null = empty state)
+ *   - onSave(id, patch, changeSummary):
+ *       called when the user clicks Save. Receives only the dirty fields as
+ *       a patch, plus a human-readable Arabic change summary for the
+ *       activity log.
+ *   - onClose:              called when the user clicks the X button
+ *   - onDraftChange(draft): called whenever the local draft changes — lets
+ *       the parent show a live preview of the unsaved state.
+ *   - onImageEditingChange(editing): forwarded to ImagePositioner — true
+ *       while the user is dragging the image, false otherwise. Lets the
+ *       parent suppress "unsaved changes" warnings during live drags.
  */
 
-import { useCallback, useState } from "react";
-import { X, Save, ImageIcon, LayoutGrid, LayoutPanelTop } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  X,
+  Save,
+  ImageIcon,
+  LayoutGrid,
+  LayoutPanelTop,
+  RotateCcw,
+  AlertCircle,
+  Check,
+  Loader2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   SponsoredBanner,
   BannerImageTransform,
   BannerType,
+  BannerInput,
   BANNER_TRANSFORM_DEFAULT,
 } from "@/lib/admin/banner-model";
 import { UploadArea } from "./UploadArea";
 import { ImagePositioner } from "./ImagePositioner";
 
+type SaveState = "idle" | "saving" | "saved" | "error";
+
 interface Props {
   banner: SponsoredBanner | null;
-  onPatch: (id: string, patch: Partial<SponsoredBanner>) => void;
+  onSave: (
+    id: string,
+    patch: Partial<BannerInput>,
+    changeSummary: string[]
+  ) => void;
   onClose: () => void;
+  /** Notifies parent of the local draft (for live preview). */
+  onDraftChange?: (draft: SponsoredBanner | null) => void;
+  /** Forwarded to ImagePositioner — true while user is dragging the image. */
+  onImageEditingChange?: (editing: boolean) => void;
 }
+
+/** Which fields can be dirty (tracked in the `dirty` Set). */
+type DirtyField =
+  | "bannerType"
+  | "image"
+  | "title"
+  | "subtitle"
+  | "enabled"
+  | "transform";
+
+/** Simulated save latency (ms) — gives the user a visible "saving" state. */
+const SAVE_LATENCY_MS = 1200;
+/** How long the green "saved" state shows (ms). */
+const SAVED_DISPLAY_MS = 2000;
+/** How long the red "error" state shows (ms). */
+const ERROR_DISPLAY_MS = 3000;
 
 const TYPE_OPTIONS: {
   value: BannerType;
@@ -66,31 +118,152 @@ const TYPE_OPTIONS: {
   },
 ];
 
-export function BannerEditor({ banner, onPatch, onClose }: Props) {
-  // Local draft state so typing in inputs feels instant (no debounce flicker).
-  // We sync to the store on every change via onPatch, but inputs read from
-  // local state to avoid caret jumps.
-  const [title, setTitle] = useState(banner?.title ?? "");
-  const [subtitle, setSubtitle] = useState(banner?.subtitle ?? "");
+/**
+ * Convert a set of dirty fields into a human-readable Arabic change summary.
+ * Used by the activity log so the user can see what changed in each edit.
+ */
+function buildChangeSummary(
+  dirty: Set<DirtyField>,
+  original: SponsoredBanner,
+  next: SponsoredBanner
+): string[] {
+  const summary: string[] = [];
+  if (dirty.has("bannerType")) {
+    const from = original.bannerType === "full" ? "كامل" : "مقسّم";
+    const to = next.bannerType === "full" ? "كامل" : "مقسّم";
+    summary.push(`نوع البانر: من «${from}» إلى «${to}»`);
+  }
+  if (dirty.has("image")) {
+    if (!original.image && next.image) summary.push("تم رفع صورة جديدة");
+    else if (original.image && !next.image) summary.push("تم حذف الصورة");
+    else summary.push("تم استبدال الصورة");
+  }
+  if (dirty.has("title")) {
+    summary.push(
+      `العنوان: من «${original.title || "—"}» إلى «${next.title || "—"}»`
+    );
+  }
+  if (dirty.has("subtitle")) {
+    summary.push(
+      `الوصف: من «${original.subtitle || "—"}» إلى «${next.subtitle || "—"}»`
+    );
+  }
+  if (dirty.has("enabled")) {
+    summary.push(next.enabled ? "تم تفعيل البانر" : "تم تعطيل البانر");
+  }
+  if (dirty.has("transform")) {
+    summary.push("تم ضبط موضع الصورة وتكبيرها");
+  }
+  return summary;
+}
 
-  // Re-sync local state when banner changes (e.g. user selects another row)
-  const bannerId = banner?.id;
-  const [lastSyncedId, setLastSyncedId] = useState<string | null>(bannerId ?? null);
-  if (bannerId && bannerId !== lastSyncedId) {
-    setTitle(banner.title);
-    setSubtitle(banner.subtitle);
-    setLastSyncedId(bannerId);
+export function BannerEditor({
+  banner,
+  onSave,
+  onClose,
+  onDraftChange,
+  onImageEditingChange,
+}: Props) {
+  const [draft, setDraft] = useState<SponsoredBanner | null>(banner);
+  const [saveState, setSaveState] = useState<SaveState>("idle");
+
+  // ---- Sync draft when banner ID changes ----
+  // We use the "adjust state during render" pattern (calling setState while
+  // a prop change is detected) instead of useEffect+setState — the latter
+  // triggers cascading renders and is flagged by react-hooks/set-state-in-effect.
+  // See https://react.dev/reference/react/useState#storing-information-from-previous-renders
+  const [prevBannerId, setPrevBannerId] = useState<string | null>(
+    banner?.id ?? null
+  );
+  const currentBannerId = banner?.id ?? null;
+  if (currentBannerId !== prevBannerId) {
+    setPrevBannerId(currentBannerId);
+    setDraft(banner);
+    setSaveState("idle");
   }
 
-  const onTransformChange = useCallback(
-    (next: BannerImageTransform) => {
-      if (!banner) return;
-      onPatch(banner.id, { transform: next });
+  // ---- Notify parent of draft changes (for live preview) ----
+  useEffect(() => {
+    onDraftChange?.(draft);
+  }, [draft, onDraftChange]);
+
+  // ---- Derived: dirty fields by diffing draft against the original banner ----
+  // This is more robust than marking dirty on every change — if the user
+  // reverts a field back to its original value, that field drops out of the
+  // dirty set automatically.
+  const dirty = useMemo<Set<DirtyField>>(() => {
+    const empty = new Set<DirtyField>();
+    if (!banner || !draft) return empty;
+    // Only diff the SAME banner — across-banner comparisons are meaningless.
+    if (banner.id !== draft.id) return empty;
+    const next = new Set<DirtyField>();
+    if (draft.bannerType !== banner.bannerType) next.add("bannerType");
+    if (draft.image !== banner.image) next.add("image");
+    if (draft.title !== banner.title) next.add("title");
+    if (draft.subtitle !== banner.subtitle) next.add("subtitle");
+    if (draft.enabled !== banner.enabled) next.add("enabled");
+    if (
+      draft.transform.offsetX !== banner.transform.offsetX ||
+      draft.transform.offsetY !== banner.transform.offsetY ||
+      draft.transform.scale !== banner.transform.scale
+    ) {
+      next.add("transform");
+    }
+    return next;
+  }, [draft, banner]);
+
+  // ---- Field update helper ----
+  const updateField = useCallback(
+    <K extends DirtyField>(key: K, value: SponsoredBanner[K]) => {
+      setDraft((prev) =>
+        prev ? { ...prev, [key]: value, updatedAt: new Date().toISOString() } : prev
+      );
     },
-    [banner, onPatch]
+    []
   );
 
-  if (!banner) {
+  const onTransformChange = useCallback((next: BannerImageTransform) => {
+    setDraft((prev) =>
+      prev
+        ? { ...prev, transform: next, updatedAt: new Date().toISOString() }
+        : prev
+    );
+  }, []);
+
+  // ---- Save handler with simulated latency + state transitions ----
+  const handleSave = useCallback(async () => {
+    if (!draft || !banner) return;
+    setSaveState("saving");
+    // Simulate network latency so the user sees the loading state.
+    await new Promise((resolve) => setTimeout(resolve, SAVE_LATENCY_MS));
+    try {
+      const summary = buildChangeSummary(dirty, banner, draft);
+      const patch: Partial<BannerInput> = {};
+      if (dirty.has("bannerType")) patch.bannerType = draft.bannerType;
+      if (dirty.has("image")) patch.image = draft.image;
+      if (dirty.has("title")) patch.title = draft.title;
+      if (dirty.has("subtitle")) patch.subtitle = draft.subtitle;
+      if (dirty.has("enabled")) patch.enabled = draft.enabled;
+      if (dirty.has("transform")) patch.transform = draft.transform;
+      onSave(banner.id, patch, summary);
+      setSaveState("saved");
+      window.setTimeout(() => setSaveState("idle"), SAVED_DISPLAY_MS);
+    } catch {
+      setSaveState("error");
+      window.setTimeout(() => setSaveState("idle"), ERROR_DISPLAY_MS);
+    }
+  }, [draft, banner, dirty, onSave]);
+
+  const handleDiscard = useCallback(() => {
+    if (!banner) return;
+    setDraft(banner);
+    setSaveState("idle");
+  }, [banner]);
+
+  const hasUnsavedChanges = dirty.size > 0;
+
+  // ---- Empty state: no banner selected ----
+  if (!banner || !draft) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
         <div className="grid place-items-center rounded-full bg-muted p-4">
@@ -104,16 +277,24 @@ export function BannerEditor({ banner, onPatch, onClose }: Props) {
     );
   }
 
-  const isFull = banner.bannerType === "full";
+  const isFull = draft.bannerType === "full";
+  const isSaving = saveState === "saving";
+  const isSaved = saveState === "saved";
+  const isError = saveState === "error";
 
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between border-b p-4">
+      <div className="flex flex-shrink-0 items-center justify-between border-b p-4">
         <div className="space-y-0.5">
           <h3 className="text-sm font-semibold text-foreground">محرر البانر</h3>
           <p className="text-xs text-muted-foreground">
-            الموضع #{banner.displayOrder} · {isFull ? "بانر كامل" : "بانر مقسّم"}
+            الموضع #{draft.displayOrder} · {isFull ? "بانر كامل" : "بانر مقسّم"}
+            {hasUnsavedChanges && (
+              <span className="mr-2 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+                تغييرات غير محفوظة
+              </span>
+            )}
           </p>
         </div>
         <Button variant="ghost" size="icon" onClick={onClose} className="h-8 w-8">
@@ -121,7 +302,8 @@ export function BannerEditor({ banner, onPatch, onClose }: Props) {
         </Button>
       </div>
 
-      <ScrollArea className="flex-1">
+      {/* Body — scrollable */}
+      <div className="admin-scroll min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
         <div className="space-y-5 p-4">
           {/* ---------- Banner Type selector ---------- */}
           <section className="space-y-2">
@@ -131,12 +313,13 @@ export function BannerEditor({ banner, onPatch, onClose }: Props) {
             <div className="grid grid-cols-2 gap-2">
               {TYPE_OPTIONS.map((opt) => {
                 const Icon = opt.icon;
-                const isSelected = banner.bannerType === opt.value;
+                const isSelected = draft.bannerType === opt.value;
                 return (
                   <button
                     key={opt.value}
                     type="button"
-                    onClick={() => onPatch(banner.id, { bannerType: opt.value })}
+                    disabled={isSaving}
+                    onClick={() => updateField("bannerType", opt.value)}
                     className={`flex flex-col items-start gap-1.5 rounded-lg border p-3 text-right transition-all ${
                       isSelected
                         ? "border-primary bg-primary/5 ring-1 ring-primary/30"
@@ -145,9 +328,13 @@ export function BannerEditor({ banner, onPatch, onClose }: Props) {
                   >
                     <div className="flex items-center gap-2">
                       <Icon
-                        className={`h-4 w-4 ${isSelected ? "text-primary" : "text-muted-foreground"}`}
+                        className={`h-4 w-4 ${
+                          isSelected ? "text-primary" : "text-muted-foreground"
+                        }`}
                       />
-                      <span className="text-sm font-medium text-foreground">{opt.label}</span>
+                      <span className="text-sm font-medium text-foreground">
+                        {opt.label}
+                      </span>
                     </div>
                     <p className="text-[11px] leading-snug text-muted-foreground">
                       {opt.description}
@@ -164,38 +351,49 @@ export function BannerEditor({ banner, onPatch, onClose }: Props) {
               صورة البانر
             </h4>
             <UploadArea
-              currentImage={banner.image}
-              bannerType={banner.bannerType}
-              onUploaded={(dataUrl) =>
-                onPatch(banner.id, {
-                  image: dataUrl,
-                  transform: { ...BANNER_TRANSFORM_DEFAULT },
-                })
-              }
-              onClear={() =>
-                onPatch(banner.id, {
-                  image: "",
-                  transform: { ...BANNER_TRANSFORM_DEFAULT },
-                })
-              }
+              currentImage={draft.image}
+              bannerType={draft.bannerType}
+              onUploaded={(dataUrl) => {
+                setDraft((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        image: dataUrl,
+                        transform: { ...BANNER_TRANSFORM_DEFAULT },
+                        updatedAt: new Date().toISOString(),
+                      }
+                    : prev
+                );
+              }}
+              onClear={() => {
+                setDraft((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        image: "",
+                        transform: { ...BANNER_TRANSFORM_DEFAULT },
+                        updatedAt: new Date().toISOString(),
+                      }
+                    : prev
+                );
+              }}
             />
           </section>
 
           {/* ---------- Image positioning (always shown when image exists) ---------- */}
-          {banner.image && (
+          {draft.image && (
             <section className="space-y-3">
               <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 ضبط الموضع
               </h4>
               <ImagePositioner
-                imageSrc={banner.image}
-                gradient={banner.gradient}
-                value={banner.transform}
+                imageSrc={draft.image}
+                gradient={draft.gradient}
+                value={draft.transform}
                 onChange={onTransformChange}
                 previewWidth={320}
-                // For full banners, the image fills the entire frame — show the
-                // full-frame safe area. For split, the default 42% panel overlay applies.
                 fullFrame={isFull}
+                onEditingChange={onImageEditingChange}
               />
             </section>
           )}
@@ -204,37 +402,39 @@ export function BannerEditor({ banner, onPatch, onClose }: Props) {
           {!isFull && (
             <>
               <section className="space-y-2">
-                <Label htmlFor="banner-title" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                <Label
+                  htmlFor="banner-title"
+                  className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+                >
                   العنوان
                 </Label>
                 <Input
                   id="banner-title"
-                  value={title}
-                  onChange={(e) => {
-                    setTitle(e.target.value);
-                    onPatch(banner.id, { title: e.target.value });
-                  }}
+                  value={draft.title}
+                  onChange={(e) => updateField("title", e.target.value)}
                   placeholder="مثال: مراجعة الأحياء"
                   dir="rtl"
                   maxLength={60}
+                  disabled={isSaving}
                 />
               </section>
 
               <section className="space-y-2">
-                <Label htmlFor="banner-subtitle" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                <Label
+                  htmlFor="banner-subtitle"
+                  className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+                >
                   الوصف
                 </Label>
                 <Textarea
                   id="banner-subtitle"
-                  value={subtitle}
-                  onChange={(e) => {
-                    setSubtitle(e.target.value);
-                    onPatch(banner.id, { subtitle: e.target.value });
-                  }}
+                  value={draft.subtitle}
+                  onChange={(e) => updateField("subtitle", e.target.value)}
                   placeholder="مثال: ملخص شامل للفصول الأربعة"
                   dir="rtl"
                   rows={3}
                   maxLength={120}
+                  disabled={isSaving}
                 />
               </section>
             </>
@@ -254,7 +454,10 @@ export function BannerEditor({ banner, onPatch, onClose }: Props) {
           {/* ---------- Enabled toggle (always shown) ---------- */}
           <section className="flex items-center justify-between rounded-lg border bg-card px-3 py-2.5">
             <div className="space-y-0.5">
-              <Label htmlFor="banner-enabled" className="text-sm font-medium text-foreground">
+              <Label
+                htmlFor="banner-enabled"
+                className="text-sm font-medium text-foreground"
+              >
                 تفعيل البانر
               </Label>
               <p className="text-xs text-muted-foreground">
@@ -263,14 +466,65 @@ export function BannerEditor({ banner, onPatch, onClose }: Props) {
             </div>
             <Switch
               id="banner-enabled"
-              checked={banner.enabled}
-              onCheckedChange={(checked) =>
-                onPatch(banner.id, { enabled: checked })
-              }
+              checked={draft.enabled}
+              onCheckedChange={(checked) => updateField("enabled", checked)}
+              disabled={isSaving}
             />
           </section>
         </div>
-      </ScrollArea>
+      </div>
+
+      {/* ---------- Save / Discard bar (only when there are unsaved changes) ---------- */}
+      {hasUnsavedChanges && (
+        <div className="admin-save-bar flex flex-shrink-0 items-center justify-between gap-3 border-t bg-card p-3">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={handleDiscard}
+            disabled={isSaving}
+            className="gap-1.5 text-xs"
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+            تجاهل التغييرات
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            onClick={handleSave}
+            disabled={isSaving}
+            className={
+              isSaved
+                ? "gap-1.5 bg-emerald-600 text-xs text-white hover:bg-emerald-600"
+                : isError
+                ? "gap-1.5 bg-red-600 text-xs text-white hover:bg-red-600"
+                : "gap-1.5 text-xs"
+            }
+          >
+            {isSaving ? (
+              <>
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                جارٍ الحفظ…
+              </>
+            ) : isSaved ? (
+              <>
+                <Check className="h-3.5 w-3.5" />
+                تم الحفظ
+              </>
+            ) : isError ? (
+              <>
+                <AlertCircle className="h-3.5 w-3.5" />
+                فشل الحفظ
+              </>
+            ) : (
+              <>
+                <Save className="h-3.5 w-3.5" />
+                حفظ التغييرات
+              </>
+            )}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

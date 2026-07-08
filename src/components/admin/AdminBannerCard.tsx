@@ -5,11 +5,20 @@
  * ----------------
  * One row in the "Current Banners" list.
  *
- * Shows: preview thumbnail, position number, title, enabled badge.
- * Actions: Edit, Move Up, Move Down, Duplicate, Delete.
+ * Shows: preview thumbnail, position number, title, subtitle, badges.
+ * Actions: Move Up, Move Down, Edit, Duplicate, Delete.
  *
  * Pure presentational component — all mutations are delegated to the parent
  * via callbacks so this card stays reusable.
+ *
+ * The `admin-banner-card admin-reorder-item` classes enable FLIP animation
+ * when the parent uses the `useFlipReorder` hook (the parent should also set
+ * `data-flip-key={banner.id}` on this card so the hook can match it across
+ * renders).
+ *
+ * For full-banner thumbnails the image is rendered with the SAME transform
+ * values as the carousel preview (translate + scale), so what you see in
+ * the list matches what students see.
  */
 
 import {
@@ -46,9 +55,11 @@ export function AdminBannerCard({
   onDuplicate,
   onDelete,
 }: Props) {
+  const hasImage = banner.image && banner.image.length > 0;
+
   return (
     <div
-      className={`group relative flex items-center gap-4 rounded-xl border bg-card p-3 transition-all ${
+      className={`admin-banner-card admin-reorder-item group relative flex items-center gap-4 rounded-xl border bg-card p-3 transition-all ${
         isSelected
           ? "border-primary ring-1 ring-primary/30"
           : "border-border hover:border-primary/40"
@@ -65,23 +76,21 @@ export function AdminBannerCard({
         onClick={onSelect}
         className="relative h-14 w-20 flex-shrink-0 overflow-hidden rounded-lg border border-border"
         style={{
-          background:
-            banner.image && banner.image.length > 0
-              ? undefined
-              : banner.gradient || "linear-gradient(135deg, #4f9cff, #2a6fcc)",
+          background: hasImage
+            ? undefined
+            : banner.gradient || "linear-gradient(135deg, #4f9cff, #2a6fcc)",
         }}
         title="اضغط للتعديل"
       >
-        {banner.image && banner.image.length > 0 ? (
+        {hasImage ? (
           <img
             src={banner.image}
             alt={banner.title}
             className="absolute inset-0 h-full w-full object-cover"
             style={{
-              objectPosition: `${50 + banner.transform.offsetX}% ${
-                50 + banner.transform.offsetY
-              }%`,
-              transform: `scale(${banner.transform.scale})`,
+              // Same transform values as the carousel preview — what you
+              // see in the list matches what students see.
+              transform: `translate(${banner.transform.offsetX}%, ${banner.transform.offsetY}%) scale(${banner.transform.scale})`,
               transformOrigin: "center",
             }}
           />
@@ -114,13 +123,13 @@ export function AdminBannerCard({
       >
         <span className="w-full truncate text-sm font-medium text-foreground">
           {banner.bannerType === "full"
-            ? (banner.title || "بانر كامل — بدون عنوان")
-            : (banner.title || "بدون عنوان")}
+            ? banner.title || "بانر كامل — بدون عنوان"
+            : banner.title || "بدون عنوان"}
         </span>
         <span className="w-full truncate text-xs text-muted-foreground">
           {banner.bannerType === "full"
             ? "صورة كاملة — النص داخل الصورة"
-            : (banner.subtitle || "بدون وصف")}
+            : banner.subtitle || "بدون وصف"}
         </span>
         <div className="flex items-center gap-1.5">
           <Badge
@@ -136,7 +145,7 @@ export function AdminBannerCard({
           <Badge variant="outline" className="text-[10px]">
             {banner.bannerType === "full" ? "كامل" : "مقسّم"}
           </Badge>
-          {banner.image && banner.image.length > 0 ? (
+          {hasImage ? (
             <Badge variant="outline" className="text-[10px]">
               صورة
             </Badge>

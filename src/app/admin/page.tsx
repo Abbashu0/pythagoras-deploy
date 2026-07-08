@@ -1,335 +1,258 @@
 "use client";
 
 /**
- * Admin Dashboard — Sponsored Carousel Manager
- * ============================================
+ * Admin Dashboard — section landing page (/admin)
+ * ================================================
  *
- * Standalone internal tool at /admin. NOT linked anywhere in the student app.
+ * This is the new dashboard entry point. It presents a grid of 8 admin
+ * "sections" (Banners, Subjects, Icons, Question Bank, Lectures, Files,
+ * Announcements, Settings). Only the Banners section is available today;
+ * the rest are placeholders that show a "قريباً" (coming soon) toast when
+ * clicked.
  *
- * Layout (desktop-optimized, RTL):
+ * Layout:
+ *   ┌─────────────────────────────────────────────────────────────┐
+ *   │  Header: "لوحة التحكم" + subtitle      [☀ / ☾ theme toggle] │
+ *   ├─────────────────────────────────────────────────────────────┤
+ *   │  Grid of 8 section cards (responsive: 1 → 2 → 3 → 4 cols)   │
+ *   └─────────────────────────────────────────────────────────────┘
  *
- *   ┌──────────────────────────────────────────────────────────────────┐
- *   │  Header: "Sponsored Carousel Manager" + subtitle                 │
- *   ├───────────────────────────┬──────────────────┬───────────────────┤
- *   │  Current Banners list     │  Banner Editor   │  Activity History │
- *   │  (with all actions)       │  (or upload)     │  (newest first)   │
- *   │                           │                  │                   │
- *   │  + Upload new banner      │  + Live preview  │                   │
- *   │    area below the list    │    of edited     │                   │
- *   │                           │    banner        │                   │
- *   ├───────────────────────────┴──────────────────┴───────────────────┤
- *   │  Recommended banner size info (always visible)                   │
- *   └──────────────────────────────────────────────────────────────────┘
+ * Theme:
+ *   - Source of truth: AdminStore.adminTheme ("light" | "dark").
+ *   - We subscribe to the store via `useAdminStore()` and read `adminTheme`
+ *     from the snapshot — no local mirror state. The Sun/Moon icon flips
+ *     reactively when the store emits.
+ *   - On mount we call `store.loadFromStorage()` (client-only, after
+ *     hydration) so the persisted theme is read and emitted. A separate
+ *     effect toggles the `dark` class on `document.documentElement`
+ *     whenever `adminTheme` changes — pure external-system sync (no
+ *     setState), so it satisfies react-hooks/set-state-in-effect.
+ *   - Toggling the button calls `store.setAdminTheme(...)` (persists +
+ *     notifies subscribers); the icon and <html> class update reactively.
  *
- * State:
- *   - Single source of truth: AdminStore (subscribed via useAdminStore).
- *   - Local UI state only: selected banner id, delete-target id, draft inputs.
- *
- * Scalability:
- *   - The 3-column layout can grow to host more managers (News, Announcements,
- *     etc.) by adding new sections — no redesign needed.
- *   - Store methods (addBanner, updateBanner, deleteBanner, moveBanner,
- *     duplicateBanner) are the contract with the future backend.
+ * Routing:
+ *   - Available sections: `router.push(href)` — server-side route.
+ *   - Unavailable sections: a shadcn toast tells the user it's coming.
  */
 
-import { useEffect, useState } from "react";
-import { ImagePlus, Layers, Info, AlertTriangle } from "lucide-react";
-import { useAdminStore } from "@/lib/admin/use-admin-store";
-import { getAdminStore } from "@/lib/admin/admin-store";
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 import {
-  MAX_BANNERS,
-  RECOMMENDED_BANNER_FULL,
-  RECOMMENDED_BANNER_SPLIT,
-  BANNER_TRANSFORM_DEFAULT,
-  BannerInput,
-} from "@/lib/admin/banner-model";
-import { AdminBannerCard } from "@/components/admin/AdminBannerCard";
-import { UploadArea } from "@/components/admin/UploadArea";
-import { BannerEditor } from "@/components/admin/BannerEditor";
-import { LiveCarouselPreview } from "@/components/admin/LiveCarouselPreview";
-import { ActivityHistory } from "@/components/admin/ActivityHistory";
-import { DeleteConfirmDialog } from "@/components/admin/DeleteConfirmDialog";
+  ImagePlus,
+  BookOpen,
+  Palette,
+  FileQuestion,
+  Video,
+  FolderOpen,
+  Megaphone,
+  Settings,
+  Moon,
+  Sun,
+  ArrowLeft,
+  type LucideIcon,
+} from "lucide-react";
+import { getAdminStore } from "@/lib/admin/admin-store";
+import { useAdminStore } from "@/lib/admin/use-admin-store";
+import { useToast } from "@/hooks/use-toast";
 
-export default function AdminPage() {
-  const { banners, history, canAddMore } = useAdminStore();
+interface AdminSection {
+  id: string;
+  title: string;
+  description: string;
+  icon: LucideIcon;
+  available: boolean;
+  /** Route to navigate to when the section is available. */
+  href?: string;
+}
+
+const SECTIONS: AdminSection[] = [
+  {
+    id: "banners",
+    title: "بانرات الصفحة الرئيسية",
+    description: "إدارة البانرات الترويجية في الكاروسيل — رفع، ترتيب، تفعيل.",
+    icon: ImagePlus,
+    available: true,
+    href: "/admin/banners",
+  },
+  {
+    id: "subjects",
+    title: "إدارة المواد الدراسية",
+    description: "إضافة وتعديل المواد والفصول المرتبطة بكل صف.",
+    icon: BookOpen,
+    available: false,
+  },
+  {
+    id: "icons",
+    title: "إدارة الأيقونات",
+    description: "مكتبة أيقونات المنصة المستخدمة في البانرات والمواد.",
+    icon: Palette,
+    available: false,
+  },
+  {
+    id: "questions",
+    title: "إدارة بنك الأسئلة",
+    description: "إضافة وتصنيف الأسئلة لمختلف المواد والفصول.",
+    icon: FileQuestion,
+    available: false,
+  },
+  {
+    id: "lectures",
+    title: "إدارة المحاضرات",
+    description: "رفع وترتيب المحاضرات المرئية وتعيينها للمواد.",
+    icon: Video,
+    available: false,
+  },
+  {
+    id: "files",
+    title: "إدارة الملفات",
+    description: "ملفات PDF والملازم المرتبطة بكل محاضرة.",
+    icon: FolderOpen,
+    available: false,
+  },
+  {
+    id: "announcements",
+    title: "إدارة الإعلانات",
+    description: "بث إعلانات وتنبيهات عامة لطلاب المنصة.",
+    icon: Megaphone,
+    available: false,
+  },
+  {
+    id: "settings",
+    title: "الإعدادات العامة",
+    description: "إعدادات المنصة العامة، الألوان، والتفضيلات.",
+    icon: Settings,
+    available: false,
+  },
+];
+
+export default function AdminDashboardPage() {
+  const router = useRouter();
+  const { toast } = useToast();
   const store = getAdminStore();
 
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  // Subscribe to the store so the Sun/Moon icon flips reactively when the
+  // theme changes. We read `adminTheme` from the snapshot rather than
+  // keeping a local mirror — the store is the single source of truth.
+  const { adminTheme } = useAdminStore();
 
-  // Load banners from localStorage AFTER hydration completes.
-  // The store starts empty on both server and client (0 banners) so SSR HTML
-  // matches the initial client render — no hydration mismatch. Then this
-  // effect runs client-only and populates the store from localStorage.
+  // ---------- Mount: load persisted state ----------
+  // loadFromStorage() runs AFTER hydration so SSR HTML matches the initial
+  // client render. The store then emits a new snapshot and `adminTheme`
+  // re-reads reactively (no local setState needed).
   useEffect(() => {
     store.loadFromStorage();
   }, [store]);
 
-  const selectedBanner = banners.find((b) => b.id === selectedId) || null;
-  const deleteBannerObj = banners.find((b) => b.id === deleteTarget) || null;
+  // ---------- External system sync: apply theme to <html> ----------
+  // This effect updates an EXTERNAL system (the DOM) based on React state —
+  // no setState call inside, so it satisfies react-hooks/set-state-in-effect.
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", adminTheme === "dark");
+  }, [adminTheme]);
 
-  const sortedBanners = [...banners].sort((a, b) => a.displayOrder - b.displayOrder);
-
-  const handlePatch = (id: string, patch: Partial<Parameters<typeof store.updateBanner>[1]>) => {
-    store.updateBanner(id, patch);
+  const handleToggleTheme = () => {
+    store.setAdminTheme(adminTheme === "dark" ? "light" : "dark");
   };
 
-  const handleUploadNew = (dataUrl: string) => {
-    if (!canAddMore) return;
-    const input: BannerInput = {
-      bannerType: "full",  // new banners default to full-banner mode
-      image: dataUrl,
-      gradient: "linear-gradient(135deg, #4f9cff, #2a6fcc)",
-      iconKey: "tests",
-      title: "بانر جديد",
-      subtitle: "أدخل الوصف هنا",
-      destination: "tests",
-      enabled: true,
-      displayOrder: 99, // store will assign real order
-      transform: { ...BANNER_TRANSFORM_DEFAULT },
-    };
-    const created = store.addBanner(input);
-    if (created) {
-      setSelectedId(created.id);
+  const handleSectionClick = (section: AdminSection) => {
+    if (section.available && section.href) {
+      router.push(section.href);
+      return;
     }
+    toast({
+      title: "قريباً",
+      description: "هذا القسم سيكون متوفراً في تحديث لاحق.",
+    });
   };
 
   return (
-    <div className="mx-auto max-w-[1400px] px-6 py-8">
-      {/* ---------- Storage error warning (shows when localStorage is full) ---------- */}
-      {store.lastStorageError && (
-        <div className="mb-6 flex items-start gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4">
-          <AlertTriangle className="mt-0.5 h-5 w-5 flex-shrink-0 text-destructive" />
-          <div className="flex-1">
-            <h3 className="text-sm font-semibold text-destructive">تحذير: مساحة التخزين ممتلئة</h3>
-            <p className="mt-1 text-xs text-destructive/80">
-              {store.lastStorageError}
-              <br />
-              التغييرات الأخيرة لم تُحفظ بشكل صحيح. قد تختفي بعض البانرات عند إعادة تحميل الصفحة.
-              احذف بانراً غير ضروري أو تأكد من أن الصور مضغوطة (يتم الضغط تلقائياً عند الرفع).
-            </p>
-          </div>
-        </div>
-      )}
-
+    <div className="mx-auto max-w-[1400px] px-4 py-8 sm:px-6 lg:px-8">
       {/* ---------- Header ---------- */}
-      <header className="mb-8">
-        <div className="flex items-center gap-3">
-          <div className="grid place-items-center rounded-xl bg-primary/10 p-2.5 text-primary">
-            <Layers className="h-6 w-6" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-foreground">
-              Sponsored Carousel Manager
-            </h1>
-            <p className="text-sm text-muted-foreground">
-              إدارة بانرات الصفحة الرئيسية الترويجية
-            </p>
-          </div>
+      <header className="mb-8 flex items-center justify-between gap-4">
+        <div className="space-y-1">
+          <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
+            لوحة التحكم
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            منصة فيثاغورس — إدارة المحتوى
+          </p>
         </div>
+
+        <button
+          type="button"
+          onClick={handleToggleTheme}
+          aria-label={adminTheme === "dark" ? "تفعيل الوضع الفاتح" : "تفعيل الوضع الداكن"}
+          title={adminTheme === "dark" ? "وضع فاتح" : "وضع داكن"}
+          className="grid h-10 w-10 place-items-center rounded-xl border border-border bg-card text-foreground transition-colors hover:bg-muted"
+        >
+          {adminTheme === "dark" ? (
+            <Sun className="h-5 w-5" />
+          ) : (
+            <Moon className="h-5 w-5" />
+          )}
+        </button>
       </header>
 
-      {/* ---------- Main 3-column grid ---------- */}
-      <div className="grid grid-cols-12 gap-6">
-        {/* Left: Banner list + upload */}
-        <section className="col-span-12 lg:col-span-5 space-y-5">
-          <div className="rounded-xl border bg-card">
-            <div className="flex items-center justify-between border-b p-4">
-              <div className="flex items-center gap-2">
-                <h2 className="text-sm font-semibold text-foreground">البانرات الحالية</h2>
-                <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
-                  {banners.length} / {MAX_BANNERS}
+      {/* ---------- Section grid ---------- */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {SECTIONS.map((section) => {
+          const Icon = section.icon;
+          return (
+            <button
+              key={section.id}
+              type="button"
+              data-available={section.available ? "true" : "false"}
+              onClick={() => handleSectionClick(section)}
+              className="admin-section-card group text-right"
+              aria-label={section.title}
+            >
+              {/* Top row: icon + open affordance */}
+              <div className="flex items-start justify-between">
+                <div
+                  className={`grid h-12 w-12 flex-shrink-0 place-items-center rounded-xl transition-colors ${
+                    section.available
+                      ? "bg-primary/10 text-primary"
+                      : "bg-muted text-muted-foreground"
+                  }`}
+                >
+                  <Icon className="h-6 w-6" />
+                </div>
+
+                {/* "فتح" affordance — visible on hover (CSS-driven) */}
+                <span className="admin-section-open inline-flex items-center gap-1 text-xs font-medium text-primary">
+                  فتح
+                  <ArrowLeft className="h-3.5 w-3.5" />
                 </span>
               </div>
-            </div>
-            <div className="space-y-2 p-3">
-              {sortedBanners.length === 0 ? (
-                <div className="grid place-items-center gap-2 py-12 text-center text-sm text-muted-foreground">
-                  <ImagePlus className="h-8 w-8 opacity-30" />
-                  لا توجد بانرات بعد. ارفع أول صورة بالأسفل.
-                </div>
-              ) : (
-                sortedBanners.map((banner, idx) => (
-                  <AdminBannerCard
-                    key={banner.id}
-                    banner={banner}
-                    position={idx + 1}
-                    total={sortedBanners.length}
-                    isSelected={banner.id === selectedId}
-                    onSelect={() => setSelectedId(banner.id)}
-                    onMoveUp={() => store.moveBanner(banner.id, "up")}
-                    onMoveDown={() => store.moveBanner(banner.id, "down")}
-                    onDuplicate={() => store.duplicateBanner(banner.id)}
-                    onDelete={() => setDeleteTarget(banner.id)}
-                  />
-                ))
-              )}
-            </div>
-          </div>
 
-          {/* Upload new banner */}
-          <div className="rounded-xl border bg-card p-4">
-            <div className="mb-3 flex items-center gap-2">
-              <ImagePlus className="h-4 w-4 text-muted-foreground" />
-              <h2 className="text-sm font-semibold text-foreground">رفع بانر جديد</h2>
-            </div>
-            {canAddMore ? (
-              <UploadArea onUploaded={handleUploadNew} />
-            ) : (
-              <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-3 text-xs text-amber-600 dark:text-amber-400">
-                وصلت إلى الحد الأقصى ({MAX_BANNERS} بانرات). احذف بانرًا لإضافة جديد.
+              {/* Title + description */}
+              <div className="space-y-1">
+                <h2 className="text-base font-semibold text-foreground">
+                  {section.title}
+                </h2>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  {section.description}
+                </p>
               </div>
-            )}
-          </div>
-        </section>
 
-        {/* Middle: Editor + live preview */}
-        <section className="col-span-12 lg:col-span-4 space-y-5">
-          <div className="rounded-xl border bg-card overflow-hidden" style={{ minHeight: 480 }}>
-            <BannerEditor
-              banner={selectedBanner}
-              onPatch={handlePatch}
-              onClose={() => setSelectedId(null)}
-            />
-          </div>
-
-          {/* Live carousel preview — same proportions as student app */}
-          <div className="rounded-xl border bg-card p-4">
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-foreground">معاينة حية</h2>
-              <span className="text-[10px] text-muted-foreground">
-                بنفس أبعاد كاروسيل الطلاب
-              </span>
-            </div>
-            <div className="flex justify-center py-4 bg-muted/20 rounded-lg">
-              <LiveCarouselPreview banners={sortedBanners} width={366} />
-            </div>
-            <p className="mt-3 text-center text-[11px] text-muted-foreground">
-              هذه معاينة مطابقة لما يراه الطلاب في الصفحة الرئيسية.
-            </p>
-          </div>
-        </section>
-
-        {/* Right: Activity history */}
-        <section className="col-span-12 lg:col-span-3">
-          <ActivityHistory />
-        </section>
+              {/* Status footer */}
+              <div className="mt-auto flex items-center gap-2 pt-2">
+                {section.available ? (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                    متاح
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+                    <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                    قريباً
+                  </span>
+                )}
+              </div>
+            </button>
+          );
+        })}
       </div>
-
-      {/* ---------- Recommended banner sizes (always visible) ---------- */}
-      <section className="mt-8 rounded-xl border bg-card p-5">
-        <div className="flex items-start gap-3">
-          <div className="grid place-items-center rounded-lg bg-blue-500/10 p-2 text-blue-600 dark:text-blue-400">
-            <Info className="h-5 w-5" />
-          </div>
-          <div className="flex-1">
-            <h2 className="text-sm font-semibold text-foreground">
-              الأحجام الرسمية للبانرات
-            </h2>
-            <p className="mt-1 text-xs text-muted-foreground">
-              كل نوع بانر له حجمه الخاص. صدّر الصور بدقة 2× retina لوضوح أعلى على شاشات الـ DPI العالية.
-              الكاروسيل يستخدم <code className="rounded bg-muted px-1 text-[10px]">object-fit: cover</code> فالصورة
-              تملأ المنطقة دون تمديد، مع قص طفيف إذا اختلفت النسبة.
-            </p>
-
-            <div className="mt-4 grid gap-4 md:grid-cols-2">
-              {/* Full banner size */}
-              <div className="rounded-lg border border-blue-500/20 bg-blue-500/5 p-4">
-                <div className="mb-3 flex items-center gap-2">
-                  <span className="rounded-full bg-blue-500/15 px-2 py-0.5 text-[10px] font-medium text-blue-600 dark:text-blue-400">
-                    بانر كامل
-                  </span>
-                  <span className="text-xs text-muted-foreground">Full Banner</span>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">العرض</div>
-                    <div className="text-lg font-bold text-foreground">
-                      {RECOMMENDED_BANNER_FULL.width}<span className="text-xs font-normal text-muted-foreground">px</span>
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">الارتفاع</div>
-                    <div className="text-lg font-bold text-foreground">
-                      {RECOMMENDED_BANNER_FULL.height}<span className="text-xs font-normal text-muted-foreground">px</span>
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">نسبة الأبعاد</div>
-                    <div className="text-sm font-semibold text-foreground">
-                      {RECOMMENDED_BANNER_FULL.aspectRatio}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">الجودة</div>
-                    <div className="text-sm font-semibold text-foreground">
-                      {RECOMMENDED_BANNER_FULL.retinaScale}× retina
-                    </div>
-                  </div>
-                </div>
-                <p className="mt-3 text-[11px] leading-snug text-muted-foreground">
-                  الصورة تملأ الإطار بالكامل. كل النص والعلامة وزر الإجراء يكون داخل الصورة نفسها.
-                </p>
-              </div>
-
-              {/* Split banner size */}
-              <div className="rounded-lg border border-purple-500/20 bg-purple-500/5 p-4">
-                <div className="mb-3 flex items-center gap-2">
-                  <span className="rounded-full bg-purple-500/15 px-2 py-0.5 text-[10px] font-medium text-purple-600 dark:text-purple-400">
-                    بانر مقسّم
-                  </span>
-                  <span className="text-xs text-muted-foreground">Split Banner</span>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">العرض</div>
-                    <div className="text-lg font-bold text-foreground">
-                      {RECOMMENDED_BANNER_SPLIT.width}<span className="text-xs font-normal text-muted-foreground">px</span>
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">الارتفاع</div>
-                    <div className="text-lg font-bold text-foreground">
-                      {RECOMMENDED_BANNER_SPLIT.height}<span className="text-xs font-normal text-muted-foreground">px</span>
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">نسبة الأبعاد</div>
-                    <div className="text-sm font-semibold text-foreground">
-                      {RECOMMENDED_BANNER_SPLIT.aspectRatio}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">الجودة</div>
-                    <div className="text-sm font-semibold text-foreground">
-                      {RECOMMENDED_BANNER_SPLIT.retinaScale}× retina
-                    </div>
-                  </div>
-                </div>
-                <p className="mt-3 text-[11px] leading-snug text-muted-foreground">
-                  الصورة تملأ الجانب الأيسر (42% من الإطار). العنوان والوصف يُعرضان على اليمين.
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ---------- Delete confirmation dialog ---------- */}
-      <DeleteConfirmDialog
-        banner={deleteBannerObj}
-        open={deleteTarget !== null}
-        onOpenChange={(open) => {
-          if (!open) setDeleteTarget(null);
-        }}
-        onConfirm={() => {
-          if (deleteTarget) {
-            store.deleteBanner(deleteTarget);
-            if (selectedId === deleteTarget) setSelectedId(null);
-            setDeleteTarget(null);
-          }
-        }}
-      />
     </div>
   );
 }

@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Admin · Sponsored Carousel — Pythagoras Platform",
-  description: "Internal dashboard for managing Home page sponsored banners.",
+  title: "Admin · Pythagoras Platform",
+  description: "Internal dashboard for managing platform content.",
   robots: { index: false, follow: false },
 };
 

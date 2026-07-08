@@ -9,15 +9,16 @@
  * Flow:
  *   1. User drops/selects a file
  *   2. Validate type (PNG/JPG/WEBP) and size (max 4MB raw)
- *   3. COMPRESS the image to the recommended banner dimensions (732×293 for
- *      full, 308×292 for split) as JPEG quality 0.85. This reduces a 3MB
+ *   3. COMPRESS the image to the recommended banner dimensions (1464×586 for
+ *      full, 616×584 for split) as JPEG quality 0.85. This reduces a 3MB
  *      photo to ~100KB, preventing localStorage quota issues.
  *   4. Pass the compressed data URL to `onUploaded`
  *
  * Architecture:
  *   - Pure UI component — no store coupling. Parent decides what to do with
  *     the uploaded data URL.
- *   - The `bannerType` prop controls which compression target is used.
+ *   - The `bannerType` prop controls which compression target is used and
+ *     which "recommended size" hint is shown.
  */
 
 import { useCallback, useRef, useState } from "react";
@@ -39,14 +40,21 @@ interface Props {
   bannerType?: BannerType;
 }
 
-export function UploadArea({ onUploaded, currentImage, onClear, bannerType = "full" }: Props) {
+export function UploadArea({
+  onUploaded,
+  currentImage,
+  onClear,
+  bannerType = "full",
+}: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [compressing, setCompressing] = useState(false);
 
   const validate = useCallback((file: File): string | null => {
-    if (!ACCEPTED_IMAGE_TYPES.includes(file.type as typeof ACCEPTED_IMAGE_TYPES[number])) {
+    if (
+      !ACCEPTED_IMAGE_TYPES.includes(file.type as (typeof ACCEPTED_IMAGE_TYPES)[number])
+    ) {
       return "صيغة غير مدعومة. المسموح: PNG, JPG, WEBP.";
     }
     if (file.size > MAX_IMAGE_BYTES) {
@@ -72,9 +80,9 @@ export function UploadArea({ onUploaded, currentImage, onClear, bannerType = "fu
         const target = getCompressionTarget(bannerType);
         const compressed = await compressImage(file, target);
         onUploaded(compressed);
-      } catch (compressionErr) {
+      } catch {
         // If compression fails, try passing the raw data URL as a fallback
-        // (might still work if the image is small enough)
+        // (might still work if the image is small enough).
         try {
           const reader = new FileReader();
           reader.onload = () => {
@@ -183,8 +191,8 @@ export function UploadArea({ onUploaded, currentImage, onClear, bannerType = "fu
       </div>
 
       {/* Recommended size hint — adapts to the current banner type */}
-      <div className="flex items-center gap-2 rounded-lg bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-        <ImageIcon className="h-3.5 w-3.5 flex-shrink-0" />
+      <div className="flex items-start gap-2 rounded-lg bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+        <ImageIcon className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
         <span>
           الحجم الموصى به (بانر {typeLabel}): {rec.width}×{rec.height}px
           (نسبة {rec.aspectRatio}) — تصدير {rec.retinaScale}× retina.

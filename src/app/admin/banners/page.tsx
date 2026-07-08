@@ -1,0 +1,430 @@
+"use client";
+
+/**
+ * Admin — Banners management page (/admin/banners)
+ * =================================================
+ *
+ * The full Sponsored-Carousel editor. Previously the only page at /admin,
+ * now a sub-page reachable from the dashboard's "بانرات الصفحة الرئيسية" card.
+ *
+ * Layout (desktop, RTL — 12-col grid):
+ *
+ *   ┌──────────────────────────────────────────────────────────────────┐
+ *   │  [→ لوحة التحكم]   "بانرات الصفحة الرئيسية"      [☀ / ☾ toggle] │
+ *   ├──────────────────────┬─────────────────────┬──────────────────────┤
+ *   │  col-span-5          │  col-span-4         │  col-span-3 (sticky) │
+ *   │  ┌────────────────┐  │  ┌────────────────┐ │  ┌─────────────────┐ │
+ *   │  │ Banner list    │  │  │ BannerEditor   │ │  │ ActivityHistory │ │
+ *   │  │ (FLIP reorder) │  │  │ (pending save) │ │  │ (newest first)  │ │
+ *   │  └────────────────┘  │  └────────────────┘ │  └─────────────────┘ │
+ *   │  ┌────────────────┐  │  ┌────────────────┐ │                      │
+ *   │  │ Upload area    │  │  │ Live preview   │ │                      │
+ *   │  └────────────────┘  │  └────────────────┘ │                      │
+ *   ├──────────────────────┴─────────────────────┴──────────────────────┤
+ *   │  Carousel Settings (auto-slide interval slider)                   │
+ *   └──────────────────────────────────────────────────────────────────┘
+ *
+ * FLIP animation:
+ *   - `useFlipReorder(bannerListRef, flipItems, 300)` where
+ *     `flipItems = isImageEditing ? [] : sortedBanners`.
+ *   - We pass `[]` while the user is dragging the image positioner so the
+ *     banner's "First" position is captured AFTER the drag ends — otherwise
+ *     the live transform updates would constantly invalidate the snapshot.
+ *
+ * State:
+ *   - selectedId / deleteTarget: pure UI state.
+ *   - adminTheme: read reactively from the store subscription (no local
+ *     mirror). The Sun/Moon icon and <html> dark class update via the
+ *     store's emit cycle — `store.setAdminTheme(...)` is the only setter.
+ *   - draftBanner: the editor's pending draft (drives the live preview).
+ *   - isImageEditing: forwarded from BannerEditor's ImagePositioner —
+ *     disables FLIP while dragging.
+ */
+
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import {
+  ArrowRight,
+  Moon,
+  Sun,
+  ImagePlus,
+  AlertTriangle,
+  SlidersHorizontal,
+} from "lucide-react";
+import { useAdminStore } from "@/lib/admin/use-admin-store";
+import { getAdminStore } from "@/lib/admin/admin-store";
+import {
+  MAX_BANNERS,
+  BANNER_TRANSFORM_DEFAULT,
+  BannerInput,
+  SponsoredBanner,
+} from "@/lib/admin/banner-model";
+import { AdminBannerCard } from "@/components/admin/AdminBannerCard";
+import { UploadArea } from "@/components/admin/UploadArea";
+import { BannerEditor } from "@/components/admin/BannerEditor";
+import { LiveCarouselPreview } from "@/components/admin/LiveCarouselPreview";
+import { ActivityHistory } from "@/components/admin/ActivityHistory";
+import { DeleteConfirmDialog } from "@/components/admin/DeleteConfirmDialog";
+import { CarouselSettings } from "@/components/admin/CarouselSettings";
+import { BannerSizeInfo } from "@/components/admin/BannerSizeInfo";
+import { Button } from "@/components/ui/button";
+import { useToast } from "@/hooks/use-toast";
+import { useFlipReorder } from "@/lib/admin/use-flip-reorder";
+
+export default function AdminBannersPage() {
+  const router = useRouter();
+  const { toast } = useToast();
+
+  // Subscribe to the store so this component re-renders on every change.
+  // We also pull `getAdminStore()` for direct method calls (mutations).
+  const {
+    banners,
+    canAddMore,
+    lastStorageError,
+    autoSlideInterval,
+    adminTheme,
+  } = useAdminStore();
+  const store = getAdminStore();
+
+  // ----- Local UI state -----
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [draftBanner, setDraftBanner] = useState<SponsoredBanner | null>(null);
+  const [isImageEditing, setIsImageEditing] = useState(false);
+
+  // Ref to the banner list container — used by the FLIP hook to snapshot
+  // child positions before/after reorders.
+  const bannerListRef = useRef<HTMLDivElement>(null);
+
+  // ----- Mount: load from localStorage -----
+  // loadFromStorage() runs AFTER hydration so SSR HTML matches the initial
+  // client render. The store then emits a new snapshot and `adminTheme`
+  // re-reads reactively (no local setState needed).
+  useEffect(() => {
+    store.loadFromStorage();
+  }, [store]);
+
+  // ----- External system sync: apply theme to <html> -----
+  // Pure DOM side-effect — no setState, so this satisfies
+  // react-hooks/set-state-in-effect.
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", adminTheme === "dark");
+  }, [adminTheme]);
+
+  // ----- Derived data -----
+  const sortedBanners = [...banners].sort(
+    (a, b) => a.displayOrder - b.displayOrder
+  );
+
+  const selectedBanner =
+    sortedBanners.find((b) => b.id === selectedId) ?? null;
+  const deleteBannerObj =
+    sortedBanners.find((b) => b.id === deleteTarget) ?? null;
+
+  // ----- FLIP animation -----
+  // Pass an empty array while the user is dragging the image positioner —
+  // otherwise every transform update would invalidate the "First" snapshot
+  // and the next reorder would animate from the wrong position.
+  const flipItems = isImageEditing ? [] : sortedBanners;
+  useFlipReorder(bannerListRef, flipItems, 300);
+
+  // ----- Theme toggle -----
+  const handleToggleTheme = () => {
+    store.setAdminTheme(adminTheme === "dark" ? "light" : "dark");
+  };
+
+  // ----- Mutations (all funnel through the store so persistence + history
+  // are guaranteed). Each one surfaces a toast so the user gets feedback. -----
+  const handleSave = (
+    id: string,
+    patch: Partial<BannerInput>,
+    changeSummary: string[]
+  ) => {
+    store.commitBannerEdit(id, patch, changeSummary);
+    toast({
+      title: "تم حفظ البانر",
+      description:
+        changeSummary.length > 0
+          ? changeSummary[0]
+          : "تم تحديث البانر بنجاح.",
+    });
+  };
+
+  const handleUploadNew = (dataUrl: string) => {
+    if (!canAddMore) return;
+    const input: BannerInput = {
+      bannerType: "full", // new banners default to full-banner mode
+      image: dataUrl,
+      gradient: "linear-gradient(135deg, #4f9cff, #2a6fcc)",
+      iconKey: "tests",
+      title: "بانر جديد",
+      subtitle: "أدخل الوصف هنا",
+      destination: "tests",
+      enabled: true,
+      displayOrder: 99, // store will assign the real order
+      transform: { ...BANNER_TRANSFORM_DEFAULT },
+    };
+    const created = store.addBanner(input);
+    if (created) {
+      setSelectedId(created.id);
+      toast({
+        title: "تم رفع البانر",
+        description: "أُضيف بانر جديد بنجاح. يمكنك تعديله الآن.",
+      });
+    } else {
+      toast({
+        title: "تعذّر رفع البانر",
+        description: `وصلت إلى الحد الأقصى (${MAX_BANNERS} بانرات).`,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleMoveUp = (banner: SponsoredBanner) => {
+    store.moveBanner(banner.id, "up");
+    toast({ title: "إعادة ترتيب", description: `تم تحريك «${banner.title || "بدون عنوان"}» لأعلى.` });
+  };
+
+  const handleMoveDown = (banner: SponsoredBanner) => {
+    store.moveBanner(banner.id, "down");
+    toast({ title: "إعادة ترتيب", description: `تم تحريك «${banner.title || "بدون عنوان"}» لأسفل.` });
+  };
+
+  const handleDuplicate = (banner: SponsoredBanner) => {
+    const copy = store.duplicateBanner(banner.id);
+    if (copy) {
+      toast({
+        title: "تم التكرار",
+        description: `أُنشئت نسخة من «${banner.title || "بدون عنوان"}».`,
+      });
+    } else {
+      toast({
+        title: "تعذّر التكرار",
+        description: `وصلت إلى الحد الأقصى (${MAX_BANNERS} بانرات).`,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleDeleteRequest = (banner: SponsoredBanner) => {
+    setDeleteTarget(banner.id);
+  };
+
+  const handleDeleteConfirm = () => {
+    if (!deleteTarget) return;
+    const target = banners.find((b) => b.id === deleteTarget);
+    store.deleteBanner(deleteTarget);
+    if (selectedId === deleteTarget) setSelectedId(null);
+    setDeleteTarget(null);
+    toast({
+      title: "تم الحذف",
+      description: `حُذف البانر «${target?.title || "بدون عنوان"}».`,
+      variant: "destructive",
+    });
+  };
+
+  const handleCarouselSave = (ms: number) => {
+    store.setAutoSlideInterval(ms);
+    toast({
+      title: "تم حفظ الإعدادات",
+      description: `مدة عرض كل بانر: ${Math.round(ms / 1000)} ثانية.`,
+    });
+  };
+
+  return (
+    <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 lg:px-8">
+      {/* ---------- Top bar: back + title + theme toggle ---------- */}
+      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-5">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => router.push("/admin")}
+            className="h-9 w-fit gap-1.5 text-xs"
+          >
+            <ArrowRight className="h-4 w-4" />
+            لوحة التحكم
+          </Button>
+
+          <div className="space-y-1">
+            <h1 className="text-xl font-bold tracking-tight text-foreground sm:text-2xl">
+              بانرات الصفحة الرئيسية
+            </h1>
+            <p className="text-sm text-muted-foreground">
+              إدارة البانرات الترويجية في الكاروسيل
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={handleToggleTheme}
+          aria-label={adminTheme === "dark" ? "تفعيل الوضع الفاتح" : "تفعيل الوضع الداكن"}
+          title={adminTheme === "dark" ? "وضع فاتح" : "وضع داكن"}
+          className="grid h-10 w-10 flex-shrink-0 place-items-center rounded-xl border border-border bg-card text-foreground transition-colors hover:bg-muted"
+        >
+          {adminTheme === "dark" ? (
+            <Sun className="h-5 w-5" />
+          ) : (
+            <Moon className="h-5 w-5" />
+          )}
+        </button>
+      </div>
+
+      {/* ---------- Storage error warning ---------- */}
+      {lastStorageError && (
+        <div className="mb-6 flex items-start gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4">
+          <AlertTriangle className="mt-0.5 h-5 w-5 flex-shrink-0 text-destructive" />
+          <div className="flex-1">
+            <h3 className="text-sm font-semibold text-destructive">
+              تحذير: مساحة التخزين ممتلئة
+            </h3>
+            <p className="mt-1 text-xs leading-relaxed text-destructive/80">
+              {lastStorageError}
+              <br />
+              التغييرات الأخيرة لم تُحفظ بشكل صحيح. قد تختفي بعض البانرات عند
+              إعادة تحميل الصفحة. احذف بانراً غير ضروري أو تأكد من أن الصور
+              مضغوطة (يتم الضغط تلقائياً عند الرفع).
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* ---------- Main 3-column grid ---------- */}
+      <div className="grid grid-cols-12 gap-6">
+        {/* ===== Left: banner list + upload ===== */}
+        <section className="col-span-12 space-y-5 lg:col-span-5">
+          {/* Banner list */}
+          <div className="rounded-xl border bg-card">
+            <div className="flex items-center justify-between border-b p-4">
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-semibold text-foreground">
+                  البانرات الحالية
+                </h2>
+                <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] tabular-nums text-muted-foreground">
+                  {banners.length} / {MAX_BANNERS}
+                </span>
+              </div>
+            </div>
+
+            <div ref={bannerListRef} className="space-y-2 p-3">
+              {sortedBanners.length === 0 ? (
+                <div className="grid place-items-center gap-2 py-12 text-center text-sm text-muted-foreground">
+                  <ImagePlus className="h-8 w-8 opacity-30" />
+                  لا توجد بانرات بعد. ارفع أول صورة بالأسفل.
+                </div>
+              ) : (
+                sortedBanners.map((banner, idx) => (
+                  <div key={banner.id} data-flip-key={banner.id}>
+                    <AdminBannerCard
+                      banner={banner}
+                      position={idx + 1}
+                      total={sortedBanners.length}
+                      isSelected={banner.id === selectedId}
+                      onSelect={() => setSelectedId(banner.id)}
+                      onMoveUp={() => handleMoveUp(banner)}
+                      onMoveDown={() => handleMoveDown(banner)}
+                      onDuplicate={() => handleDuplicate(banner)}
+                      onDelete={() => handleDeleteRequest(banner)}
+                    />
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* Upload new banner */}
+          <div className="rounded-xl border bg-card p-4">
+            <div className="mb-3 flex items-center gap-2">
+              <ImagePlus className="h-4 w-4 text-muted-foreground" />
+              <h2 className="text-sm font-semibold text-foreground">
+                رفع بانر جديد
+              </h2>
+              <BannerSizeInfo />
+            </div>
+            {canAddMore ? (
+              <UploadArea onUploaded={handleUploadNew} bannerType="full" />
+            ) : (
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-3 text-xs text-amber-600 dark:text-amber-400">
+                وصلت إلى الحد الأقصى ({MAX_BANNERS} بانرات). احذف بانرًا لإضافة
+                جديد.
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* ===== Middle: editor + live preview ===== */}
+        <section className="col-span-12 space-y-5 lg:col-span-4">
+          {/* Editor */}
+          <div
+            className="overflow-hidden rounded-xl border bg-card"
+            style={{ minHeight: 480 }}
+          >
+            <BannerEditor
+              banner={selectedBanner}
+              onSave={handleSave}
+              onClose={() => setSelectedId(null)}
+              onDraftChange={setDraftBanner}
+              onImageEditingChange={setIsImageEditing}
+            />
+          </div>
+
+          {/* Live carousel preview — same proportions as student app */}
+          <div className="rounded-xl border bg-card p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-foreground">
+                معاينة حية
+              </h2>
+              <span className="text-[10px] text-muted-foreground">
+                بنفس أبعاد كاروسيل الطلاب
+              </span>
+            </div>
+            <div className="flex justify-center rounded-lg bg-muted/20 py-4">
+              <LiveCarouselPreview
+                banner={draftBanner || selectedBanner}
+                allBanners={sortedBanners}
+                width={366}
+              />
+            </div>
+            <p className="mt-3 text-center text-[11px] leading-relaxed text-muted-foreground">
+              هذه معاينة مطابقة لما يراه الطلاب في الصفحة الرئيسية. التغييرات
+              غير المحفوظة تظهر هنا فوراً.
+            </p>
+          </div>
+        </section>
+
+        {/* ===== Right: activity history (sticky) ===== */}
+        <section className="col-span-12 lg:col-span-3">
+          <div className="lg:sticky lg:top-6">
+            <ActivityHistory />
+          </div>
+        </section>
+      </div>
+
+      {/* ---------- Carousel settings (full-width strip at bottom) ---------- */}
+      <section className="mt-8">
+        <div className="mb-3 flex items-center gap-2">
+          <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
+          <h2 className="text-sm font-semibold text-foreground">
+            إعدادات الكاروسيل
+          </h2>
+        </div>
+        <CarouselSettings
+          interval={autoSlideInterval}
+          onSave={handleCarouselSave}
+        />
+      </section>
+
+      {/* ---------- Delete confirmation dialog ---------- */}
+      <DeleteConfirmDialog
+        banner={deleteBannerObj}
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+        onConfirm={handleDeleteConfirm}
+      />
+    </div>
+  );
+}

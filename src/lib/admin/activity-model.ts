@@ -10,12 +10,21 @@ export interface ActivityHistoryEntry {
   id: string;
   /** ISO timestamp. */
   at: string;
-  /** Machine-readable action verb (uploaded, deleted, edited, reordered, duplicated, enabled, disabled). */
+  /** Machine-readable action verb. */
   action: ActivityAction;
-  /** Human-readable Arabic label, e.g. "تم رفع بانر" — shown in the UI. */
+  /** Human-readable Arabic label, e.g. "إضافة بانر" — shown in the UI. */
   label: string;
   /** Title of the banner the action affected. */
   bannerTitle: string;
+  /**
+   * Thumbnail for the history row.
+   * Either the banner's image data URL (when an image is uploaded) or the
+   * banner's gradient string (used as a CSS background when no image).
+   * For "settings" actions this is an empty string.
+   */
+  thumbnail: string;
+  /** Optional human-readable list of changes (used for "edited" / "settings"). */
+  changeSummary?: string[];
 }
 
 export type ActivityAction =
@@ -25,14 +34,31 @@ export type ActivityAction =
   | "reordered"
   | "duplicated"
   | "enabled"
-  | "disabled";
+  | "disabled"
+  | "settings";
 
 export const ACTIVITY_LABELS: Record<ActivityAction, string> = {
-  uploaded: "رفع بانر",
+  uploaded: "إضافة بانر",
   deleted: "حذف بانر",
   edited: "تعديل بانر",
   reordered: "إعادة ترتيب",
   duplicated: "تكرار بانر",
   enabled: "تفعيل بانر",
   disabled: "تعطيل بانر",
+  settings: "تعديل الإعدادات",
+};
+
+/**
+ * Emoji icons shown next to each activity entry.
+ * Used as a visual indicator of the action type in the history list.
+ */
+export const ACTIVITY_ICONS: Record<ActivityAction, string> = {
+  uploaded: "🟢",
+  deleted: "🔴",
+  edited: "🟠",
+  reordered: "🔵",
+  duplicated: "🟣",
+  enabled: "🟢",
+  disabled: "⚪",
+  settings: "⏱️",
 };
