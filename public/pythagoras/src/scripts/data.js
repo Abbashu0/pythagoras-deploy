@@ -470,18 +470,115 @@ export function getNavItems() {
 }
 
 /**
+ * Hardcoded English titles for each subject id.
+ *
+ * The admin Materials Manager can override these per-item via the
+ * `englishTitle` field. We keep this map as a fallback so the student
+ * app still shows a sensible English caption when the admin store
+ * hasn't set one yet (e.g. first visit, fresh install, or older
+ * localStorage data that predates the englishTitle field).
+ */
+const ENGLISH_TITLES = {
+  islamic: "ISLAMIC",
+  arabic: "ARABIC",
+  english: "ENGLISH",
+  biology: "BIOLOGY",
+  math: "MATHEMATICS",
+  chemistry: "CHEMISTRY",
+  physics: "PHYSICS",
+  french: "FRENCH",
+};
+
+/** Default gradient backgrounds for subjects without uploaded images. */
+const SUBJECT_GRADIENTS = {
+  islamic: "linear-gradient(135deg, #1a5c3a, #0d3a24)",
+  arabic: "linear-gradient(135deg, #8b4513, #5c2e0a)",
+  english: "linear-gradient(135deg, #1e3a8a, #0f1e4a)",
+  biology: "linear-gradient(135deg, #166534, #0a3d20)",
+  math: "linear-gradient(135deg, #7c2d12, #4a1a08)",
+  chemistry: "linear-gradient(135deg, #581c87, #2e0a4a)",
+  physics: "linear-gradient(135deg, #0c4a6e, #062840)",
+  french: "linear-gradient(135deg, #1e40af, #0a1e5a)",
+};
+
+/**
+ * Separate localStorage key for the global materials fade intensity.
+ * MUST stay in sync with `src/lib/admin/content-store.ts` — that file
+ * derives the fade key as `${storageKey}-fade`, where the materials
+ * storageKey is `pythagoras-admin-materials`.
+ *
+ * Stored as a decimal string (e.g. "0.72") — the student app reads it
+ * directly as the alpha value of the bottom-up black gradient overlay
+ * on each material card.
+ */
+const ADMIN_MATERIALS_FADE_KEY = "pythagoras-admin-materials-fade";
+
+/**
+ * Returns the global fade intensity for material cards (0–1).
+ *
+ * The admin Materials Manager exposes a slider (0–100%) whose value is
+ * persisted as a decimal (e.g. 0.72 for 72%). The student app uses this
+ * number directly as the alpha channel of the bottom-up black gradient
+ * overlay on each material card — higher = darker bottom, more legible
+ * white title text over busy images.
+ *
+ * Defaults to 0.72 when the admin store has never written the key, when
+ * the value is missing, or when localStorage is unreadable.
+ */
+export function getMaterialsFadeIntensity() {
+  try {
+    const raw = localStorage.getItem(ADMIN_MATERIALS_FADE_KEY);
+    if (raw === null) return 0.72;
+    const val = Number.parseFloat(raw);
+    if (!Number.isFinite(val) || val < 0 || val > 1) return 0.72;
+    return val;
+  } catch {
+    return 0.72;
+  }
+}
+
+/**
  * Returns the live test subjects (materials) from the admin store.
  * Falls back to the hardcoded testSubjects if localStorage is empty.
  * The admin Materials Manager writes to this key.
  * Merges admin data with the hardcoded subjects so we don't lose
  * description/pageDescription/etc. fields that the admin doesn't manage yet.
+ *
+ * Also passes through the new image-card fields the admin manages:
+ *   - englishTitle:  English caption shown under the Arabic title.
+ *                    Falls back to the hardcoded ENGLISH_TITLES map.
+ *   - image:         Data URL of the uploaded card image (empty = gradient).
+ *   - transform:     Image positioning { offsetX, offsetY, scale } chosen
+ *                    in the admin ImagePositioner. Same shape as banner
+ *                    transform so both editors can share a component.
  */
 export function getTestSubjects() {
   try {
     const raw = localStorage.getItem(ADMIN_MATERIALS_KEY);
-    if (!raw) return testSubjects.slice();
+    if (!raw || raw === "[]") {
+      // Fallback: merge hardcoded subjects with englishTitle and default fields
+      return testSubjects.map((s) => ({
+        ...s,
+        title: s.title || s.name || s.id,
+        englishTitle: ENGLISH_TITLES[s.id] || "",
+        image: "",
+        gradient: SUBJECT_GRADIENTS[s.id] || "linear-gradient(135deg, #1a3a5c, #0d1e30)",
+        transform: { offsetX: 0, offsetY: 0, scale: 1 },
+        available: s.available !== false,
+      }));
+    }
     const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed) || parsed.length === 0) return testSubjects.slice();
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      return testSubjects.map((s) => ({
+        ...s,
+        title: s.title || s.name || s.id,
+        englishTitle: ENGLISH_TITLES[s.id] || "",
+        image: "",
+        gradient: SUBJECT_GRADIENTS[s.id] || "linear-gradient(135deg, #1a3a5c, #0d1e30)",
+        transform: { offsetX: 0, offsetY: 0, scale: 1 },
+        available: s.available !== false,
+      }));
+    }
     // Build a map of hardcoded subjects for merging extra fields
     const hardcodedMap = new Map(testSubjects.map((s) => [s.id, s]));
     return parsed
@@ -489,10 +586,19 @@ export function getTestSubjects() {
       .sort((a, b) => (a.order || 0) - (b.order || 0))
       .map((item) => {
         const hardcoded = hardcodedMap.get(item.id);
+        const transform = item.transform && typeof item.transform === "object"
+          ? {
+              offsetX: Number(item.transform.offsetX) || 0,
+              offsetY: Number(item.transform.offsetY) || 0,
+              scale: Number(item.transform.scale) || 1,
+            }
+          : { offsetX: 0, offsetY: 0, scale: 1 };
         return {
           id: item.id,
           title: item.label || hardcoded?.title || item.id,
           name: item.label || hardcoded?.name || item.label || item.id,
+          // English title: admin store wins, then hardcoded map, then empty.
+          englishTitle: item.englishTitle || ENGLISH_TITLES[item.id] || "",
           icon: item.icon || hardcoded?.icon || "tests",
           description: hardcoded?.description || "",
           pageDescription: hardcoded?.pageDescription || "",
@@ -500,10 +606,26 @@ export function getTestSubjects() {
           hasDiagramPractice: hardcoded?.hasDiagramPractice || false,
           available: item.available !== false,
           color: hardcoded?.color,
+          // Image-card fields — empty image means the student UI falls
+          // back to the gradient background.
+          image: typeof item.image === "string" ? item.image : "",
+          gradient:
+            typeof item.gradient === "string"
+              ? item.gradient
+              : "linear-gradient(135deg, #1a3a5c, #0d1e30)",
+          transform,
         };
       });
   } catch {
-    return testSubjects.slice();
+    return testSubjects.map((s) => ({
+      ...s,
+      title: s.title || s.name || s.id,
+      englishTitle: ENGLISH_TITLES[s.id] || "",
+      image: "",
+      gradient: SUBJECT_GRADIENTS[s.id] || "linear-gradient(135deg, #1a3a5c, #0d1e30)",
+      transform: { offsetX: 0, offsetY: 0, scale: 1 },
+      available: s.available !== false,
+    }));
   }
 }
 

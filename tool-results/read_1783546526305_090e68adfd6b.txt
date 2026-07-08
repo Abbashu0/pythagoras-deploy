@@ -1,0 +1,1228 @@
+     1→.tests-subjects-stack,
+     2→.subject-tests-stack,
+     3→.question-bank-stack {
+     4→  display: grid;
+     5→  gap: 14px;
+     6→}
+     7→
+     8→.subjects-grid {
+     9→  display: grid;
+    10→  gap: 12px;
+    11→}
+    12→
+    13→.subject-card,
+    14→.subject-hero-card,
+    15→.subject-action-card {
+    16→  width: 100%;
+    17→  position: relative;
+    18→  overflow: hidden;
+    19→  text-align: right;
+    20→  border: 1px solid rgba(255, 255, 255, 0.08);
+    21→  background: var(--surface-soft);
+    22→  backdrop-filter: blur(24px);
+    23→  -webkit-backdrop-filter: blur(24px);
+    24→  box-shadow: var(--shadow-md);
+    25→  transition:
+    26→    transform 180ms ease,
+    27→    border-color 180ms ease,
+    28→    background 180ms ease,
+    29→    box-shadow 180ms ease;
+    30→}
+    31→
+    32→.subject-card:hover,
+    33→.subject-card:focus-visible,
+    34→.subject-hero-card:hover,
+    35→.subject-hero-card:focus-visible,
+    36→.subject-action-card:hover,
+    37→.subject-action-card:focus-visible {
+    38→  transform: translateY(-2px);
+    39→  border-color: rgba(255, 255, 255, 0.16);
+    40→}
+    41→
+    42→.subject-card:active,
+    43→.subject-hero-card:active,
+    44→.subject-action-card:active {
+    45→  transform: scale(0.985);
+    46→}
+    47→
+    48→.subject-card {
+    49→  display: grid;
+    50→  gap: 14px;
+    51→  padding: 18px;
+    52→  border-radius: var(--radius-lg);
+    53→  background:
+    54→    linear-gradient(180deg, color-mix(in oklab, var(--accent) 10%, rgba(255, 255, 255, 0.06)), transparent 24%),
+    55→    color-mix(in oklab, var(--accent) 8%, var(--surface-strong));
+    56→  border-color: color-mix(in oklab, var(--accent) 24%, rgba(255, 255, 255, 0.08));
+    57→  box-shadow:
+    58→    0 18px 40px rgba(0, 0, 0, 0.24),
+    59→    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    60→}
+    61→
+    62→.subject-card-head,
+    63→.subject-hero-head,
+    64→.subject-action-head {
+    65→  display: flex;
+    66→  align-items: flex-start;
+    67→  justify-content: space-between;
+    68→  gap: 14px;
+    69→}
+    70→
+    71→.subject-card-copy,
+    72→.subject-hero-copy,
+    73→.subject-action-copy {
+    74→  display: grid;
+    75→  gap: 8px;
+    76→}
+    77→
+    78→.subject-card-title,
+    79→.subject-hero-title,
+    80→.subject-action-title {
+    81→  margin: 0;
+    82→  font-weight: 600;
+    83→  line-height: 1.35;
+    84→}
+    85→
+    86→.subject-card-title {
+    87→  font-size: 1.25rem;
+    88→}
+    89→
+    90→.subject-hero-title {
+    91→  font-size: 1.5rem;
+    92→}
+    93→
+    94→.subject-action-title {
+    95→  font-size: 1.1875rem;
+    96→}
+    97→
+    98→.subject-card-text,
+    99→.subject-hero-text,
+   100→.subject-action-text {
+   101→  margin: 0;
+   102→  color: var(--muted);
+   103→  font-size: 0.8125rem;
+   104→  line-height: 1.85;
+   105→}
+   106→
+   107→.subject-card-icon,
+   108→.subject-hero-icon,
+   109→.subject-action-icon {
+   110→  flex-shrink: 0;
+   111→}
+   112→
+   113→.subject-card-foot,
+   114→.subject-hero-foot {
+   115→  display: flex;
+   116→  align-items: center;
+   117→  justify-content: space-between;
+   118→  gap: 12px;
+   119→}
+   120→
+   121→.subject-card-arrow {
+   122→  width: 36px;
+   123→  height: 36px;
+   124→  display: grid;
+   125→  place-items: center;
+   126→  border-radius: 14px;
+   127→  color: var(--accent);
+   128→  background: color-mix(in oklab, var(--accent) 7%, rgba(255, 255, 255, 0.04));
+   129→  border: 1px solid color-mix(in oklab, var(--accent) 18%, rgba(255, 255, 255, 0.06));
+   130→  transform: rotate(90deg);
+   131→}
+   132→
+   133→.subject-card-arrow .app-icon {
+   134→  width: 16px;
+   135→  height: 16px;
+   136→}
+   137→
+   138→.subject-hero-card {
+   139→  display: grid;
+   140→  gap: 18px;
+   141→  padding: 22px;
+   142→  border-radius: var(--radius-xl);
+   143→  background:
+   144→    linear-gradient(180deg, color-mix(in oklab, var(--accent) 12%, transparent), transparent 60%),
+   145→    linear-gradient(180deg, rgba(255, 255, 255, 0.06), transparent 24%),
+   146→    var(--surface);
+   147→  border-color: color-mix(in oklab, var(--accent) 30%, rgba(255, 255, 255, 0.08));
+   148→  box-shadow:
+   149→    0 24px 50px rgba(0, 0, 0, 0.26),
+   150→    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+   151→}
+   152→
+   153→.subject-hero-meta {
+   154→  display: grid;
+   155→  gap: 4px;
+   156→  text-align: left;
+   157→}
+   158→
+   159→.subject-hero-meta-label {
+   160→  color: var(--muted-soft);
+   161→  font-size: 0.75rem;
+   162→}
+   163→
+   164→.subject-hero-meta-value {
+   165→  color: var(--fg);
+   166→  font-size: 0.8125rem;
+   167→  font-weight: 500;
+   168→}
+   169→
+   170→.subject-actions-grid,
+   171→.subject-actions-single {
+   172→  display: grid;
+   173→  gap: 12px;
+   174→}
+   175→
+   176→.question-bank-search-wrap {
+   177→  display: grid;
+   178→  justify-items: center;
+   179→  padding-top: 2px;
+   180→  margin-bottom: 4px;
+   181→}
+   182→
+   183→.question-bank-search-sentinel {
+   184→  width: 100%;
+   185→  height: 1px;
+   186→  margin-top: -1px;
+   187→}
+   188→
+   189→.question-bank-search-sticky {
+   190→  position: sticky;
+   191→  top: calc(58px + env(safe-area-inset-top));
+   192→  z-index: 26;
+   193→  margin-block: 0 8px;
+   194→  padding: 0;
+   195→  background: transparent;
+   196→  box-shadow: none;
+   197→  backdrop-filter: none;
+   198→  -webkit-backdrop-filter: none;
+   199→  transition:
+   200→    backdrop-filter 180ms ease,
+   201→    -webkit-backdrop-filter 180ms ease,
+   202→    background 180ms ease,
+   203→    box-shadow 180ms ease;
+   204→}
+   205→
+   206→.question-bank-search-sticky.is-stuck {
+   207→  background: transparent;
+   208→  backdrop-filter: none;
+   209→  -webkit-backdrop-filter: none;
+   210→  box-shadow: none;
+   211→}
+   212→
+   213→body[data-theme="light"] .question-bank-search-sticky.is-stuck {
+   214→  background: transparent;
+   215→  box-shadow: none;
+   216→}
+   217→
+   218→.app-question-bank-tools-layer {
+   219→  position: absolute;
+   220→  inset: 0;
+   221→  z-index: 27;
+   222→  pointer-events: none;
+   223→}
+   224→
+   225→.question-bank-panel-dismiss {
+   226→  position: absolute;
+   227→  inset: 0;
+   228→  border: 0;
+   229→  background: transparent;
+   230→  opacity: 0;
+   231→  pointer-events: none;
+   232→}
+   233→
+   234→.app-question-bank-tools-layer.is-open .question-bank-panel-dismiss {
+   235→  pointer-events: auto;
+   236→}
+   237→
+   238→.question-bank-floating-tools {
+   239→  position: absolute;
+   240→  top: calc(18px + env(safe-area-inset-top));
+   241→  right: 18px;
+   242→  display: grid;
+   243→  justify-items: end;
+   244→  gap: 10px;
+   245→}
+   246→
+   247→.question-bank-menu-button,
+   248→.question-bank-menu-panel {
+   249→  pointer-events: auto;
+   250→}
+   251→
+   252→.question-bank-menu-button {
+   253→  position: relative;
+   254→  width: 46px;
+   255→  height: 46px;
+   256→  display: grid;
+   257→  place-items: center;
+   258→  border-radius: 50%;
+   259→  border: 1px solid rgba(255, 255, 255, 0.1);
+   260→  background:
+   261→    linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 70%),
+   262→    color-mix(in oklab, var(--surface) 88%, rgba(28, 34, 43, 0.8));
+   263→  color: var(--fg);
+   264→  box-shadow:
+   265→    0 14px 28px rgba(0, 0, 0, 0.28),
+   266→    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+   267→  backdrop-filter: blur(18px);
+   268→  -webkit-backdrop-filter: blur(18px);
+   269→  transition:
+   270→    transform 180ms ease,
+   271→    border-color 180ms ease,
+   272→    box-shadow 180ms ease,
+   273→    background 180ms ease;
+   274→}
+   275→
+   276→.question-bank-menu-button:hover,
+   277→.question-bank-menu-button:focus-visible {
+   278→  transform: translateY(-1px);
+   279→  border-color: color-mix(in oklab, var(--accent) 20%, rgba(255, 255, 255, 0.12));
+   280→  box-shadow:
+   281→    0 16px 30px rgba(0, 0, 0, 0.32),
+   282→    inset 0 1px 0 rgba(255, 255, 255, 0.16);
+   283→}
+   284→
+   285→.question-bank-menu-button:active {
+   286→  transform: scale(0.97);
+   287→}
+   288→
+   289→.question-bank-menu-button-icon {
+   290→  width: 18px;
+   291→  height: 18px;
+   292→  display: grid;
+   293→  place-items: center;
+   294→}
+   295→
+   296→.question-bank-menu-button-icon .app-icon {
+   297→  width: 18px;
+   298→  height: 18px;
+   299→}
+   300→
+   301→.question-bank-menu-button-badge {
+   302→  position: absolute;
+   303→  top: 10px;
+   304→  right: 11px;
+   305→  width: 8px;
+   306→  height: 8px;
+   307→  border-radius: 50%;
+   308→  background: var(--accent);
+   309→  box-shadow: 0 0 0 2px rgba(7, 10, 16, 0.72);
+   310→}
+   311→
+   312→.question-bank-menu-panel {
+   313→  width: min(330px, calc(100vw - 72px));
+   314→  max-height: min(62vh, 560px);
+   315→  overflow: hidden;
+   316→  border-radius: 28px;
+   317→  border: 1px solid rgba(255, 255, 255, 0.09);
+   318→  background:
+   319→    linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 22%),
+   320→    color-mix(in oklab, var(--surface) 94%, rgba(15, 19, 27, 0.88));
+   321→  box-shadow:
+   322→    0 26px 60px rgba(0, 0, 0, 0.34),
+   323→    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+   324→  backdrop-filter: blur(20px);
+   325→  -webkit-backdrop-filter: blur(20px);
+   326→  opacity: 0;
+   327→  transform: translateY(-8px) scale(0.985);
+   328→  pointer-events: none;
+   329→  transition:
+   330→    opacity 180ms ease,
+   331→    transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+   332→}
+   333→
+   334→.question-bank-menu-panel.is-open {
+   335→  opacity: 1;
+   336→  transform: translateY(0) scale(1);
+   337→  pointer-events: auto;
+   338→}
+   339→
+   340→.question-bank-menu-panel-scroll {
+   341→  max-height: min(62vh, 560px);
+   342→  overflow: auto;
+   343→  display: grid;
+   344→  gap: 10px;
+   345→  padding: 14px;
+   346→}
+   347→
+   348→.question-bank-panel-section {
+   349→  display: grid;
+   350→  gap: 10px;
+   351→  padding: 14px;
+   352→  border-radius: 22px;
+   353→  border: 1px solid rgba(255, 255, 255, 0.07);
+   354→  background: rgba(255, 255, 255, 0.035);
+   355→}
+   356→
+   357→.question-bank-panel-section.is-static {
+   358→  gap: 12px;
+   359→}
+   360→
+   361→.question-bank-panel-heading {
+   362→  display: flex;
+   363→  align-items: center;
+   364→  justify-content: space-between;
+   365→  gap: 12px;
+   366→}
+   367→
+   368→.question-bank-panel-heading strong,
+   369→.question-bank-panel-row-copy strong {
+   370→  color: var(--fg);
+   371→  font-size: 0.875rem;
+   372→  font-weight: 600;
+   373→}
+   374→
+   375→.question-bank-panel-reset {
+   376→  padding: 0;
+   377→  border: 0;
+   378→  background: transparent;
+   379→  color: var(--accent);
+   380→  font-size: 0.75rem;
+   381→  font-weight: 600;
+   382→}
+   383→
+   384→.question-bank-view-switch {
+   385→  display: grid;
+   386→  grid-template-columns: repeat(2, minmax(0, 1fr));
+   387→  gap: 8px;
+   388→}
+   389→
+   390→.question-bank-view-option {
+   391→  min-height: 46px;
+   392→  display: inline-flex;
+   393→  align-items: center;
+   394→  justify-content: center;
+   395→  gap: 8px;
+   396→  border-radius: 16px;
+   397→  border: 1px solid rgba(255, 255, 255, 0.08);
+   398→  background: rgba(255, 255, 255, 0.03);
+   399→  color: var(--muted);
+   400→  font-size: 0.8125rem;
+   401→  font-weight: 600;
+   402→  transition:
+   403→    transform 180ms ease,
+   404→    border-color 180ms ease,
+   405→    background 180ms ease,
+   406→    color 180ms ease;
+   407→}
+   408→
+   409→.question-bank-view-option .app-icon {
+   410→  width: 16px;
+   411→  height: 16px;
+   412→}
+   413→
+   414→.question-bank-view-option.is-active {
+   415→  color: var(--fg);
+   416→  border-color: color-mix(in oklab, var(--accent) 26%, rgba(255, 255, 255, 0.08));
+   417→  background:
+   418→    linear-gradient(180deg, color-mix(in oklab, var(--accent) 9%, rgba(255, 255, 255, 0.03)), transparent 90%),
+   419→    rgba(255, 255, 255, 0.06);
+   420→}
+   421→
+   422→.question-bank-panel-row {
+   423→  display: flex;
+   424→  align-items: center;
+   425→  justify-content: space-between;
+   426→  gap: 12px;
+   427→  width: 100%;
+   428→  padding: 0;
+   429→  border: 0;
+   430→  background: transparent;
+   431→  text-align: right;
+   432→  color: inherit;
+   433→}
+   434→
+   435→.question-bank-panel-row-copy {
+   436→  display: grid;
+   437→  gap: 4px;
+   438→  justify-items: start;
+   439→}
+   440→
+   441→.question-bank-panel-row-copy span {
+   442→  color: var(--muted);
+   443→  font-size: 0.75rem;
+   444→}
+   445→
+   446→.question-bank-panel-chevron {
+   447→  width: 18px;
+   448→  height: 18px;
+   449→  display: grid;
+   450→  place-items: center;
+   451→  color: var(--muted-soft);
+   452→  transition: transform 180ms ease;
+   453→}
+   454→
+   455→.question-bank-panel-section.is-open .question-bank-panel-chevron {
+   456→  transform: rotate(180deg);
+   457→}
+   458→
+   459→.question-bank-panel-chevron .app-icon {
+   460→  width: 15px;
+   461→  height: 15px;
+   462→}
+   463→
+   464→.question-bank-panel-options {
+   465→  display: grid;
+   466→  gap: 8px;
+   467→}
+   468→
+   469→.question-bank-panel-options[hidden] {
+   470→  display: none !important;
+   471→}
+   472→
+   473→.question-bank-option-row {
+   474→  display: flex;
+   475→  align-items: center;
+   476→  justify-content: space-between;
+   477→  gap: 12px;
+   478→  width: 100%;
+   479→  min-height: 44px;
+   480→  padding: 10px 12px;
+   481→  border-radius: 16px;
+   482→  border: 1px solid rgba(255, 255, 255, 0.06);
+   483→  background: rgba(255, 255, 255, 0.02);
+   484→  color: var(--muted);
+   485→  text-align: right;
+   486→  transition:
+   487→    border-color 180ms ease,
+   488→    background 180ms ease,
+   489→    color 180ms ease,
+   490→    transform 180ms ease;
+   491→}
+   492→
+   493→.question-bank-option-row.is-selected {
+   494→  color: var(--fg);
+   495→  border-color: color-mix(in oklab, var(--accent) 22%, rgba(255, 255, 255, 0.08));
+   496→  background: color-mix(in oklab, var(--accent) 8%, rgba(255, 255, 255, 0.03));
+   497→}
+   498→
+   499→.question-bank-option-row:active {
+   500→  transform: scale(0.988);
+   501→}
+   502→
+   503→.question-bank-option-copy {
+   504→  min-width: 0;
+   505→  line-height: 1.6;
+   506→}
+   507→
+   508→.question-bank-option-check {
+   509→  width: 22px;
+   510→  height: 22px;
+   511→  flex: 0 0 auto;
+   512→  display: grid;
+   513→  place-items: center;
+   514→  border-radius: 50%;
+   515→  border: 1px solid rgba(255, 255, 255, 0.1);
+   516→  color: var(--accent);
+   517→  background: rgba(255, 255, 255, 0.05);
+   518→}
+   519→
+   520→.question-bank-option-check .app-icon {
+   521→  width: 14px;
+   522→  height: 14px;
+   523→}
+   524→
+   525→.question-search-shell {
+   526→  width: 64px;
+   527→  max-width: 100%;
+   528→  border-radius: 999px;
+   529→  border: 1px solid color-mix(in oklab, var(--accent) 18%, rgba(255, 255, 255, 0.08));
+   530→  background:
+   531→    linear-gradient(180deg, rgba(255, 255, 255, 0.12), transparent 70%),
+   532→    var(--surface-soft);
+   533→  backdrop-filter: blur(24px);
+   534→  -webkit-backdrop-filter: blur(24px);
+   535→  box-shadow: var(--shadow-md);
+   536→  overflow: hidden;
+   537→  cursor: text;
+   538→  transition:
+   539→    width 240ms cubic-bezier(0.22, 1, 0.36, 1),
+   540→    border-color 180ms ease,
+   541→    background 180ms ease,
+   542→    box-shadow 180ms ease,
+   543→    transform 180ms ease;
+   544→}
+   545→
+   546→.question-search-shell.is-expanded,
+   547→.question-search-shell.has-value {
+   548→  width: min(100%, 360px);
+   549→}
+   550→
+   551→.question-search-shell.is-expanded,
+   552→.question-search-shell.has-value,
+   553→.question-search-shell:focus-within {
+   554→  border-color: color-mix(in oklab, var(--accent) 28%, rgba(255, 255, 255, 0.08));
+   555→  box-shadow:
+   556→    var(--shadow-md),
+   557→    0 0 0 1px color-mix(in oklab, var(--accent) 10%, transparent);
+   558→}
+   559→
+   560→.question-search {
+   561→  display: flex;
+   562→  align-items: center;
+   563→  justify-content: center;
+   564→  width: 100%;
+   565→  min-height: 60px;
+   566→  padding: 0 18px;
+   567→  gap: 0;
+   568→  position: relative;
+   569→}
+   570→
+   571→.question-search-icon {
+   572→  width: 24px;
+   573→  height: 24px;
+   574→  display: grid;
+   575→  place-items: center;
+   576→  color: var(--muted);
+   577→  flex: 0 0 auto;
+   578→  transition:
+   579→    color 180ms ease,
+   580→    transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+   581→}
+   582→
+   583→.question-search-shell.is-expanded .question-search-icon,
+   584→.question-search-shell.has-value .question-search-icon,
+   585→.question-search-shell:focus-within .question-search-icon {
+   586→  color: var(--accent);
+   587→  transform: scale(0.98);
+   588→}
+   589→
+   590→.question-search-icon .app-icon {
+   591→  width: 20px;
+   592→  height: 20px;
+   593→}
+   594→
+   595→.question-search-shell:not(.is-expanded):not(.has-value) .question-search {
+   596→  padding: 0;
+   597→}
+   598→
+   599→.question-search-shell:not(.is-expanded):not(.has-value) .question-search-icon {
+   600→  position: absolute;
+   601→  inset: 0;
+   602→  margin: auto;
+   603→}
+   604→
+   605→.question-search-input {
+   606→  flex: 1;
+   607→  min-width: 0;
+   608→  max-width: 0;
+   609→  background: transparent;
+   610→  border: 0;
+   611→  outline: 0;
+   612→  color: var(--fg);
+   613→  font-size: 0.875rem;
+   614→  line-height: 1.8;
+   615→  opacity: 0;
+   616→  pointer-events: none;
+   617→  margin-inline-start: 0;
+   618→  transition:
+   619→    max-width 240ms cubic-bezier(0.22, 1, 0.36, 1),
+   620→    opacity 160ms ease,
+   621→    margin-inline-start 240ms cubic-bezier(0.22, 1, 0.36, 1);
+   622→}
+   623→
+   624→.question-search-shell.is-expanded .question-search-input,
+   625→.question-search-shell.has-value .question-search-input,
+   626→.question-search-shell:focus-within .question-search-input {
+   627→  max-width: 260px;
+   628→  opacity: 1;
+   629→  pointer-events: auto;
+   630→  margin-inline-start: 12px;
+   631→}
+   632→
+   633→.question-search-input::placeholder {
+   634→  color: var(--muted-soft);
+   635→  opacity: 0;
+   636→  transition: opacity 140ms ease;
+   637→}
+   638→
+   639→.question-search-shell.is-expanded .question-search-input::placeholder,
+   640→.question-search-shell.has-value .question-search-input::placeholder,
+   641→.question-search-shell:focus-within .question-search-input::placeholder {
+   642→  opacity: 1;
+   643→}
+   644→
+   645→.question-bank-empty {
+   646→  min-height: 320px;
+   647→  display: grid;
+   648→  align-content: center;
+   649→  justify-items: center;
+   650→  gap: 16px;
+   651→  padding: 28px 22px;
+   652→  border-radius: var(--radius-xl);
+   653→  border: 1px solid rgba(255, 255, 255, 0.08);
+   654→  background:
+   655→    linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 26%),
+   656→    var(--surface-soft);
+   657→  text-align: center;
+   658→  box-shadow: var(--shadow-md);
+   659→}
+   660→
+   661→.question-bank-empty-icon {
+   662→  width: 68px;
+   663→  height: 68px;
+   664→  border-radius: 22px;
+   665→}
+   666→
+   667→.question-bank-empty-copy {
+   668→  display: grid;
+   669→  gap: 8px;
+   670→  max-width: 28ch;
+   671→}
+   672→
+   673→.question-bank-empty-title {
+   674→  margin: 0;
+   675→  font-size: 1.5rem;
+   676→  line-height: 1.4;
+   677→  font-weight: 600;
+   678→}
+   679→
+   680→.question-bank-empty-text {
+   681→  margin: 0;
+   682→  color: var(--muted);
+   683→  font-size: 0.875rem;
+   684→  line-height: 1.9;
+   685→}
+   686→
+   687→.question-bank-empty-action {
+   688→  display: inline-flex;
+   689→  align-items: center;
+   690→  justify-content: center;
+   691→  gap: 8px;
+   692→  min-height: 42px;
+   693→  padding: 0 16px;
+   694→  border-radius: 999px;
+   695→  border: 1px solid color-mix(in oklab, var(--accent) 20%, rgba(255, 255, 255, 0.08));
+   696→  background: color-mix(in oklab, var(--accent) 8%, rgba(255, 255, 255, 0.04));
+   697→  color: var(--fg);
+   698→  font-size: 0.8125rem;
+   699→  font-weight: 600;
+   700→}
+   701→
+   702→.question-bank-empty-action-icon {
+   703→  width: 16px;
+   704→  height: 16px;
+   705→  display: grid;
+   706→  place-items: center;
+   707→}
+   708→
+   709→.question-bank-empty-action-icon .app-icon {
+   710→  width: 14px;
+   711→  height: 14px;
+   712→}
+   713→
+   714→.question-bank-list,
+   715→.question-detail-stack {
+   716→  display: grid;
+   717→  gap: 12px;
+   718→}
+   719→
+   720→.question-bank-list.is-grid-mode {
+   721→  grid-template-columns: repeat(2, minmax(0, 1fr));
+   722→  gap: 12px;
+   723→}
+   724→
+   725→.question-bank-item {
+   726→  width: 100%;
+   727→  display: flex;
+   728→  align-items: flex-start;
+   729→  gap: 14px;
+   730→  padding: 16px 18px;
+   731→  text-align: right;
+   732→  border-radius: var(--radius-lg);
+   733→  border: 1px solid rgba(255, 255, 255, 0.08);
+   734→  background:
+   735→    linear-gradient(180deg, rgba(255, 255, 255, 0.045), transparent 32%),
+   736→    var(--surface-soft);
+   737→  box-shadow: var(--shadow-sm);
+   738→  transition:
+   739→    transform 180ms ease,
+   740→    border-color 180ms ease,
+   741→    background 180ms ease,
+   742→    box-shadow 180ms ease;
+   743→}
+   744→
+   745→.question-bank-item.is-grid {
+   746→  min-height: 198px;
+   747→  display: grid;
+   748→  align-content: space-between;
+   749→  gap: 12px;
+   750→  padding: 14px;
+   751→}
+   752→
+   753→.question-bank-item:hover,
+   754→.question-bank-item:focus-visible {
+   755→  transform: translateY(-2px);
+   756→  border-color: color-mix(in oklab, var(--accent) 22%, rgba(255, 255, 255, 0.08));
+   757→  box-shadow: var(--shadow-md);
+   758→}
+   759→
+   760→.question-bank-item:active {
+   761→  transform: scale(0.99);
+   762→}
+   763→
+   764→.question-bank-item-number {
+   765→  flex: 0 0 auto;
+   766→  min-width: 56px;
+   767→  padding-top: 2px;
+   768→  color: var(--accent);
+   769→  font-size: 1.5rem;
+   770→  line-height: 1;
+   771→  font-weight: 700;
+   772→  text-align: right;
+   773→}
+   774→
+   775→.question-bank-item.is-grid .question-bank-item-number {
+   776→  min-width: 0;
+   777→  padding-top: 0;
+   778→  font-size: 1.375rem;
+   779→}
+   780→
+   781→.question-bank-item-copy {
+   782→  min-width: 0;
+   783→  display: grid;
+   784→  gap: 10px;
+   785→  flex: 1;
+   786→}
+   787→
+   788→.question-bank-item.is-grid .question-bank-item-copy {
+   789→  gap: 8px;
+   790→}
+   791→
+   792→.question-bank-item-text {
+   793→  margin: 0;
+   794→  color: var(--fg);
+   795→  font-size: 0.9375rem;
+   796→  line-height: 1.95;
+   797→  display: -webkit-box;
+   798→  -webkit-line-clamp: 3;
+   799→  -webkit-box-orient: vertical;
+   800→  overflow: hidden;
+   801→}
+   802→
+   803→.question-bank-item.is-grid .question-bank-item-text {
+   804→  font-size: 0.8125rem;
+   805→  line-height: 1.8;
+   806→  -webkit-line-clamp: 5;
+   807→}
+   808→
+   809→.question-bank-item-meta,
+   810→.question-detail-meta {
+   811→  display: flex;
+   812→  flex-wrap: wrap;
+   813→  gap: 8px;
+   814→}
+   815→
+   816→.question-bank-chip,
+   817→.question-detail-chip {
+   818→  display: inline-flex;
+   819→  align-items: center;
+   820→  justify-content: center;
+   821→  min-height: 30px;
+   822→  padding: 0 12px;
+   823→  border-radius: 999px;
+   824→  border: 1px solid rgba(255, 255, 255, 0.08);
+   825→  background: rgba(255, 255, 255, 0.04);
+   826→  color: var(--muted);
+   827→  font-size: 0.75rem;
+   828→  line-height: 1.2;
+   829→}
+   830→
+   831→.question-bank-chip.is-type,
+   832→.question-detail-chip.is-accent {
+   833→  color: var(--accent);
+   834→  border-color: color-mix(in oklab, var(--accent) 22%, rgba(255, 255, 255, 0.08));
+   835→  background: color-mix(in oklab, var(--accent) 9%, rgba(255, 255, 255, 0.04));
+   836→}
+   837→
+   838→.question-bank-chip.is-soft,
+   839→.question-detail-chip.is-soft {
+   840→  color: var(--muted-soft);
+   841→}
+   842→
+   843→.question-detail-chip.is-source {
+   844→  color: var(--fg);
+   845→  background: color-mix(in oklab, var(--accent) 7%, rgba(255, 255, 255, 0.04));
+   846→}
+   847→
+   848→.question-detail-card {
+   849→  display: grid;
+   850→  gap: 14px;
+   851→  padding: 18px;
+   852→  border-radius: var(--radius-xl);
+   853→  border: 1px solid rgba(255, 255, 255, 0.08);
+   854→  background:
+   855→    linear-gradient(180deg, rgba(255, 255, 255, 0.045), transparent 26%),
+   856→    var(--surface-soft);
+   857→  box-shadow: var(--shadow-md);
+   858→}
+   859→
+   860→.question-detail-card-title {
+   861→  margin: 0;
+   862→  font-size: 1.125rem;
+   863→  line-height: 1.4;
+   864→  font-weight: 600;
+   865→}
+   866→
+   867→.question-detail-rich-text {
+   868→  display: grid;
+   869→  gap: 10px;
+   870→}
+   871→
+   872→.question-detail-rich-text p {
+   873→  margin: 0;
+   874→  color: var(--fg);
+   875→  font-size: 0.9375rem;
+   876→  line-height: 2;
+   877→}
+   878→
+   879→.question-answer-rows {
+   880→  display: grid;
+   881→  gap: 10px;
+   882→}
+   883→
+   884→.question-answer-row {
+   885→  display: flex;
+   886→  align-items: flex-start;
+   887→  justify-content: space-between;
+   888→  gap: 12px;
+   889→  padding: 12px 14px;
+   890→  border-radius: 18px;
+   891→  background: rgba(255, 255, 255, 0.035);
+   892→  border: 1px solid rgba(255, 255, 255, 0.06);
+   893→}
+   894→
+   895→.question-answer-row.is-block {
+   896→  display: grid;
+   897→  gap: 8px;
+   898→}
+   899→
+   900→.question-answer-label {
+   901→  flex: 0 0 auto;
+   902→  color: var(--muted-soft);
+   903→  font-size: 0.75rem;
+   904→  font-weight: 500;
+   905→}
+   906→
+   907→.question-answer-value {
+   908→  min-width: 0;
+   909→  color: var(--fg);
+   910→  font-size: 0.875rem;
+   911→  line-height: 1.95;
+   912→  text-align: right;
+   913→}
+   914→
+   915→.question-answer-value p {
+   916→  margin: 0;
+   917→}
+   918→
+   919→.question-answer-list {
+   920→  margin: 0;
+   921→  padding: 0 18px 0 0;
+   922→  display: grid;
+   923→  gap: 8px;
+   924→  color: var(--fg);
+   925→  font-size: 0.875rem;
+   926→  line-height: 1.95;
+   927→}
+   928→
+   929→.question-answer-list.is-ordered {
+   930→  padding-right: 22px;
+   931→}
+   932→
+   933→.question-mcq-options {
+   934→  display: grid;
+   935→  gap: 10px;
+   936→}
+   937→
+   938→.question-mcq-option {
+   939→  display: flex;
+   940→  align-items: center;
+   941→  gap: 12px;
+   942→  padding: 12px 14px;
+   943→  border-radius: 18px;
+   944→  border: 1px solid rgba(255, 255, 255, 0.08);
+   945→  background: rgba(255, 255, 255, 0.03);
+   946→  color: var(--fg);
+   947→  font-size: 0.875rem;
+   948→  line-height: 1.8;
+   949→}
+   950→
+   951→.question-mcq-option.is-correct {
+   952→  border-color: color-mix(in oklab, var(--accent) 30%, rgba(255, 255, 255, 0.08));
+   953→  background: color-mix(in oklab, var(--accent) 9%, rgba(255, 255, 255, 0.03));
+   954→}
+   955→
+   956→.question-mcq-marker {
+   957→  width: 18px;
+   958→  height: 18px;
+   959→  display: grid;
+   960→  place-items: center;
+   961→  color: var(--accent);
+   962→  flex: 0 0 auto;
+   963→}
+   964→
+   965→.question-mcq-marker .app-icon {
+   966→  width: 16px;
+   967→  height: 16px;
+   968→}
+   969→
+   970→.question-comparison-columns {
+   971→  display: grid;
+   972→  gap: 12px;
+   973→}
+   974→
+   975→.question-comparison-column {
+   976→  display: grid;
+   977→  gap: 12px;
+   978→  padding: 14px;
+   979→  border-radius: 20px;
+   980→  border: 1px solid rgba(255, 255, 255, 0.06);
+   981→  background: rgba(255, 255, 255, 0.03);
+   982→}
+   983→
+   984→.question-comparison-column-title {
+   985→  margin: 0;
+   986→  font-size: 1rem;
+   987→  line-height: 1.4;
+   988→}
+   989→
+   990→.question-comparison-table-wrap {
+   991→  overflow-x: auto;
+   992→  border-radius: 20px;
+   993→  border: 1px solid rgba(255, 255, 255, 0.08);
+   994→}
+   995→
+   996→.question-comparison-table {
+   997→  width: 100%;
+   998→  border-collapse: collapse;
+   999→  min-width: 520px;
+  1000→  background: rgba(255, 255, 255, 0.02);
+  1001→}
+  1002→
+  1003→.question-comparison-table th,
+  1004→.question-comparison-table td {
+  1005→  padding: 14px;
+  1006→  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  1007→  text-align: right;
+  1008→  vertical-align: top;
+  1009→  font-size: 0.8125rem;
+  1010→  line-height: 1.9;
+  1011→}
+  1012→
+  1013→.question-comparison-table th {
+  1014→  color: var(--fg);
+  1015→  font-weight: 600;
+  1016→  background: rgba(255, 255, 255, 0.03);
+  1017→}
+  1018→
+  1019→.question-appearance-list {
+  1020→  display: grid;
+  1021→  gap: 10px;
+  1022→}
+  1023→
+  1024→.question-appearance-item {
+  1025→  display: grid;
+  1026→  gap: 10px;
+  1027→  padding: 14px;
+  1028→  border-radius: 20px;
+  1029→  border: 1px solid rgba(255, 255, 255, 0.06);
+  1030→  background: rgba(255, 255, 255, 0.03);
+  1031→}
+  1032→
+  1033→.question-detail-empty {
+  1034→  min-height: 260px;
+  1035→}
+  1036→
+  1037→.subject-action-card {
+  1038→  display: grid;
+  1039→  gap: 14px;
+  1040→  padding: 18px;
+  1041→  border-radius: var(--radius-lg);
+  1042→}
+  1043→
+  1044→.subject-action-card.is-secondary {
+  1045→  background:
+  1046→    linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 28%),
+  1047→    var(--surface-soft);
+  1048→}
+  1049→
+  1050→.subject-action-card.is-wide {
+  1051→  background:
+  1052→    linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 24%),
+  1053→    var(--surface-soft);
+  1054→}
+  1055→
+  1056→.subject-action-card.is-diagram {
+  1057→  border-color: color-mix(in oklab, var(--accent) 28%, rgba(255, 255, 255, 0.08));
+  1058→  background:
+  1059→    linear-gradient(180deg, color-mix(in oklab, var(--accent) 10%, transparent), transparent 58%),
+  1060→    var(--surface-soft);
+  1061→}
+  1062→
+  1063→@media (min-width: 700px) {
+  1064→  .subjects-grid,
+  1065→  .subject-actions-grid {
+  1066→    grid-template-columns: repeat(2, minmax(0, 1fr));
+  1067→  }
+  1068→
+  1069→  .subject-actions-single {
+  1070→    grid-template-columns: 1fr;
+  1071→  }
+  1072→
+  1073→  .question-comparison-columns {
+  1074→    grid-template-columns: repeat(2, minmax(0, 1fr));
+  1075→  }
+  1076→}
+  1077→
+  1078→@media (max-width: 420px) {
+  1079→  .question-bank-menu-panel {
+  1080→    width: calc(100vw - 56px);
+  1081→  }
+  1082→}
+  1083→
+  1084→/* ============================================
+  1085→   Materials List — Horizontal Cards
+  1086→   Vertical list, full-width, compact height
+  1087→   ============================================ */
+  1088→
+  1089→.materials-list {
+  1090→  display: flex;
+  1091→  flex-direction: column;
+  1092→  gap: 16px;
+  1093→}
+  1094→
+  1095→.material-card {
+  1096→  display: flex;
+  1097→  align-items: center;
+  1098→  gap: 16px;
+  1099→  width: 100%;
+  1100→  min-height: 120px;
+  1101→  max-height: 140px;
+  1102→  padding: 18px 20px;
+  1103→  border-radius: 24px;
+  1104→  border: 1px solid color-mix(in oklab, var(--accent) 20%, rgba(255, 255, 255, 0.08));
+  1105→  background:
+  1106→    linear-gradient(180deg, color-mix(in oklab, var(--accent) 8%, rgba(255, 255, 255, 0.06)), transparent 30%),
+  1107→    color-mix(in oklab, var(--accent) 6%, var(--surface-strong));
+  1108→  backdrop-filter: blur(24px);
+  1109→  -webkit-backdrop-filter: blur(24px);
+  1110→  box-shadow: var(--shadow-md);
+  1111→  text-align: right;
+  1112→  cursor: pointer;
+  1113→  overflow: hidden;
+  1114→  transition:
+  1115→    transform 200ms cubic-bezier(0.22, 1, 0.36, 1),
+  1116→    border-color 200ms ease,
+  1117→    box-shadow 200ms ease;
+  1118→}
+  1119→
+  1120→.material-card:hover,
+  1121→.material-card:focus-visible {
+  1122→  transform: translateY(-2px);
+  1123→  border-color: color-mix(in oklab, var(--accent) 34%, rgba(255, 255, 255, 0.12));
+  1124→  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.28);
+  1125→}
+  1126→
+  1127→.material-card:active {
+  1128→  transform: scale(0.985);
+  1129→}
+  1130→
+  1131→/* Icon — rounded square on the right (RTL) */
+  1132→.material-card-icon {
+  1133→  flex-shrink: 0;
+  1134→  width: 64px;
+  1135→  height: 64px;
+  1136→  border-radius: 20px;
+  1137→  display: grid;
+  1138→  place-items: center;
+  1139→  background: color-mix(in oklab, var(--accent) 14%, rgba(255, 255, 255, 0.04));
+  1140→  border: 1px solid color-mix(in oklab, var(--accent) 24%, rgba(255, 255, 255, 0.08));
+  1141→  color: var(--accent);
+  1142→}
+  1143→
+  1144→.material-card-icon .app-icon {
+  1145→  width: 30px;
+  1146→  height: 30px;
+  1147→  stroke-width: 1.6;
+  1148→}
+  1149→
+  1150→/* Body — title + description in the middle */
+  1151→.material-card-body {
+  1152→  flex: 1;
+  1153→  min-width: 0;
+  1154→  display: flex;
+  1155→  flex-direction: column;
+  1156→  gap: 4px;
+  1157→}
+  1158→
+  1159→.material-card-title {
+  1160→  margin: 0;
+  1161→  font-size: 1.0625rem;
+  1162→  font-weight: 600;
+  1163→  line-height: 1.3;
+  1164→  color: var(--fg);
+  1165→  white-space: nowrap;
+  1166→  overflow: hidden;
+  1167→  text-overflow: ellipsis;
+  1168→}
+  1169→
+  1170→.material-card-desc {
+  1171→  margin: 0;
+  1172→  font-size: 0.8125rem;
+  1173→  line-height: 1.5;
+  1174→  color: var(--muted);
+  1175→  display: -webkit-box;
+  1176→  -webkit-line-clamp: 2;
+  1177→  -webkit-box-orient: vertical;
+  1178→  overflow: hidden;
+  1179→}
+  1180→
+  1181→/* Meta — status badge + arrow on the left (RTL) */
+  1182→.material-card-meta {
+  1183→  flex-shrink: 0;
+  1184→  display: flex;
+  1185→  flex-direction: column;
+  1186→  align-items: center;
+  1187→  gap: 10px;
+  1188→}
+  1189→
+  1190→.material-card-arrow {
+  1191→  width: 32px;
+  1192→  height: 32px;
+  1193→  display: grid;
+  1194→  place-items: center;
+  1195→  border-radius: 12px;
+  1196→  color: var(--accent);
+  1197→  background: color-mix(in oklab, var(--accent) 7%, rgba(255, 255, 255, 0.04));
+  1198→  border: 1px solid color-mix(in oklab, var(--accent) 16%, rgba(255, 255, 255, 0.06));
+  1199→  transform: rotate(90deg);
+  1200→  transition: transform 200ms ease;
+  1201→}
+  1202→
+  1203→.material-card:hover .material-card-arrow,
+  1204→.material-card:focus-visible .material-card-arrow {
+  1205→  transform: rotate(90deg) translateX(-2px);
+  1206→}
+  1207→
+  1208→.material-card-arrow .app-icon {
+  1209→  width: 14px;
+  1210→  height: 14px;
+  1211→}
+  1212→
+  1213→/* Light theme overrides */
+  1214→body[data-theme="light"] .material-card {
+  1215→  border-color: color-mix(in oklab, var(--accent) 22%, rgba(35, 28, 18, 0.10));
+  1216→  box-shadow: 0 12px 28px rgba(35, 28, 18, 0.06);
+  1217→}
+  1218→
+  1219→body[data-theme="light"] .material-card:hover,
+  1220→body[data-theme="light"] .material-card:focus-visible {
+  1221→  box-shadow: 0 18px 38px rgba(35, 28, 18, 0.10);
+  1222→}
+  1223→
+  1224→body[data-theme="light"] .material-card-icon {
+  1225→  background: color-mix(in oklab, var(--accent) 12%, rgba(35, 28, 18, 0.03));
+  1226→  border-color: color-mix(in oklab, var(--accent) 22%, rgba(35, 28, 18, 0.08));
+  1227→}
+  1228→

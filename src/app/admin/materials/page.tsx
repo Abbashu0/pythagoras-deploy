@@ -7,37 +7,62 @@
  * Edits the student app's list of subjects (8 entries). Persists to
  * localStorage under `pythagoras-admin-materials`.
  *
- * Same layout as the Navigation manager (provided by `<AdminPageLayout>`):
- *   - Left: reorderable list of materials (FLIP animation, move up/down).
- *   - Middle: editor (name input + icon picker + available toggle)
- *             with the pending-save pattern.
- *   - Right: shared `ActivityHistory`.
- *   - Bottom: `<LiveCardGridPreview variant="grid">` showing the materials
- *             as a card grid (matching the student app's materials page).
+ * Layout (provided by `<AdminPageLayout>` — 12-col grid, RTL):
  *
- * Activity logging routes through `getAdminStore().appendHistoryEntry(...)`
- * with the `logPrefix: "مواد"` so the right-hand panel distinguishes
- * "مواد: الأحياء" from "أدوات: بومودورو".
+ *   ┌──────────────────────────────────────────────────────────────────┐
+ *   │  [→ لوحة التحكم]   "إدارة المواد"      [☀ / ☾ toggle]            │
+ *   │                    "تعديل صور وعناوين المواد"                    │
+ *   ├──────────────────────┬─────────────────────┬──────────────────────┤
+ *   │  col-span-5          │  col-span-4         │  col-span-3 (sticky) │
+ *   │  Materials list      │  MaterialEditor     │  ActivityHistory     │
+ *   │  (FLIP reorder,      │  (image upload +    │  (shared — auto by   │
+ *   │   image thumbnails)  │   positioner +      │   AdminPageLayout)   │
+ *   │                      │   AR/EN titles +    │                      │
+ *   │                      │   available toggle) │                      │
+ *   ├──────────────────────┴─────────────────────┴──────────────────────┤
+ *   │  Bottom strip:                                                    │
+ *   │   - Live card preview (single material, 16:9, matches student UI)│
+ *   │   - Fade Intensity slider (0–100%, default 72%)                   │
+ *   └──────────────────────────────────────────────────────────────────┘
+ *
+ * State:
+ *   - selectedId / draftItem / isImageEditing: pure UI state.
+ *   - The store subscription (`useMaterialsStore`) re-renders on every
+ *     item change AND on every fadeIntensity change (since both live in
+ *     the same snapshot).
+ *
+ * FLIP animation:
+ *   - `useFlipReorder(listRef, flipItems, 300)` where
+ *     `flipItems = isImageEditing ? [] : sorted.map(i => i.id)`.
+ *   - We pass `[]` while the user is dragging the image positioner so the
+ *     list items' positions are captured AFTER the drag ends — otherwise
+ *     the live transform updates would constantly invalidate the snapshot.
  */
 
 import { useMemo, useRef, useState } from "react";
-import { BookOpen } from "lucide-react";
+import { BookOpen, Eye } from "lucide-react";
 import { AdminPageLayout } from "@/components/admin/AdminPageLayout";
-import { SimpleListItem } from "@/components/admin/SimpleListItem";
-import { SimpleItemEditor, EditableItem } from "@/components/admin/SimpleItemEditor";
-import { LiveCardGridPreview } from "@/components/admin/LiveCardGridPreview";
+import { MaterialListItem } from "@/components/admin/MaterialListItem";
+import { MaterialEditor } from "@/components/admin/MaterialEditor";
+import { MaterialCardPreview } from "@/components/admin/MaterialCardPreview";
+import { FadeIntensitySettings } from "@/components/admin/FadeIntensitySettings";
 import { useToast } from "@/hooks/use-toast";
 import { useFlipReorder } from "@/lib/admin/use-flip-reorder";
 import { useMaterialsStore } from "@/lib/admin/use-content-store";
-import { getMaterialsStore, ContentItem } from "@/lib/admin/content-store";
+import {
+  getMaterialsStore,
+  type ContentItem,
+} from "@/lib/admin/content-store";
+import type { MaterialPatch } from "@/components/admin/MaterialEditor";
 
 export default function AdminMaterialsPage() {
   const { toast } = useToast();
-  const { items, lastStorageError } = useMaterialsStore();
+  const { items, fadeIntensity, lastStorageError } = useMaterialsStore();
   const store = getMaterialsStore();
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [draft, setDraft] = useState<EditableItem | null>(null);
+  const [draftItem, setDraftItem] = useState<ContentItem | null>(null);
+  const [isImageEditing, setIsImageEditing] = useState(false);
 
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -46,7 +71,12 @@ export default function AdminMaterialsPage() {
     [items]
   );
 
-  const flipItems = useMemo(() => sorted.map((i) => i.id), [sorted]);
+  // FLIP — pass [] while image is being dragged so the snapshot isn't
+  // invalidated by live transform updates inside the editor.
+  const flipItems = useMemo(
+    () => (isImageEditing ? [] : sorted.map((i) => i.id)),
+    [sorted, isImageEditing]
+  );
   useFlipReorder(listRef, flipItems, 300);
 
   // Defensive: clear selection if the selected item disappears.
@@ -57,27 +87,29 @@ export default function AdminMaterialsPage() {
   const [trackedExists, setTrackedExists] = useState(true);
   if (selectedStillExists !== trackedExists) {
     setTrackedExists(selectedStillExists);
-    if (!selectedStillExists) setSelectedId(null);
+    if (!selectedStillExists) {
+      setSelectedId(null);
+      setDraftItem(null);
+    }
   }
 
   const selectedItem = sorted.find((i) => i.id === selectedId) ?? null;
 
+  // The preview shows the draft if there are unsaved changes, otherwise
+  // the committed selected item. When nothing is selected, fall back to
+  // the first item so the preview is never blank on first load.
+  const previewItem =
+    draftItem ??
+    selectedItem ??
+    (sorted.length > 0 ? sorted[0] : null);
+
+  // ---------- Mutations ----------
   const handleSave = (
     id: string,
-    patch: { label?: string; icon?: string; enabled?: boolean },
+    patch: MaterialPatch,
     changeSummary: string[]
   ) => {
-    // Translate the generic `enabled` patch field back into the
-    // content-store's `available` field name.
-    const contentPatch: {
-      label?: string;
-      icon?: string;
-      available?: boolean;
-    } = {};
-    if (patch.label !== undefined) contentPatch.label = patch.label;
-    if (patch.icon !== undefined) contentPatch.icon = patch.icon;
-    if (patch.enabled !== undefined) contentPatch.available = patch.enabled;
-    store.commitContentEdit(id, contentPatch, changeSummary);
+    store.commitContentEdit(id, patch, changeSummary);
     toast({
       title: "تم حفظ المادة",
       description:
@@ -103,10 +135,18 @@ export default function AdminMaterialsPage() {
     });
   };
 
+  const handleFadeSave = (value: number) => {
+    store.setFadeIntensity(value);
+    toast({
+      title: "تم حفظ شدة التظليل",
+      description: `القيمة الجديدة: ${Math.round(value * 100)}%`,
+    });
+  };
+
   return (
     <AdminPageLayout
       title="إدارة المواد"
-      subtitle="تعديل ترتيب وأيقونات المواد الدراسية"
+      subtitle="تعديل صور وعناوين المواد الدراسية"
       loadStore={() => store.loadFromStorage()}
       storageError={lastStorageError}
       list={
@@ -130,15 +170,12 @@ export default function AdminMaterialsPage() {
                 لا توجد مواد.
               </div>
             ) : (
-              sorted.map((item) => (
+              sorted.map((item, idx) => (
                 <div key={item.id} data-flip-key={item.id}>
-                  <SimpleListItem
-                    id={item.id}
-                    label={item.label}
-                    icon={item.icon}
-                    order={item.order}
+                  <MaterialListItem
+                    item={item}
+                    order={idx}
                     total={sorted.length}
-                    enabled={item.available}
                     isSelected={item.id === selectedId}
                     onSelect={() => setSelectedId(item.id)}
                     onMoveUp={() => handleMoveUp(item)}
@@ -150,34 +187,61 @@ export default function AdminMaterialsPage() {
           </div>
 
           <div className="border-t px-4 py-2.5 text-[11px] leading-relaxed text-muted-foreground">
-            الترتيب يطابق ترتيب ظهور المواد في صفحة المواد للطلاب.
+            الترتيب يطابق ترتيب ظهور المواد في صفحة المواد للطلاب. كل بطاقة
+            تظهر كصورة كاملة بنسبة 16:9.
           </div>
         </div>
       }
       editor={
         <div style={{ minHeight: 480 }}>
-          <SimpleItemEditor
+          <MaterialEditor
             item={selectedItem}
-            enabledField="available"
-            title="محرر المادة"
-            itemNoun="مادة"
             onSave={handleSave}
-            onClose={() => setSelectedId(null)}
-            onDraftChange={setDraft}
+            onClose={() => {
+              setSelectedId(null);
+              setDraftItem(null);
+            }}
+            onDraftChange={setDraftItem}
+            onImageEditingChange={setIsImageEditing}
           />
         </div>
       }
       preview={
-        <LiveCardGridPreview
-          items={
-            draft
-              ? sorted.map((i) => (i.id === draft.id ? draft : i))
-              : sorted
-          }
-          activeId={selectedId}
-          headerLabel="شبكة المواد للطلاب"
-          variant="grid"
-        />
+        <div className="grid gap-6 lg:grid-cols-2">
+          {/* Live single-card preview — matches the student app's
+              full-image material card exactly. */}
+          <div className="rounded-xl border bg-card p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Eye className="h-4 w-4 text-muted-foreground" />
+                <h2 className="text-sm font-semibold text-foreground">
+                  معاينة البطاقة
+                </h2>
+              </div>
+              <span className="text-[10px] text-muted-foreground">
+                مطابقة لما يراه الطلاب
+              </span>
+            </div>
+            <div className="flex justify-center rounded-lg bg-muted/20 p-4">
+              <div className="w-full max-w-md">
+                <MaterialCardPreview
+                  item={previewItem}
+                  fadeIntensity={fadeIntensity}
+                />
+              </div>
+            </div>
+            <p className="mt-3 text-center text-[11px] leading-relaxed text-muted-foreground">
+              التغييرات غير المحفوظة تظهر هنا فوراً. شدة التظليل تنطبق على جميع
+              البطاقات.
+            </p>
+          </div>
+
+          {/* Fade intensity slider — same pattern as CarouselSettings */}
+          <FadeIntensitySettings
+            value={fadeIntensity}
+            onSave={handleFadeSave}
+          />
+        </div>
       }
     />
   );

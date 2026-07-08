@@ -30,14 +30,31 @@ import {
   RECOMMENDED_BANNER_SPLIT,
   BannerType,
 } from "@/lib/admin/banner-model";
-import { compressImage, getCompressionTarget } from "@/lib/admin/image-compress";
+import {
+  compressImage,
+  getCompressionTarget,
+  type CompressOptions,
+} from "@/lib/admin/image-compress";
 
 interface Props {
   onUploaded: (dataUrl: string) => void;
   currentImage?: string;
   onClear?: () => void;
-  /** Which recommended size + compression target to use. Defaults to "full". */
+  /** Which recommended size + compression target to use. Defaults to "full".
+   *  Ignored when `compressionTarget` is provided. */
   bannerType?: BannerType;
+  /**
+   * Custom compression target — overrides the banner-type-based defaults.
+   * Use this for non-banner contexts (e.g. material cards with a 16:9
+   * aspect ratio need a wider target than the 5:2 banner).
+   */
+  compressionTarget?: CompressOptions;
+  /**
+   * Custom "recommended size" hint text shown under the drop zone.
+   * Overrides the auto-generated "الحجم الموصى به (بانر {type}): ..." line.
+   * Use this when reusing the uploader outside the banner context.
+   */
+  recommendedHint?: string;
 }
 
 export function UploadArea({
@@ -45,6 +62,8 @@ export function UploadArea({
   currentImage,
   onClear,
   bannerType = "full",
+  compressionTarget,
+  recommendedHint,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -75,9 +94,10 @@ export function UploadArea({
       setError(null);
       setCompressing(true);
       try {
-        // Compress the image to the recommended banner dimensions.
-        // This prevents localStorage quota issues when storing 5 banners.
-        const target = getCompressionTarget(bannerType);
+        // Compress the image. If a custom compressionTarget is provided
+        // (e.g. for material cards), use it directly; otherwise fall back
+        // to the banner-type-based defaults.
+        const target = compressionTarget ?? getCompressionTarget(bannerType);
         const compressed = await compressImage(file, target);
         onUploaded(compressed);
       } catch {
@@ -101,7 +121,7 @@ export function UploadArea({
         setCompressing(false);
       }
     },
-    [onUploaded, validate, bannerType]
+    [onUploaded, validate, bannerType, compressionTarget]
   );
 
   const onDrop = useCallback(
@@ -190,15 +210,21 @@ export function UploadArea({
         />
       </div>
 
-      {/* Recommended size hint — adapts to the current banner type */}
+      {/* Recommended size hint — adapts to the current banner type,
+          or uses the custom `recommendedHint` when provided (for
+          non-banner contexts like material cards). */}
       <div className="flex items-start gap-2 rounded-lg bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
         <ImageIcon className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
-        <span>
-          الحجم الموصى به (بانر {typeLabel}): {rec.width}×{rec.height}px
-          (نسبة {rec.aspectRatio}) — تصدير {rec.retinaScale}× retina.
-          <br />
-          يتم ضغط الصور تلقائياً عند الرفع لتوفير المساحة.
-        </span>
+        {recommendedHint ? (
+          <span>{recommendedHint}</span>
+        ) : (
+          <span>
+            الحجم الموصى به (بانر {typeLabel}): {rec.width}×{rec.height}px
+            (نسبة {rec.aspectRatio}) — تصدير {rec.retinaScale}× retina.
+            <br />
+            يتم ضغط الصور تلقائياً عند الرفع لتوفير المساحة.
+          </span>
+        )}
       </div>
 
       {error && (
