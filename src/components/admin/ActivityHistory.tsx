@@ -99,8 +99,8 @@ export function ActivityHistory() {
     <div
       className="flex flex-col rounded-xl border bg-card overflow-hidden"
       style={{
-        height: "calc(100vh - 120px)",
-        maxHeight: "calc(100vh - 120px)",
+        height: "600px",
+        maxHeight: "600px",
         minWidth: "280px",
         position: "sticky",
         top: "1rem",

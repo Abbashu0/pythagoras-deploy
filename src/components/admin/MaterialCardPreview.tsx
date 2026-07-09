@@ -147,19 +147,6 @@ export function MaterialCardPreview({
         }}
       />
 
-      {/* State badge — top-left */}
-      <div className="absolute left-4 top-4 z-10">
-        <span
-          className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${
-            available
-              ? "bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-400/40"
-              : "bg-amber-500/20 text-amber-200 ring-1 ring-amber-400/40"
-          }`}
-        >
-          {available ? "متاح الآن" : "قريباً"}
-        </span>
-      </div>
-
       {/* Centered title block — vertical position adjustable via slider */}
       <div
         className="pointer-events-none absolute inset-x-5 z-10 text-center"
