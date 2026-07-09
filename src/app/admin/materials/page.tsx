@@ -269,7 +269,7 @@ export default function AdminMaterialsPage() {
               </span>
             </div>
             <div className="flex justify-center rounded-lg bg-muted/20 p-4">
-              <div className="w-full max-w-md">
+              <div style={{ width: "378px", maxWidth: "100%" }}>
                 <MaterialCardPreview
                   image={previewItem?.image}
                   gradient={previewItem?.gradient}
