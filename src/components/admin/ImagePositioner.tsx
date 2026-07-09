@@ -73,6 +73,7 @@ interface Props {
 const MIN_SCALE = 1;
 const MAX_SCALE = 5;
 const SCALE_STEP = 0.25;
+const WHEEL_ZOOM_STEP = 0.1; // Smaller step for smooth wheel zoom
 /** Max offset in % (±150%) — wide range for precise editing. */
 const MAX_OFFSET = 150;
 /** Long-press arrow button repeat interval (ms). */
@@ -323,6 +324,28 @@ export function ImagePositioner({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+  }, [imageSrc, onChange]);
+
+  // ---- Ctrl + Mouse Wheel zoom ----
+  // When the user hovers over the positioner frame and presses Ctrl + wheel,
+  // zoom in/out smoothly. Prevents page zoom while over the frame.
+  useEffect(() => {
+    const frame = frameRef.current;
+    if (!frame || !imageSrc) return;
+
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      const v = valueRef.current;
+      const delta = e.deltaY < 0 ? WHEEL_ZOOM_STEP : -WHEEL_ZOOM_STEP;
+      onChange({
+        ...v,
+        scale: clampScale(+(v.scale + delta).toFixed(2)),
+      });
+    };
+
+    frame.addEventListener("wheel", onWheel, { passive: false });
+    return () => frame.removeEventListener("wheel", onWheel);
   }, [imageSrc, onChange]);
 
   // Activate keyboard shortcuts on hover/focus.

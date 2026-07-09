@@ -97,8 +97,14 @@ export function ActivityHistory() {
 
   return (
     <div
-      className="flex flex-col rounded-xl border bg-card"
-      style={{ maxHeight: "calc(100vh - 120px)", overflow: "hidden" }}
+      className="flex flex-col rounded-xl border bg-card overflow-hidden"
+      style={{
+        height: "calc(100vh - 120px)",
+        maxHeight: "calc(100vh - 120px)",
+        minWidth: "280px",
+        position: "sticky",
+        top: "1rem",
+      }}
     >
       {/* Header — fixed at top */}
       <div className="flex flex-shrink-0 items-center justify-between border-b p-4">

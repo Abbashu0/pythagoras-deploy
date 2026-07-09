@@ -21,15 +21,18 @@
  *   │                      │   available toggle) │                      │
  *   ├──────────────────────┴─────────────────────┴──────────────────────┤
  *   │  Bottom strip:                                                    │
- *   │   - Live card preview (single material, 16:9, matches student UI)│
- *   │   - Fade Intensity slider (0–100%, default 72%)                   │
+ *   │   - Live card preview (single material, matches student UI)      │
+ *   │   - Appearance Settings (card height, fade, text scale, position)│
  *   └──────────────────────────────────────────────────────────────────┘
  *
  * State:
  *   - selectedId / draftItem / isImageEditing: pure UI state.
+ *   - draftSettings: working copy of the four global appearance
+ *     settings while the user drags the sliders. null = no unsaved
+ *     changes (preview falls back to the committed snapshot values).
  *   - The store subscription (`useMaterialsStore`) re-renders on every
- *     item change AND on every fadeIntensity change (since both live in
- *     the same snapshot).
+ *     item change AND on every settings change (both live in the same
+ *     snapshot).
  *
  * FLIP animation:
  *   - `useFlipReorder(listRef, flipItems, 300)` where
@@ -45,24 +48,40 @@ import { AdminPageLayout } from "@/components/admin/AdminPageLayout";
 import { MaterialListItem } from "@/components/admin/MaterialListItem";
 import { MaterialEditor } from "@/components/admin/MaterialEditor";
 import { MaterialCardPreview } from "@/components/admin/MaterialCardPreview";
-import { FadeIntensitySettings } from "@/components/admin/FadeIntensitySettings";
+import { AppearanceSettings } from "@/components/admin/AppearanceSettings";
 import { useToast } from "@/hooks/use-toast";
 import { useFlipReorder } from "@/lib/admin/use-flip-reorder";
 import { useMaterialsStore } from "@/lib/admin/use-content-store";
 import {
   getMaterialsStore,
   type ContentItem,
+  type MaterialsSettings,
 } from "@/lib/admin/content-store";
 import type { MaterialPatch } from "@/components/admin/MaterialEditor";
 
 export default function AdminMaterialsPage() {
   const { toast } = useToast();
-  const { items, fadeIntensity, lastStorageError } = useMaterialsStore();
+  const {
+    items,
+    fadeIntensity,
+    textVerticalPosition,
+    textScale,
+    cardHeight,
+    lastStorageError,
+  } = useMaterialsStore();
   const store = getMaterialsStore();
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draftItem, setDraftItem] = useState<ContentItem | null>(null);
   const [isImageEditing, setIsImageEditing] = useState(false);
+
+  // Working draft of the four global appearance settings. null = no
+  // unsaved changes — the live preview falls back to the committed
+  // snapshot values. Setting a non-null value makes the preview update
+  // in real-time as the user drags the sliders.
+  const [draftSettings, setDraftSettings] = useState<MaterialsSettings | null>(
+    null
+  );
 
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -103,6 +122,18 @@ export default function AdminMaterialsPage() {
     selectedItem ??
     (sorted.length > 0 ? sorted[0] : null);
 
+  // Committed (saved) appearance settings from the snapshot.
+  const committedSettings: MaterialsSettings = {
+    fadeIntensity,
+    textVerticalPosition,
+    textScale,
+    cardHeight,
+  };
+
+  // Effective = draft (if unsaved changes) otherwise committed.
+  const effectiveSettings: MaterialsSettings =
+    draftSettings ?? committedSettings;
+
   // ---------- Mutations ----------
   const handleSave = (
     id: string,
@@ -135,12 +166,26 @@ export default function AdminMaterialsPage() {
     });
   };
 
-  const handleFadeSave = (value: number) => {
-    store.setFadeIntensity(value);
+  // ---------- Appearance settings handlers ----------
+  // Plain functions (no useCallback) — matches the pattern used by the
+  // item-save/move handlers above. The store singleton is stable and
+  // `toast` is stable per `useToast`, so memoization isn't necessary.
+  const handleSettingsDraftChange = (next: MaterialsSettings) => {
+    setDraftSettings(next);
+  };
+
+  const handleSettingsSave = () => {
+    if (!draftSettings) return;
+    store.setMaterialsSettings(draftSettings);
+    setDraftSettings(null);
     toast({
-      title: "تم حفظ شدة التظليل",
-      description: `القيمة الجديدة: ${Math.round(value * 100)}%`,
+      title: "تم حفظ إعدادات المظهر",
+      description: "ستظهر التغييرات على جميع بطاقات المواد للطلاب.",
     });
+  };
+
+  const handleSettingsReset = () => {
+    setDraftSettings(null);
   };
 
   return (
@@ -188,7 +233,7 @@ export default function AdminMaterialsPage() {
 
           <div className="border-t px-4 py-2.5 text-[11px] leading-relaxed text-muted-foreground">
             الترتيب يطابق ترتيب ظهور المواد في صفحة المواد للطلاب. كل بطاقة
-            تظهر كصورة كاملة بنسبة 16:9.
+            تظهر كصورة كاملة بارتفاع قابل للتعديل من إعدادات المظهر.
           </div>
         </div>
       }
@@ -209,7 +254,8 @@ export default function AdminMaterialsPage() {
       preview={
         <div className="grid gap-6 lg:grid-cols-2">
           {/* Live single-card preview — matches the student app's
-              full-image material card exactly. */}
+              full-image material card exactly. Updates in real-time
+              as the user drags the appearance sliders. */}
           <div className="rounded-xl border bg-card p-4">
             <div className="mb-3 flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -225,21 +271,32 @@ export default function AdminMaterialsPage() {
             <div className="flex justify-center rounded-lg bg-muted/20 p-4">
               <div className="w-full max-w-md">
                 <MaterialCardPreview
-                  item={previewItem}
-                  fadeIntensity={fadeIntensity}
+                  image={previewItem?.image}
+                  gradient={previewItem?.gradient}
+                  transform={previewItem?.transform}
+                  title={previewItem?.label}
+                  englishTitle={previewItem?.englishTitle}
+                  available={previewItem?.available ?? true}
+                  fadeIntensity={effectiveSettings.fadeIntensity}
+                  textVerticalPosition={effectiveSettings.textVerticalPosition}
+                  textScale={effectiveSettings.textScale}
+                  cardHeight={effectiveSettings.cardHeight}
                 />
               </div>
             </div>
             <p className="mt-3 text-center text-[11px] leading-relaxed text-muted-foreground">
-              التغييرات غير المحفوظة تظهر هنا فوراً. شدة التظليل تنطبق على جميع
-              البطاقات.
+              التغييرات غير المحفوظة تظهر هنا فوراً. إعدادات المظهر تنطبق على
+              جميع البطاقات.
             </p>
           </div>
 
-          {/* Fade intensity slider — same pattern as CarouselSettings */}
-          <FadeIntensitySettings
-            value={fadeIntensity}
-            onSave={handleFadeSave}
+          {/* Appearance Settings — 4 sliders + Save/Reset */}
+          <AppearanceSettings
+            committed={committedSettings}
+            draft={draftSettings}
+            onDraftChange={handleSettingsDraftChange}
+            onSave={handleSettingsSave}
+            onReset={handleSettingsReset}
           />
         </div>
       }

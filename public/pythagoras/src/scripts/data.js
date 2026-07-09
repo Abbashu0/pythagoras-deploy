@@ -512,18 +512,11 @@ const SUBJECT_GRADIENTS = {
  * on each material card.
  */
 const ADMIN_MATERIALS_FADE_KEY = "pythagoras-admin-materials-fade";
+const ADMIN_MATERIALS_SETTINGS_KEY = "pythagoras-admin-materials-settings";
 
 /**
  * Returns the global fade intensity for material cards (0–1).
- *
- * The admin Materials Manager exposes a slider (0–100%) whose value is
- * persisted as a decimal (e.g. 0.72 for 72%). The student app uses this
- * number directly as the alpha channel of the bottom-up black gradient
- * overlay on each material card — higher = darker bottom, more legible
- * white title text over busy images.
- *
- * Defaults to 0.72 when the admin store has never written the key, when
- * the value is missing, or when localStorage is unreadable.
+ * Defaults to 0.72.
  */
 export function getMaterialsFadeIntensity() {
   try {
@@ -534,6 +527,41 @@ export function getMaterialsFadeIntensity() {
     return val;
   } catch {
     return 0.72;
+  }
+}
+
+/**
+ * Returns all global material card appearance settings from the admin store.
+ *
+ * Settings are stored in a single JSON object in localStorage under
+ * `pythagoras-admin-materials-settings`. Each field has a sensible default
+ * so the student app works even if the admin has never been opened.
+ *
+ * Fields:
+ *   - fadeIntensity:        0–1, default 0.72. Bottom black gradient alpha.
+ *   - textVerticalPosition: -100 to +100, default 0. Vertical text offset.
+ *   - textScale:            0.8–1.4, default 1. Global text size multiplier.
+ *   - cardHeight:           160–340, default 213. Card height in pixels.
+ */
+export function getMaterialsSettings() {
+  const defaults = {
+    fadeIntensity: 0.72,
+    textVerticalPosition: 0,
+    textScale: 1,
+    cardHeight: 213,
+  };
+  try {
+    const raw = localStorage.getItem(ADMIN_MATERIALS_SETTINGS_KEY);
+    if (!raw) return defaults;
+    const parsed = JSON.parse(raw);
+    return {
+      fadeIntensity: typeof parsed.fadeIntensity === "number" ? parsed.fadeIntensity : defaults.fadeIntensity,
+      textVerticalPosition: typeof parsed.textVerticalPosition === "number" ? parsed.textVerticalPosition : defaults.textVerticalPosition,
+      textScale: typeof parsed.textScale === "number" ? parsed.textScale : defaults.textScale,
+      cardHeight: typeof parsed.cardHeight === "number" ? parsed.cardHeight : defaults.cardHeight,
+    };
+  } catch {
+    return defaults;
   }
 }
 

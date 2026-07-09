@@ -20,6 +20,30 @@
  *     `appendHistoryEntry(...)` so every admin sub-system shows up in
  *     the same `ActivityHistory` panel.
  *   - When the backend arrives, swap localStorage for API calls.
+ *
+ * Global materials appearance settings
+ * --------------------------------------
+ * The materials store also owns FOUR global card-appearance settings
+ * that apply to every material card in the student app:
+ *
+ *   - fadeIntensity        (0..1, default 0.72)
+ *     Bottom-up black overlay alpha — higher = darker bottom = more
+ *     legible white title text over busy images.
+ *
+ *   - textVerticalPosition (-100..+100, default 0)
+     Vertical offset of the title block. 0 = vertically centered,
+ *   +100 = top, -100 = bottom.
+ *
+ *   - textScale            (0.8..1.4, default 1)
+ *     Multiplier applied to the title font sizes.
+ *
+ *   - cardHeight           (160..340 px, default 213)
+ *     Fixed pixel height of every material card.
+ *
+ * All four are persisted together as a single JSON object under
+ * `<storageKey>-settings` (e.g. `pythagoras-admin-materials-settings`).
+ * The legacy `<storageKey>-fade` plain-string key is read ONCE on load
+ * for backward compatibility (then ignored in favor of the new JSON).
  */
 
 import {
@@ -66,12 +90,41 @@ export interface ContentStoreConfig {
   logPrefix: string;
 }
 
+/**
+ * Global material-card appearance settings. All four fields are
+ * persisted together as JSON under `<storageKey>-settings`.
+ */
+export interface MaterialsSettings {
+  /** Bottom-up black overlay alpha (0..1). */
+  fadeIntensity: number;
+  /** Vertical offset of the title block (-100..+100). 0 = centered. */
+  textVerticalPosition: number;
+  /** Title font scale multiplier (0.8..1.4). */
+  textScale: number;
+  /** Fixed card height in px (160..340). */
+  cardHeight: number;
+}
+
+export const DEFAULT_MATERIALS_SETTINGS: MaterialsSettings = {
+  fadeIntensity: 0.72,
+  textVerticalPosition: 0,
+  textScale: 1,
+  cardHeight: 213,
+};
+
+/** Clamp a number to [min, max]. NaN/Infinity → min. */
+function clamp(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.max(min, Math.min(max, value));
+}
+
 export interface ContentSnapshot {
   items: ContentItem[];
-  /** Global fade overlay intensity (0–1) applied to all material cards.
-   *  Stored separately from items so the slider UI persists without
-   *  touching item data. */
+  /** Global appearance settings — see `MaterialsSettings` doc. */
   fadeIntensity: number;
+  textVerticalPosition: number;
+  textScale: number;
+  cardHeight: number;
   lastStorageError: string | null;
 }
 
@@ -79,18 +132,24 @@ type Listener = () => void;
 
 class ContentStore {
   private storageKey: string;
-  /** Separate localStorage key for the global fade intensity slider. */
+  /**
+   * Legacy localStorage key that previously held the fade intensity as
+   * a plain decimal string ("0.72"). Kept ONLY for one-time migration
+   * — we now persist all four settings together under `settingsStorageKey`.
+   */
   private fadeStorageKey: string;
+  /** Combined JSON key for all four appearance settings. */
+  private settingsStorageKey: string;
   private defaults: ContentItem[];
   private logPrefix: string;
 
   private items: ContentItem[] = [];
-  /**
-   * Global fade overlay intensity (0–1) used by the student app's
-   * full-image material cards. Default 0.72 = 72% black at the bottom
-   * of the card, fading to transparent at the top.
-   */
-  fadeIntensity: number = 0.72;
+
+  // ---- Global appearance settings (defaults match the student app) ----
+  fadeIntensity: number = DEFAULT_MATERIALS_SETTINGS.fadeIntensity;
+  textVerticalPosition: number = DEFAULT_MATERIALS_SETTINGS.textVerticalPosition;
+  textScale: number = DEFAULT_MATERIALS_SETTINGS.textScale;
+  cardHeight: number = DEFAULT_MATERIALS_SETTINGS.cardHeight;
 
   private listeners: Set<Listener> = new Set();
   private hasLoadedFromStorage = false;
@@ -99,13 +158,17 @@ class ContentStore {
 
   private snapshot: ContentSnapshot = {
     items: [],
-    fadeIntensity: 0.72,
+    fadeIntensity: DEFAULT_MATERIALS_SETTINGS.fadeIntensity,
+    textVerticalPosition: DEFAULT_MATERIALS_SETTINGS.textVerticalPosition,
+    textScale: DEFAULT_MATERIALS_SETTINGS.textScale,
+    cardHeight: DEFAULT_MATERIALS_SETTINGS.cardHeight,
     lastStorageError: null,
   };
 
   constructor(config: ContentStoreConfig) {
     this.storageKey = config.storageKey;
     this.fadeStorageKey = `${config.storageKey}-fade`;
+    this.settingsStorageKey = `${config.storageKey}-settings`;
     this.defaults = config.defaults.map((i) => ({ ...i }));
     this.logPrefix = config.logPrefix;
     this.rebuildSnapshot();
@@ -128,29 +191,80 @@ class ContentStore {
       } else {
         this.items = this.defaults.map((i) => ({ ...i }));
       }
-      // Load the global fade intensity from its own localStorage key.
-      // Falls back to the default (0.72) when never set or invalid.
-      try {
-        const fadeRaw = localStorage.getItem(this.fadeStorageKey);
-        if (fadeRaw !== null) {
-          const fadeVal = Number.parseFloat(fadeRaw);
-          if (Number.isFinite(fadeVal) && fadeVal >= 0 && fadeVal <= 1) {
-            this.fadeIntensity = fadeVal;
-          }
-        }
-      } catch {
-        /* noop — keep default if fade key is unreadable */
-      }
+      // Load all four appearance settings from the combined JSON key.
+      // Falls back to the legacy `-fade` plain-string key for migration
+      // when the new key hasn't been written yet.
+      this.loadSettingsFromStorage();
       this.persist();
-      this.persistFade();
+      this.persistSettings();
       this.emit();
       return this.items.length > 0;
     } catch {
       this.items = this.defaults.map((i) => ({ ...i }));
       this.persist();
-      this.persistFade();
+      this.persistSettings();
       this.emit();
       return true;
+    }
+  }
+
+  /**
+   * Read the combined appearance-settings JSON from localStorage and
+   * populate the four `*Settings` fields. Handles three cases:
+   *
+   *   1. New JSON key present → parse + clamp each field.
+   *   2. Legacy `-fade` plain-string key present (and new key absent)
+   *      → migrate just the fadeIntensity value.
+   *   3. Neither key present → keep the in-memory defaults.
+   */
+  private loadSettingsFromStorage() {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = localStorage.getItem(this.settingsStorageKey);
+      if (raw !== null) {
+        const parsed = JSON.parse(raw) as Partial<MaterialsSettings>;
+        if (parsed) {
+          if (
+            typeof parsed.fadeIntensity === "number" &&
+            Number.isFinite(parsed.fadeIntensity)
+          ) {
+            this.fadeIntensity = clamp(parsed.fadeIntensity, 0, 1);
+          }
+          if (
+            typeof parsed.textVerticalPosition === "number" &&
+            Number.isFinite(parsed.textVerticalPosition)
+          ) {
+            this.textVerticalPosition = clamp(
+              parsed.textVerticalPosition,
+              -100,
+              100
+            );
+          }
+          if (
+            typeof parsed.textScale === "number" &&
+            Number.isFinite(parsed.textScale)
+          ) {
+            this.textScale = clamp(parsed.textScale, 0.8, 1.4);
+          }
+          if (
+            typeof parsed.cardHeight === "number" &&
+            Number.isFinite(parsed.cardHeight)
+          ) {
+            this.cardHeight = clamp(Math.round(parsed.cardHeight), 160, 340);
+          }
+        }
+        return;
+      }
+      // Migration: read the legacy plain-string fade key.
+      const fadeRaw = localStorage.getItem(this.fadeStorageKey);
+      if (fadeRaw !== null) {
+        const fadeVal = Number.parseFloat(fadeRaw);
+        if (Number.isFinite(fadeVal)) {
+          this.fadeIntensity = clamp(fadeVal, 0, 1);
+        }
+      }
+    } catch {
+      /* noop — keep defaults if settings JSON is unreadable */
     }
   }
 
@@ -171,6 +285,9 @@ class ContentStore {
     this.snapshot = {
       items: this.items,
       fadeIntensity: this.fadeIntensity,
+      textVerticalPosition: this.textVerticalPosition,
+      textScale: this.textScale,
+      cardHeight: this.cardHeight,
       lastStorageError: this.lastStorageError,
     };
   }
@@ -203,33 +320,52 @@ class ContentStore {
   }
 
   /**
-   * Persist the global fade intensity to its own localStorage key.
-   * Stored as a decimal string (e.g. "0.72") so the student app can
-   * read it directly without conversion.
+   * Persist all four appearance settings to the combined JSON key.
+   * The student app reads this same JSON via `getMaterialsSettings()`
+   * so admin changes take effect for students on next page load.
    */
-  private persistFade() {
+  private persistSettings() {
     if (typeof window === "undefined") return;
     try {
-      localStorage.setItem(this.fadeStorageKey, String(this.fadeIntensity));
+      const settings: MaterialsSettings = {
+        fadeIntensity: this.fadeIntensity,
+        textVerticalPosition: this.textVerticalPosition,
+        textScale: this.textScale,
+        cardHeight: this.cardHeight,
+      };
+      localStorage.setItem(
+        this.settingsStorageKey,
+        JSON.stringify(settings)
+      );
     } catch (err) {
       console.warn(
-        `[ContentStore:${this.fadeStorageKey}] persist failed:`,
+        `[ContentStore:${this.settingsStorageKey}] persist failed:`,
         err
       );
     }
   }
 
   // ---------- Shared activity logging ----------
+  /**
+   * Append one activity history entry via the shared AdminStore channel.
+   *
+   * `thumbnail` should be the material's image data URL (or gradient
+   * fallback) for image-affecting changes so the ActivityHistory panel
+   * can show a preview thumbnail. For settings changes (no specific
+   * material), pass an empty string — the panel will fall back to the
+   * action icon.
+   */
   private logActivity(
     action: ActivityAction,
     itemLabel: string,
-    changeSummary?: string[]
+    changeSummary?: string[],
+    thumbnail: string = ""
   ) {
     getAdminStore().appendHistoryEntry({
       action,
       label: ACTIVITY_LABELS[action],
       bannerTitle: `${this.logPrefix}: ${itemLabel}`,
-      thumbnail: "",
+      thumbnail,
       changeSummary,
     });
   }
@@ -237,7 +373,9 @@ class ContentStore {
   // ---------- Mutations ----------
   /**
    * Commit a content item edit: apply the patch AND log exactly ONE
-   * "edited" entry with a human-readable Arabic change summary.
+   * "edited" entry with a human-readable Arabic change summary. The
+   * activity entry's thumbnail is the material's image (or gradient
+   * fallback) so the history panel can show what changed.
    */
   commitContentEdit(
     id: string,
@@ -252,7 +390,8 @@ class ContentStore {
       return updated;
     });
     if (target) {
-      this.logActivity("edited", target.label, changeSummary);
+      const thumbnail = target.image || target.gradient || "";
+      this.logActivity("edited", target.label, changeSummary, thumbnail);
     }
     this.persist();
     this.emit();
@@ -282,20 +421,87 @@ class ContentStore {
   }
 
   /**
-   * Set the global fade intensity (0–1). Persists to the dedicated
-   * `pythagoras-admin-materials-fade` localStorage key (separate from
-   * the items array) so the slider value survives reloads without
-   * touching item data. Also logs a "settings" entry to the shared
-   * activity history.
+   * Merge a partial set of appearance settings into the current values,
+   * persist them, and log ONE "settings" activity entry listing every
+   * changed field with from→to details. Emits a snapshot update so
+   * subscribers re-render with the new values.
+   *
+   * All values are clamped to their valid ranges before being applied.
+   */
+  setMaterialsSettings(settings: Partial<MaterialsSettings>) {
+    const prev: MaterialsSettings = {
+      fadeIntensity: this.fadeIntensity,
+      textVerticalPosition: this.textVerticalPosition,
+      textScale: this.textScale,
+      cardHeight: this.cardHeight,
+    };
+
+    const next: MaterialsSettings = {
+      fadeIntensity:
+        settings.fadeIntensity !== undefined
+          ? clamp(settings.fadeIntensity, 0, 1)
+          : prev.fadeIntensity,
+      textVerticalPosition:
+        settings.textVerticalPosition !== undefined
+          ? clamp(settings.textVerticalPosition, -100, 100)
+          : prev.textVerticalPosition,
+      textScale:
+        settings.textScale !== undefined
+          ? clamp(settings.textScale, 0.8, 1.4)
+          : prev.textScale,
+      cardHeight:
+        settings.cardHeight !== undefined
+          ? clamp(Math.round(settings.cardHeight), 160, 340)
+          : prev.cardHeight,
+    };
+
+    this.fadeIntensity = next.fadeIntensity;
+    this.textVerticalPosition = next.textVerticalPosition;
+    this.textScale = next.textScale;
+    this.cardHeight = next.cardHeight;
+
+    // Build a human-readable Arabic change summary listing only the
+    // fields that actually changed, with from→to details.
+    const changeSummary: string[] = [];
+    if (prev.fadeIntensity !== next.fadeIntensity) {
+      changeSummary.push(
+        `شدة التعتيم: من ${Math.round(prev.fadeIntensity * 100)}% إلى ${Math.round(next.fadeIntensity * 100)}%`
+      );
+    }
+    if (prev.textVerticalPosition !== next.textVerticalPosition) {
+      changeSummary.push(
+        `الموضع العمودي للنص: من ${prev.textVerticalPosition} إلى ${next.textVerticalPosition}`
+      );
+    }
+    if (prev.textScale !== next.textScale) {
+      changeSummary.push(
+        `حجم النص: من ${Math.round(prev.textScale * 100)}% إلى ${Math.round(next.textScale * 100)}%`
+      );
+    }
+    if (prev.cardHeight !== next.cardHeight) {
+      changeSummary.push(
+        `ارتفاع البطاقة: من ${prev.cardHeight}px إلى ${next.cardHeight}px`
+      );
+    }
+
+    this.persistSettings();
+
+    if (changeSummary.length > 0) {
+      // No thumbnail for global settings changes — the activity panel
+      // will show the ⏱️ "settings" action icon instead.
+      this.logActivity("settings", "إعدادات المظهر", changeSummary, "");
+    }
+    this.emit();
+  }
+
+  /**
+   * Backward-compatible wrapper for `setMaterialsSettings({ fadeIntensity })`.
+   * Kept so older callers (and any future code that only cares about
+   * the fade overlay) can still call this method. Internally it routes
+   * through the combined settings JSON.
    */
   setFadeIntensity(value: number) {
-    const clamped = Math.max(0, Math.min(1, value));
-    this.fadeIntensity = clamped;
-    this.persistFade();
-    this.logActivity("settings", "شدة التعتيم", [
-      `شدة التعتيم: ${Math.round(clamped * 100)}%`,
-    ]);
-    this.emit();
+    this.setMaterialsSettings({ fadeIntensity: value });
   }
 }
 
