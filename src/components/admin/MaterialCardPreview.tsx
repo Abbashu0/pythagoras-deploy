@@ -125,7 +125,7 @@ export function MaterialCardPreview({
               inset: "0",
               width: "100%",
               height: "100%",
-              objectFit: "cover",
+              objectFit: "contain",
               transform: `translate(${tf.offsetX}%, ${tf.offsetY}%) scale(${tf.scale})`,
               transformOrigin: "center center",
             }}

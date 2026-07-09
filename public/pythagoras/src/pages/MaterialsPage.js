@@ -57,7 +57,7 @@ function subjectCard(subject, settings, delay) {
   return `
     <button type="button" class="material-image-card stagger" style="animation-delay:${delay}ms; height: ${cardHeight}px;" data-nav-to="${getTestsSubjectView(subject.id)}">
       <div class="material-image-bg" style="${hasImage ? '' : `background: ${bg};`}">
-        ${hasImage ? `<img class="material-image-photo" src="${subject.image}" alt="${subject.title}" loading="lazy" style="object-fit: cover; transform: translate(${transform.offsetX}%, ${transform.offsetY}%) scale(${transform.scale});" />` : ''}
+        ${hasImage ? `<img class="material-image-photo" src="${subject.image}" alt="${subject.title}" loading="lazy" style="object-fit: contain; transform: translate(${transform.offsetX}%, ${transform.offsetY}%) scale(${transform.scale});" />` : ''}
       </div>
       <div class="material-image-fade" style="background: linear-gradient(to top, rgba(0,0,0,${fade}), rgba(0,0,0,0));"></div>
       <div class="material-image-content" style="bottom: ${textBottom}px;">

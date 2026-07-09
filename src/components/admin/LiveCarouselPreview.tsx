@@ -93,7 +93,7 @@ export function LiveCarouselPreview({
               draggable={false}
               className="absolute inset-0 h-full w-full select-none"
               style={{
-                objectFit: "cover",
+                objectFit: "contain",
                 // Use translate + scale (NOT object-position) — consistent
                 // with the editor's ImagePositioner transform values.
                 transform: `translate(${banner.transform.offsetX}%, ${banner.transform.offsetY}%) scale(${banner.transform.scale})`,
@@ -155,7 +155,7 @@ export function LiveCarouselPreview({
                   draggable={false}
                   className="absolute inset-0 h-full w-full select-none"
                   style={{
-                    objectFit: "cover",
+                    objectFit: "contain",
                     transform: `translate(${banner.transform.offsetX}%, ${banner.transform.offsetY}%) scale(${banner.transform.scale})`,
                     transformOrigin: "center",
                   }}
