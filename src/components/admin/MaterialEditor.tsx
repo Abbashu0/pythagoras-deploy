@@ -274,13 +274,7 @@ export function MaterialEditor({
             </h4>
             <UploadArea
               currentImage={draft.image || undefined}
-              compressionTarget={{
-                maxWidth: 800,
-                maxHeight: 450,
-                quality: 0.85,
-                mime: "image/jpeg",
-              }}
-              recommendedHint="الحجم الموصى به: 800×450px (نسبة 16:9) — تصدير 2× retina. يتم ضغط الصور تلقائياً عند الرفع لتوفير المساحة."
+              recommendedHint="يتم حفظ الصورة بأبعادها الأصلية دون أي قص. استخدم أدوات التموضع والتكبير لضبط الجزء الظاهر."
               onUploaded={(dataUrl) => {
                 setDraft((prev) =>
                   prev

@@ -1,159 +1,190 @@
 /**
- * Image compression utility for admin banner uploads.
+ * Image storage utility for admin uploads.
  *
- * Problem: Raw photos from cameras/phones can be 2-5 MB each. Five such
- * images in localStorage easily exceed the ~5 MB quota, causing
- * QuotaExceededError → banners silently disappear on next page load.
+ * CRITICAL: This module does NOT crop, resize, or re-encode images.
+ * The original image is preserved 100% as-is. The only processing is
+ * converting the File to a data URL for localStorage storage.
  *
- * Solution: Before storing a banner image, scale it to fit within the
- * recommended banner dimensions and re-encode as JPEG (quality 0.85).
- * This typically reduces a 3 MB photo to ~80-150 KB — a 20× reduction
- * with no visible quality loss at the carousel's display size.
+ * If the image is larger than ~3MB (which would blow localStorage's
+ * ~5MB quota when storing multiple images), we scale it down
+ * proportionally — but we NEVER crop, NEVER change aspect ratio,
+ * and NEVER center-crop. The full image is always preserved.
  *
- * Contain (NOT cover) behavior — the image is NEVER cropped:
- *   - The image is scaled proportionally to fit WITHIN the max dimensions
- *     (like CSS `object-fit: contain`).
- *   - The full image is preserved; empty margins may appear on the sides
- *     that don't match the source aspect ratio.
- *   - No offset tricks, no cropping — what you upload is what gets stored,
- *     just smaller.
- *
- * The compression target depends on bannerType (2× retina of the carousel's
- * CSS pixel size):
- *   - "full":  1464×586  (2× retina of 732×293)
- *   - "split": 616×584   (2× retina of 308×292)
+ * The admin then uses the Image Positioner (translate + scale) to
+ * decide which part of the image is visible inside the frame.
  */
 
-export interface CompressOptions {
-  /** Max width in pixels (retina). Image never exceeds this. */
-  maxWidth: number;
-  /** Max height in pixels (retina). Image never exceeds this. */
-  maxHeight: number;
-  /** JPEG quality 0-1. Default 0.85 — good balance of size vs quality. */
+export interface StoreOptions {
+  /**
+   * Maximum file size in bytes. If the image exceeds this, it's
+   * scaled down proportionally (NOT cropped) to fit.
+   * Default: 2MB (2_097_152) — leaves room for other localStorage data.
+   */
+  maxBytes?: number;
+  /** JPEG quality for downscaled images. Default 0.9 (high quality). */
   quality?: number;
-  /** Output format. Default "image/jpeg". Use "image/png" if transparency needed. */
+  /** Output format. Default "image/jpeg". */
   mime?: string;
 }
 
 /**
- * Compress an image File or data URL to a smaller data URL.
+ * Store an image File as a data URL, preserving the original image
+ * as much as possible.
  *
- * Uses "contain" fit: the image is scaled to fit entirely inside the target
- * box, preserving aspect ratio. No cropping, no offset. Empty margins are
- * left on the sides that don't match the source aspect ratio.
+ * - If the file is small enough (< maxBytes), it's stored AS-IS
+ *   with zero processing — original dimensions, original quality.
+ * - If the file exceeds maxBytes, it's scaled down proportionally
+ *   (preserving aspect ratio, NO cropping) until it fits.
  *
- * Returns a Promise<string> that resolves to the compressed data URL.
- * If compression fails (e.g. bad image), rejects with an Error.
+ * Returns a Promise<string> that resolves to the data URL.
  */
-export function compressImage(
+export function storeImage(
   source: File | string,
-  options: CompressOptions
+  options: StoreOptions = {}
 ): Promise<string> {
-  const { maxWidth, maxHeight, quality = 0.85, mime = "image/jpeg" } = options;
+  const { maxBytes = 2_097_152, quality = 0.9, mime = "image/jpeg" } = options;
 
   return new Promise((resolve, reject) => {
-    // Create an Image element from the source
+    // If source is already a string (data URL), check its size
+    if (typeof source === "string") {
+      const bytes = dataUrlBytes(source);
+      if (bytes <= maxBytes) {
+        // Small enough — return as-is, zero processing
+        resolve(source);
+        return;
+      }
+      // Too large — need to scale down (no crop)
+      scaleDownToSize(source, maxBytes, quality, mime).then(resolve).catch(reject);
+      return;
+    }
+
+    // Source is a File — read it as data URL first
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result !== "string") {
+        reject(new Error("Failed to read file"));
+        return;
+      }
+      const dataUrl = reader.result;
+      const bytes = dataUrlBytes(dataUrl);
+
+      if (bytes <= maxBytes) {
+        // Small enough — store original as-is, zero processing
+        resolve(dataUrl);
+        return;
+      }
+
+      // Too large — scale down proportionally (NO crop, preserve aspect ratio)
+      scaleDownToSize(dataUrl, maxBytes, quality, mime).then(resolve).catch(reject);
+    };
+    reader.onerror = () => reject(new Error("Failed to read file"));
+    reader.readAsDataURL(source);
+  });
+}
+
+/**
+ * Scale an image down proportionally until its data URL fits within
+ * maxBytes. Aspect ratio is ALWAYS preserved. The image is NEVER cropped.
+ *
+ * Algorithm:
+ *   1. Start with the original dimensions.
+ *   2. If the data URL is too large, scale down by 10%.
+ *   3. Repeat until it fits or we hit a minimum dimension.
+ */
+function scaleDownToSize(
+  dataUrl: string,
+  maxBytes: number,
+  quality: number,
+  mime: string
+): Promise<string> {
+  return new Promise((resolve, reject) => {
     const img = new Image();
     img.crossOrigin = "anonymous";
 
     img.onload = () => {
-      try {
-        // "Contain" fit: scale image so it fits entirely inside the target
-        // box, preserving aspect ratio. No cropping. The full image is
-        // preserved — empty margins are left on the sides that don't match.
-        const sourceRatio = img.width / img.height;
-        const targetRatio = maxWidth / maxHeight;
+      let scale = 1.0;
+      const minScale = 0.1; // Don't go below 10% of original
+      const originalW = img.width;
+      const originalH = img.height;
 
-        let drawWidth: number;
-        let drawHeight: number;
-
-        if (sourceRatio > targetRatio) {
-          // Source is wider than the target box — match width, scale height
-          // down so the image fits inside (height < maxHeight).
-          drawWidth = maxWidth;
-          drawHeight = maxWidth / sourceRatio;
-        } else {
-          // Source is taller than (or equal to) the target box — match
-          // height, scale width down so the image fits inside.
-          drawHeight = maxHeight;
-          drawWidth = maxHeight * sourceRatio;
-        }
-
-        // Center the image inside the target box — empty margins fill the
-        // remaining space on the cross axis. This is the visual equivalent
-        // of `object-fit: contain`.
-        const offsetX = (maxWidth - drawWidth) / 2;
-        const offsetY = (maxHeight - drawHeight) / 2;
+      const tryScale = (currentScale: number): void => {
+        const w = Math.round(originalW * currentScale);
+        const h = Math.round(originalH * currentScale);
 
         const canvas = document.createElement("canvas");
-        canvas.width = maxWidth;
-        canvas.height = maxHeight;
+        canvas.width = w;
+        canvas.height = h;
         const ctx = canvas.getContext("2d");
         if (!ctx) {
           reject(new Error("Canvas 2D context not available"));
           return;
         }
 
-        // High-quality downscaling
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = "high";
-        ctx.drawImage(img, offsetX, offsetY, drawWidth, drawHeight);
+        // Draw the FULL image at the scaled size — no crop, no offset
+        ctx.drawImage(img, 0, 0, w, h);
 
-        const dataUrl = canvas.toDataURL(mime, quality);
-        resolve(dataUrl);
-      } catch (err) {
-        reject(err);
-      }
-    };
+        const result = canvas.toDataURL(mime, quality);
+        const bytes = dataUrlBytes(result);
 
-    img.onerror = () => {
-      reject(new Error("Failed to load image for compression"));
-    };
-
-    // Load the source into the Image element
-    if (typeof source === "string") {
-      img.src = source;
-    } else {
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result === "string") {
-          img.src = reader.result;
+        if (bytes <= maxBytes || currentScale <= minScale) {
+          resolve(result);
         } else {
-          reject(new Error("Failed to read file"));
+          // Still too large — reduce scale by 10% and try again
+          tryScale(currentScale * 0.9);
         }
       };
-      reader.onerror = () => reject(new Error("Failed to read file"));
-      reader.readAsDataURL(source);
-    }
+
+      tryScale(scale);
+    };
+
+    img.onerror = () => reject(new Error("Failed to load image for scaling"));
+    img.src = dataUrl;
   });
 }
 
 /**
- * Get the compression target for a given banner type.
- *
- * These are 2× retina of the recommended CSS pixel sizes so the image
- * stays crisp on high-DPI screens.
- *
- *   - "full":  1464×586  (2× retina of 732×293)
- *   - "split": 616×584   (2× retina of 308×292)
+ * Backward-compatible alias. Old code calls `compressImage` — we keep
+ * the function name but it now delegates to `storeImage` which does
+ * NOT crop.
  */
-export function getCompressionTarget(bannerType: "full" | "split"): CompressOptions {
+export function compressImage(
+  source: File | string,
+  _options: { maxWidth: number; maxHeight: number; quality?: number; mime?: string }
+): Promise<string> {
+  // Ignore maxWidth/maxHeight — we don't resize to specific dimensions anymore.
+  // Just store the image as-is (or scale down proportionally if too large).
+  return storeImage(source, {
+    maxBytes: 2_097_152,
+    quality: _options.quality || 0.9,
+    mime: _options.mime || "image/jpeg",
+  });
+}
+
+/**
+ * Get compression target for a given banner type.
+ * Kept for backward compatibility — the values are no longer used
+ * for cropping, only as hints in the UI.
+ */
+export function getCompressionTarget(bannerType: "full" | "split"): {
+  maxWidth: number;
+  maxHeight: number;
+  quality: number;
+  mime: string;
+} {
   if (bannerType === "full") {
-    return { maxWidth: 1464, maxHeight: 586, quality: 0.85, mime: "image/jpeg" };
+    return { maxWidth: 1464, maxHeight: 586, quality: 0.9, mime: "image/jpeg" };
   }
-  return { maxWidth: 616, maxHeight: 584, quality: 0.85, mime: "image/jpeg" };
+  return { maxWidth: 616, maxHeight: 584, quality: 0.9, mime: "image/jpeg" };
 }
 
 /**
  * Estimate the size of a data URL in bytes.
- *
- * Useful for showing "this image is N KB" hints in the UI and for
- * detecting when an image is too large to safely store in localStorage.
  */
 export function dataUrlBytes(dataUrl: string): number {
   try {
     const base64 = dataUrl.split(",")[1] || "";
-    // Base64 encodes 3 bytes per 4 chars, minus padding
     const padding = (base64.match(/=+$/) || [""])[0].length;
     return Math.floor((base64.length * 3) / 4) - padding;
   } catch {

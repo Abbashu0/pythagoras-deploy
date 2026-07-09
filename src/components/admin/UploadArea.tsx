@@ -31,27 +31,17 @@ import {
   BannerType,
 } from "@/lib/admin/banner-model";
 import {
-  compressImage,
-  getCompressionTarget,
-  type CompressOptions,
+  storeImage,
 } from "@/lib/admin/image-compress";
 
 interface Props {
   onUploaded: (dataUrl: string) => void;
   currentImage?: string;
   onClear?: () => void;
-  /** Which recommended size + compression target to use. Defaults to "full".
-   *  Ignored when `compressionTarget` is provided. */
+  /** Which recommended size hint to show. Defaults to "full". */
   bannerType?: BannerType;
   /**
-   * Custom compression target — overrides the banner-type-based defaults.
-   * Use this for non-banner contexts (e.g. material cards with a 16:9
-   * aspect ratio need a wider target than the 5:2 banner).
-   */
-  compressionTarget?: CompressOptions;
-  /**
    * Custom "recommended size" hint text shown under the drop zone.
-   * Overrides the auto-generated "الحجم الموصى به (بانر {type}): ..." line.
    * Use this when reusing the uploader outside the banner context.
    */
   recommendedHint?: string;
@@ -62,7 +52,6 @@ export function UploadArea({
   currentImage,
   onClear,
   bannerType = "full",
-  compressionTarget,
   recommendedHint,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -94,12 +83,11 @@ export function UploadArea({
       setError(null);
       setCompressing(true);
       try {
-        // Compress the image. If a custom compressionTarget is provided
-        // (e.g. for material cards), use it directly; otherwise fall back
-        // to the banner-type-based defaults.
-        const target = compressionTarget ?? getCompressionTarget(bannerType);
-        const compressed = await compressImage(file, target);
-        onUploaded(compressed);
+        // Store the image as-is. No cropping, no resizing, no re-encoding
+        // (unless the file exceeds 2MB, in which case it's scaled down
+        // proportionally — but NEVER cropped).
+        const stored = await storeImage(file);
+        onUploaded(stored);
       } catch {
         // If compression fails, try passing the raw data URL as a fallback
         // (might still work if the image is small enough).
@@ -121,7 +109,7 @@ export function UploadArea({
         setCompressing(false);
       }
     },
-    [onUploaded, validate, bannerType, compressionTarget]
+    [onUploaded, validate, bannerType]
   );
 
   const onDrop = useCallback(
@@ -183,7 +171,7 @@ export function UploadArea({
         {compressing ? (
           <>
             <Loader2 className="h-7 w-7 animate-spin text-primary" />
-            <p className="text-sm font-medium text-foreground">جارٍ ضغط الصورة…</p>
+            <p className="text-sm font-medium text-foreground">جارٍ حفظ الصورة…</p>
           </>
         ) : (
           <>
@@ -222,7 +210,7 @@ export function UploadArea({
             الحجم الموصى به (بانر {typeLabel}): {rec.width}×{rec.height}px
             (نسبة {rec.aspectRatio}) — تصدير {rec.retinaScale}× retina.
             <br />
-            يتم ضغط الصور تلقائياً عند الرفع لتوفير المساحة.
+            يتم حفظ الصورة بأبعادها الأصلية دون قص. استخدم أدوات التموضع لضبط الجزء الظاهر.
           </span>
         )}
       </div>
