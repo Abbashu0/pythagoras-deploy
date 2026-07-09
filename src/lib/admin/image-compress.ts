@@ -42,7 +42,7 @@ export function storeImage(
   source: File | string,
   options: StoreOptions = {}
 ): Promise<string> {
-  const { maxBytes = 2_097_152, quality = 0.9, mime = "image/jpeg" } = options;
+  const { maxBytes = 500_000, quality = 0.85, mime = "image/jpeg" } = options;
 
   return new Promise((resolve, reject) => {
     // If source is already a string (data URL), check its size
@@ -156,8 +156,8 @@ export function compressImage(
   // Ignore maxWidth/maxHeight — we don't resize to specific dimensions anymore.
   // Just store the image as-is (or scale down proportionally if too large).
   return storeImage(source, {
-    maxBytes: 2_097_152,
-    quality: _options.quality || 0.9,
+    maxBytes: 500_000,
+    quality: _options.quality || 0.85,
     mime: _options.mime || "image/jpeg",
   });
 }
