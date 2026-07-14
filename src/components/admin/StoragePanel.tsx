@@ -3,17 +3,21 @@
 /**
  * StoragePanel
  * -------------
- * Admin widget that shows live IndexedDB image-storage statistics and
- * provides maintenance actions:
- *   • Cleanup orphans — deletes images whose key isn't referenced by
- *     any banner/material in localStorage.
- *   • Export media — downloads all images as a single JSON file
- *     (backup / transfer to another device).
- *   • Import media — restores an exported JSON file.
- *   • Refresh stats — re-reads the cache + meta store.
+ * Admin widget showing live storage statistics for the entire platform —
+ * IndexedDB (images now, questions/files later), localStorage (metadata),
+ * and the browser storage quota.
  *
- * The panel auto-refreshes on a 5-second interval while mounted, so
- * the user sees uploads from other tabs reflected here.
+ * Features:
+ *   • Quota overview: total available, used, free (with progress bar)
+ *   • IndexedDB breakdown: image count, total bytes, avg, min, max
+ *   • Category breakdown: images by type (banner / mat / tool / other)
+ *   • localStorage breakdown: total bytes, key count
+ *   • Last activity: most recent image added + timestamp
+ *   • Maintenance actions: cleanup orphans, export, import
+ *
+ * Renamed from "مساحة تخزين الصور" to "مساحة التخزين" because future
+ * updates will store questions, files, and other admin data here too —
+ * not just images.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -28,6 +32,11 @@ import {
   Loader2,
   ImageIcon,
   Database,
+  Layers,
+  Clock,
+  TrendingUp,
+  Archive,
+  Gauge,
 } from "lucide-react";
 import {
   Card,
@@ -51,11 +60,24 @@ import {
 import { collectReferencedImageKeys } from "@/lib/admin/image-migrate";
 
 interface Props {
-  /** Optional className override. */
   className?: string;
 }
 
 type BusyAction = "cleanup" | "export" | "import" | "clear" | null;
+
+/** Translate a key prefix to an Arabic label. */
+function prefixLabel(prefix: string): string {
+  switch (prefix) {
+    case "banner":
+      return "بانرات";
+    case "mat":
+      return "مواد دراسية";
+    case "tool":
+      return "أدوات";
+    default:
+      return prefix;
+  }
+}
 
 export function StoragePanel({ className }: Props) {
   const { toast } = useToast();
@@ -65,7 +87,6 @@ export function StoragePanel({ className }: Props) {
   const [errors, setErrors] = useState<number>(0);
   const importInputRef = useRef<HTMLInputElement>(null);
 
-  // ---------- Refresh stats from IndexedDB ----------
   const refresh = useCallback(async () => {
     try {
       const s = await getStats();
@@ -78,14 +99,12 @@ export function StoragePanel({ className }: Props) {
     }
   }, []);
 
-  // Initial load + 5s polling.
   useEffect(() => {
     refresh();
     const id = window.setInterval(refresh, 5000);
     return () => window.clearInterval(id);
   }, [refresh]);
 
-  // ---------- Cleanup orphaned images ----------
   const handleCleanup = useCallback(async () => {
     if (busy) return;
     setBusy("cleanup");
@@ -115,7 +134,6 @@ export function StoragePanel({ className }: Props) {
     }
   }, [busy, refresh, toast]);
 
-  // ---------- Export all images ----------
   const handleExport = useCallback(async () => {
     if (busy) return;
     setBusy("export");
@@ -154,7 +172,6 @@ export function StoragePanel({ className }: Props) {
     }
   }, [busy, toast]);
 
-  // ---------- Import images from JSON ----------
   const handleImport = useCallback(
     async (file: File) => {
       if (busy) return;
@@ -206,28 +223,43 @@ export function StoragePanel({ className }: Props) {
   const totalBytes = stats?.totalBytes ?? 0;
   const largestBytes = stats?.largestBytes ?? 0;
   const largestKey = stats?.largestKey ?? null;
+  const smallestBytes = stats?.smallestBytes ?? 0;
+  const averageBytes = stats?.averageBytes ?? 0;
   const lastAddedKey = stats?.lastAddedKey ?? null;
   const lastAddedAt = stats?.lastAddedAt ?? null;
+  const quotaBytes = stats?.quotaBytes ?? null;
+  const usageBytes = stats?.usageBytes ?? null;
+  const localStorageBytes = stats?.localStorageBytes ?? 0;
+  const localStorageKeyCount = stats?.localStorageKeyCount ?? 0;
+  const byCategory = stats?.byCategory ?? [];
 
-  // Qualitative usage tier (green/amber/red based on rough thresholds).
-  const usageTier: "ok" | "warn" | "danger" =
-    totalBytes < 50 * 1024 * 1024
+  // Quota progress (browser storage estimate)
+  const quotaPct =
+    quotaBytes && usageBytes && quotaBytes > 0
+      ? Math.min(100, (usageBytes / quotaBytes) * 100)
+      : null;
+  const freeBytes = quotaBytes && usageBytes ? quotaBytes - usageBytes : null;
+
+  const quotaTier: "ok" | "warn" | "danger" =
+    quotaPct === null
       ? "ok"
-      : totalBytes < 200 * 1024 * 1024
+      : quotaPct < 50
+      ? "ok"
+      : quotaPct < 80
       ? "warn"
       : "danger";
 
   const tierColor =
-    usageTier === "ok"
+    quotaTier === "ok"
       ? "text-emerald-600 dark:text-emerald-400"
-      : usageTier === "warn"
+      : quotaTier === "warn"
       ? "text-amber-600 dark:text-amber-400"
       : "text-red-600 dark:text-red-400";
 
   const tierLabel =
-    usageTier === "ok"
+    quotaTier === "ok"
       ? "ضمن النطاق المريح"
-      : usageTier === "warn"
+      : quotaTier === "warn"
       ? "استخدام متوسط"
       : "استخدام عالٍ — يُنصح بالتنظيف";
 
@@ -237,7 +269,7 @@ export function StoragePanel({ className }: Props) {
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <Database className="h-5 w-5 text-primary" />
-            <CardTitle className="text-base">مساحة تخزين الصور</CardTitle>
+            <CardTitle className="text-base">مساحة التخزين</CardTitle>
           </div>
           <Button
             variant="ghost"
@@ -252,73 +284,168 @@ export function StoragePanel({ className }: Props) {
         </div>
       </CardHeader>
 
-      <CardContent className="space-y-4">
-        {/* ---------- Stats grid ---------- */}
-        <div className="grid grid-cols-2 gap-3">
-          <StatCard
-            icon={<ImageIcon className="h-4 w-4" />}
-            label="عدد الصور"
-            value={loading ? "…" : String(count)}
-          />
-          <StatCard
-            icon={<HardDrive className="h-4 w-4" />}
-            label="المساحة المستخدمة"
-            value={loading ? "…" : formatBytes(totalBytes)}
-            valueClassName={tierColor}
-          />
-          <StatCard
-            icon={<AlertTriangle className="h-4 w-4" />}
-            label="أكبر صورة"
-            value={
-              loading
-                ? "…"
-                : largestKey
-                ? formatBytes(largestBytes)
-                : "—"
-            }
-            hint={largestKey || undefined}
-          />
-          <StatCard
-            icon={<CheckCircle2 className="h-4 w-4" />}
-            label="آخر صورة مضافة"
-            value={
-              loading
-                ? "…"
-                : lastAddedKey
-                ? lastAddedKey
-                : "—"
-            }
-            hint={
-              lastAddedAt
-                ? new Date(lastAddedAt).toLocaleString("ar", {
-                    dateStyle: "short",
-                    timeStyle: "short",
-                  })
-                : undefined
-            }
-          />
+      <CardContent className="space-y-5">
+        {/* ---------- Quota Overview ---------- */}
+        <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
+          <div className="flex items-center gap-2 text-xs font-semibold text-foreground">
+            <Gauge className="h-3.5 w-3.5 text-primary" />
+            المساحة الإجمالية (حسب المتصفح)
+          </div>
+          {quotaBytes !== null && usageBytes !== null ? (
+            <>
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div>
+                  <div className="text-[10px] text-muted-foreground">الإجمالي</div>
+                  <div className="text-sm font-bold tabular-nums text-foreground">
+                    {formatBytes(quotaBytes)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[10px] text-muted-foreground">المستخدم</div>
+                  <div className={`text-sm font-bold tabular-nums ${tierColor}`}>
+                    {formatBytes(usageBytes)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[10px] text-muted-foreground">المتاح</div>
+                  <div className="text-sm font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
+                    {freeBytes ? formatBytes(freeBytes) : "—"}
+                  </div>
+                </div>
+              </div>
+              <div className="space-y-1">
+                <Progress
+                  value={quotaPct ?? 0}
+                  className={`h-2 ${
+                    quotaTier === "ok"
+                      ? "[&_[data-slot=progress-indicator]]:bg-emerald-500"
+                      : quotaTier === "warn"
+                      ? "[&_[data-slot=progress-indicator]]:bg-amber-500"
+                      : "[&_[data-slot=progress-indicator]]:bg-red-500"
+                  }`}
+                />
+                <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                  <span>{quotaPct !== null ? `${quotaPct.toFixed(1)}% مستخدم` : ""}</span>
+                  <span className={tierColor}>{tierLabel}</span>
+                </div>
+              </div>
+            </>
+          ) : (
+            <p className="text-[11px] text-muted-foreground">
+              المتصفح لا يدعم تقدير المساحة. استخدم إحصائيات IndexedDB أدناه.
+            </p>
+          )}
         </div>
 
-        {/* ---------- Usage tier indicator ---------- */}
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-            <span>مستوى الاستخدام</span>
-            <span className={tierColor}>{tierLabel}</span>
+        {/* ---------- IndexedDB Stats Grid ---------- */}
+        <div>
+          <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-foreground">
+            <Layers className="h-3.5 w-3.5 text-primary" />
+            قاعدة بيانات IndexedDB
           </div>
-          <Progress
-            value={Math.min(
-              100,
-              (totalBytes / (500 * 1024 * 1024)) * 100
-            )}
-            className={`h-1.5 ${
-              usageTier === "ok"
-                ? "[&_[data-slot=progress-indicator]]:bg-emerald-500"
-                : usageTier === "warn"
-                ? "[&_[data-slot=progress-indicator]]:bg-amber-500"
-                : "[&_[data-slot=progress-indicator]]:bg-red-500"
-            }`}
-          />
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <StatCard
+              icon={<ImageIcon className="h-4 w-4" />}
+              label="عدد العناصر"
+              value={loading ? "…" : String(count)}
+            />
+            <StatCard
+              icon={<HardDrive className="h-4 w-4" />}
+              label="الحجم الكلي"
+              value={loading ? "…" : formatBytes(totalBytes)}
+              valueClassName={tierColor}
+            />
+            <StatCard
+              icon={<TrendingUp className="h-4 w-4" />}
+              label="المتوسط"
+              value={loading ? "…" : formatBytes(averageBytes)}
+            />
+            <StatCard
+              icon={<Archive className="h-4 w-4" />}
+              label="أصغر / أكبر"
+              value={
+                loading
+                  ? "…"
+                  : count > 0
+                  ? `${formatBytes(smallestBytes)} / ${formatBytes(largestBytes)}`
+                  : "—"
+              }
+              hint={largestKey || undefined}
+            />
+          </div>
         </div>
+
+        {/* ---------- Category Breakdown ---------- */}
+        {byCategory.length > 0 && (
+          <div>
+            <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-foreground">
+              <Archive className="h-3.5 w-3.5 text-primary" />
+              التفصيل حسب النوع
+            </div>
+            <div className="space-y-1.5">
+              {byCategory.map((cat) => {
+                const pct =
+                  totalBytes > 0 ? (cat.bytes / totalBytes) * 100 : 0;
+                return (
+                  <div
+                    key={cat.prefix}
+                    className="flex items-center gap-2 rounded-md border bg-card px-2.5 py-1.5"
+                  >
+                    <span className="w-20 flex-shrink-0 text-[11px] font-medium text-foreground">
+                      {prefixLabel(cat.prefix)}
+                    </span>
+                    <div className="relative h-2 flex-1 overflow-hidden rounded-full bg-muted">
+                      <div
+                        className="absolute inset-y-0 right-0 rounded-full bg-primary/60"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                    <span className="w-24 flex-shrink-0 text-left text-[10px] tabular-nums text-muted-foreground">
+                      {cat.count} × {formatBytes(cat.bytes)}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* ---------- localStorage Stats ---------- */}
+        <div>
+          <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-foreground">
+            <HardDrive className="h-3.5 w-3.5 text-primary" />
+            localStorage (بيانات الإعدادات)
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <StatCard
+              icon={<HardDrive className="h-4 w-4" />}
+              label="الحجم"
+              value={loading ? "…" : formatBytes(localStorageBytes)}
+            />
+            <StatCard
+              icon={<Layers className="h-4 w-4" />}
+              label="عدد المفاتيح"
+              value={loading ? "…" : String(localStorageKeyCount)}
+            />
+          </div>
+        </div>
+
+        {/* ---------- Last Activity ---------- */}
+        {lastAddedKey && (
+          <div className="flex items-center gap-2 rounded-md border bg-muted/20 px-3 py-2 text-[11px]">
+            <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+            <span className="text-muted-foreground">آخر إضافة:</span>
+            <span className="font-medium text-foreground">{lastAddedKey}</span>
+            {lastAddedAt && (
+              <span className="mr-auto text-muted-foreground">
+                {new Date(lastAddedAt).toLocaleString("ar", {
+                  dateStyle: "short",
+                  timeStyle: "short",
+                })}
+              </span>
+            )}
+          </div>
+        )}
 
         {/* ---------- Errors indicator ---------- */}
         {errors > 0 && (
@@ -332,7 +459,7 @@ export function StoragePanel({ className }: Props) {
         )}
 
         {/* ---------- Actions ---------- */}
-        <div className="flex flex-wrap gap-2 pt-1">
+        <div className="flex flex-wrap gap-2 border-t pt-3">
           <Button
             variant="outline"
             size="sm"
@@ -345,7 +472,7 @@ export function StoragePanel({ className }: Props) {
             ) : (
               <Trash2 className="h-3.5 w-3.5" />
             )}
-            تنظيف الصور غير المستخدمة
+            تنظيف العناصر غير المستخدمة
           </Button>
 
           <Button
@@ -360,7 +487,7 @@ export function StoragePanel({ className }: Props) {
             ) : (
               <Download className="h-3.5 w-3.5" />
             )}
-            تصدير الصور
+            تصدير
           </Button>
 
           <Button
@@ -375,7 +502,7 @@ export function StoragePanel({ className }: Props) {
             ) : (
               <Upload className="h-3.5 w-3.5" />
             )}
-            استيراد الصور
+            استيراد
           </Button>
 
           <input

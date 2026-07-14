@@ -35,12 +35,36 @@ export interface ImageDBError {
 }
 
 export interface ImageDBStats {
+  /** Number of images currently in IndexedDB. */
   count: number;
+  /** Total bytes used by images (sum of data URL lengths × ¾). */
   totalBytes: number;
+  /** Key of the largest image. */
   largestKey: string | null;
+  /** Size of the largest image in bytes. */
   largestBytes: number;
+  /** Key of the most recently added image. */
   lastAddedKey: string | null;
+  /** ISO timestamp of the most recent write. */
   lastAddedAt: string | null;
+  /** Average image size in bytes (0 if count is 0). */
+  averageBytes: number;
+  /** Smallest image size in bytes (0 if count is 0). */
+  smallestBytes: number;
+  /** Browser storage quota estimate (total available, in bytes).
+   *  Comes from navigator.storage.estimate(). May be undefined in some
+   *  browsers/contexts. */
+  quotaBytes: number | null;
+  /** Browser storage usage estimate (in bytes) — includes IndexedDB +
+   *  other origin storage. Comes from navigator.storage.estimate().
+   *  May be undefined. */
+  usageBytes: number | null;
+  /** localStorage usage in bytes (UTF-16: char count × 2). */
+  localStorageBytes: number;
+  /** Number of localStorage keys. */
+  localStorageKeyCount: number;
+  /** Breakdown of images by key prefix (e.g. "banner", "mat", "tool"). */
+  byCategory: { prefix: string; count: number; bytes: number }[];
 }
 
 export interface ImageDBExportEntry {
@@ -211,6 +235,9 @@ export async function getStats(): Promise<ImageDBStats> {
   let totalBytes = 0;
   let largestKey: string | null = null;
   let largestBytes = 0;
+  let smallestBytes = Infinity;
+  // Category breakdown (by key prefix before the first "-")
+  const categoryMap = new Map<string, { count: number; bytes: number }>();
   for (const [key, dataUrl] of cache.entries()) {
     if (!dataUrl) continue;
     count++;
@@ -220,7 +247,24 @@ export async function getStats(): Promise<ImageDBStats> {
       largestBytes = bytes;
       largestKey = key;
     }
+    if (bytes < smallestBytes) {
+      smallestBytes = bytes;
+    }
+    // Categorize by prefix (e.g. "banner-xxx" → "banner", "mat-xxx" → "mat")
+    const dashIdx = key.indexOf("-");
+    const prefix = dashIdx > 0 ? key.slice(0, dashIdx) : "other";
+    const cat = categoryMap.get(prefix) || { count: 0, bytes: 0 };
+    cat.count++;
+    cat.bytes += bytes;
+    categoryMap.set(prefix, cat);
   }
+  if (count === 0) smallestBytes = 0;
+
+  // Sort categories by bytes descending
+  const byCategory = Array.from(categoryMap.entries())
+    .map(([prefix, v]) => ({ prefix, ...v }))
+    .sort((a, b) => b.bytes - a.bytes);
+
   let lastAddedKey: string | null = null;
   let lastAddedAt: string | null = null;
   try {
@@ -247,7 +291,53 @@ export async function getStats(): Promise<ImageDBStats> {
   } catch {
     /* noop */
   }
-  return { count, totalBytes, largestKey, largestBytes, lastAddedKey, lastAddedAt };
+
+  // Browser storage quota estimate (navigator.storage.estimate())
+  let quotaBytes: number | null = null;
+  let usageBytes: number | null = null;
+  try {
+    if (typeof navigator !== "undefined" && navigator.storage?.estimate) {
+      const est = await navigator.storage.estimate();
+      quotaBytes = est.quota ?? null;
+      usageBytes = est.usage ?? null;
+    }
+  } catch {
+    /* noop */
+  }
+
+  // localStorage usage (UTF-16: char count × 2)
+  let localStorageBytes = 0;
+  let localStorageKeyCount = 0;
+  try {
+    if (typeof localStorage !== "undefined") {
+      localStorageKeyCount = localStorage.length;
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key) {
+          const val = localStorage.getItem(key) || "";
+          localStorageBytes += (key.length + val.length) * 2;
+        }
+      }
+    }
+  } catch {
+    /* noop */
+  }
+
+  return {
+    count,
+    totalBytes,
+    largestKey,
+    largestBytes,
+    lastAddedKey,
+    lastAddedAt,
+    averageBytes: count > 0 ? Math.round(totalBytes / count) : 0,
+    smallestBytes,
+    quotaBytes,
+    usageBytes,
+    localStorageBytes,
+    localStorageKeyCount,
+    byCategory,
+  };
 }
 
 export function getAllKeys(): string[] {
