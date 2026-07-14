@@ -54,8 +54,14 @@ interface Props {
   gradient?: string;
   value: BannerImageTransform;
   onChange: (next: BannerImageTransform) => void;
-  /** Width of the preview frame. Default 320. */
+  /** Width of the preview frame. Default BANNER_POSITIONER_WIDTH (394). */
   previewWidth?: number;
+  /**
+   * Aspect ratio of the preview frame as a "W / H" CSS string.
+   * Defaults to "5 / 2" (banner). Pass `${cssWidth} / ${cssHeight}` for
+   * material cards so the editor matches the actual card shape.
+   */
+  aspectRatio?: string;
   /**
    * When true (full-banner mode), the safe-area overlay covers the entire
    * frame. When false (split mode, default), the overlay shows only the
@@ -88,7 +94,8 @@ export function ImagePositioner({
   gradient,
   value,
   onChange,
-  previewWidth = 320,
+  previewWidth = 394,
+  aspectRatio = "5 / 2",
   fullFrame = false,
   onEditingChange,
 }: Props) {
@@ -428,7 +435,7 @@ export function ImagePositioner({
         }`}
         style={{
           width: previewWidth,
-          aspectRatio: "5 / 2",
+          aspectRatio,
           background: imageSrc ? "#0a0d14" : gradient || "#1e2536",
         }}
         tabIndex={0}

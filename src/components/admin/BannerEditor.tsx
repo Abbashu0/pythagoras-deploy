@@ -65,6 +65,8 @@ import {
 } from "@/lib/admin/banner-model";
 import { UploadArea } from "./UploadArea";
 import { ImagePositioner } from "./ImagePositioner";
+import { setImage as setImageInDB, deleteImage as deleteImageFromDB } from "@/lib/admin/image-db";
+import { getBannerDimensions, BANNER_POSITIONER_WIDTH } from "@/lib/admin/dimensions";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -240,7 +242,10 @@ export function BannerEditor({
       const summary = buildChangeSummary(dirty, banner, draft);
       const patch: Partial<BannerInput> = {};
       if (dirty.has("bannerType")) patch.bannerType = draft.bannerType;
-      if (dirty.has("image")) patch.image = draft.image;
+      if (dirty.has("image")) {
+        patch.image = draft.image || "";
+        patch.imageKey = draft.imageKey || "";
+      }
       if (dirty.has("title")) patch.title = draft.title;
       if (dirty.has("subtitle")) patch.subtitle = draft.subtitle;
       if (dirty.has("enabled")) patch.enabled = draft.enabled;
@@ -352,25 +357,35 @@ export function BannerEditor({
             </h4>
             <UploadArea
               currentImage={draft.image}
-              bannerType={draft.bannerType}
+              recommendedDimensions={getBannerDimensions(draft.bannerType)}
+              recommendedLabel={
+                draft.bannerType === "full" ? "بانر كامل" : "بانر مقسّم"
+              }
               onUploaded={(dataUrl) => {
+                const key = `banner-${draft?.id || "temp"}`;
                 setDraft((prev) =>
                   prev
                     ? {
                         ...prev,
                         image: dataUrl,
+                        imageKey: key,
                         transform: { ...BANNER_TRANSFORM_DEFAULT },
                         updatedAt: new Date().toISOString(),
                       }
                     : prev
                 );
+                setImageInDB(key, dataUrl).catch((e) =>
+                  console.error("[BannerEditor] setImageInDB failed:", e)
+                );
               }}
               onClear={() => {
+                if (draft?.imageKey) deleteImageFromDB(draft.imageKey);
                 setDraft((prev) =>
                   prev
                     ? {
                         ...prev,
                         image: "",
+                        imageKey: "",
                         transform: { ...BANNER_TRANSFORM_DEFAULT },
                         updatedAt: new Date().toISOString(),
                       }
@@ -391,7 +406,7 @@ export function BannerEditor({
                 gradient={draft.gradient}
                 value={draft.transform}
                 onChange={onTransformChange}
-                previewWidth={320}
+                previewWidth={BANNER_POSITIONER_WIDTH}
                 fullFrame={isFull}
                 onEditingChange={onImageEditingChange}
               />

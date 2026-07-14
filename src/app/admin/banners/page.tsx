@@ -67,6 +67,7 @@ import { ActivityHistory } from "@/components/admin/ActivityHistory";
 import { DeleteConfirmDialog } from "@/components/admin/DeleteConfirmDialog";
 import { CarouselSettings } from "@/components/admin/CarouselSettings";
 import { BannerSizeInfo } from "@/components/admin/BannerSizeInfo";
+import { getBannerDimensions } from "@/lib/admin/dimensions";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { useFlipReorder } from "@/lib/admin/use-flip-reorder";
@@ -102,6 +103,7 @@ export default function AdminBannersPage() {
   // re-reads reactively (no local setState needed).
   useEffect(() => {
     store.loadFromStorage();
+    store.hydrateImagesFromIDB();
   }, [store]);
 
   // ----- External system sync: apply theme to <html> -----
@@ -344,7 +346,11 @@ export default function AdminBannersPage() {
               <BannerSizeInfo />
             </div>
             {canAddMore ? (
-              <UploadArea onUploaded={handleUploadNew} bannerType="full" />
+              <UploadArea
+                onUploaded={handleUploadNew}
+                recommendedDimensions={getBannerDimensions("full")}
+                recommendedLabel="بانر كامل"
+              />
             ) : (
               <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-3 text-xs text-amber-600 dark:text-amber-400">
                 وصلت إلى الحد الأقصى ({MAX_BANNERS} بانرات). احذف بانرًا لإضافة
@@ -384,7 +390,6 @@ export default function AdminBannersPage() {
               <LiveCarouselPreview
                 banner={draftBanner || selectedBanner}
                 allBanners={sortedBanners}
-                width={366}
               />
             </div>
             <p className="mt-3 text-center text-[11px] leading-relaxed text-muted-foreground">

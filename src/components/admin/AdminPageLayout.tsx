@@ -38,6 +38,7 @@ import { Button } from "@/components/ui/button";
 import { ActivityHistory } from "@/components/admin/ActivityHistory";
 import { useAdminStore } from "@/lib/admin/use-admin-store";
 import { getAdminStore } from "@/lib/admin/admin-store";
+import { getMaterialsStore, getToolsStore } from "@/lib/admin/content-store";
 
 interface Props {
   title: string;
@@ -74,9 +75,14 @@ export function AdminPageLayout({
 
   // Mount: load persisted state for both the page's own store and the
   // shared AdminStore (theme + activity history). Idempotent.
+  // After loading, hydrate images from IndexedDB so list cards + the
+  // editor + live preview can render uploaded images.
   useEffect(() => {
     loadStore();
     store.loadFromStorage();
+    store.hydrateImagesFromIDB();
+    getMaterialsStore().hydrateImagesFromIDB();
+    getToolsStore().hydrateImagesFromIDB();
   }, [loadStore, store]);
 
   // External system sync: apply theme to <html>. No setState inside

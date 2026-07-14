@@ -9,6 +9,7 @@ import { settingsScreen } from "../pages/SettingsPage.js";
 import { subjectTestsScreen } from "../pages/SubjectTestsPage.js";
 import { testsSubjectsScreen } from "../pages/TestsSubjectsPage.js";
 import { toolsScreen } from "../pages/ToolsPage.js";
+import "./image-db.js"; // Registers window.ImageDB (IndexedDB image storage + cache)
 import {
   getBiologyQuestionDetailFromView,
   getQuestionBankSubjectByView,
@@ -1069,7 +1070,14 @@ applyTheme(getStoredTheme());
 applyDensity(getStoredDensity());
 
 const startView = viewFromHash() || "tools";
-refreshView(startView, { activateNav: false });
+// Preload images from IndexedDB, THEN render the first view.
+if (window.ImageDB) {
+  window.ImageDB.preloadAllImages().finally(function () {
+    refreshView(startView, { activateNav: false });
+  });
+} else {
+  refreshView(startView, { activateNav: false });
+}
 
 window.addEventListener("popstate", () => {
   const view = viewFromHash();

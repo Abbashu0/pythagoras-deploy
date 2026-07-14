@@ -26,6 +26,7 @@
 
 import type { BannerImageTransform } from "@/lib/admin/banner-model";
 import { BANNER_TRANSFORM_DEFAULT } from "@/lib/admin/banner-model";
+import { MATERIAL_PREVIEW_WIDTH } from "@/lib/admin/dimensions";
 
 interface Props {
   image?: string;
@@ -50,7 +51,7 @@ export function MaterialCardPreview({
   textVerticalPosition,
   textScale,
   cardHeight,
-  maxWidth,
+  maxWidth = MATERIAL_PREVIEW_WIDTH,
 }: Props) {
   // Empty placeholder
   if (!title && !image && !gradient) {

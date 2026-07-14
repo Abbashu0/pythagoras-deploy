@@ -23,12 +23,13 @@
  * from the audit-log API and the UI won't change.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { History, Trash2, ChevronDown, ChevronUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useAdminStore } from "@/lib/admin/use-admin-store";
 import { getAdminStore } from "@/lib/admin/admin-store";
+import { getImageSync, preloadAllImages } from "@/lib/admin/image-db";
 import {
   ActivityAction,
   ACTIVITY_ICONS,
@@ -70,14 +71,48 @@ function formatDateTime(iso: string) {
   }
 }
 
-/** True if the entry's thumbnail string looks like an image data URL or URL. */
-function isImageThumb(thumb: string): boolean {
-  return (
-    !!thumb &&
-    (thumb.startsWith("data:") ||
-      thumb.startsWith("http") ||
-      thumb.startsWith("/"))
-  );
+/**
+ * Resolve an activity entry's thumbnail to one of:
+ *   - { kind: "image", src: <dataUrl> }  — render as <img>
+ *   - { kind: "css", background: <css> } — render as div with CSS background
+ *   - { kind: "icon" }                   — render the action icon fallback
+ *
+ * Handles `idb:<imageKey>` references (resolved synchronously from the
+ * ImageDB in-memory cache), legacy `data:` URLs, and gradient CSS strings.
+ */
+function resolveThumbnail(
+  thumb: string
+):
+  | { kind: "image"; src: string }
+  | { kind: "css"; background: string }
+  | { kind: "icon" } {
+  if (!thumb) return { kind: "icon" };
+
+  if (thumb.startsWith("idb:")) {
+    const key = thumb.slice(4);
+    const dataUrl = getImageSync(key);
+    if (dataUrl) return { kind: "image", src: dataUrl };
+    return { kind: "icon" };
+  }
+
+  if (thumb.startsWith("data:") || thumb.startsWith("http")) {
+    return { kind: "image", src: thumb };
+  }
+
+  if (
+    thumb.startsWith("linear-gradient") ||
+    thumb.startsWith("radial-gradient") ||
+    thumb.startsWith("#") ||
+    thumb.startsWith("rgb")
+  ) {
+    return { kind: "css", background: thumb };
+  }
+
+  if (thumb.startsWith("/")) {
+    return { kind: "image", src: thumb };
+  }
+
+  return { kind: "icon" };
 }
 
 export function ActivityHistory() {
@@ -85,6 +120,19 @@ export function ActivityHistory() {
   const store = getAdminStore();
   // Track which entries are expanded (showing change summary). Keyed by id.
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // Force a re-render once IndexedDB images are preloaded so idb: thumbnails
+  // resolve to real data URLs (getImageSync returns "" before preload).
+  const [, setImagesLoaded] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    preloadAllImages().then(() => {
+      if (!cancelled) setImagesLoaded(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const toggleExpand = (id: string) => {
     setExpanded((prev) => {
@@ -152,17 +200,32 @@ export function ActivityHistory() {
                     <div className="flex items-start gap-3">
                       {/* Thumbnail (or icon placeholder if no thumbnail) */}
                       <div className="flex-shrink-0">
-                        {isImageThumb(entry.thumbnail) ? (
-                          <img
-                            src={entry.thumbnail}
-                            alt={entry.bannerTitle}
-                            className="h-9 w-9 rounded-md border border-border object-cover"
-                          />
-                        ) : (
-                          <div className="grid h-9 w-9 place-items-center rounded-md border border-border bg-muted text-base">
-                            {ACTIVITY_ICONS[entry.action]}
-                          </div>
-                        )}
+                        {(() => {
+                          const thumb = resolveThumbnail(entry.thumbnail);
+                          if (thumb.kind === "image") {
+                            return (
+                              <img
+                                src={thumb.src}
+                                alt={entry.bannerTitle}
+                                className="h-9 w-9 rounded-md border border-border object-cover"
+                              />
+                            );
+                          }
+                          if (thumb.kind === "css") {
+                            return (
+                              <div
+                                className="h-9 w-9 rounded-md border border-border"
+                                style={{ background: thumb.background }}
+                                aria-label={entry.bannerTitle}
+                              />
+                            );
+                          }
+                          return (
+                            <div className="grid h-9 w-9 place-items-center rounded-md border border-border bg-muted text-base">
+                              {ACTIVITY_ICONS[entry.action]}
+                            </div>
+                          );
+                        })()}
                       </div>
 
                       {/* Content */}

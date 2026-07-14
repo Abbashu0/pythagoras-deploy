@@ -3,22 +3,23 @@
 /**
  * UploadArea
  * -----------
- * Drag & drop + click-to-browse image uploader with validation, compression,
- * and preview.
+ * Drag & drop + click-to-browse image uploader with validation, adaptive
+ * compression, and preview.
  *
  * Flow:
  *   1. User drops/selects a file
- *   2. Validate type (PNG/JPG/WEBP) and size (max 4MB raw)
- *   3. COMPRESS the image to the recommended banner dimensions (1464×586 for
- *      full, 616×584 for split) as JPEG quality 0.85. This reduces a 3MB
- *      photo to ~100KB, preventing localStorage quota issues.
- *   4. Pass the compressed data URL to `onUploaded`
+ *   2. Validate type (PNG/JPG/WEBP) and size (max 10MB raw)
+ *   3. ADAPTIVE compression — small images pass through byte-identical;
+ *      medium/large images re-encode at the appropriate quality tier.
+ *      NEVER cropped.
+ *   4. Pass the (possibly compressed) data URL to `onUploaded`
  *
- * Architecture:
- *   - Pure UI component — no store coupling. Parent decides what to do with
- *     the uploaded data URL.
- *   - The `bannerType` prop controls which compression target is used and
- *     which "recommended size" hint is shown.
+ * Recommended-size hint:
+ *   - The hint adapts to the `recommendedDimensions` prop (a Dimensions
+ *     object computed by the parent via getMaterialCardDimensions() or
+ *     getBannerDimensions()).
+ *   - Falls back to the legacy `recommendedHint` string for callers that
+ *     don't supply dimensions.
  */
 
 import { useCallback, useRef, useState } from "react";
@@ -26,24 +27,20 @@ import { UploadCloud, ImageIcon, AlertCircle, Loader2 } from "lucide-react";
 import {
   ACCEPTED_IMAGE_TYPES,
   MAX_IMAGE_BYTES,
-  RECOMMENDED_BANNER_FULL,
-  RECOMMENDED_BANNER_SPLIT,
-  BannerType,
 } from "@/lib/admin/banner-model";
-import {
-  storeImage,
-} from "@/lib/admin/image-compress";
+import { storeImage } from "@/lib/admin/image-compress";
+import type { Dimensions } from "@/lib/admin/dimensions";
 
 interface Props {
   onUploaded: (dataUrl: string) => void;
   currentImage?: string;
   onClear?: () => void;
-  /** Which recommended size hint to show. Defaults to "full". */
-  bannerType?: BannerType;
-  /**
-   * Custom "recommended size" hint text shown under the drop zone.
-   * Use this when reusing the uploader outside the banner context.
-   */
+  /** Recommended dimensions for the hint. When provided, takes precedence
+   *  over `recommendedHint`. */
+  recommendedDimensions?: Dimensions;
+  /** Optional label for the recommended-size hint (e.g. "بانر كامل"). */
+  recommendedLabel?: string;
+  /** Custom "recommended size" hint text. Ignored when `recommendedDimensions` is set. */
   recommendedHint?: string;
 }
 
@@ -51,7 +48,8 @@ export function UploadArea({
   onUploaded,
   currentImage,
   onClear,
-  bannerType = "full",
+  recommendedDimensions,
+  recommendedLabel,
   recommendedHint,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -83,33 +81,33 @@ export function UploadArea({
       setError(null);
       setCompressing(true);
       try {
-        // Store the image as-is. No cropping, no resizing, no re-encoding
-        // (unless the file exceeds 2MB, in which case it's scaled down
-        // proportionally — but NEVER cropped).
         const stored = await storeImage(file);
         onUploaded(stored);
-      } catch {
-        // If compression fails, try passing the raw data URL as a fallback
-        // (might still work if the image is small enough).
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("[UploadArea] storeImage failed:", msg, err);
         try {
           const reader = new FileReader();
           reader.onload = () => {
             if (typeof reader.result === "string") {
               onUploaded(reader.result);
             } else {
-              setError("تعذّر قراءة الملف. حاول مجددًا.");
+              setError("تعذّر قراءة الملف. حاول مجددًا بصورة أخرى.");
             }
           };
-          reader.onerror = () => setError("تعذّر قراءة الملف. حاول مجددًا.");
+          reader.onerror = () =>
+            setError("تعذّر قراءة الملف. تأكد من أن الصورة سليمة وحاول مجددًا.");
           reader.readAsDataURL(file);
         } catch {
-          setError("تعذّر معالجة الصورة. حاول بصورة أخرى.");
+          setError(
+            "تعذّر معالجة الصورة. جرب صورة أصغر أو بصيغة مختلفة (PNG / JPG / WEBP)."
+          );
         }
       } finally {
         setCompressing(false);
       }
     },
-    [onUploaded, validate, bannerType]
+    [onUploaded, validate]
   );
 
   const onDrop = useCallback(
@@ -141,8 +139,9 @@ export function UploadArea({
     [handleFile]
   );
 
-  const rec = bannerType === "split" ? RECOMMENDED_BANNER_SPLIT : RECOMMENDED_BANNER_FULL;
-  const typeLabel = bannerType === "split" ? "مقسّم" : "كامل";
+  const maxMb = (MAX_IMAGE_BYTES / (1024 * 1024)).toFixed(0);
+  const rec = recommendedDimensions;
+  const recLabel = recommendedLabel || "الصورة";
 
   return (
     <div className="space-y-3">
@@ -183,7 +182,7 @@ export function UploadArea({
                 اسحب الصورة هنا أو اضغط للاختيار
               </p>
               <p className="text-xs text-muted-foreground">
-                PNG · JPG · WEBP — الحد الأقصى 4 ميجابايت
+                PNG · JPG · WEBP — الحد الأقصى {maxMb} ميجابايت
               </p>
             </div>
           </>
@@ -198,20 +197,39 @@ export function UploadArea({
         />
       </div>
 
-      {/* Recommended size hint — adapts to the current banner type,
-          or uses the custom `recommendedHint` when provided (for
-          non-banner contexts like material cards). */}
       <div className="flex items-start gap-2 rounded-lg bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
         <ImageIcon className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
-        {recommendedHint ? (
+        {rec ? (
+          <div className="space-y-1">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+              <span className="font-semibold text-foreground">{recLabel}</span>
+              <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+                {rec.aspectRatio}
+              </span>
+            </div>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px]">
+              <span>
+                حجم العرض:{" "}
+                <span className="font-medium text-foreground">
+                  {rec.cssWidth}×{rec.cssHeight}px
+                </span>
+              </span>
+              <span>
+                الحجم الموصى به (2× retina):{" "}
+                <span className="font-medium text-emerald-600 dark:text-emerald-400">
+                  {rec.retinaWidth}×{rec.retinaHeight}px
+                </span>
+              </span>
+            </div>
+            <p className="text-[10px] leading-relaxed text-muted-foreground">
+              صدّر صورة بهذا الحجم بالضبط لتحصل على ملاءمة تامة بدون قص. يتم حفظ
+              الصورة بأبعادها الأصلية، واستخدم أدوات التموضع لضبط الجزء الظاهر.
+            </p>
+          </div>
+        ) : recommendedHint ? (
           <span>{recommendedHint}</span>
         ) : (
-          <span>
-            الحجم الموصى به (بانر {typeLabel}): {rec.width}×{rec.height}px
-            (نسبة {rec.aspectRatio}) — تصدير {rec.retinaScale}× retina.
-            <br />
-            يتم حفظ الصورة بأبعادها الأصلية دون قص. استخدم أدوات التموضع لضبط الجزء الظاهر.
-          </span>
+          <span>يتم حفظ الصورة بأبعادها الأصلية دون قص. استخدم أدوات التموضع لضبط الجزء الظاهر.</span>
         )}
       </div>
 

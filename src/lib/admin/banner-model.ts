@@ -41,8 +41,15 @@ export interface SponsoredBanner {
   id: string;
   /** Layout mode — controls how the carousel renders this banner. */
   bannerType: BannerType;
-  /** Data URL or remote URL of the banner image. Empty string = placeholder gradient. */
+  /** Data URL or remote URL of the banner image. Empty string = placeholder gradient.
+   *  NOTE: in localStorage this field is stripped to "" when `imageKey` is
+   *  set (the actual image data lives in IndexedDB). The in-memory copy
+   *  is hydrated from IndexedDB via `hydrateImagesFromIDB()`. */
   image: string;
+  /** IndexedDB key for the image (e.g. "banner-<uuid>"). When this is
+   *  set, the student app looks up the image from IndexedDB instead of
+   *  reading `image` directly. Keeps localStorage tiny. */
+  imageKey?: string;
   /** If image is empty, this gradient is used as the visual background. */
   gradient: string;
   /** Icon key from the student app's icon set (used as fallback glyph over gradient). */
@@ -114,7 +121,7 @@ export const RECOMMENDED_BANNER_SPLIT = {
 export const RECOMMENDED_BANNER = RECOMMENDED_BANNER_SPLIT;
 
 export const ACCEPTED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"] as const;
-export const MAX_IMAGE_BYTES = 4 * 1024 * 1024; // 4 MB
+export const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10 MB (IndexedDB can handle large images)
 
 export function makeBanner(input: BannerInput): SponsoredBanner {
   const now = new Date().toISOString();

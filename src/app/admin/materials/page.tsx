@@ -248,6 +248,7 @@ export default function AdminMaterialsPage() {
             }}
             onDraftChange={setDraftItem}
             onImageEditingChange={setIsImageEditing}
+            cardHeight={effectiveSettings.cardHeight}
           />
         </div>
       }
@@ -269,14 +270,13 @@ export default function AdminMaterialsPage() {
               </span>
             </div>
             <div className="flex justify-center rounded-lg bg-muted/20 p-4">
-              <div style={{ width: "378px", maxWidth: "100%" }}>
+              <div style={{ width: "100%", maxWidth: "394px" }}>
                 <MaterialCardPreview
                   image={previewItem?.image}
                   gradient={previewItem?.gradient}
                   transform={previewItem?.transform}
                   title={previewItem?.label}
                   englishTitle={previewItem?.englishTitle}
-                  available={previewItem?.available ?? true}
                   fadeIntensity={effectiveSettings.fadeIntensity}
                   textVerticalPosition={effectiveSettings.textVerticalPosition}
                   textScale={effectiveSettings.textScale}

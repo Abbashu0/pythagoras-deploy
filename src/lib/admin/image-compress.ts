@@ -1,64 +1,79 @@
 /**
- * Image storage utility for admin uploads.
+ * Adaptive image storage for admin uploads.
  *
- * CRITICAL: This module does NOT crop, resize, or re-encode images.
- * The original image is preserved 100% as-is. The only processing is
- * converting the File to a data URL for localStorage storage.
+ * Design goals:
+ *   1. NO strict 150KB cap — use adaptive tiers based on the source size.
+ *   2. NEVER crop. NEVER force-resize. Aspect ratio is ALWAYS preserved.
+ *   3. Small images stay byte-identical (no re-encode).
+ *   4. Medium images re-encode at near-lossless quality.
+ *   5. Large/huge images re-encode at lower quality + proportional
+ *      downscale (still no crop) to keep them reasonable.
+ *   6. PNG with alpha is preserved as PNG (no JPEG conversion).
  *
- * If the image is larger than ~3MB (which would blow localStorage's
- * ~5MB quota when storing multiple images), we scale it down
- * proportionally — but we NEVER crop, NEVER change aspect ratio,
- * and NEVER center-crop. The full image is always preserved.
- *
- * The admin then uses the Image Positioner (translate + scale) to
- * decide which part of the image is visible inside the frame.
+ * Adaptive tiers (based on the RAW file size):
+ *   < 500 KB → Store as-is (zero processing)
+ *   < 1 MB   → Re-encode JPEG q=0.92 (near-lossless)
+ *   < 2 MB   → Re-encode JPEG q=0.85 (good quality)
+ *   < 5 MB   → Re-encode JPEG q=0.80 + scale max 2560px wide
+ *   >= 5 MB  → Re-encode JPEG q=0.75 + scale max 2000px wide
  */
 
 export interface StoreOptions {
-  /**
-   * Maximum file size in bytes. If the image exceeds this, it's
-   * scaled down proportionally (NOT cropped) to fit.
-   * Default: 2MB (2_097_152) — leaves room for other localStorage data.
-   */
-  maxBytes?: number;
-  /** JPEG quality for downscaled images. Default 0.9 (high quality). */
   quality?: number;
-  /** Output format. Default "image/jpeg". */
   mime?: string;
+  maxWidth?: number;
 }
 
-/**
- * Store an image File as a data URL, preserving the original image
- * as much as possible.
- *
- * - If the file is small enough (< maxBytes), it's stored AS-IS
- *   with zero processing — original dimensions, original quality.
- * - If the file exceeds maxBytes, it's scaled down proportionally
- *   (preserving aspect ratio, NO cropping) until it fits.
- *
- * Returns a Promise<string> that resolves to the data URL.
- */
+interface CompressionTier {
+  name: "passthrough" | "light" | "medium" | "high" | "extreme";
+  quality: number;
+  maxWidth: number;
+  mime: "image/jpeg" | "image/png" | "image/webp";
+}
+
+const SMALL = 500 * 1024;
+const MEDIUM = 1024 * 1024;
+const LARGE = 2 * 1024 * 1024;
+const HUGE = 5 * 1024 * 1024;
+
+export function pickTier(sourceBytes: number, hasAlpha: boolean): CompressionTier {
+  if (hasAlpha) {
+    if (sourceBytes < HUGE) {
+      return { name: "passthrough", quality: 1, maxWidth: 0, mime: "image/png" };
+    }
+    return { name: "high", quality: 1, maxWidth: 2560, mime: "image/png" };
+  }
+
+  if (sourceBytes < SMALL) {
+    return { name: "passthrough", quality: 1, maxWidth: 0, mime: "image/jpeg" };
+  }
+  if (sourceBytes < MEDIUM) {
+    return { name: "light", quality: 0.92, maxWidth: 0, mime: "image/jpeg" };
+  }
+  if (sourceBytes < LARGE) {
+    return { name: "medium", quality: 0.85, maxWidth: 0, mime: "image/jpeg" };
+  }
+  if (sourceBytes < HUGE) {
+    return { name: "high", quality: 0.80, maxWidth: 2560, mime: "image/jpeg" };
+  }
+  return { name: "extreme", quality: 0.75, maxWidth: 2000, mime: "image/jpeg" };
+}
+
 export function storeImage(
   source: File | string,
   options: StoreOptions = {}
 ): Promise<string> {
-  const { maxBytes = 500_000, quality = 0.85, mime = "image/jpeg" } = options;
+  const { quality, mime, maxWidth } = options;
 
   return new Promise((resolve, reject) => {
-    // If source is already a string (data URL), check its size
     if (typeof source === "string") {
-      const bytes = dataUrlBytes(source);
-      if (bytes <= maxBytes) {
-        // Small enough — return as-is, zero processing
-        resolve(source);
-        return;
-      }
-      // Too large — need to scale down (no crop)
-      scaleDownToSize(source, maxBytes, quality, mime).then(resolve).catch(reject);
+      const srcBytes = dataUrlBytes(source);
+      const hasAlpha = detectAlpha(source);
+      const tier = pickTier(srcBytes, hasAlpha);
+      applyTier(source, tier, { quality, mime, maxWidth }).then(resolve).catch(reject);
       return;
     }
 
-    // Source is a File — read it as data URL first
     const reader = new FileReader();
     reader.onload = () => {
       if (typeof reader.result !== "string") {
@@ -66,107 +81,88 @@ export function storeImage(
         return;
       }
       const dataUrl = reader.result;
-      const bytes = dataUrlBytes(dataUrl);
-
-      if (bytes <= maxBytes) {
-        // Small enough — store original as-is, zero processing
-        resolve(dataUrl);
-        return;
-      }
-
-      // Too large — scale down proportionally (NO crop, preserve aspect ratio)
-      scaleDownToSize(dataUrl, maxBytes, quality, mime).then(resolve).catch(reject);
+      const srcBytes = dataUrlBytes(dataUrl);
+      const hasAlpha = detectAlpha(dataUrl);
+      const tier = pickTier(srcBytes, hasAlpha);
+      applyTier(dataUrl, tier, { quality, mime, maxWidth }).then(resolve).catch(reject);
     };
     reader.onerror = () => reject(new Error("Failed to read file"));
     reader.readAsDataURL(source);
   });
 }
 
-/**
- * Scale an image down proportionally until its data URL fits within
- * maxBytes. Aspect ratio is ALWAYS preserved. The image is NEVER cropped.
- *
- * Algorithm:
- *   1. Start with the original dimensions.
- *   2. If the data URL is too large, scale down by 10%.
- *   3. Repeat until it fits or we hit a minimum dimension.
- */
-function scaleDownToSize(
+function applyTier(
   dataUrl: string,
-  maxBytes: number,
-  quality: number,
-  mime: string
+  tier: CompressionTier,
+  overrides: { quality?: number; mime?: string; maxWidth?: number }
 ): Promise<string> {
+  const finalQuality = overrides.quality ?? tier.quality;
+  const finalMime = (overrides.mime as CompressionTier["mime"]) ?? tier.mime;
+  const finalMaxWidth = overrides.maxWidth ?? tier.maxWidth;
+
+  if (tier.name === "passthrough") {
+    return Promise.resolve(dataUrl);
+  }
+
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.crossOrigin = "anonymous";
 
     img.onload = () => {
-      let scale = 1.0;
-      const minScale = 0.1; // Don't go below 10% of original
-      const originalW = img.width;
-      const originalH = img.height;
+      let targetW = img.width;
+      let targetH = img.height;
+      if (finalMaxWidth > 0 && targetW > finalMaxWidth) {
+        const ratio = finalMaxWidth / targetW;
+        targetW = Math.round(targetW * ratio);
+        targetH = Math.round(targetH * ratio);
+      }
 
-      const tryScale = (currentScale: number): void => {
-        const w = Math.round(originalW * currentScale);
-        const h = Math.round(originalH * currentScale);
+      const canvas = document.createElement("canvas");
+      canvas.width = targetW;
+      canvas.height = targetH;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        reject(new Error("Canvas 2D context not available"));
+        return;
+      }
 
-        const canvas = document.createElement("canvas");
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) {
-          reject(new Error("Canvas 2D context not available"));
-          return;
-        }
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
 
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = "high";
-        // Draw the FULL image at the scaled size — no crop, no offset
-        ctx.drawImage(img, 0, 0, w, h);
+      if (finalMime === "image/jpeg") {
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, targetW, targetH);
+      }
+      ctx.drawImage(img, 0, 0, targetW, targetH);
 
-        const result = canvas.toDataURL(mime, quality);
-        const bytes = dataUrlBytes(result);
-
-        if (bytes <= maxBytes || currentScale <= minScale) {
-          resolve(result);
-        } else {
-          // Still too large — reduce scale by 10% and try again
-          tryScale(currentScale * 0.9);
-        }
-      };
-
-      tryScale(scale);
+      try {
+        const result = canvas.toDataURL(finalMime, finalQuality);
+        resolve(result);
+      } catch (err) {
+        reject(new Error(`Canvas export failed: ${err instanceof Error ? err.message : String(err)}`));
+      }
     };
 
-    img.onerror = () => reject(new Error("Failed to load image for scaling"));
+    img.onerror = () => reject(new Error("Failed to load image for compression"));
     img.src = dataUrl;
   });
 }
 
-/**
- * Backward-compatible alias. Old code calls `compressImage` — we keep
- * the function name but it now delegates to `storeImage` which does
- * NOT crop.
- */
+function detectAlpha(dataUrl: string): boolean {
+  return /^data:image\/png/i.test(dataUrl);
+}
+
 export function compressImage(
   source: File | string,
   _options: { maxWidth: number; maxHeight: number; quality?: number; mime?: string }
 ): Promise<string> {
-  // Ignore maxWidth/maxHeight — we don't resize to specific dimensions anymore.
-  // Just store the image as-is (or scale down proportionally if too large).
   return storeImage(source, {
-    maxBytes: 500_000,
-    quality: _options.quality || 0.85,
-    mime: _options.mime || "image/jpeg",
+    quality: _options.quality,
+    mime: _options.mime,
+    maxWidth: 0,
   });
 }
 
-/**
- * Get compression target for a given banner type.
- * Kept for backward compatibility — the values are no longer used
- * for cropping, only as hints in the UI.
- */
 export function getCompressionTarget(bannerType: "full" | "split"): {
   maxWidth: number;
   maxHeight: number;
@@ -179,9 +175,6 @@ export function getCompressionTarget(bannerType: "full" | "split"): {
   return { maxWidth: 616, maxHeight: 584, quality: 0.9, mime: "image/jpeg" };
 }
 
-/**
- * Estimate the size of a data URL in bytes.
- */
 export function dataUrlBytes(dataUrl: string): number {
   try {
     const base64 = dataUrl.split(",")[1] || "";
@@ -190,4 +183,12 @@ export function dataUrlBytes(dataUrl: string): number {
   } catch {
     return dataUrl.length;
   }
+}
+
+export function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return "0 B";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }

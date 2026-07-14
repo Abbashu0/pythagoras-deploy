@@ -42,6 +42,7 @@ import {
   ActivityHistoryEntry,
   ACTIVITY_LABELS,
 } from "./activity-model";
+import { getImageSync, preloadAllImages } from "./image-db";
 
 const BANNERS_KEY = "pythagoras-admin-banners";
 const HISTORY_KEY = "pythagoras-admin-history";
@@ -155,15 +156,34 @@ class AdminStore {
       const b = localStorage.getItem(BANNERS_KEY);
       if (b) {
         const parsed = JSON.parse(b) as SponsoredBanner[];
-        // Migrate older banners that don't have a `bannerType` field yet —
-        // treat them as "split" (the original layout) since they have
-        // title/subtitle/icon set up for the split layout.
-        // Banners without a `transform` get the default transform.
-        this.banners = parsed.map((banner) => ({
-          ...banner,
-          bannerType: (banner.bannerType ?? "split") as BannerType,
-          transform: banner.transform || { ...BANNER_TRANSFORM_DEFAULT },
-        }));
+        // SANITIZER: drop any large `image` data URL field — it lives
+        // in IndexedDB now (via imageKey) and would blow localStorage's
+        // ~5MB quota. We keep ONLY the imageKey reference.
+        // HYDRATION: if the banner has an imageKey, resolve it to the
+        // actual data URL via ImageDB.getImageSync() so the in-memory
+        // banner object can be rendered by AdminBannerCard,
+        // LiveCarouselPreview, etc.
+        this.banners = parsed.map((banner) => {
+          const sanitized = { ...banner };
+          if (
+            typeof sanitized.image === "string" &&
+            sanitized.image.startsWith("data:") &&
+            sanitized.image.length > 1000
+          ) {
+            sanitized.image = "";
+          }
+          // Hydrate from IndexedDB cache if available (synchronous read
+          // from the in-memory Map; returns "" if not yet preloaded).
+          if (sanitized.imageKey && !sanitized.image) {
+            const dataUrl = getImageSync(sanitized.imageKey);
+            if (dataUrl) sanitized.image = dataUrl;
+          }
+          return {
+            ...sanitized,
+            bannerType: (sanitized.bannerType ?? "split") as BannerType,
+            transform: sanitized.transform || { ...BANNER_TRANSFORM_DEFAULT },
+          };
+        });
         this.banners.sort((a, b2) => a.displayOrder - b2.displayOrder);
       } else {
         // First visit — seed with the default 5 banners so the dashboard
@@ -171,10 +191,23 @@ class AdminStore {
         this.banners = this.seedBanners();
       }
 
-      // 4. History
+      // 4. History — with one-time sanitizer.
+      // Older versions stored FULL image data URLs in each entry's
+      // `thumbnail` field. Strip oversized thumbnails to reclaim space.
       const h = localStorage.getItem(HISTORY_KEY);
       if (h) {
-        this.history = JSON.parse(h) as ActivityHistoryEntry[];
+        const parsed = JSON.parse(h) as ActivityHistoryEntry[];
+        this.history = parsed.map((entry) => {
+          if (
+            entry &&
+            typeof entry.thumbnail === "string" &&
+            entry.thumbnail.startsWith("data:") &&
+            entry.thumbnail.length > 1000
+          ) {
+            return { ...entry, thumbnail: "" };
+          }
+          return entry;
+        });
       }
 
       // Persist — writes migrated banner shapes back + ensures all four
@@ -188,6 +221,32 @@ class AdminStore {
       this.persist();
       this.emit();
       return true;
+    }
+  }
+
+  /**
+   * Asynchronously hydrate banner images from IndexedDB.
+   * Call after loadFromStorage() on admin pages so list cards + the
+   * editor + live preview can render uploaded images.
+   */
+  async hydrateImagesFromIDB(): Promise<void> {
+    if (typeof window === "undefined") return;
+    try {
+      await preloadAllImages();
+      let changed = false;
+      this.banners = this.banners.map((b) => {
+        if (b.imageKey && (!b.image || b.image.length === 0)) {
+          const dataUrl = getImageSync(b.imageKey);
+          if (dataUrl) {
+            changed = true;
+            return { ...b, image: dataUrl };
+          }
+        }
+        return b;
+      });
+      if (changed) this.emit();
+    } catch (e) {
+      console.warn("[AdminStore] hydrateImagesFromIDB failed:", e);
     }
   }
 
@@ -263,7 +322,14 @@ class AdminStore {
    * background).
    */
   bannerThumbnail(banner: SponsoredBanner): string {
-    return banner.image || banner.gradient;
+    // Return `idb:${imageKey}` (a short reference string) so the
+    // ActivityHistory panel can resolve it via ImageDB.getImageSync()
+    // at render time. Falls back to the gradient (a short CSS string).
+    if (banner.imageKey) return `idb:${banner.imageKey}`;
+    const img = banner.image || "";
+    if (img.startsWith("data:")) return ""; // legacy data URL — drop
+    if (img) return img;
+    return banner.gradient || "";
   }
 
   // ---------- Subscription ----------
@@ -305,7 +371,20 @@ class AdminStore {
   private persist() {
     if (typeof window === "undefined") return;
     try {
-      localStorage.setItem(BANNERS_KEY, JSON.stringify(this.banners));
+      // CRITICAL: Strip image DATA URLs from banners before saving to
+      // localStorage. The image data lives in IndexedDB (via imageKey).
+      const bannersForStorage = this.banners.map((b) => {
+        if (b.imageKey) return { ...b, image: "" };
+        if (
+          typeof b.image === "string" &&
+          b.image.startsWith("data:") &&
+          b.image.length > 1000
+        ) {
+          return { ...b, image: "" };
+        }
+        return b;
+      });
+      localStorage.setItem(BANNERS_KEY, JSON.stringify(bannersForStorage));
       localStorage.setItem(HISTORY_KEY, JSON.stringify(this.history));
       localStorage.setItem(THEME_KEY, this.adminTheme);
       localStorage.setItem(
@@ -314,15 +393,45 @@ class AdminStore {
       );
       this.lastStorageError = null;
     } catch (err) {
-      // QuotaExceededError — localStorage is full (typically ~5MB).
-      // This happens when banner images are too large.
-      // We DON'T silently swallow this — surface it to the UI.
+      // QuotaExceededError — localStorage is full.
+      // Try recovery: clear keys + retry with sanitized data.
       const isQuota =
         err instanceof DOMException &&
         (err.name === "QuotaExceededError" ||
           err.name === "NS_ERROR_DOM_QUOTA_REACHED" ||
           err.code === 22 ||
           err.code === 1014);
+
+      if (isQuota) {
+        try {
+          localStorage.removeItem(BANNERS_KEY);
+          localStorage.removeItem(HISTORY_KEY);
+          const bannersForStorage = this.banners.map((b) => {
+            if (b.imageKey) return { ...b, image: "" };
+            if (
+              typeof b.image === "string" &&
+              b.image.startsWith("data:") &&
+              b.image.length > 1000
+            ) {
+              return { ...b, image: "" };
+            }
+            return b;
+          });
+          localStorage.setItem(BANNERS_KEY, JSON.stringify(bannersForStorage));
+          localStorage.setItem(HISTORY_KEY, JSON.stringify(this.history));
+          localStorage.setItem(THEME_KEY, this.adminTheme);
+          localStorage.setItem(
+            CAROUSEL_KEY,
+            JSON.stringify({ autoSlideInterval: this.autoSlideInterval })
+          );
+          this.lastStorageError = null;
+          console.info("[AdminStore] Recovery successful after quota error.");
+          return;
+        } catch (recoveryErr) {
+          console.error("[AdminStore] Recovery write also failed:", recoveryErr);
+        }
+      }
+
       this.lastStorageError = isQuota
         ? "امتلأت مساحة التخزين المحلية. احذف بانراً قديماً أو استخدم صوراً أصغر."
         : `خطأ في الحفظ: ${err instanceof Error ? err.message : String(err)}`;

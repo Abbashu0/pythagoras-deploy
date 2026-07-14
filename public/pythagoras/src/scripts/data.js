@@ -415,13 +415,14 @@ export function getSponsoredBanners() {
         // Default to "split" for older banners that don't have the field.
         bannerType: b.bannerType || "split",
         iconKey: b.iconKey || "tests",
-        // Admin store keeps `image` (data URL or empty) and `gradient` separately.
-        // Student app's SponsoredCarouselCard uses `image` as the CSS background.
-        // If admin uploaded a real image, use it; otherwise fall back to gradient.
+        // Image: if banner has an imageKey, look it up in IndexedDB
+        // (the admin stores image data there, NOT in localStorage). Falls
+        // back to the inline `image` field (legacy) or the gradient.
         image:
-          b.image && b.image.length > 0
+          (b.imageKey && window.ImageDB && window.ImageDB.getImageSync(b.imageKey)) ||
+          (b.image && b.image.length > 0
             ? b.image
-            : b.gradient || "linear-gradient(135deg, #4f9cff, #2a6fcc)",
+            : b.gradient || "linear-gradient(135deg, #4f9cff, #2a6fcc)"),
         gradient: b.gradient || b.image,
         title: b.title || "",
         subtitle: b.subtitle || "",
@@ -634,9 +635,12 @@ export function getTestSubjects() {
           hasDiagramPractice: hardcoded?.hasDiagramPractice || false,
           available: item.available !== false,
           color: hardcoded?.color,
-          // Image-card fields — empty image means the student UI falls
-          // back to the gradient background.
-          image: typeof item.image === "string" ? item.image : "",
+          // Image: if item has an imageKey, look it up in IndexedDB
+          // (the admin stores image data there, NOT in localStorage).
+          // Falls back to the inline `image` field (legacy) or empty.
+          image:
+            (item.imageKey && window.ImageDB && window.ImageDB.getImageSync(item.imageKey)) ||
+            (typeof item.image === "string" ? item.image : ""),
           gradient:
             typeof item.gradient === "string"
               ? item.gradient

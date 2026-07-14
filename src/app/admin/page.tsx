@@ -54,6 +54,8 @@ import {
 import { getAdminStore } from "@/lib/admin/admin-store";
 import { useAdminStore } from "@/lib/admin/use-admin-store";
 import { useToast } from "@/hooks/use-toast";
+import { StoragePanel } from "@/components/admin/StoragePanel";
+import { migrateLegacyImages } from "@/lib/admin/image-migrate";
 
 interface AdminSection {
   id: string;
@@ -144,6 +146,21 @@ export default function AdminDashboardPage() {
   // re-reads reactively (no local setState needed).
   useEffect(() => {
     store.loadFromStorage();
+    store.hydrateImagesFromIDB();
+    // Run one-time legacy image migration in the background.
+    migrateLegacyImages()
+      .then((res) => {
+        if (res.migrated > 0) {
+          console.info(
+            `[image-migrate] Migrated ${res.migrated} images from localStorage to IndexedDB.`
+          );
+          store.loadFromStorage();
+          store.hydrateImagesFromIDB();
+        }
+      })
+      .catch((e) => {
+        console.warn("[image-migrate] Migration failed:", e);
+      });
   }, [store]);
 
   // ---------- External system sync: apply theme to <html> ----------
@@ -255,6 +272,11 @@ export default function AdminDashboardPage() {
             </button>
           );
         })}
+      </div>
+
+      {/* ---------- Storage panel ---------- */}
+      <div className="mt-8">
+        <StoragePanel />
       </div>
     </div>
   );

@@ -64,6 +64,11 @@ import {
 import { UploadArea } from "./UploadArea";
 import { ImagePositioner } from "./ImagePositioner";
 import type { ContentItem } from "@/lib/admin/content-store";
+import { setImage as setImageInDB, deleteImage as deleteImageFromDB } from "@/lib/admin/image-db";
+import {
+  getMaterialCardDimensions,
+  MATERIAL_POSITIONER_WIDTH,
+} from "@/lib/admin/dimensions";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -92,6 +97,10 @@ interface Props {
   onDraftChange?: (draft: ContentItem | null) => void;
   /** Forwarded to ImagePositioner — true while the user is dragging. */
   onImageEditingChange?: (editing: boolean) => void;
+  /** The CURRENT committed card height from the materials store. Used to
+   *  compute the recommended image dimensions in the UploadArea hint.
+   *  Defaults to 213 (the student app default) when not provided. */
+  cardHeight?: number;
 }
 
 /** Simulated save latency (ms) — gives the user a visible "saving" state. */
@@ -139,9 +148,14 @@ export function MaterialEditor({
   onClose,
   onDraftChange,
   onImageEditingChange,
+  cardHeight = 213,
 }: Props) {
   const [draft, setDraft] = useState<ContentItem | null>(item);
   const [saveState, setSaveState] = useState<SaveState>("idle");
+
+  // Recommended image dimensions for the UploadArea hint — recomputed
+  // every render so it stays in sync with the current cardHeight.
+  const recommendedDimensions = getMaterialCardDimensions({ cardHeight });
 
   // ---- Sync draft when the item ID changes ----
   // "Adjust state during render" pattern (same approach BannerEditor uses
@@ -205,7 +219,10 @@ export function MaterialEditor({
       const patch: MaterialPatch = {};
       if (dirty.has("label")) patch.label = draft.label;
       if (dirty.has("englishTitle")) patch.englishTitle = draft.englishTitle || "";
-      if (dirty.has("image")) patch.image = draft.image || "";
+      if (dirty.has("image")) {
+        patch.image = draft.image || "";
+        patch.imageKey = draft.imageKey || "";
+      }
       if (dirty.has("transform")) patch.transform = draft.transform;
       if (dirty.has("available")) patch.available = draft.available;
       onSave(item.id, patch, summary);
@@ -274,24 +291,32 @@ export function MaterialEditor({
             </h4>
             <UploadArea
               currentImage={draft.image || undefined}
-              recommendedHint="يتم حفظ الصورة بأبعادها الأصلية دون أي قص. استخدم أدوات التموضع والتكبير لضبط الجزء الظاهر."
+              recommendedDimensions={recommendedDimensions}
+              recommendedLabel="بطاقة المادة"
               onUploaded={(dataUrl) => {
+                const key = `mat-${draft?.id || "temp"}`;
                 setDraft((prev) =>
                   prev
                     ? {
                         ...prev,
                         image: dataUrl,
+                        imageKey: key,
                         transform: { ...BANNER_TRANSFORM_DEFAULT },
                       }
                     : prev
                 );
+                setImageInDB(key, dataUrl).catch((e) =>
+                  console.error("[MaterialEditor] setImageInDB failed:", e)
+                );
               }}
               onClear={() => {
+                if (draft?.imageKey) deleteImageFromDB(draft.imageKey);
                 setDraft((prev) =>
                   prev
                     ? {
                         ...prev,
                         image: "",
+                        imageKey: "",
                         transform: { ...BANNER_TRANSFORM_DEFAULT },
                       }
                     : prev
@@ -311,9 +336,8 @@ export function MaterialEditor({
                 gradient={draft.gradient}
                 value={draft.transform || BANNER_TRANSFORM_DEFAULT}
                 onChange={onTransformChange}
-                // 16:9 preview width — narrower than the banner's 320
-                // because the card aspect ratio is taller-per-width.
-                previewWidth={288}
+                previewWidth={recommendedDimensions.cssWidth}
+                aspectRatio={`${recommendedDimensions.cssWidth} / ${recommendedDimensions.cssHeight}`}
                 fullFrame
                 onEditingChange={onImageEditingChange}
               />

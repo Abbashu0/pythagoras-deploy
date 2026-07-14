@@ -26,20 +26,25 @@
  */
 
 import { SponsoredBanner } from "@/lib/admin/banner-model";
+import { CAROUSEL_PREVIEW_WIDTH } from "@/lib/admin/dimensions";
 
 interface Props {
   /** The banner to render. If null, shows an empty-state placeholder. */
   banner: SponsoredBanner | null;
   /** Optional — used only to render the correct number of pagination dots. */
   allBanners?: SponsoredBanner[];
-  /** Constrain width to match the student app's mobile card (~366px). */
+  /**
+   * Constrain width to match the student app's actual content width.
+   * Defaults to CAROUSEL_PREVIEW_WIDTH (394px) — the exact width of
+   * the carousel frame on a 430px student-app device.
+   */
   width?: number;
 }
 
 export function LiveCarouselPreview({
   banner,
   allBanners,
-  width = 366,
+  width = CAROUSEL_PREVIEW_WIDTH,
 }: Props) {
   if (!banner) {
     return (

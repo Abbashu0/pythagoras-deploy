@@ -52,6 +52,7 @@ import {
 } from "./activity-model";
 import { getAdminStore } from "./admin-store";
 import type { BannerImageTransform } from "./banner-model";
+import { getImageSync, preloadAllImages } from "./image-db";
 
 export interface ContentItem {
   id: string;
@@ -64,8 +65,14 @@ export interface ContentItem {
    *  materials page renders an image instead. */
   icon: string;
   /** Data URL of the uploaded card image. Empty string = use the
-   *  gradient fallback. */
+   *  gradient fallback. NOTE: in localStorage this field is stripped to
+   *  "" when `imageKey` is set (the actual image data lives in
+   *  IndexedDB). The in-memory copy is hydrated from IndexedDB. */
   image?: string;
+  /** IndexedDB key for the image (e.g. "mat-biology"). When this is
+   *  set, the student app looks up the image from IndexedDB instead of
+   *  reading `image` directly. Keeps localStorage tiny. */
+  imageKey?: string;
   /** Fallback CSS background (gradient) shown when no image is uploaded. */
   gradient?: string;
   /** Saved image positioning (drag + zoom) chosen in the admin image
@@ -183,10 +190,23 @@ class ContentStore {
       if (stored) {
         const parsed = JSON.parse(stored) as ContentItem[];
         this.items = parsed
-          .map((item) => ({
-            ...this.defaults[0],
-            ...item,
-          }))
+          .map((item) => {
+            const merged = { ...this.defaults[0], ...item };
+            // SANITIZER: drop large data URLs (they live in IndexedDB).
+            if (
+              typeof merged.image === "string" &&
+              merged.image.startsWith("data:") &&
+              merged.image.length > 1000
+            ) {
+              merged.image = "";
+            }
+            // HYDRATION: resolve imageKey from IndexedDB cache.
+            if (merged.imageKey && (!merged.image || merged.image.length === 0)) {
+              const dataUrl = getImageSync(merged.imageKey);
+              if (dataUrl) merged.image = dataUrl;
+            }
+            return merged;
+          })
           .sort((a, b) => a.order - b.order);
       } else {
         this.items = this.defaults.map((i) => ({ ...i }));
@@ -205,6 +225,32 @@ class ContentStore {
       this.persistSettings();
       this.emit();
       return true;
+    }
+  }
+
+  /**
+   * Asynchronously hydrate item images from IndexedDB.
+   * Call after loadFromStorage() on admin pages so list cards + the
+   * editor + live preview can render uploaded images.
+   */
+  async hydrateImagesFromIDB(): Promise<void> {
+    if (typeof window === "undefined") return;
+    try {
+      await preloadAllImages();
+      let changed = false;
+      this.items = this.items.map((item) => {
+        if (item.imageKey && (!item.image || item.image.length === 0)) {
+          const dataUrl = getImageSync(item.imageKey);
+          if (dataUrl) {
+            changed = true;
+            return { ...item, image: dataUrl };
+          }
+        }
+        return item;
+      });
+      if (changed) this.emit();
+    } catch (e) {
+      console.warn(`[ContentStore:${this.storageKey}] hydrateImagesFromIDB failed:`, e);
     }
   }
 
@@ -299,7 +345,20 @@ class ContentStore {
   private persist() {
     if (typeof window === "undefined") return;
     try {
-      localStorage.setItem(this.storageKey, JSON.stringify(this.items));
+      // CRITICAL: Strip image DATA URLs from items before saving to
+      // localStorage. The image data lives in IndexedDB (via imageKey).
+      const itemsForStorage = this.items.map((item) => {
+        if (item.imageKey) return { ...item, image: "" };
+        if (
+          typeof item.image === "string" &&
+          item.image.startsWith("data:") &&
+          item.image.length > 1000
+        ) {
+          return { ...item, image: "" };
+        }
+        return item;
+      });
+      localStorage.setItem(this.storageKey, JSON.stringify(itemsForStorage));
       this.lastStorageError = null;
     } catch (err) {
       const isQuota =
@@ -308,6 +367,31 @@ class ContentStore {
           err.name === "NS_ERROR_DOM_QUOTA_REACHED" ||
           err.code === 22 ||
           err.code === 1014);
+
+      // Recovery: clear the key and retry with sanitized data.
+      if (isQuota) {
+        try {
+          localStorage.removeItem(this.storageKey);
+          const itemsForStorage = this.items.map((item) => {
+            if (item.imageKey) return { ...item, image: "" };
+            if (
+              typeof item.image === "string" &&
+              item.image.startsWith("data:") &&
+              item.image.length > 1000
+            ) {
+              return { ...item, image: "" };
+            }
+            return item;
+          });
+          localStorage.setItem(this.storageKey, JSON.stringify(itemsForStorage));
+          this.lastStorageError = null;
+          console.info(`[ContentStore:${this.storageKey}] Recovery successful after quota error.`);
+          return;
+        } catch (recoveryErr) {
+          console.error(`[ContentStore:${this.storageKey}] Recovery write also failed:`, recoveryErr);
+        }
+      }
+
       this.lastStorageError = isQuota
         ? "امتلأت مساحة التخزين المحلية."
         : `خطأ في الحفظ: ${err instanceof Error ? err.message : String(err)}`;
@@ -390,7 +474,9 @@ class ContentStore {
       return updated;
     });
     if (target) {
-      const thumbnail = target.image || target.gradient || "";
+      const thumbnail = target.imageKey
+        ? `idb:${target.imageKey}`
+        : target.gradient || "";
       this.logActivity("edited", target.label, changeSummary, thumbnail);
     }
     this.persist();
