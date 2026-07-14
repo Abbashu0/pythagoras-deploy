@@ -24,6 +24,8 @@ case "$1" in
           git commit -m "auto-save: $TIMESTAMP" --allow-empty-message 2>&1 | tail -1 >> "$LOG_FILE"
           echo "[autosave] تم الحفظ التلقائي في $TIMESTAMP" >> "$LOG_FILE"
         fi
+        # رفع تلقائي إلى GitHub بعد كل فحص (آمن: لا يرفع إذا لم تكن هناك commits جديدة)
+        bash "$PROJECT_DIR/scripts/auto-push.sh" 2>&1 >> "$LOG_FILE"
       done
     ) &
     DAEMON_PID=$!
