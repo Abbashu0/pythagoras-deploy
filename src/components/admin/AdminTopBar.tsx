@@ -32,6 +32,8 @@ interface Props {
   onMenuClick: () => void;
   /** Activity Center toggle. */
   onActivityClick: () => void;
+  /** Command Palette / Search toggle. */
+  onSearchClick: () => void;
 }
 
 /** Route → breadcrumb segments mapping. */
@@ -43,7 +45,7 @@ const BREADCRUMB_MAP: Record<string, { label: string; parent?: string; parentLab
   "/admin/navigation": { label: "التنقل", parent: "/admin", parentLabel: "النظام" },
 };
 
-export function AdminTopBar({ onMenuClick, onActivityClick }: Props) {
+export function AdminTopBar({ onMenuClick, onActivityClick, onSearchClick }: Props) {
   const pathname = usePathname();
   const { adminTheme } = useAdminStore();
   const store = getAdminStore();
@@ -81,16 +83,28 @@ export function AdminTopBar({ onMenuClick, onActivityClick }: Props) {
       {/* Spacer */}
       <div className="flex-1" />
 
-      {/* Global Search trigger (placeholder for Command Palette) */}
+      {/* Global Search trigger — opens Command Palette */}
       <button
         type="button"
+        onClick={onSearchClick}
         className="hidden items-center gap-2 rounded-lg border border-border bg-background px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted sm:flex"
-        title="بحث عام (Ctrl+K) — قريباً"
+        title="بحث عام (Ctrl+K)"
       >
         <Search className="h-3.5 w-3.5" />
         <span>بحث…</span>
         <kbd className="rounded border bg-muted px-1 text-[9px] font-mono">⌘K</kbd>
       </button>
+
+      {/* Mobile search button */}
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={onSearchClick}
+        className="sm:hidden"
+        aria-label="بحث"
+      >
+        <Search className="h-5 w-5" />
+      </Button>
 
       {/* Activity Center button */}
       <Button
