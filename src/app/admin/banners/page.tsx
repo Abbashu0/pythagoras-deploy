@@ -59,7 +59,7 @@ import { AdminBannerCard } from "@/components/admin/AdminBannerCard";
 import { UploadArea } from "@/components/admin/UploadArea";
 import { BannerEditor } from "@/components/admin/BannerEditor";
 import { LiveCarouselPreview } from "@/components/admin/LiveCarouselPreview";
-import { ActivityHistory } from "@/components/admin/ActivityHistory";
+
 import { DeleteConfirmDialog } from "@/components/admin/DeleteConfirmDialog";
 import { CarouselSettings } from "@/components/admin/CarouselSettings";
 import { BannerSizeInfo } from "@/components/admin/BannerSizeInfo";
@@ -225,7 +225,7 @@ export default function AdminBannersPage() {
         </div>
       )}
 
-      {/* ---------- Main 3-column grid ---------- */}
+      {/* ---------- Main 2-column grid ---------- */}
       <div className="grid grid-cols-12 gap-6">
         {/* ===== Left: banner list + upload ===== */}
         <section className="col-span-12 space-y-5 lg:col-span-5">
@@ -293,7 +293,7 @@ export default function AdminBannersPage() {
         </section>
 
         {/* ===== Middle: editor + live preview ===== */}
-        <section className="col-span-12 space-y-5 lg:col-span-4">
+        <section className="col-span-12 space-y-5 lg:col-span-7">
           {/* Editor */}
           <div
             className="overflow-hidden rounded-xl border bg-card"
@@ -331,12 +331,6 @@ export default function AdminBannersPage() {
           </div>
         </section>
 
-        {/* ===== Right: activity history (sticky) ===== */}
-        <section className="col-span-12 lg:col-span-3">
-          <div className="lg:sticky lg:top-6">
-            <ActivityHistory />
-          </div>
-        </section>
       </div>
 
       {/* ---------- Carousel settings (full-width strip at bottom) ---------- */}

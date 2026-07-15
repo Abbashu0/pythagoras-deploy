@@ -42,7 +42,7 @@ const BREADCRUMB_MAP: Record<string, { label: string; parent?: string; parentLab
   "/admin/banners": { label: "البانرات", parent: "/admin", parentLabel: "التسويق" },
   "/admin/materials": { label: "المواد الدراسية", parent: "/admin", parentLabel: "المحتوى" },
   "/admin/tools": { label: "الأدوات", parent: "/admin", parentLabel: "المحتوى" },
-  "/admin/navigation": { label: "التنقل", parent: "/admin", parentLabel: "النظام" },
+  "/admin/navigation": { label: "التنقل", parent: "/admin", parentLabel: "المحتوى" },
 };
 
 export function AdminTopBar({ onMenuClick, onActivityClick, onSearchClick }: Props) {

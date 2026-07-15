@@ -28,6 +28,8 @@ import {
   FileText,
   Crown,
   Activity,
+  Compass,
+  Wrench,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -60,6 +62,8 @@ const NAV_GROUPS: NavGroup[] = [
     label: "المحتوى",
     items: [
       { label: "المواد الدراسية", href: "/admin/materials", icon: BookOpen, available: true },
+      { label: "إدارة التنقل", href: "/admin/navigation", icon: Compass, available: true },
+      { label: "إدارة الأدوات", href: "/admin/tools", icon: Wrench, available: true },
       { label: "بنك الأسئلة", href: "/admin/questions", icon: FileQuestion, available: false, badge: "قريباً" },
       { label: "المحاضرات", href: "/admin/lectures", icon: Video, available: false, badge: "قريباً" },
       { label: "الملفات", href: "/admin/pdfs", icon: FileText, available: false, badge: "قريباً" },

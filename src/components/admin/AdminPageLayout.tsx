@@ -6,18 +6,15 @@
  *
  * In the new AdminShell architecture:
  *   - The shell provides sidebar + topbar + breadcrumbs + theme toggle
- *   - This layout only provides the 3-column content grid:
- *     [list] [editor] [activity history]
- *   - The old header (back button + title + theme toggle) has been removed
- *     — navigation is via the sidebar, breadcrumbs are in the topbar
- *
- * The `loadStore` prop is still called on mount for the page's own store
- * (idempotent — the shell already loaded the shared AdminStore).
+ *   - Activity history is now GLOBAL (ActivityCenterDrawer) — no longer
+ *     a per-page sidebar column
+ *   - This layout provides a 2-column content grid:
+ *     [list] [editor]
+ *   - The preview strip stays at the bottom (full-width)
  */
 
 import { useEffect, type ReactNode } from "react";
 import { AlertTriangle } from "lucide-react";
-import { ActivityHistory } from "@/components/admin/ActivityHistory";
 import { getMaterialsStore, getToolsStore } from "@/lib/admin/content-store";
 
 interface Props {
@@ -25,12 +22,12 @@ interface Props {
   storageError?: string | null;
   /**
    * Called once on mount (client-only, after hydration). The page uses
-   * this to load its own list store. Idempotent on repeat calls.
+   * this to load its own list store. Idempotent.
    */
   loadStore: () => void;
   /** Left column — the reorderable list of items. */
   list: ReactNode;
-  /** Middle column — the editor panel. */
+  /** Right column — the editor panel (wider now, no activity sidebar). */
   editor: ReactNode;
   /** Bottom strip — the live preview (full-width). */
   preview: ReactNode;
@@ -45,13 +42,12 @@ export function AdminPageLayout({
 }: Props) {
   useEffect(() => {
     loadStore();
-    // Hydrate images from IndexedDB for all content stores.
     getMaterialsStore().hydrateImagesFromIDB();
     getToolsStore().hydrateImagesFromIDB();
   }, [loadStore]);
 
   return (
-    <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 lg:px-8">
+    <div className="mx-auto max-w-[1200px] px-4 py-6 sm:px-6 lg:px-8">
       {/* ---------- Storage error warning ---------- */}
       {storageError && (
         <div className="mb-6 flex items-start gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4">
@@ -63,15 +59,10 @@ export function AdminPageLayout({
         </div>
       )}
 
-      {/* ---------- Main 3-column grid ---------- */}
+      {/* ---------- Main 2-column grid (list + editor) ---------- */}
       <div className="grid grid-cols-12 gap-6">
         <section className="col-span-12 space-y-5 lg:col-span-5">{list}</section>
-        <section className="col-span-12 lg:col-span-4">{editor}</section>
-        <section className="col-span-12 lg:col-span-3">
-          <div className="lg:sticky lg:top-20">
-            <ActivityHistory />
-          </div>
-        </section>
+        <section className="col-span-12 lg:col-span-7">{editor}</section>
       </div>
 
       {/* ---------- Bottom: live preview ---------- */}
