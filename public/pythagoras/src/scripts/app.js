@@ -1,15 +1,15 @@
-import { renderAppShell } from "../components/AppShell.js";
-import { homeScreen } from "../pages/HomePage.js";
-import { lecturesScreen } from "../pages/LecturesPage.js";
-import { materialsScreen } from "../pages/MaterialsPage.js";
-import { placeholderScreen } from "../pages/PlaceholderPage.js";
+import { renderAppShell } from "../components/AppShell.js?v=20260715b";
+import { homeScreen } from "../pages/HomePage.js?v=20260715b";
+import { lecturesScreen } from "../pages/LecturesPage.js?v=20260715b";
+import { materialsScreen } from "../pages/MaterialsPage.js?v=20260715b";
+import { placeholderScreen } from "../pages/PlaceholderPage.js?v=20260715b";
 import { questionBankScreen, renderQuestionBankResults } from "../pages/QuestionBankPage.js?v=20260613c";
-import { questionDetailScreen } from "../pages/QuestionDetailPage.js";
-import { settingsScreen } from "../pages/SettingsPage.js";
-import { subjectTestsScreen } from "../pages/SubjectTestsPage.js";
-import { testsSubjectsScreen } from "../pages/TestsSubjectsPage.js";
-import { toolsScreen } from "../pages/ToolsPage.js";
-import "./image-db.js"; // Registers window.ImageDB (IndexedDB image storage + cache)
+import { questionDetailScreen } from "../pages/QuestionDetailPage.js?v=20260715b";
+import { settingsScreen } from "../pages/SettingsPage.js?v=20260715b";
+import { subjectTestsScreen } from "../pages/SubjectTestsPage.js?v=20260715b";
+import { testsSubjectsScreen } from "../pages/TestsSubjectsPage.js?v=20260715b";
+import { toolsScreen } from "../pages/ToolsPage.js?v=20260715b";
+import "./image-db.js?v=20260715b"; // Registers window.ImageDB (IndexedDB image storage + cache)
 import {
   getBiologyQuestionDetailFromView,
   getQuestionBankSubjectByView,
@@ -19,16 +19,16 @@ import {
   themeLabels,
   densityLabels,
   viewNavMap,
-} from "./data.js";
+} from "./data.js?v=20260715b";
 import {
   getBiologyQuestionBankSnapshot,
   getBiologyQuestionByGlobalOrder,
   getQuestionBankQuery,
   loadBiologyOriginalQuestionBank,
   setQuestionBankQuery,
-} from "./biologyQuestionBank.js";
-import { icon } from "./icons.js";
-import { bindNavigationInteractions, triggerNavActivation } from "./navigation.js";
+} from "./biologyQuestionBank.js?v=20260715b";
+import { icon } from "./icons.js?v=20260715b";
+import { bindNavigationInteractions, triggerNavActivation } from "./navigation.js?v=20260715b";
 import {
   QUESTION_BANK_SOURCE_OPTIONS,
   applyQuestionBankFilters,
@@ -37,16 +37,16 @@ import {
   getQuestionTypeLabel,
   hasActiveQuestionBankFilters,
   normalizeQuestionBankFilters,
-} from "./questionBankFilters.js";
-import { pushRoute, viewFromHash } from "./router.js";
-import { applyTheme, getStoredTheme, syncThemeControls } from "./theme.js";
+} from "./questionBankFilters.js?v=20260715b";
+import { pushRoute, viewFromHash } from "./router.js?v=20260715b";
+import { applyTheme, getStoredTheme, syncThemeControls } from "./theme.js?v=20260715b";
 import {
   applyDensity,
   getStoredDensity,
   syncDensityControls,
-} from "./density.js";
-import { SponsoredCarouselController } from "../components/SponsoredCarouselCard.js";
-import { showToast } from "./toast.js";
+} from "./density.js?v=20260715b";
+import { SponsoredCarouselController } from "../components/SponsoredCarouselCard.js?v=20260715b";
+import { showToast } from "./toast.js?v=20260715b";
 
 let currentView = "tools";
 let sponsoredCarouselController = null;
@@ -1069,7 +1069,7 @@ function bindSponsoredCarousel() {
 applyTheme(getStoredTheme());
 applyDensity(getStoredDensity());
 
-const startView = viewFromHash() || "tools";
+const startView = viewFromHash() || "home";
 // Preload images from IndexedDB, THEN render the first view.
 if (window.ImageDB) {
   window.ImageDB.preloadAllImages().finally(function () {
