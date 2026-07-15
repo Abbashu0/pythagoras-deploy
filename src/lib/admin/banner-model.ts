@@ -37,6 +37,18 @@ export type BannerType = "full" | "split";
 
 export const DEFAULT_BANNER_TYPE: BannerType = "full";
 
+/**
+ * Destination type — controls what happens when a student taps a banner.
+ */
+export type DestinationType = "internal" | "external" | "pdf" | "none";
+
+/**
+ * Banner status — controls visibility in the carousel.
+ *   - "active":   shown in the carousel (subject to scheduling)
+ *   - "archived": hidden from carousel but kept in the library
+ */
+export type BannerStatus = "active" | "archived";
+
 export interface SponsoredBanner {
   id: string;
   /** Layout mode — controls how the carousel renders this banner. */
@@ -56,8 +68,19 @@ export interface SponsoredBanner {
   iconKey: string;
   title: string;
   subtitle: string;
+  /** Destination value — interpretation depends on `destinationType`. */
   destination: string;
+  /** What happens when the banner is tapped. */
+  destinationType?: DestinationType;
+  /** Whether the banner is enabled (old field — kept for backward compat).
+   *  When status is "archived", enabled is false. */
   enabled: boolean;
+  /** Banner status — "active" shows in carousel, "archived" hides it. */
+  status?: BannerStatus;
+  /** Scheduling: start date (ISO). null = immediately. */
+  startDate?: string | null;
+  /** Scheduling: end date (ISO). null = no end. */
+  endDate?: string | null;
   displayOrder: number;
   /** Saved image positioning (drag + zoom) chosen in the admin image positioner. */
   transform: BannerImageTransform;
@@ -81,7 +104,14 @@ export const BANNER_TRANSFORM_DEFAULT: BannerImageTransform = {
   scale: 1,
 };
 
-export const MAX_BANNERS = 5;
+/**
+ * MAX_ACTIVE_BANNERS — the carousel shows at most this many ACTIVE banners.
+ * The banner LIBRARY is unlimited — archived banners don't count.
+ */
+export const MAX_ACTIVE_BANNERS = 5;
+
+/** @deprecated Use MAX_ACTIVE_BANNERS instead. */
+export const MAX_BANNERS = MAX_ACTIVE_BANNERS;
 
 /**
  * Recommended banner export sizes.

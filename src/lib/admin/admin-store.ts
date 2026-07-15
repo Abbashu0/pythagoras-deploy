@@ -34,6 +34,7 @@ import {
   BannerType,
   SponsoredBanner,
   MAX_BANNERS,
+  MAX_ACTIVE_BANNERS,
   makeBanner,
   BANNER_TRANSFORM_DEFAULT,
 } from "./banner-model";
@@ -349,7 +350,7 @@ class AdminStore {
     this.snapshot = {
       banners: this.banners,
       history: this.history,
-      canAddMore: this.banners.length < MAX_BANNERS,
+      canAddMore: this.getActiveBanners().length < MAX_ACTIVE_BANNERS,
       adminTheme: this.adminTheme,
       autoSlideInterval: this.autoSlideInterval,
       lastStorageError: this.lastStorageError,
@@ -498,11 +499,27 @@ class AdminStore {
 
   // ---------- Mutations ----------
   /**
+   * Get only ACTIVE banners (not archived). Used for counting against
+   * MAX_ACTIVE_BANNERS and for the student app's carousel.
+   */
+  getActiveBanners(): SponsoredBanner[] {
+    return this.banners.filter((b) => b.status !== "archived" && b.enabled !== false);
+  }
+
+  /**
+   * Get only ARCHIVED banners.
+   */
+  getArchivedBanners(): SponsoredBanner[] {
+    return this.banners.filter((b) => b.status === "archived");
+  }
+
+  /**
    * Add a new banner. Logs an "uploaded" entry with the banner's thumbnail.
-   * Returns the new banner, or null if MAX_BANNERS has been reached.
+   * Returns the new banner, or null if MAX_ACTIVE_BANNERS has been reached.
+   * New banners default to status="active".
    */
   addBanner(input: BannerInput): SponsoredBanner | null {
-    if (this.banners.length >= MAX_BANNERS) return null;
+    if (this.getActiveBanners().length >= MAX_ACTIVE_BANNERS) return null;
     const nextOrder =
       this.banners.length === 0
         ? 1
@@ -613,7 +630,7 @@ class AdminStore {
    * the source wasn't found.
    */
   duplicateBanner(id: string): SponsoredBanner | null {
-    if (this.banners.length >= MAX_BANNERS) return null;
+    if (this.getActiveBanners().length >= MAX_ACTIVE_BANNERS) return null;
     const source = this.banners.find((b) => b.id === id);
     if (!source) return null;
     const nextOrder =
@@ -625,6 +642,9 @@ class AdminStore {
       title: `${source.title} (نسخة)`,
       displayOrder: nextOrder,
       transform: { ...source.transform },
+      // Duplicates start as active
+      status: "active",
+      enabled: true,
     });
     this.banners = [...this.banners, copy];
     this.banners.sort((a, b) => a.displayOrder - b.displayOrder);
@@ -632,6 +652,46 @@ class AdminStore {
     this.persist();
     this.emit();
     return copy;
+  }
+
+  /**
+   * Archive a banner — removes it from the carousel but keeps it in
+   * the library. Archived banners don't count against MAX_ACTIVE_BANNERS.
+   */
+  archiveBanner(id: string) {
+    const target = this.banners.find((b) => b.id === id);
+    if (!target) return;
+    this.banners = this.banners.map((b) =>
+      b.id === id
+        ? { ...b, status: "archived" as const, enabled: false, updatedAt: new Date().toISOString() }
+        : b
+    );
+    this.log("edited", target.title || "بدون عنوان", this.bannerThumbnail(target), [
+      "تم أرشفة البانر",
+    ]);
+    this.persist();
+    this.emit();
+  }
+
+  /**
+   * Restore an archived banner to active status. Returns false if
+   * MAX_ACTIVE_BANNERS has been reached.
+   */
+  unarchiveBanner(id: string): boolean {
+    if (this.getActiveBanners().length >= MAX_ACTIVE_BANNERS) return false;
+    const target = this.banners.find((b) => b.id === id);
+    if (!target) return false;
+    this.banners = this.banners.map((b) =>
+      b.id === id
+        ? { ...b, status: "active" as const, enabled: true, updatedAt: new Date().toISOString() }
+        : b
+    );
+    this.log("edited", target.title || "بدون عنوان", this.bannerThumbnail(target), [
+      "تمت استعادة البانر من الأرشيف",
+    ]);
+    this.persist();
+    this.emit();
+    return true;
   }
 
   /**
