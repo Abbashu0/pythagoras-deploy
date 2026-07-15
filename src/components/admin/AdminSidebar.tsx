@@ -88,7 +88,7 @@ const NAV_GROUPS: NavGroup[] = [
     id: "system",
     label: "النظام",
     items: [
-      { label: "التحليلات", href: "/admin/analytics", icon: BarChart3, available: false, badge: "قريباً" },
+      { label: "التحليلات والصحة", href: "/admin/analytics", icon: BarChart3, available: true },
       { label: "السجل", href: "/admin/logs", icon: Activity, available: false, badge: "قريباً" },
       { label: "الإعدادات", href: "/admin/settings", icon: Settings, available: false, badge: "قريباً" },
     ],
