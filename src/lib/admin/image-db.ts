@@ -115,16 +115,33 @@ function openDB(): Promise<IDBDatabase> {
           db.createObjectStore("meta");
         }
       };
-      req.onsuccess = () => resolve(req.result);
+      req.onsuccess = () => {
+        const db = req.result;
+        // CRITICAL: If the connection closes (e.g., browser tab switch,
+        // version change in another tab), reset the cache so the next
+        // openDB() call creates a fresh connection.
+        db.onclose = () => {
+          console.warn("[ImageDB] Connection closed — will reopen on next access.");
+          dbPromise = null;
+        };
+        db.onversionchange = () => {
+          db.close();
+          dbPromise = null;
+        };
+        resolve(db);
+      };
       req.onerror = () => {
+        dbPromise = null; // Allow retry on next call
         pushError("open_failed", `IndexedDB open failed: ${req.error?.message || "unknown"}`);
         reject(req.error || new Error("IndexedDB open failed"));
       };
       req.onblocked = () => {
+        dbPromise = null; // Allow retry on next call
         pushError("open_failed", "IndexedDB open blocked by another tab.");
         reject(new Error("IndexedDB open blocked"));
       };
     } catch (e) {
+      dbPromise = null; // Allow retry on next call
       pushError("open_failed", `IndexedDB open threw: ${e instanceof Error ? e.message : String(e)}`);
       reject(e);
     }
@@ -132,11 +149,35 @@ function openDB(): Promise<IDBDatabase> {
   return dbPromise;
 }
 
+/**
+ * Get a fresh DB connection. If the cached connection is closed/stale,
+ * this resets the cache and opens a new one. Use this instead of
+ * openDB() directly in write operations to avoid "connection is closing"
+ * errors.
+ */
+async function getDB(): Promise<IDBDatabase> {
+  if (dbPromise) {
+    try {
+      const db = await dbPromise;
+      // Check if the connection is still open
+      if (!db.objectStoreNames || db.objectStoreNames.length === 0) {
+        // Connection is stale/closed — reset and retry
+        dbPromise = null;
+      } else {
+        return db;
+      }
+    } catch {
+      dbPromise = null;
+    }
+  }
+  return openDB();
+}
+
 export async function preloadAllImages(): Promise<void> {
   if (preloaded) return;
   preloaded = true;
   try {
-    const db = await openDB();
+    const db = await getDB();
     const tx = db.transaction(STORE_NAME, "readonly");
     const store = tx.objectStore(STORE_NAME);
     const [keys, values] = await Promise.all([
@@ -165,7 +206,7 @@ export async function getImage(key: string): Promise<string> {
   const cached = cache.get(key);
   if (cached) return cached;
   try {
-    const db = await openDB();
+    const db = await getDB();
     const tx = db.transaction(STORE_NAME, "readonly");
     const req = tx.objectStore(STORE_NAME).get(key);
     const result = await reqToPromise<unknown>(req);
@@ -192,13 +233,28 @@ export async function setImage(key: string, dataUrl: string): Promise<void> {
   const previousValue = cache.get(key);
   cache.set(key, dataUrl);
   try {
-    const db = await openDB();
+    const db = await getDB();
     const tx = db.transaction(STORE_NAME, "readwrite");
     tx.objectStore(STORE_NAME).put(dataUrl, key);
     const metaTx = db.transaction("meta", "readwrite");
     metaTx.objectStore("meta").put(new Date().toISOString(), `lastWrite:${key}`);
     await Promise.all([txToPromise(tx), txToPromise(metaTx)]);
   } catch (e) {
+    // Retry once with a fresh connection (fixes "connection is closing" error)
+    try {
+      dbPromise = null; // Force fresh connection
+      const db = await getDB();
+      const tx = db.transaction(STORE_NAME, "readwrite");
+      tx.objectStore(STORE_NAME).put(dataUrl, key);
+      const metaTx = db.transaction("meta", "readwrite");
+      metaTx.objectStore("meta").put(new Date().toISOString(), `lastWrite:${key}`);
+      await Promise.all([txToPromise(tx), txToPromise(metaTx)]);
+      return; // Success on retry
+    } catch (retryErr) {
+      // Fall through to error handling
+      e = retryErr;
+    }
+
     const isQuota =
       e instanceof DOMException &&
       (e.name === "QuotaExceededError" ||
@@ -218,7 +274,7 @@ export async function setImage(key: string, dataUrl: string): Promise<void> {
 export async function deleteImage(key: string): Promise<void> {
   cache.delete(key);
   try {
-    const db = await openDB();
+    const db = await getDB();
     const tx = db.transaction(STORE_NAME, "readwrite");
     tx.objectStore(STORE_NAME).delete(key);
     const metaTx = db.transaction("meta", "readwrite");
@@ -268,7 +324,7 @@ export async function getStats(): Promise<ImageDBStats> {
   let lastAddedKey: string | null = null;
   let lastAddedAt: string | null = null;
   try {
-    const db = await openDB();
+    const db = await getDB();
     if (db.objectStoreNames.contains("meta")) {
       const tx = db.transaction("meta", "readonly");
       const store = tx.objectStore("meta");
