@@ -405,9 +405,9 @@ export function getSponsoredBanners() {
     if (!raw) return sponsoredBanners.slice();
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed) || parsed.length === 0) return sponsoredBanners.slice();
-    // Filter enabled, sort by displayOrder, normalize shape
+    // Filter enabled + active (not archived), sort by displayOrder, normalize shape
     return parsed
-      .filter((b) => b && b.enabled !== false)
+      .filter((b) => b && b.enabled !== false && b.status !== "archived")
       .sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0))
       .map((b) => ({
         id: b.id,

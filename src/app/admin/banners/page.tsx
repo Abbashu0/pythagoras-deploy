@@ -46,11 +46,15 @@ import {
   ImagePlus,
   AlertTriangle,
   SlidersHorizontal,
+  Archive,
+  RotateCcw,
+  Trash2,
 } from "lucide-react";
 import { useAdminStore } from "@/lib/admin/use-admin-store";
 import { getAdminStore } from "@/lib/admin/admin-store";
 import {
   MAX_BANNERS,
+  MAX_ACTIVE_BANNERS,
   BANNER_TRANSFORM_DEFAULT,
   BannerInput,
   SponsoredBanner,
@@ -147,7 +151,7 @@ export default function AdminBannersPage() {
     } else {
       toast({
         title: "تعذّر رفع البانر",
-        description: `وصلت إلى الحد الأقصى (${MAX_BANNERS} بانرات).`,
+        description: `وصلت إلى الحد الأقصى (${MAX_ACTIVE_BANNERS} بانرات نشطة).`,
         variant: "destructive",
       });
     }
@@ -173,7 +177,7 @@ export default function AdminBannersPage() {
     } else {
       toast({
         title: "تعذّر التكرار",
-        description: `وصلت إلى الحد الأقصى (${MAX_BANNERS} بانرات).`,
+        description: `وصلت إلى الحد الأقصى (${MAX_ACTIVE_BANNERS} بانرات نشطة).`,
         variant: "destructive",
       });
     }
@@ -203,6 +207,28 @@ export default function AdminBannersPage() {
       description: `مدة عرض كل بانر: ${Math.round(ms / 1000)} ثانية.`,
     });
   };
+
+  const handleArchive = (banner: SponsoredBanner) => {
+    store.archiveBanner(banner.id);
+    toast({ title: "تمت الأرشفة", description: `أُرشفة «${banner.title || "بدون عنوان"}».` });
+  };
+
+  const handleUnarchive = (banner: SponsoredBanner) => {
+    const ok = store.unarchiveBanner(banner.id);
+    if (ok) {
+      toast({ title: "تمت الاستعادة", description: `استُعيد «${banner.title || "بدون عنوان"}».` });
+    } else {
+      toast({
+        title: "تعذّرت الاستعادة",
+        description: `وصلت إلى الحد الأقصى (${MAX_ACTIVE_BANNERS} بانرات نشطة).`,
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Active vs archived
+  const activeBanners = sortedBanners.filter((b) => b.status !== "archived");
+  const archivedBanners = sortedBanners.filter((b) => b.status === "archived");
 
   return (
     <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 lg:px-8">
@@ -237,29 +263,30 @@ export default function AdminBannersPage() {
                   البانرات الحالية
                 </h2>
                 <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] tabular-nums text-muted-foreground">
-                  {banners.length} / {MAX_BANNERS}
+                  {activeBanners.length} / {MAX_ACTIVE_BANNERS}
                 </span>
               </div>
             </div>
 
             <div ref={bannerListRef} className="space-y-2 p-3">
-              {sortedBanners.length === 0 ? (
+              {activeBanners.length === 0 ? (
                 <div className="grid place-items-center gap-2 py-12 text-center text-sm text-muted-foreground">
                   <ImagePlus className="h-8 w-8 opacity-30" />
-                  لا توجد بانرات بعد. ارفع أول صورة بالأسفل.
+                  لا توجد بانرات نشطة. ارفع أول صورة بالأسفل.
                 </div>
               ) : (
-                sortedBanners.map((banner, idx) => (
+                activeBanners.map((banner, idx) => (
                   <div key={banner.id} data-flip-key={banner.id}>
                     <AdminBannerCard
                       banner={banner}
                       position={idx + 1}
-                      total={sortedBanners.length}
+                      total={activeBanners.length}
                       isSelected={banner.id === selectedId}
                       onSelect={() => setSelectedId(banner.id)}
                       onMoveUp={() => handleMoveUp(banner)}
                       onMoveDown={() => handleMoveDown(banner)}
                       onDuplicate={() => handleDuplicate(banner)}
+                      onArchive={() => handleArchive(banner)}
                       onDelete={() => handleDeleteRequest(banner)}
                     />
                   </div>
@@ -332,6 +359,58 @@ export default function AdminBannersPage() {
         </section>
 
       </div>
+
+      {/* ---------- Archived banners ---------- */}
+      {archivedBanners.length > 0 && (
+        <section className="mt-6">
+          <div className="mb-3 flex items-center gap-2">
+            <Archive className="h-4 w-4 text-muted-foreground" />
+            <h2 className="text-sm font-semibold text-foreground">
+              الأرشيف
+            </h2>
+            <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] tabular-nums text-muted-foreground">
+              {archivedBanners.length}
+            </span>
+          </div>
+          <div className="space-y-2 rounded-xl border bg-card p-3">
+            {archivedBanners.map((banner) => (
+              <div
+                key={banner.id}
+                className="flex items-center gap-3 rounded-lg border bg-background px-3 py-2"
+              >
+                <div className="grid h-10 w-10 flex-shrink-0 place-items-center rounded-md bg-muted text-xs font-bold text-muted-foreground">
+                  {banner.bannerType === "full" ? "F" : "S"}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-xs font-medium text-foreground">
+                    {banner.title || "بدون عنوان"}
+                  </p>
+                  <p className="truncate text-[10px] text-muted-foreground">
+                    {banner.subtitle || "—"}
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleUnarchive(banner)}
+                  className="h-7 gap-1 text-[10px]"
+                >
+                  <RotateCcw className="h-3 w-3" />
+                  استعادة
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleDeleteRequest(banner)}
+                  className="h-7 gap-1 text-[10px] text-muted-foreground hover:text-destructive"
+                >
+                  <Trash2 className="h-3 w-3" />
+                </Button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* ---------- Carousel settings (full-width strip at bottom) ---------- */}
       <section className="mt-8">

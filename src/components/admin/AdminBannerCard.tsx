@@ -25,6 +25,7 @@ import {
   ChevronUp,
   ChevronDown,
   Copy,
+  Archive,
   Trash2,
   Pencil,
 } from "lucide-react";
@@ -42,6 +43,7 @@ interface Props {
   onMoveDown: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
+  onArchive?: () => void;
 }
 
 export function AdminBannerCard({
@@ -54,6 +56,7 @@ export function AdminBannerCard({
   onMoveDown,
   onDuplicate,
   onDelete,
+  onArchive,
 }: Props) {
   const hasImage = banner.image && banner.image.length > 0;
 
@@ -197,6 +200,17 @@ export function AdminBannerCard({
         >
           <Copy className="h-4 w-4" />
         </Button>
+        {onArchive && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 text-muted-foreground hover:bg-amber-500/10 hover:text-amber-500"
+            onClick={onArchive}
+            title="أرشفة"
+          >
+            <Archive className="h-4 w-4" />
+          </Button>
+        )}
         <Button
           variant="ghost"
           size="icon"
