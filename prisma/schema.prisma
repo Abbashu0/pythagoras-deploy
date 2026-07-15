@@ -10,47 +10,65 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+/// Platform user — a student or teacher registered on Pythagoras.
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id          String   @id @default(cuid())
+  email       String   @unique
+  name        String?
+  /// Role: "student", "teacher", "admin"
+  role        String   @default("student")
+  /// Anonymous display name shown in admin (e.g. "طالب #1234")
+  displayName String?
+  /// Grade level: "6" (6th grade — the current target)
+  grade       String?
+  /// Is the user active (has logged in within last 30 days)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  subscriptions PremiumSubscription[]
+
+  @@index([role])
+  @@index([createdAt])
 }
 
-model Post {
+/// Premium subscription — tracks who pays and when.
+model PremiumSubscription {
   id        String   @id @default(cuid())
-  title     String
-  content   String?
-  published Boolean  @default(false)
-  authorId  String
+  userId    String
+  /// Plan: "monthly", "yearly", "lifetime"
+  plan      String   @default("monthly")
+  /// Status: "active", "cancelled", "expired", "pending"
+  status    String   @default("active")
+  /// Price paid in SYP (Syrian Pounds)
+  price     Int      @default(0)
+  /// When the subscription started
+  startedAt DateTime @default(now())
+  /// When the subscription ends (null = lifetime)
+  endsAt    DateTime?
+  /// Payment method: "manual", "bank", "card", "other"
+  paymentMethod String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@index([startedAt])
 }
 
 /// Analytics event — the core of the event system.
-/// Every user interaction (app open, login, study, banner click, etc.)
-/// is stored here. The dashboard reads from this table to compute
-/// KPIs, charts, and banner analytics.
 model AnalyticsEvent {
   id        String   @id @default(cuid())
-  /// Event type — e.g. "app_open", "login", "banner_click", "quiz_finished"
   type      String
-  /// ISO timestamp of the event
   timestamp DateTime @default(now())
-  /// Anonymous user identifier (localStorage UUID on the client)
   userId    String?
-  /// Session identifier (per-app-session UUID)
   sessionId String?
-  /// Banner/material/question ID (if the event is about a specific entity)
   entityId  String?
-  /// Platform: "web", "ios", "android"
   platform  String?
-  /// App version
   version   String?
-  /// Device info (user agent or device model)
   device    String?
-  /// Additional JSON metadata (e.g. quiz score, study duration, etc.)
   metadata  String?
 
   @@index([type])

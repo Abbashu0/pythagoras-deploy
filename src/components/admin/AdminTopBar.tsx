@@ -43,6 +43,8 @@ const BREADCRUMB_MAP: Record<string, { label: string; parent?: string; parentLab
   "/admin/materials": { label: "المواد الدراسية", parent: "/admin", parentLabel: "المحتوى" },
   "/admin/tools": { label: "الأدوات", parent: "/admin", parentLabel: "المحتوى" },
   "/admin/navigation": { label: "التنقل", parent: "/admin", parentLabel: "المحتوى" },
+  "/admin/users": { label: "المستخدمون", parent: "/admin", parentLabel: "المستخدمون" },
+  "/admin/premium": { label: "Premium", parent: "/admin", parentLabel: "المستخدمون" },
 };
 
 export function AdminTopBar({ onMenuClick, onActivityClick, onSearchClick }: Props) {

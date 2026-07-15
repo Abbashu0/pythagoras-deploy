@@ -80,8 +80,8 @@ const NAV_GROUPS: NavGroup[] = [
     id: "users",
     label: "المستخدمون",
     items: [
-      { label: "المستخدمون", href: "/admin/users", icon: Users, available: false, badge: "قريباً" },
-      { label: "Premium", href: "/admin/premium", icon: Crown, available: false, badge: "قريباً" },
+      { label: "المستخدمون", href: "/admin/users", icon: Users, available: true },
+      { label: "Premium", href: "/admin/premium", icon: Crown, available: true },
     ],
   },
   {
