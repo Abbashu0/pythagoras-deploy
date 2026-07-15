@@ -41,12 +41,8 @@
  *     disables FLIP while dragging.
  */
 
-import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRef, useState } from "react";
 import {
-  ArrowRight,
-  Moon,
-  Sun,
   ImagePlus,
   AlertTriangle,
   SlidersHorizontal,
@@ -73,17 +69,13 @@ import { useToast } from "@/hooks/use-toast";
 import { useFlipReorder } from "@/lib/admin/use-flip-reorder";
 
 export default function AdminBannersPage() {
-  const router = useRouter();
   const { toast } = useToast();
 
-  // Subscribe to the store so this component re-renders on every change.
-  // We also pull `getAdminStore()` for direct method calls (mutations).
   const {
     banners,
     canAddMore,
     lastStorageError,
     autoSlideInterval,
-    adminTheme,
   } = useAdminStore();
   const store = getAdminStore();
 
@@ -96,22 +88,6 @@ export default function AdminBannersPage() {
   // Ref to the banner list container — used by the FLIP hook to snapshot
   // child positions before/after reorders.
   const bannerListRef = useRef<HTMLDivElement>(null);
-
-  // ----- Mount: load from localStorage -----
-  // loadFromStorage() runs AFTER hydration so SSR HTML matches the initial
-  // client render. The store then emits a new snapshot and `adminTheme`
-  // re-reads reactively (no local setState needed).
-  useEffect(() => {
-    store.loadFromStorage();
-    store.hydrateImagesFromIDB();
-  }, [store]);
-
-  // ----- External system sync: apply theme to <html> -----
-  // Pure DOM side-effect — no setState, so this satisfies
-  // react-hooks/set-state-in-effect.
-  useEffect(() => {
-    document.documentElement.classList.toggle("dark", adminTheme === "dark");
-  }, [adminTheme]);
 
   // ----- Derived data -----
   const sortedBanners = [...banners].sort(
@@ -129,11 +105,6 @@ export default function AdminBannersPage() {
   // and the next reorder would animate from the wrong position.
   const flipItems = isImageEditing ? [] : sortedBanners;
   useFlipReorder(bannerListRef, flipItems, 300);
-
-  // ----- Theme toggle -----
-  const handleToggleTheme = () => {
-    store.setAdminTheme(adminTheme === "dark" ? "light" : "dark");
-  };
 
   // ----- Mutations (all funnel through the store so persistence + history
   // are guaranteed). Each one surfaces a toast so the user gets feedback. -----
@@ -235,45 +206,6 @@ export default function AdminBannersPage() {
 
   return (
     <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 lg:px-8">
-      {/* ---------- Top bar: back + title + theme toggle ---------- */}
-      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-5">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => router.push("/admin")}
-            className="h-9 w-fit gap-1.5 text-xs"
-          >
-            <ArrowRight className="h-4 w-4" />
-            لوحة التحكم
-          </Button>
-
-          <div className="space-y-1">
-            <h1 className="text-xl font-bold tracking-tight text-foreground sm:text-2xl">
-              بانرات الصفحة الرئيسية
-            </h1>
-            <p className="text-sm text-muted-foreground">
-              إدارة البانرات الترويجية في الكاروسيل
-            </p>
-          </div>
-        </div>
-
-        <button
-          type="button"
-          onClick={handleToggleTheme}
-          aria-label={adminTheme === "dark" ? "تفعيل الوضع الفاتح" : "تفعيل الوضع الداكن"}
-          title={adminTheme === "dark" ? "وضع فاتح" : "وضع داكن"}
-          className="grid h-10 w-10 flex-shrink-0 place-items-center rounded-xl border border-border bg-card text-foreground transition-colors hover:bg-muted"
-        >
-          {adminTheme === "dark" ? (
-            <Sun className="h-5 w-5" />
-          ) : (
-            <Moon className="h-5 w-5" />
-          )}
-        </button>
-      </div>
-
       {/* ---------- Storage error warning ---------- */}
       {lastStorageError && (
         <div className="mb-6 flex items-start gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4">

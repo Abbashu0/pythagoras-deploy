@@ -1,57 +1,33 @@
 "use client";
 
 /**
- * AdminPageLayout — shared chrome for the admin sub-pages
- * (`/admin/navigation`, `/admin/materials`, `/admin/tools`).
+ * AdminPageLayout — shared content layout for admin sub-pages
+ * (materials, tools, navigation).
  *
- * Renders the same 3-column layout the Banners manager uses, but
- * factored out so the new managers don't duplicate the back-button /
- * title / theme-toggle / activity-history boilerplate.
+ * In the new AdminShell architecture:
+ *   - The shell provides sidebar + topbar + breadcrumbs + theme toggle
+ *   - This layout only provides the 3-column content grid:
+ *     [list] [editor] [activity history]
+ *   - The old header (back button + title + theme toggle) has been removed
+ *     — navigation is via the sidebar, breadcrumbs are in the topbar
  *
- * Layout (desktop, RTL — 12-col grid):
- *
- *   ┌──────────────────────────────────────────────────────────────────┐
- *   │  [→ لوحة التحكم]   "title"            [☀ / ☾ toggle]              │
- *   │                    "subtitle"                                     │
- *   ├──────────────────────┬─────────────────────┬──────────────────────┤
- *   │  col-span-5          │  col-span-4         │  col-span-3 (sticky) │
- *   │  {list}              │  {editor}           │  ActivityHistory     │
- *   ├──────────────────────┴─────────────────────┴──────────────────────┤
- *   │  {preview} — full-width strip at the bottom                       │
- *   └──────────────────────────────────────────────────────────────────┘
- *
- * Theme handling: identical to `/admin` and `/admin/banners` — subscribe
- * to AdminStore, read `adminTheme` from the snapshot, sync the `dark`
- * class on `<html>` via an effect. The toggle button calls
- * `store.setAdminTheme(...)`.
- *
- * The `loadStore` prop is called once on mount so the page can wire up
- * whatever store(s) it needs (its own list store + the shared AdminStore
- * for the activity log + theme). Each store is idempotent on repeat
- * `loadFromStorage()` calls.
+ * The `loadStore` prop is still called on mount for the page's own store
+ * (idempotent — the shell already loaded the shared AdminStore).
  */
 
 import { useEffect, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
-import { ArrowRight, Moon, Sun, AlertTriangle } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { AlertTriangle } from "lucide-react";
 import { ActivityHistory } from "@/components/admin/ActivityHistory";
-import { useAdminStore } from "@/lib/admin/use-admin-store";
-import { getAdminStore } from "@/lib/admin/admin-store";
 import { getMaterialsStore, getToolsStore } from "@/lib/admin/content-store";
 
 interface Props {
-  title: string;
-  subtitle: string;
-  /**
-   * Called once on mount (client-only, after hydration). The page uses
-   * this to load its own list store AND the shared AdminStore (so the
-   * activity history + theme are available). All stores are idempotent
-   * on repeat calls.
-   */
-  loadStore: () => void;
   /** Optional storage error message — surfaces a warning banner. */
   storageError?: string | null;
+  /**
+   * Called once on mount (client-only, after hydration). The page uses
+   * this to load its own list store. Idempotent on repeat calls.
+   */
+  loadStore: () => void;
   /** Left column — the reorderable list of items. */
   list: ReactNode;
   /** Middle column — the editor panel. */
@@ -61,107 +37,38 @@ interface Props {
 }
 
 export function AdminPageLayout({
-  title,
-  subtitle,
-  loadStore,
   storageError,
+  loadStore,
   list,
   editor,
   preview,
 }: Props) {
-  const router = useRouter();
-  const { adminTheme } = useAdminStore();
-  const store = getAdminStore();
-
-  // Mount: load persisted state for both the page's own store and the
-  // shared AdminStore (theme + activity history). Idempotent.
-  // After loading, hydrate images from IndexedDB so list cards + the
-  // editor + live preview can render uploaded images.
   useEffect(() => {
     loadStore();
-    store.loadFromStorage();
-    store.hydrateImagesFromIDB();
+    // Hydrate images from IndexedDB for all content stores.
     getMaterialsStore().hydrateImagesFromIDB();
     getToolsStore().hydrateImagesFromIDB();
-  }, [loadStore, store]);
-
-  // External system sync: apply theme to <html>. No setState inside
-  // (pure DOM mutation) so this satisfies react-hooks/set-state-in-effect.
-  useEffect(() => {
-    document.documentElement.classList.toggle("dark", adminTheme === "dark");
-  }, [adminTheme]);
-
-  const handleToggleTheme = () => {
-    store.setAdminTheme(adminTheme === "dark" ? "light" : "dark");
-  };
+  }, [loadStore]);
 
   return (
     <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 lg:px-8">
-      {/* ---------- Top bar: back + title + theme toggle ---------- */}
-      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-5">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => router.push("/admin")}
-            className="h-9 w-fit gap-1.5 text-xs"
-          >
-            <ArrowRight className="h-4 w-4" />
-            لوحة التحكم
-          </Button>
-
-          <div className="space-y-1">
-            <h1 className="text-xl font-bold tracking-tight text-foreground sm:text-2xl">
-              {title}
-            </h1>
-            <p className="text-sm text-muted-foreground">{subtitle}</p>
-          </div>
-        </div>
-
-        <button
-          type="button"
-          onClick={handleToggleTheme}
-          aria-label={
-            adminTheme === "dark" ? "تفعيل الوضع الفاتح" : "تفعيل الوضع الداكن"
-          }
-          title={adminTheme === "dark" ? "وضع فاتح" : "وضع داكن"}
-          className="grid h-10 w-10 flex-shrink-0 place-items-center rounded-xl border border-border bg-card text-foreground transition-colors hover:bg-muted"
-        >
-          {adminTheme === "dark" ? (
-            <Sun className="h-5 w-5" />
-          ) : (
-            <Moon className="h-5 w-5" />
-          )}
-        </button>
-      </div>
-
       {/* ---------- Storage error warning ---------- */}
       {storageError && (
         <div className="mb-6 flex items-start gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4">
           <AlertTriangle className="mt-0.5 h-5 w-5 flex-shrink-0 text-destructive" />
           <div className="flex-1">
-            <h3 className="text-sm font-semibold text-destructive">
-              تحذير: تعذّر الحفظ
-            </h3>
-            <p className="mt-1 text-xs leading-relaxed text-destructive/80">
-              {storageError}
-            </p>
+            <h3 className="text-sm font-semibold text-destructive">تحذير: تعذّر الحفظ</h3>
+            <p className="mt-1 text-xs leading-relaxed text-destructive/80">{storageError}</p>
           </div>
         </div>
       )}
 
       {/* ---------- Main 3-column grid ---------- */}
       <div className="grid grid-cols-12 gap-6">
-        {/* Left: list */}
         <section className="col-span-12 space-y-5 lg:col-span-5">{list}</section>
-
-        {/* Middle: editor */}
         <section className="col-span-12 lg:col-span-4">{editor}</section>
-
-        {/* Right: activity history (sticky) */}
         <section className="col-span-12 lg:col-span-3">
-          <div className="lg:sticky lg:top-6">
+          <div className="lg:sticky lg:top-20">
             <ActivityHistory />
           </div>
         </section>

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { AdminShell } from "@/components/admin/AdminShell";
 
 export const metadata: Metadata = {
   title: "Admin · Pythagoras Platform",
@@ -7,9 +8,5 @@ export const metadata: Metadata = {
 };
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <div dir="rtl" className="min-h-screen bg-background">
-      {children}
-    </div>
-  );
+  return <AdminShell>{children}</AdminShell>;
 }
