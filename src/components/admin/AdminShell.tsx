@@ -24,6 +24,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { AdminSidebar } from "./AdminSidebar";
 import { AdminTopBar } from "./AdminTopBar";
+import { ActivityCenterDrawer } from "./ActivityCenterDrawer";
 import { useAdminStore } from "@/lib/admin/use-admin-store";
 import { getAdminStore } from "@/lib/admin/admin-store";
 
@@ -55,13 +56,16 @@ export function AdminShell({ children }: Props) {
       <div className="flex flex-1 flex-col overflow-hidden">
         <AdminTopBar
           onMenuClick={() => setSidebarOpen(true)}
-          onActivityClick={() => setActivityOpen((v) => !v)}
+          onActivityClick={() => setActivityOpen(true)}
         />
 
         <main className="admin-scroll flex-1 overflow-y-auto">
           {children}
         </main>
       </div>
+
+      {/* Global Activity Center Drawer — accessible from any page */}
+      <ActivityCenterDrawer open={activityOpen} onClose={() => setActivityOpen(false)} />
     </div>
   );
 }
