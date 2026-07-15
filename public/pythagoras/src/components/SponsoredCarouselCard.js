@@ -1,4 +1,4 @@
-import { icon } from "../scripts/icons.js";
+import { icon } from "../scripts/icons.js?v=20260715b";
 
 /**
  * SponsoredCarouselCard
@@ -290,12 +290,19 @@ export class SponsoredCarouselController {
     this.track.style.transition = animate
       ? "transform 360ms cubic-bezier(0.22, 1, 0.36, 1)"
       : "none";
-    // RTL: the visual rail flows right-to-left, so we translate by +percentage.
-    // LTR would use -percentage. The track container inherits dir from body (rtl).
     const isRtl = getComputedStyle(this.root).direction === "rtl";
     const pct = isRtl ? target * 100 : -target * 100;
     this.track.style.transform = `translateX(${pct}%)`;
     this._syncIndicators();
+
+    // Track banner_impression when a slide becomes visible
+    const visibleSlide = this.slides[target];
+    if (visibleSlide) {
+      const bannerId = visibleSlide.dataset.id;
+      if (bannerId && window.trackEvent) {
+        window.trackEvent("banner_impression", { entityId: bannerId });
+      }
+    }
   }
 
   _syncIndicators() {
@@ -358,8 +365,10 @@ export class SponsoredCarouselController {
   _onSlideTap(e) {
     const slide = e.currentTarget;
     const id = slide.dataset.id;
-    // Per spec: tapping a card simply logs its id. Navigation will be wired later.
-    // eslint-disable-next-line no-console
+    // Track banner_click event
+    if (window.trackEvent) {
+      window.trackEvent("banner_click", { entityId: id });
+    }
     console.log("[SponsoredCarousel] tapped banner id:", id);
   }
 

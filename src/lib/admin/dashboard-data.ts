@@ -108,30 +108,52 @@ export async function getDashboardData(): Promise<DashboardData> {
     /* noop */
   }
 
+  // ---- Fetch real analytics from the API (if available) ----
+  let realAnalytics: {
+    totalEvents: number;
+    uniqueUsers: number;
+    dailyActivity: { date: string; count: number }[];
+    bannerAnalytics: { bannerId: string; impressions: number; clicks: number; ctr: number }[];
+  } | null = null;
+
+  try {
+    const res = await fetch("/api/events?range=weekly", { cache: "no-store" });
+    if (res.ok) {
+      const data = await res.json();
+      realAnalytics = data;
+    }
+  } catch {
+    // API not available (e.g. during SSR) — fall back to mock
+  }
+
+  const hasRealData = realAnalytics !== null && realAnalytics!.totalEvents > 0;
+
   // ---- KPIs ----
   const today = new Date().getDate();
   const kpis: DashboardKPI[] = [
     {
       id: "users",
       label: "إجمالي المستخدمين",
-      value: "1,247",
-      sublabel: "جديد اليوم: 23",
+      value: hasRealData ? String(realAnalytics!.uniqueUsers) : "1,247",
+      sublabel: hasRealData
+        ? `${realAnalytics!.uniqueUsers} مستخدم فريد`
+        : "جديد اليوم: 23",
       trend: 12,
       trendDirection: "up",
       icon: "Users",
       color: "text-blue-500",
-      isDemo: true,
+      isDemo: !hasRealData,
     },
     {
       id: "study",
       label: "جلسات الدراسة",
-      value: "3,892",
-      sublabel: "هذا الأسبوع",
+      value: hasRealData ? String(realAnalytics!.totalEvents) : "3,892",
+      sublabel: hasRealData ? "إجمالي الأحداث" : "هذا الأسبوع",
       trend: 8,
       trendDirection: "up",
       icon: "BookOpen",
       color: "text-emerald-500",
-      isDemo: true,
+      isDemo: !hasRealData,
     },
     {
       id: "premium",
@@ -157,34 +179,66 @@ export async function getDashboardData(): Promise<DashboardData> {
     },
   ];
 
-  // ---- Weekly activity chart (mock) ----
-  const weeklyActivity: DashboardChartPoint[] = [];
-  for (let i = 6; i >= 0; i--) {
-    const seed = today + i;
-    weeklyActivity.push({
-      label: dayLabel(i),
-      value: Math.floor(200 + seededRandom(seed) * 400),
+  // ---- Weekly activity chart (real if available, mock otherwise) ----
+  let weeklyActivity: DashboardChartPoint[] = [];
+  if (hasRealData && realAnalytics!.dailyActivity.length > 0) {
+    // Map API data to chart points
+    const dayNames = ["الأحد", "الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
+    weeklyActivity = realAnalytics!.dailyActivity.map((d) => {
+      const date = new Date(d.date);
+      return {
+        label: dayNames[date.getDay()] || d.date,
+        value: d.count,
+      };
     });
+  } else {
+    // Mock data
+    for (let i = 6; i >= 0; i--) {
+      const seed = today + i;
+      weeklyActivity.push({
+        label: dayLabel(i),
+        value: Math.floor(200 + seededRandom(seed) * 400),
+      });
+    }
   }
 
-  // ---- Banner analytics (real banner count + mock metrics) ----
-  const bannerAnalytics: BannerAnalyticsRow[] = banners
-    .filter((b) => b.enabled !== false)
-    .slice(0, 5)
-    .map((b, i) => {
-      const seed = today + i + 1;
-      const impressions = Math.floor(500 + seededRandom(seed) * 2000);
-      const clicks = Math.floor(impressions * (0.03 + seededRandom(seed + 10) * 0.07));
-      return {
-        id: b.id,
-        title: b.title || "بدون عنوان",
-        impressions,
-        clicks,
-        ctr: impressions > 0 ? (clicks / impressions) * 100 : 0,
-        isDemo: true,
-      };
-    })
-    .sort((a, b) => b.clicks - a.clicks);
+  // ---- Banner analytics (real if available, mock otherwise) ----
+  let bannerAnalytics: BannerAnalyticsRow[];
+  if (hasRealData && realAnalytics!.bannerAnalytics.length > 0) {
+    // Match real banner analytics with banner titles
+    bannerAnalytics = realAnalytics!.bannerAnalytics
+      .map((ba) => {
+        const banner = banners.find((b) => b.id === ba.bannerId);
+        return {
+          id: ba.bannerId,
+          title: banner?.title || ba.bannerId,
+          impressions: ba.impressions,
+          clicks: ba.clicks,
+          ctr: ba.ctr,
+          isDemo: false,
+        };
+      })
+      .sort((a, b) => b.clicks - a.clicks);
+  } else {
+    // Mock data
+    bannerAnalytics = banners
+      .filter((b) => b.enabled !== false && b.status !== "archived")
+      .slice(0, 5)
+      .map((b, i) => {
+        const seed = today + i + 1;
+        const impressions = Math.floor(500 + seededRandom(seed) * 2000);
+        const clicks = Math.floor(impressions * (0.03 + seededRandom(seed + 10) * 0.07));
+        return {
+          id: b.id,
+          title: b.title || "بدون عنوان",
+          impressions,
+          clicks,
+          ctr: impressions > 0 ? (clicks / impressions) * 100 : 0,
+          isDemo: true,
+        };
+      })
+      .sort((a, b) => b.clicks - a.clicks);
+  }
 
   // ---- System health ----
   const storageUsed = storageStats?.totalBytes ?? 0;
@@ -240,6 +294,6 @@ export async function getDashboardData(): Promise<DashboardData> {
     bannerAnalytics,
     systemHealth,
     quickActions,
-    isAllDemo: true, // most data is mock
+    isAllDemo: !hasRealData, // true when no real analytics data available
   };
 }

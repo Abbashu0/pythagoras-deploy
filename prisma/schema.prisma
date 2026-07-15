@@ -1,9 +1,6 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -29,4 +26,35 @@ model Post {
   authorId  String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+/// Analytics event — the core of the event system.
+/// Every user interaction (app open, login, study, banner click, etc.)
+/// is stored here. The dashboard reads from this table to compute
+/// KPIs, charts, and banner analytics.
+model AnalyticsEvent {
+  id        String   @id @default(cuid())
+  /// Event type — e.g. "app_open", "login", "banner_click", "quiz_finished"
+  type      String
+  /// ISO timestamp of the event
+  timestamp DateTime @default(now())
+  /// Anonymous user identifier (localStorage UUID on the client)
+  userId    String?
+  /// Session identifier (per-app-session UUID)
+  sessionId String?
+  /// Banner/material/question ID (if the event is about a specific entity)
+  entityId  String?
+  /// Platform: "web", "ios", "android"
+  platform  String?
+  /// App version
+  version   String?
+  /// Device info (user agent or device model)
+  device    String?
+  /// Additional JSON metadata (e.g. quiz score, study duration, etc.)
+  metadata  String?
+
+  @@index([type])
+  @@index([timestamp])
+  @@index([userId])
+  @@index([entityId])
 }

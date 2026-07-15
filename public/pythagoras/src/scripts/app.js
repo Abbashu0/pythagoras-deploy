@@ -9,7 +9,8 @@ import { settingsScreen } from "../pages/SettingsPage.js?v=20260715b";
 import { subjectTestsScreen } from "../pages/SubjectTestsPage.js?v=20260715b";
 import { testsSubjectsScreen } from "../pages/TestsSubjectsPage.js?v=20260715b";
 import { toolsScreen } from "../pages/ToolsPage.js?v=20260715b";
-import "./image-db.js?v=20260715b"; // Registers window.ImageDB (IndexedDB image storage + cache)
+import "./image-db.js?v=20260715b";
+import { trackEvent } from "./event-tracker.js?v=20260715b"; // Registers window.ImageDB (IndexedDB image storage + cache)
 import {
   getBiologyQuestionDetailFromView,
   getQuestionBankSubjectByView,
@@ -1084,3 +1085,7 @@ window.addEventListener("popstate", () => {
   prepareQuestionBankRestore(currentView, view);
   refreshView(view, { activateNav: false });
 });
+
+
+// Expose trackEvent globally for vanilla JS components
+window.trackEvent = trackEvent;
