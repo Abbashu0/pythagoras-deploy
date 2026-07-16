@@ -90,7 +90,7 @@ function dayLabel(offset: number): string {
 // Main data generator
 // ============================================================
 
-export async function getDashboardData(): Promise<DashboardData> {
+export async function getDashboardData(timeRange?: "daily" | "weekly" | "monthly" | "yearly" | "all"): Promise<DashboardData> {
   // Real data from stores
   const adminStore = getAdminStore();
   const materialsStore = getMaterialsStore();
@@ -117,7 +117,8 @@ export async function getDashboardData(): Promise<DashboardData> {
   } | null = null;
 
   try {
-    const res = await fetch("/api/events?range=weekly", { cache: "no-store" });
+    const rangeParam = timeRange || "weekly";
+    const res = await fetch(`/api/events?range=${rangeParam}`, { cache: "no-store" });
     if (res.ok) {
       const data = await res.json();
       realAnalytics = data;
@@ -129,47 +130,47 @@ export async function getDashboardData(): Promise<DashboardData> {
   const hasRealData = realAnalytics !== null && realAnalytics!.totalEvents > 0;
 
   // ---- KPIs ----
-  const today = new Date().getDate();
+  // When no real data, show 0 — NOT fake numbers. The app is in development.
   const kpis: DashboardKPI[] = [
     {
       id: "users",
       label: "إجمالي المستخدمين",
-      value: hasRealData ? String(realAnalytics!.uniqueUsers) : "1,247",
+      value: hasRealData ? String(realAnalytics!.uniqueUsers) : "0",
       sublabel: hasRealData
         ? `${realAnalytics!.uniqueUsers} مستخدم فريد`
-        : "جديد اليوم: 23",
-      trend: 12,
-      trendDirection: "up",
+        : "بانتظار إطلاق التطبيق",
+      trend: 0,
+      trendDirection: "flat",
       icon: "Users",
       color: "text-blue-500",
-      isDemo: !hasRealData,
+      isDemo: false,
     },
     {
       id: "study",
       label: "جلسات الدراسة",
-      value: hasRealData ? String(realAnalytics!.totalEvents) : "3,892",
-      sublabel: hasRealData ? "إجمالي الأحداث" : "هذا الأسبوع",
-      trend: 8,
-      trendDirection: "up",
+      value: hasRealData ? String(realAnalytics!.totalEvents) : "0",
+      sublabel: hasRealData ? "إجمالي الأحداث" : "بانتظار إطلاق التطبيق",
+      trend: 0,
+      trendDirection: "flat",
       icon: "BookOpen",
       color: "text-emerald-500",
-      isDemo: !hasRealData,
+      isDemo: false,
     },
     {
       id: "premium",
       label: "Premium",
-      value: "89",
-      sublabel: "الإيرام: 4,450 ل.س",
-      trend: 5,
-      trendDirection: "up",
+      value: "0",
+      sublabel: "الإيراد: 0 ل.س",
+      trend: 0,
+      trendDirection: "flat",
       icon: "Crown",
       color: "text-amber-500",
-      isDemo: true,
+      isDemo: false,
     },
     {
       id: "banners",
       label: "البانرات النشطة",
-      value: String(banners.filter((b) => b.enabled !== false).length),
+      value: String(banners.filter((b) => b.enabled !== false && b.status !== "archived").length),
       sublabel: `إجمالي: ${banners.length}`,
       trend: 0,
       trendDirection: "flat",
@@ -179,10 +180,9 @@ export async function getDashboardData(): Promise<DashboardData> {
     },
   ];
 
-  // ---- Weekly activity chart (real if available, mock otherwise) ----
+  // ---- Activity chart (real data only, no mock) ----
   let weeklyActivity: DashboardChartPoint[] = [];
   if (hasRealData && realAnalytics!.dailyActivity.length > 0) {
-    // Map API data to chart points
     const dayNames = ["الأحد", "الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
     weeklyActivity = realAnalytics!.dailyActivity.map((d) => {
       const date = new Date(d.date);
@@ -192,20 +192,15 @@ export async function getDashboardData(): Promise<DashboardData> {
       };
     });
   } else {
-    // Mock data
+    // Show 7 empty days (0 events) — not fake numbers
     for (let i = 6; i >= 0; i--) {
-      const seed = today + i;
-      weeklyActivity.push({
-        label: dayLabel(i),
-        value: Math.floor(200 + seededRandom(seed) * 400),
-      });
+      weeklyActivity.push({ label: dayLabel(i), value: 0 });
     }
   }
 
-  // ---- Banner analytics (real if available, mock otherwise) ----
+  // ---- Banner analytics (real data only, no mock) ----
   let bannerAnalytics: BannerAnalyticsRow[];
   if (hasRealData && realAnalytics!.bannerAnalytics.length > 0) {
-    // Match real banner analytics with banner titles
     bannerAnalytics = realAnalytics!.bannerAnalytics
       .map((ba) => {
         const banner = banners.find((b) => b.id === ba.bannerId);
@@ -220,24 +215,18 @@ export async function getDashboardData(): Promise<DashboardData> {
       })
       .sort((a, b) => b.clicks - a.clicks);
   } else {
-    // Mock data
+    // Show real banners with 0 impressions/clicks — not fake numbers
     bannerAnalytics = banners
       .filter((b) => b.enabled !== false && b.status !== "archived")
       .slice(0, 5)
-      .map((b, i) => {
-        const seed = today + i + 1;
-        const impressions = Math.floor(500 + seededRandom(seed) * 2000);
-        const clicks = Math.floor(impressions * (0.03 + seededRandom(seed + 10) * 0.07));
-        return {
-          id: b.id,
-          title: b.title || "بدون عنوان",
-          impressions,
-          clicks,
-          ctr: impressions > 0 ? (clicks / impressions) * 100 : 0,
-          isDemo: true,
-        };
-      })
-      .sort((a, b) => b.clicks - a.clicks);
+      .map((b) => ({
+        id: b.id,
+        title: b.title || "بدون عنوان",
+        impressions: 0,
+        clicks: 0,
+        ctr: 0,
+        isDemo: false,
+      }));
   }
 
   // ---- System health ----
@@ -294,6 +283,6 @@ export async function getDashboardData(): Promise<DashboardData> {
     bannerAnalytics,
     systemHealth,
     quickActions,
-    isAllDemo: !hasRealData, // true when no real analytics data available
+    isAllDemo: false, // No more mock data — all numbers are real or zero
   };
 }

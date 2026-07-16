@@ -2,30 +2,15 @@
 
 /**
  * AdminShell — the master layout wrapper for the entire admin console.
- *
- * Structure:
- *   ┌──────────────────────────────────────────────────┐
- *   │              │  TopBar (sticky)                   │
- *   │   Sidebar    ├────────────────────────────────────┤
- *   │   (fixed)    │                                    │
- *   │              │  Main Content (scrollable)         │
- *   │              │                                    │
- *   └──────────────┴────────────────────────────────────┘
- *
- * The sidebar is fixed on desktop (lg+) and slide-in on mobile.
- * The topbar is sticky and contains breadcrumbs + global tools.
- * The main content area is the children (each page's content).
- *
- * CRITICAL: This shell is ADDITIVE — it wraps existing pages without
- * modifying their internal logic. Existing pages continue to work
- * exactly as before, just inside a better frame.
  */
 
 import { useEffect, useState, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import { AdminSidebar } from "./AdminSidebar";
 import { AdminTopBar } from "./AdminTopBar";
 import { ActivityCenterDrawer } from "./ActivityCenterDrawer";
 import { CommandPalette } from "./CommandPalette";
+import { NotificationsDrawer } from "./NotificationsDrawer";
 import { useAdminStore } from "@/lib/admin/use-admin-store";
 import { getAdminStore } from "@/lib/admin/admin-store";
 
@@ -34,24 +19,24 @@ interface Props {
 }
 
 export function AdminShell({ children }: Props) {
+  const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const { adminTheme } = useAdminStore();
   const store = getAdminStore();
 
-  // Apply theme to <html> — same pattern as before, just centralized.
   useEffect(() => {
     document.documentElement.classList.toggle("dark", adminTheme === "dark");
   }, [adminTheme]);
 
-  // Load store on mount (same as before, just centralized).
   useEffect(() => {
     store.loadFromStorage();
     store.hydrateImagesFromIDB();
   }, [store]);
 
-  // Global Ctrl+K / Cmd+K to open Command Palette
+  // Global Ctrl+K / Cmd+K
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "k") {
@@ -71,7 +56,8 @@ export function AdminShell({ children }: Props) {
         <AdminTopBar
           onMenuClick={() => setSidebarOpen(true)}
           onActivityClick={() => setActivityOpen(true)}
-          onSearchClick={() => setPaletteOpen(true)}
+          onNotificationsClick={() => setNotificationsOpen(true)}
+          onSearchNavigate={(href) => router.push(href)}
         />
 
         <main className="admin-scroll flex-1 overflow-y-auto">
@@ -79,10 +65,8 @@ export function AdminShell({ children }: Props) {
         </main>
       </div>
 
-      {/* Global Activity Center Drawer — accessible from any page */}
       <ActivityCenterDrawer open={activityOpen} onClose={() => setActivityOpen(false)} />
-
-      {/* Global Command Palette — Ctrl+K from anywhere */}
+      <NotificationsDrawer open={notificationsOpen} onClose={() => setNotificationsOpen(false)} />
       <CommandPalette
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}

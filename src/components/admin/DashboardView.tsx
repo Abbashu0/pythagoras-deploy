@@ -69,19 +69,19 @@ export function DashboardView() {
   const router = useRouter();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [timeRange, setTimeRange] = useState<"daily" | "weekly" | "monthly" | "yearly" | "all">("weekly");
 
   useEffect(() => {
     let cancelled = false;
-    getDashboardData().then((d) => {
+    // Pass time range to the data fetcher
+    getDashboardData(timeRange).then((d) => {
       if (!cancelled) {
         setData(d);
         setLoading(false);
       }
     });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    return () => { cancelled = true; };
+  }, [timeRange]);
 
   if (loading || !data) {
     return (
@@ -102,17 +102,6 @@ export function DashboardView() {
 
   return (
     <div className="mx-auto max-w-[1200px] space-y-6 px-4 py-6 sm:px-6 lg:px-8">
-      {/* ---------- Demo data banner ---------- */}
-      {data.isAllDemo && (
-        <div className="flex items-center gap-2 rounded-lg border border-blue-500/20 bg-blue-500/5 px-3 py-2 text-xs text-blue-600 dark:text-blue-400">
-          <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
-          <span>
-            البيانات المعروضة تجريبية (Demo). ستُستبدل ببيانات حقيقية عند ربط
-            الـ backend.
-          </span>
-        </div>
-      )}
-
       {/* ---------- KPI Row ---------- */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {data.kpis.map((kpi) => {
@@ -136,11 +125,6 @@ export function DashboardView() {
                   <div className={`grid h-10 w-10 place-items-center rounded-lg bg-muted ${kpi.color}`}>
                     <Icon className="h-5 w-5" />
                   </div>
-                  {kpi.isDemo && (
-                    <span className="rounded-full bg-muted px-1.5 py-0.5 text-[8px] font-medium text-muted-foreground">
-                      تجريبي
-                    </span>
-                  )}
                 </div>
                 <div className="mt-3 space-y-0.5">
                   <div className="text-2xl font-bold tabular-nums text-foreground">
@@ -165,15 +149,33 @@ export function DashboardView() {
 
       {/* ---------- Activity Chart + Quick Actions ---------- */}
       <div className="grid gap-4 lg:grid-cols-3">
-        {/* Weekly Activity Chart */}
+        {/* Activity Chart */}
         <Card className="lg:col-span-2">
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm">
               <Activity className="h-4 w-4 text-primary" />
-              النشاط الأسبوعي
-              <span className="ml-auto text-[10px] font-normal text-muted-foreground">
-                آخر 7 أيام
-              </span>
+              النشاط
+              <div className="mr-auto flex gap-1">
+                {[
+                  { value: "daily" as const, label: "يومي" },
+                  { value: "weekly" as const, label: "أسبوعي" },
+                  { value: "monthly" as const, label: "شهري" },
+                  { value: "yearly" as const, label: "سنوي" },
+                  { value: "all" as const, label: "كامل" },
+                ].map((opt) => (
+                  <button
+                    key={opt.value}
+                    onClick={() => setTimeRange(opt.value)}
+                    className={`rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                      timeRange === opt.value
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-muted text-muted-foreground hover:bg-muted/70"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -243,9 +245,6 @@ export function DashboardView() {
           <CardTitle className="flex items-center gap-2 text-sm">
             <ImagePlus className="h-4 w-4 text-primary" />
             أداء البانرات
-            <span className="ml-auto text-[10px] font-normal text-muted-foreground">
-              تجريبي
-            </span>
           </CardTitle>
         </CardHeader>
         <CardContent>

@@ -88,6 +88,13 @@ export async function GET(request: NextRequest) {
       case "monthly":
         startDate.setMonth(now.getMonth() - 1);
         break;
+      case "yearly":
+        startDate.setFullYear(now.getFullYear() - 1);
+        break;
+      case "all":
+        // From the beginning of time (or 2020)
+        startDate = new Date("2020-01-01");
+        break;
       case "weekly":
       default:
         startDate.setDate(now.getDate() - 7);
