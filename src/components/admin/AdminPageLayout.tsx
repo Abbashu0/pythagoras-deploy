@@ -1,23 +1,16 @@
 "use client";
 
 /**
- * AdminPageLayout — shared content layout for admin sub-pages.
+ * AdminPageLayout — shared content layout for admin sub-pages
+ * (materials, tools, navigation).
  *
- * NEW LAYOUT (with live preview on the left):
- *
- *   ┌─────────┬──────────────────┬──────────────┐
- *   │         │                  │              │
- *   │ Sidebar │  Editor area     │  Preview     │
- *   │ (right) │  (scrollable)    │  (fixed left)│
- *   │         │  - List          │  [Card][Page]│
- *   │         │  - Editor form   │              │
- *   │         │  - Settings      │              │
- *   │         │                  │              │
- *   └─────────┴──────────────────┴──────────────┘
- *
- * The preview is ALWAYS visible (sticky) while the editor scrolls.
- * The preview panel has a toggle between "بطاقة" (single card) and
- * "صفحة كاملة" (full student app page via iframe).
+ * In the new AdminShell architecture:
+ *   - The shell provides sidebar + topbar + breadcrumbs + theme toggle
+ *   - Activity history is now GLOBAL (ActivityCenterDrawer) — no longer
+ *     a per-page sidebar column
+ *   - This layout provides a 2-column content grid:
+ *     [list] [editor]
+ *   - The preview strip stays at the bottom (full-width)
  */
 
 import { useEffect, type ReactNode } from "react";
@@ -25,28 +18,27 @@ import { AlertTriangle } from "lucide-react";
 import { getMaterialsStore, getToolsStore } from "@/lib/admin/content-store";
 
 interface Props {
+  /** Optional storage error message — surfaces a warning banner. */
   storageError?: string | null;
+  /**
+   * Called once on mount (client-only, after hydration). The page uses
+   * this to load its own list store. Idempotent.
+   */
   loadStore: () => void;
-  /** Editor area: list + form + settings (scrollable) */
+  /** Left column — the reorderable list of items. */
+  list: ReactNode;
+  /** Right column — the editor panel (wider now, no activity sidebar). */
   editor: ReactNode;
-  /** Preview panel content (card mode) */
-  cardPreview: ReactNode;
-  /** Student app URL for full-page mode */
-  fullPageUrl: string;
-  /** Label for full-page mode */
-  fullPageLabel: string;
-  /** Optional children (e.g. DeleteConfirmDialog) */
-  children?: ReactNode;
+  /** Bottom strip — the live preview (full-width). */
+  preview: ReactNode;
 }
 
 export function AdminPageLayout({
   storageError,
   loadStore,
+  list,
   editor,
-  cardPreview,
-  fullPageUrl,
-  fullPageLabel,
-  children,
+  preview,
 }: Props) {
   useEffect(() => {
     loadStore();
@@ -55,7 +47,7 @@ export function AdminPageLayout({
   }, [loadStore]);
 
   return (
-    <div className="mx-auto max-w-[1600px] px-4 py-6 sm:px-6 lg:px-8">
+    <div className="mx-auto max-w-[1200px] px-4 py-6 sm:px-6 lg:px-8">
       {/* ---------- Storage error warning ---------- */}
       {storageError && (
         <div className="mb-6 flex items-start gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4">
@@ -67,36 +59,14 @@ export function AdminPageLayout({
         </div>
       )}
 
-      {/* ---------- 2-column: Editor (right) + Preview (left, fixed) ---------- */}
+      {/* ---------- Main 2-column grid (list + editor) ---------- */}
       <div className="grid grid-cols-12 gap-6">
-        {/* Editor area — scrollable */}
-        <section className="col-span-12 lg:col-span-7 xl:col-span-8">
-          {editor}
-        </section>
-
-        {/* Preview — fixed on the left */}
-        <section className="col-span-12 lg:col-span-5 xl:col-span-4">
-          <LivePreviewPanelWrapper
-            cardPreview={cardPreview}
-            fullPageUrl={fullPageUrl}
-            fullPageLabel={fullPageLabel}
-          />
-        </section>
+        <section className="col-span-12 space-y-5 lg:col-span-5">{list}</section>
+        <section className="col-span-12 lg:col-span-7">{editor}</section>
       </div>
 
-      {/* Optional children (dialogs, etc.) */}
-      {children}
+      {/* ---------- Bottom: live preview ---------- */}
+      <section className="mt-8">{preview}</section>
     </div>
   );
-}
-
-// Lazy import to avoid circular dependency
-import { LivePreviewPanel } from "./LivePreviewPanel";
-
-function LivePreviewPanelWrapper(props: {
-  cardPreview: ReactNode;
-  fullPageUrl: string;
-  fullPageLabel: string;
-}) {
-  return <LivePreviewPanel {...props} />;
 }
