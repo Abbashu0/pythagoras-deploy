@@ -82,8 +82,15 @@ type GraphSource = "graphify" | "understand";
 // ============================================================
 
 async function fetchGraphify(): Promise<NormGraph> {
-  const res = await fetch("/api/graphify?resource=graph.json", { cache: "no-store" });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  // Try static file first (faster, no cold-start), then fall back to API
+  let res: Response;
+  try {
+    res = await fetch("/graphs/graphify.json", { cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  } catch {
+    res = await fetch("/api/graphify?resource=graph.json", { cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  }
   const data = await res.json();
   return {
     nodes: (data.nodes || []).map((n: Record<string, unknown>) => ({
@@ -109,8 +116,15 @@ async function fetchGraphify(): Promise<NormGraph> {
 }
 
 async function fetchUnderstand(): Promise<NormGraph> {
-  const res = await fetch("/api/understand?resource=graph.json", { cache: "no-store" });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  // Try static file first (faster, no cold-start), then fall back to API
+  let res: Response;
+  try {
+    res = await fetch("/graphs/understand.json", { cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  } catch {
+    res = await fetch("/api/understand?resource=graph.json", { cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  }
   const data = await res.json();
   // Group by file path → community-like grouping
   const fileToCommunity = new Map<string, number>();
