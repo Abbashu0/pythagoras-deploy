@@ -21,6 +21,16 @@
     <link rel="stylesheet" crossorigin href="/understand-dashboard/assets/index-FnUqz1wa.css">
   </head>
   <body>
+    <script>
+      // Auto-set the access token so the dashboard doesn't prompt for it.
+      // The token is required by the dashboard's client-side check, but our
+      // static file serving ignores it server-side — any value works.
+      try {
+        if (!sessionStorage.getItem("understand-anything-token")) {
+          sessionStorage.setItem("understand-anything-token", "static-demo");
+        }
+      } catch (e) {}
+    </script>
     <div id="root"></div>
   </body>
 </html>
