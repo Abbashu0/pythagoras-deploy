@@ -96,7 +96,7 @@ async function fetchGraphify(): Promise<NormGraph> {
     nodes: (data.nodes || []).map((n: Record<string, unknown>) => ({
       id: n.id as string,
       label: n.label as string,
-      type: (n.metadata?.kind as string) || (n.file_type as string) || "node",
+      type: ((n.metadata as Record<string, unknown> | undefined)?.kind as string) || (n.file_type as string) || "node",
       source_file: (n.source_file as string) || "",
       source_location: (n.source_location as string) || "",
       community: (n.community as number) || 0,
@@ -183,25 +183,29 @@ export default function GraphifyPage() {
   const router = useRouter();
   const { toast } = useToast();
 
-  const [source, setSource] = useState<GraphSource>("graphify");
+  const [source, setSource] = useState<GraphSource>("understand");
   const [status, setStatus] = useState<Record<string, unknown> | null>(null);
   const [graph, setGraph] = useState<NormGraph | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [loadRequested, setLoadRequested] = useState(false);
   const [search, setSearch] = useState("");
   const [selectedCommunity, setSelectedCommunity] = useState<number | null>(null);
   const [selectedNode, setSelectedNode] = useState<NormNode | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
 
-  // ---- Fetch graph + status whenever source changes ----
+  // ---- Fetch graph + status when user requests ----
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [statusData, graphData] = await Promise.all([
-        fetchStatus(source),
-        source === "graphify" ? fetchGraphify() : fetchUnderstand(),
-      ]);
-      setStatus(statusData);
-      setGraph(graphData);
+      const graphData = source === "graphify" ? fetchGraphify() : fetchUnderstand();
+      const graph = await graphData;
+      setGraph(graph);
+      // Set status from graph data itself (no extra API call)
+      setStatus({
+        built: true,
+        nodes: graph.nodes.length,
+        edges: graph.links.length,
+      });
     } catch (e) {
       console.error(`[${source}] fetch failed:`, e);
       toast({
@@ -217,8 +221,18 @@ export default function GraphifyPage() {
   }, [source, toast]);
 
   useEffect(() => {
-    void fetchData();
-  }, [fetchData]);
+    if (loadRequested) {
+      void fetchData();
+    }
+  }, [loadRequested, fetchData]);
+
+  // When user switches source, reset and require explicit reload
+  useEffect(() => {
+    setGraph(null);
+    setLoadRequested(false);
+    setSelectedNode(null);
+    setSelectedCommunity(null);
+  }, [source]);
 
   // ---- Communities list ----
   const communities = useMemo(() => {
@@ -259,8 +273,8 @@ export default function GraphifyPage() {
         visibleIds.has(typeof l.target === "string" ? l.target : l.target.id)
     );
 
-    if (visibleNodes.length > 300) {
-      visibleNodes = visibleNodes.slice(0, 300);
+    if (visibleNodes.length > 100) {
+      visibleNodes = visibleNodes.slice(0, 100);
       const newIds = new Set(visibleNodes.map((n) => n.id));
       visibleLinks = visibleLinks.filter(
         (l) =>
@@ -275,14 +289,15 @@ export default function GraphifyPage() {
   // ---- D3 force simulation ----
   useEffect(() => {
     if (!filteredGraph.nodes.length || !svgRef.current) return;
+    const svgEl = svgRef.current;
 
     void (async () => {
       const d3 = await import("d3");
-      const svg = d3.select(svgRef.current);
+      const svg = d3.select(svgEl);
       svg.selectAll("*").remove();
 
-      const width = svgRef.current.clientWidth;
-      const height = svgRef.current.clientHeight;
+      const width = svgEl.clientWidth;
+      const height = svgEl.clientHeight;
 
       const color = d3.scaleOrdinal(d3.schemeCategory10);
 
@@ -293,13 +308,15 @@ export default function GraphifyPage() {
         target: typeof l.target === "string" ? l.target : l.target.id,
       }));
 
-      const simulation = d3
-        .forceSimulation(nodes as never)
+      // Use any-typed simulation to avoid D3's strict generic friction
+      // (the runtime behavior is correct; the types just don't flow through)
+      const sim: any = d3
+        .forceSimulation(nodes as any)
         .force(
           "link",
           d3
-            .forceLink(links as never)
-            .id((d: never) => (d as NormNode).id)
+            .forceLink(links as any)
+            .id((d: any) => d.id)
             .distance(50)
             .strength(0.3)
         )
@@ -312,7 +329,7 @@ export default function GraphifyPage() {
         .attr("stroke", "#999")
         .attr("stroke-opacity", 0.3)
         .selectAll("line")
-        .data(links)
+        .data(links as any[])
         .join("line")
         .attr("stroke-width", 0.5);
 
@@ -330,11 +347,11 @@ export default function GraphifyPage() {
 
       const node = svg
         .append("g")
-        .selectAll<SVGCircleElement, NormNode>("circle")
-        .data(nodes)
+        .selectAll("circle")
+        .data(nodes as any[])
         .join("circle")
         .attr("r", 4)
-        .attr("fill", (d) =>
+        .attr("fill", (d: any) =>
           isUnderstand
             ? typeColors[d.type] || "#64748b"
             : color(d.community)
@@ -342,20 +359,20 @@ export default function GraphifyPage() {
         .attr("stroke", "#fff")
         .attr("stroke-width", 0.5)
         .style("cursor", "pointer")
-        .on("click", (_event, d) => setSelectedNode(d))
-        .on("mouseover", function () {
+        .on("click", (_event: any, d: any) => setSelectedNode(d as NormNode))
+        .on("mouseover", (function (this: SVGCircleElement, _event: any) {
           d3.select(this).attr("r", 7).attr("stroke-width", 2);
-        })
-        .on("mouseout", function () {
+        }) as any)
+        .on("mouseout", (function (this: SVGCircleElement, _event: any) {
           d3.select(this).attr("r", 4).attr("stroke-width", 0.5);
-        });
+        }) as any);
 
       const label = svg
         .append("g")
-        .selectAll<SVGTextElement, NormNode>("text")
-        .data(nodes)
+        .selectAll("text")
+        .data(nodes as any[])
         .join("text")
-        .text((d) => d.label)
+        .text((d: any) => d.label)
         .attr("font-size", 8)
         .attr("fill", "#666")
         .attr("dx", 6)
@@ -363,28 +380,28 @@ export default function GraphifyPage() {
         .style("pointer-events", "none")
         .style("opacity", 0);
 
-      node.append("title").text((d) => `${d.label}\n${d.source_file}`);
+      node.append("title").text((d: any) => `${d.label}\n${d.source_file}`);
 
-      simulation.on("tick", () => {
+      sim.on("tick", () => {
         link
-          .attr("x1", (d: never) => (d.source as NormNode).x ?? 0)
-          .attr("y1", (d: never) => (d.source as NormNode).y ?? 0)
-          .attr("x2", (d: never) => (d.target as NormNode).x ?? 0)
-          .attr("y2", (d: never) => (d.target as NormNode).y ?? 0);
-        node.attr("cx", (d) => d.x ?? 0).attr("cy", (d) => d.y ?? 0);
-        label.attr("x", (d) => d.x ?? 0).attr("y", (d) => d.y ?? 0);
+          .attr("x1", (d: any) => d.source.x ?? 0)
+          .attr("y1", (d: any) => d.source.y ?? 0)
+          .attr("x2", (d: any) => d.target.x ?? 0)
+          .attr("y2", (d: any) => d.target.y ?? 0);
+        node.attr("cx", (d: any) => d.x ?? 0).attr("cy", (d: any) => d.y ?? 0);
+        label.attr("x", (d: any) => d.x ?? 0).attr("y", (d: any) => d.y ?? 0);
       });
 
       const zoom = d3
         .zoom()
         .scaleExtent([0.1, 10])
-        .on("zoom", (event) => {
+        .on("zoom", (event: any) => {
           svg.selectAll("g").attr("transform", event.transform);
         });
-      svg.call(zoom as never);
+      svg.call(zoom as any);
 
       return () => {
-        simulation.stop();
+        sim.stop();
       };
     })();
   }, [filteredGraph, source]);
@@ -604,20 +621,29 @@ export default function GraphifyPage() {
               <p className="text-xs text-muted-foreground">جارٍ تحميل الـ graph…</p>
             </div>
           ) : !graph ? (
-            <div className="grid h-full place-items-center gap-3 p-8 text-center">
-              <AlertCircle className="h-12 w-12 text-destructive/30" />
-              <div>
-                <h3 className="text-sm font-semibold">الـ graph غير مبني</h3>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {source === "graphify" ? (
-                    <code className="mt-2 block rounded bg-muted p-2 text-[11px]">
-                      graphify . --code-only
-                    </code>
-                  ) : (
-                    <code className="mt-2 block rounded bg-muted p-2 text-[11px]">
-                      node scripts/understand/build-graph.mjs
-                    </code>
-                  )}
+            <div className="grid h-full place-items-center gap-4 p-8 text-center">
+              <div className="space-y-3">
+                <Layers className="mx-auto h-12 w-12 text-muted-foreground/30" />
+                <div>
+                  <h3 className="text-sm font-semibold text-foreground">
+                    {source === "graphify" ? "Graphify" : "Understand Anything"}
+                  </h3>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {source === "graphify"
+                      ? "تحليل بنيوي بـ tree-sitter AST — 1400+ nodes"
+                      : "تحليل دلالي مع شروحات لكل node — 990 nodes"}
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  onClick={() => setLoadRequested(true)}
+                  className="gap-1.5 text-xs"
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                  تحميل الـ Graph
+                </Button>
+                <p className="text-[10px] text-muted-foreground/70">
+                  سيتم تحميل ومعالجة البيانات في المتصفح
                 </p>
               </div>
             </div>
@@ -637,9 +663,9 @@ export default function GraphifyPage() {
                   {filteredGraph.links.length}
                 </span>{" "}
                 links
-                {filteredGraph.nodes.length === 300 && (
+                {filteredGraph.nodes.length === 100 && (
                   <span className="mr-2 text-amber-600">
-                    (محدود بـ 300 للعرض)
+                    (محدود بـ 100 — استخدم الفلتر لتضييق النطاق)
                   </span>
                 )}
               </div>
@@ -702,13 +728,13 @@ export default function GraphifyPage() {
                 </div>
 
                 {/* Summary (Understand Anything) */}
-                {selectedNode.metadata?.summary && (
+                {Boolean(selectedNode.metadata?.summary) && (
                   <div>
                     <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
                       الشرح
                     </div>
                     <div className="mt-0.5 rounded-md border border-border bg-muted/30 p-2 text-xs leading-relaxed">
-                      {String(selectedNode.metadata.summary)}
+                      {String((selectedNode.metadata as any).summary || "")}
                     </div>
                   </div>
                 )}
@@ -716,23 +742,23 @@ export default function GraphifyPage() {
                 {/* Metadata */}
                 {selectedNode.metadata && (
                   <div className="grid grid-cols-2 gap-3">
-                    {selectedNode.metadata.language && (
+                    {(selectedNode.metadata as any).language && (
                       <div>
                         <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
                           اللغة
                         </div>
                         <div className="mt-0.5 text-xs">
-                          {String(selectedNode.metadata.language)}
+                          {String((selectedNode.metadata as any).language)}
                         </div>
                       </div>
                     )}
-                    {selectedNode.metadata.complexity && (
+                    {(selectedNode.metadata as any).complexity && (
                       <div>
                         <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
                           التعقيد
                         </div>
                         <div className="mt-0.5 text-xs">
-                          {String(selectedNode.metadata.complexity)}
+                          {String((selectedNode.metadata as any).complexity)}
                         </div>
                       </div>
                     )}
