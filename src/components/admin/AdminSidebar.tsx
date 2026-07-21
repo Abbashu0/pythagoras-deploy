@@ -30,6 +30,7 @@ import {
   Activity,
   Compass,
   Wrench,
+  Share2,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -89,6 +90,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: "النظام",
     items: [
       { label: "التحليلات والصحة", href: "/admin/analytics", icon: BarChart3, available: true },
+      { label: "Graphify — Knowledge Graph", href: "/admin/graphify", icon: Share2, available: true },
       { label: "السجل", href: "/admin/logs", icon: Activity, available: false, badge: "قريباً" },
       { label: "الإعدادات", href: "/admin/settings", icon: Settings, available: false, badge: "قريباً" },
     ],
