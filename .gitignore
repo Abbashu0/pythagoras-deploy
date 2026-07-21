@@ -55,3 +55,6 @@ server.log
 
 # Graphify knowledge graph (auto-generated, rebuilt on commit)
 /graphify-out/
+
+# Understand Anything knowledge graph (auto-generated, rebuilt on commit)
+/.ua/

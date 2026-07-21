@@ -1,20 +1,21 @@
 "use client";
 
 /**
- * /admin/graphify — Interactive Graphify Viewer
+ * /admin/graphify — Interactive Knowledge Graph Viewer
  *
  * Shows the project's knowledge graph in a force-directed visualization.
  *
- * Features:
- *   - D3.js force-directed graph (lightweight, no external deps beyond d3)
- *   - Filter by community
- *   - Search by node label
- *   - Click node → show details (file, type, connections)
- *   - Show graph stats (nodes, edges, communities)
- *   - Show freshness (last built commit vs current HEAD)
- *   - Button to refresh the graph
+ * Supports TWO graph sources (toggle in header):
+ *   1. Graphify — AST-based, fast, structural (tree-sitter, no LLM)
+ *   2. Understand Anything — semantic, deeper, with summaries
  *
- * Data source: /api/graphify?resource=graph.json
+ * Features:
+ *   - D3.js force-directed graph
+ *   - Filter by community (Graphify) or by layer (Understand Anything)
+ *   - Search by node label/file
+ *   - Click node → show details + connections
+ *   - Show graph stats
+ *   - Toggle between graph sources
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -24,112 +25,186 @@ import {
   Loader2,
   RefreshCw,
   Search,
-  Activity,
   Box,
   Link2,
   Layers,
   FileCode,
   AlertCircle,
   Info,
+  GitBranch,
+  Share2,
+  Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
+import { cn } from "@/lib/utils";
 
-interface GraphNode {
+// ============================================================
+// Types — normalized across both graph sources
+// ============================================================
+
+interface NormNode {
   id: string;
   label: string;
-  file_type: string;
+  type: string;
   source_file: string;
-  source_location: string;
+  source_location?: string;
   community: number;
   community_name?: string;
   metadata?: Record<string, unknown>;
-  // D3 will add x, y, vx, vy
+  // D3 runtime
   x?: number;
   y?: number;
   vx?: number;
   vy?: number;
 }
 
-interface GraphLink {
-  source: string | GraphNode;
-  target: string | GraphNode;
+interface NormLink {
+  source: string | NormNode;
+  target: string | NormNode;
   relation: string;
   confidence: string;
-  source_file: string;
+  source_file?: string;
   weight?: number;
 }
 
-interface GraphData {
-  nodes: GraphNode[];
-  links: GraphLink[];
+interface NormGraph {
+  nodes: NormNode[];
+  links: NormLink[];
   built_at_commit?: string;
 }
 
-interface GraphStatus {
-  built: boolean;
-  graphExists: boolean;
-  reportExists: boolean;
-  htmlExists: boolean;
-  nodes?: number;
-  edges?: number;
-  communities?: number;
-  graphifyDir: string;
+type GraphSource = "graphify" | "understand";
+
+// ============================================================
+// Source-specific fetchers
+// ============================================================
+
+async function fetchGraphify(): Promise<NormGraph> {
+  const res = await fetch("/api/graphify?resource=graph.json", { cache: "no-store" });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  return {
+    nodes: (data.nodes || []).map((n: Record<string, unknown>) => ({
+      id: n.id as string,
+      label: n.label as string,
+      type: (n.metadata?.kind as string) || (n.file_type as string) || "node",
+      source_file: (n.source_file as string) || "",
+      source_location: (n.source_location as string) || "",
+      community: (n.community as number) || 0,
+      community_name: n.community_name as string,
+      metadata: n.metadata as Record<string, unknown>,
+    })),
+    links: (data.links || []).map((l: Record<string, unknown>) => ({
+      source: l.source as string,
+      target: l.target as string,
+      relation: (l.relation as string) || "related",
+      confidence: (l.confidence as string) || "EXTRACTED",
+      source_file: l.source_file as string,
+      weight: l.weight as number,
+    })),
+    built_at_commit: data.built_at_commit as string,
+  };
 }
+
+async function fetchUnderstand(): Promise<NormGraph> {
+  const res = await fetch("/api/understand?resource=graph.json", { cache: "no-store" });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  // Group by file path → community-like grouping
+  const fileToCommunity = new Map<string, number>();
+  let nextComm = 0;
+  for (const n of data.nodes || []) {
+    const dir = (n.filePath || "").split("/").slice(0, -1).join("/") || "root";
+    if (!fileToCommunity.has(dir)) {
+      fileToCommunity.set(dir, nextComm++);
+    }
+  }
+  return {
+    nodes: (data.nodes || []).map((n: Record<string, unknown>) => {
+      const filePath = (n.filePath as string) || "";
+      const dir = filePath.split("/").slice(0, -1).join("/") || "root";
+      return {
+        id: n.id as string,
+        label: (n.name as string) || n.id,
+        type: (n.type as string) || "node",
+        source_file: filePath,
+        source_location: n.lineRange ? `L${n.lineRange[0]}` : "",
+        community: fileToCommunity.get(dir) || 0,
+        community_name: dir,
+        metadata: {
+          kind: n.type,
+          language: (n.tags as string[])?.[0] || "",
+          complexity: n.complexity,
+          summary: n.summary,
+        },
+      };
+    }),
+    links: (data.edges || []).map((e: Record<string, unknown>) => ({
+      source: e.source as string,
+      target: e.target as string,
+      relation: (e.type as string) || "related",
+      confidence: "EXTRACTED",
+      weight: (e.weight as number) ?? 0.7,
+    })),
+    built_at_commit: data.builtAtCommit as string,
+  };
+}
+
+async function fetchStatus(source: GraphSource): Promise<Record<string, unknown>> {
+  const url = source === "graphify"
+    ? "/api/graphify?resource=status"
+    : "/api/understand?resource=status";
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) return { built: false };
+  return res.json();
+}
+
+// ============================================================
+// Main Page
+// ============================================================
 
 export default function GraphifyPage() {
   const router = useRouter();
   const { toast } = useToast();
 
-  const [status, setStatus] = useState<GraphStatus | null>(null);
-  const [graph, setGraph] = useState<GraphData | null>(null);
+  const [source, setSource] = useState<GraphSource>("graphify");
+  const [status, setStatus] = useState<Record<string, unknown> | null>(null);
+  const [graph, setGraph] = useState<NormGraph | null>(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [selectedCommunity, setSelectedCommunity] = useState<number | null>(null);
-  const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
+  const [selectedNode, setSelectedNode] = useState<NormNode | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
 
-  // ---- Fetch status ----
-  const fetchStatus = useCallback(async () => {
-    try {
-      const res = await fetch("/api/graphify?resource=status", { cache: "no-store" });
-      if (res.ok) {
-        const data = await res.json();
-        setStatus(data);
-      }
-    } catch (e) {
-      console.error("[graphify] status fetch failed:", e);
-    }
-  }, []);
-
-  // ---- Fetch graph ----
-  const fetchGraph = useCallback(async () => {
+  // ---- Fetch graph + status whenever source changes ----
+  const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/graphify?resource=graph.json", { cache: "no-store" });
-      if (res.ok) {
-        const data = await res.json();
-        setGraph(data);
-      } else {
-        toast({
-          title: "الـ graph غير مبني",
-          description: "شغّل `graphify . --code-only` في الـ terminal.",
-          variant: "destructive",
-        });
-      }
+      const [statusData, graphData] = await Promise.all([
+        fetchStatus(source),
+        source === "graphify" ? fetchGraphify() : fetchUnderstand(),
+      ]);
+      setStatus(statusData);
+      setGraph(graphData);
     } catch (e) {
-      console.error("[graphify] graph fetch failed:", e);
+      console.error(`[${source}] fetch failed:`, e);
+      toast({
+        title: "فشل تحميل الـ graph",
+        description: source === "graphify"
+          ? "شغّل `graphify . --code-only` في الـ terminal"
+          : "شغّل `node scripts/understand/build-graph.mjs`",
+        variant: "destructive",
+      });
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [source, toast]);
 
   useEffect(() => {
-    void fetchStatus();
-    void fetchGraph();
-  }, [fetchStatus, fetchGraph]);
+    void fetchData();
+  }, [fetchData]);
 
   // ---- Communities list ----
   const communities = useMemo(() => {
@@ -147,7 +222,7 @@ export default function GraphifyPage() {
       .sort((a, b) => b.count - a.count);
   }, [graph]);
 
-  // ---- Filtered graph (by search + community) ----
+  // ---- Filtered graph ----
   const filteredGraph = useMemo(() => {
     if (!graph) return { nodes: [], links: [] };
     const normSearch = search.trim().toLowerCase();
@@ -170,7 +245,6 @@ export default function GraphifyPage() {
         visibleIds.has(typeof l.target === "string" ? l.target : l.target.id)
     );
 
-    // Limit to top 300 nodes for performance
     if (visibleNodes.length > 300) {
       visibleNodes = visibleNodes.slice(0, 300);
       const newIds = new Set(visibleNodes.map((n) => n.id));
@@ -188,7 +262,6 @@ export default function GraphifyPage() {
   useEffect(() => {
     if (!filteredGraph.nodes.length || !svgRef.current) return;
 
-    // Dynamic import to keep D3 out of the SSR bundle
     void (async () => {
       const d3 = await import("d3");
       const svg = d3.select(svgRef.current);
@@ -197,10 +270,8 @@ export default function GraphifyPage() {
       const width = svgRef.current.clientWidth;
       const height = svgRef.current.clientHeight;
 
-      // Color scale by community
       const color = d3.scaleOrdinal(d3.schemeCategory10);
 
-      // Clone to avoid mutating state
       const nodes = filteredGraph.nodes.map((n) => ({ ...n }));
       const links = filteredGraph.links.map((l) => ({
         ...l,
@@ -214,7 +285,7 @@ export default function GraphifyPage() {
           "link",
           d3
             .forceLink(links as never)
-            .id((d: never) => (d as GraphNode).id)
+            .id((d: never) => (d as NormNode).id)
             .distance(50)
             .strength(0.3)
         )
@@ -222,7 +293,6 @@ export default function GraphifyPage() {
         .force("center", d3.forceCenter(width / 2, height / 2))
         .force("collide", d3.forceCollide().radius(8));
 
-      // Links
       const link = svg
         .append("g")
         .attr("stroke", "#999")
@@ -232,14 +302,29 @@ export default function GraphifyPage() {
         .join("line")
         .attr("stroke-width", 0.5);
 
-      // Nodes
+      // Color by node type for Understand Anything, community for Graphify
+      const isUnderstand = source === "understand";
+      const typeColors: Record<string, string> = {
+        file: "#3b82f6",
+        function: "#10b981",
+        class: "#a855f7",
+        module: "#f59e0b",
+        service: "#ef4444",
+        endpoint: "#06b6d4",
+        config: "#64748b",
+      };
+
       const node = svg
         .append("g")
-        .selectAll<SVGCircleElement, GraphNode>("circle")
+        .selectAll<SVGCircleElement, NormNode>("circle")
         .data(nodes)
         .join("circle")
         .attr("r", 4)
-        .attr("fill", (d) => color(d.community))
+        .attr("fill", (d) =>
+          isUnderstand
+            ? typeColors[d.type] || "#64748b"
+            : color(d.community)
+        )
         .attr("stroke", "#fff")
         .attr("stroke-width", 0.5)
         .style("cursor", "pointer")
@@ -251,10 +336,9 @@ export default function GraphifyPage() {
           d3.select(this).attr("r", 4).attr("stroke-width", 0.5);
         });
 
-      // Labels (only show for high-degree nodes to avoid clutter)
       const label = svg
         .append("g")
-        .selectAll<SVGTextElement, GraphNode>("text")
+        .selectAll<SVGTextElement, NormNode>("text")
         .data(nodes)
         .join("text")
         .text((d) => d.label)
@@ -269,15 +353,14 @@ export default function GraphifyPage() {
 
       simulation.on("tick", () => {
         link
-          .attr("x1", (d: never) => (d.source as GraphNode).x ?? 0)
-          .attr("y1", (d: never) => (d.source as GraphNode).y ?? 0)
-          .attr("x2", (d: never) => (d.target as GraphNode).x ?? 0)
-          .attr("y2", (d: never) => (d.target as GraphNode).y ?? 0);
+          .attr("x1", (d: never) => (d.source as NormNode).x ?? 0)
+          .attr("y1", (d: never) => (d.source as NormNode).y ?? 0)
+          .attr("x2", (d: never) => (d.target as NormNode).x ?? 0)
+          .attr("y2", (d: never) => (d.target as NormNode).y ?? 0);
         node.attr("cx", (d) => d.x ?? 0).attr("cy", (d) => d.y ?? 0);
         label.attr("x", (d) => d.x ?? 0).attr("y", (d) => d.y ?? 0);
       });
 
-      // Zoom/pan
       const zoom = d3
         .zoom()
         .scaleExtent([0.1, 10])
@@ -290,12 +373,12 @@ export default function GraphifyPage() {
         simulation.stop();
       };
     })();
-  }, [filteredGraph]);
+  }, [filteredGraph, source]);
 
   // ---- Selected node connections ----
   const selectedNodeConnections = useMemo(() => {
     if (!graph || !selectedNode) return [];
-    const conn: Array<{ node: GraphNode; relation: string; direction: "in" | "out" }> = [];
+    const conn: Array<{ node: NormNode; relation: string; direction: "in" | "out" }> = [];
     for (const link of graph.links) {
       const srcId = typeof link.source === "string" ? link.source : link.source.id;
       const tgtId = typeof link.target === "string" ? link.target : link.target.id;
@@ -310,7 +393,17 @@ export default function GraphifyPage() {
     return conn.slice(0, 50);
   }, [graph, selectedNode]);
 
-  // ---- Render ----
+  const stats = {
+    nodes: status?.nodes as number | undefined,
+    edges: status?.edges as number | undefined,
+    communities: status?.communities as number | undefined,
+    built: status?.built as boolean | undefined,
+  };
+
+  // ============================================================
+  // Render
+  // ============================================================
+
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background">
       {/* Header */}
@@ -328,24 +421,51 @@ export default function GraphifyPage() {
           <div>
             <h1 className="flex items-center gap-2 text-sm font-bold text-foreground">
               <Layers className="h-4 w-4 text-primary" />
-              Graphify — Knowledge Graph
+              Knowledge Graph Explorer
             </h1>
             <p className="text-[11px] text-muted-foreground">
-              {status?.built
-                ? `${status.nodes ?? 0} nodes · ${status.edges ?? 0} edges · ${status.communities ?? 0} communities`
+              {stats.built
+                ? `${stats.nodes ?? 0} nodes · ${stats.edges ?? 0} edges${stats.communities ? ` · ${stats.communities} communities` : ""}`
                 : "Graph غير مبني"}
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-1.5">
+        {/* Source toggle */}
+        <div className="flex items-center gap-2">
+          <div className="flex rounded-lg border border-border bg-muted/30 p-0.5">
+            <button
+              onClick={() => setSource("graphify")}
+              className={cn(
+                "flex items-center gap-1.5 rounded-md px-3 py-1 text-[11px] font-medium transition-colors",
+                source === "graphify"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+              title="Graphify — AST-based structural graph (fast, no LLM)"
+            >
+              <Share2 className="h-3 w-3" />
+              Graphify
+            </button>
+            <button
+              onClick={() => setSource("understand")}
+              className={cn(
+                "flex items-center gap-1.5 rounded-md px-3 py-1 text-[11px] font-medium transition-colors",
+                source === "understand"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+              title="Understand Anything — Semantic graph with summaries"
+            >
+              <Sparkles className="h-3 w-3" />
+              Understand Anything
+            </button>
+          </div>
+
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => {
-              void fetchStatus();
-              void fetchGraph();
-            }}
+            onClick={() => void fetchData()}
             disabled={loading}
             className="gap-1 text-xs"
           >
@@ -359,9 +479,24 @@ export default function GraphifyPage() {
         </div>
       </header>
 
+      {/* Source info banner */}
+      <div className="border-b border-border bg-muted/20 px-4 py-2 text-[11px] text-muted-foreground">
+        {source === "graphify" ? (
+          <span className="flex items-center gap-2">
+            <Share2 className="h-3 w-3" />
+            <strong>Graphify</strong> — تحليل بنيوي بـ tree-sitter AST (سريع، بدون LLM). يكتسب calls/imports/defines عبر ~40 لغة.
+          </span>
+        ) : (
+          <span className="flex items-center gap-2">
+            <Sparkles className="h-3 w-3" />
+            <strong>Understand Anything</strong> — تحليل دلالي مع شروحات لكل node (functions, classes, files). الألوان حسب نوع الـ node.
+          </span>
+        )}
+      </div>
+
       {/* Body — 3 columns */}
       <div className="flex flex-1 overflow-hidden">
-        {/* Left sidebar: search + communities */}
+        {/* Left sidebar */}
         <aside className="hidden w-64 flex-col border-l border-border bg-card/40 md:flex">
           <div className="border-b border-border p-3">
             <div className="relative">
@@ -379,7 +514,7 @@ export default function GraphifyPage() {
           <div className="border-b border-border p-3">
             <div className="mb-2 flex items-center justify-between">
               <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                المجتمعات
+                {source === "graphify" ? "المجتمعات" : "المجلدات"}
               </span>
               {selectedCommunity !== null && (
                 <button
@@ -397,13 +532,16 @@ export default function GraphifyPage() {
                   onClick={() =>
                     setSelectedCommunity(selectedCommunity === c.id ? null : c.id)
                   }
-                  className={`flex w-full items-center justify-between rounded px-2 py-1 text-[11px] transition-colors ${
+                  className={cn(
+                    "flex w-full items-center justify-between rounded px-2 py-1 text-[11px] transition-colors",
                     selectedCommunity === c.id
                       ? "bg-primary/10 text-primary"
                       : "hover:bg-muted/50"
-                  }`}
+                  )}
                 >
-                  <span className="truncate">{c.name}</span>
+                  <span className="truncate" title={c.name}>
+                    {c.name}
+                  </span>
                   <span className="font-mono tabular-nums text-muted-foreground">
                     {c.count}
                   </span>
@@ -417,14 +555,34 @@ export default function GraphifyPage() {
             <span className="mb-2 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
               دليل الألوان
             </span>
-            <p className="text-[10px] text-muted-foreground">
-              كل لون = community مختلفة. كل node = مفهوم في الكود (function, class, file).
-              كل edge = علاقة (calls, imports, defines, references).
-            </p>
+            {source === "understand" ? (
+              <div className="space-y-1 text-[10px]">
+                <div className="flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: "#3b82f6" }} />
+                  <span>File</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: "#10b981" }} />
+                  <span>Function</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: "#a855f7" }} />
+                  <span>Class</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: "#06b6d4" }} />
+                  <span>Endpoint / Service</span>
+                </div>
+              </div>
+            ) : (
+              <p className="text-[10px] text-muted-foreground">
+                كل لون = community مختلفة. كل node = مفهوم في الكود. كل edge = علاقة (calls, imports, defines, references).
+              </p>
+            )}
           </div>
         </aside>
 
-        {/* Center: graph visualization */}
+        {/* Center: graph */}
         <div className="relative flex-1 bg-muted/10">
           {loading ? (
             <div className="grid h-full place-items-center gap-2">
@@ -437,10 +595,15 @@ export default function GraphifyPage() {
               <div>
                 <h3 className="text-sm font-semibold">الـ graph غير مبني</h3>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  شغّل هذا الأمر في الـ terminal:
-                  <code className="mt-2 block rounded bg-muted p-2 text-[11px]">
-                    graphify . --code-only
-                  </code>
+                  {source === "graphify" ? (
+                    <code className="mt-2 block rounded bg-muted p-2 text-[11px]">
+                      graphify . --code-only
+                    </code>
+                  ) : (
+                    <code className="mt-2 block rounded bg-muted p-2 text-[11px]">
+                      node scripts/understand/build-graph.mjs
+                    </code>
+                  )}
                 </p>
               </div>
             </div>
@@ -451,7 +614,6 @@ export default function GraphifyPage() {
                 className="h-full w-full"
                 style={{ cursor: "grab" }}
               />
-              {/* Visible nodes info overlay */}
               <div className="absolute right-3 top-3 rounded-lg border border-border bg-background/90 px-3 py-1.5 text-[11px] backdrop-blur">
                 <span className="font-mono tabular-nums">
                   {filteredGraph.nodes.length}
@@ -471,7 +633,7 @@ export default function GraphifyPage() {
           )}
         </div>
 
-        {/* Right sidebar: selected node details */}
+        {/* Right sidebar: node details */}
         <aside className="hidden w-80 flex-col border-r border-border bg-card/40 lg:flex">
           <div className="border-b border-border px-4 py-3">
             <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
@@ -488,7 +650,6 @@ export default function GraphifyPage() {
               </div>
             ) : (
               <div className="space-y-4">
-                {/* Node identity */}
                 <div>
                   <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
                     الاسم
@@ -498,48 +659,75 @@ export default function GraphifyPage() {
                   </div>
                 </div>
 
-                {/* File */}
+                <div>
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                    النوع
+                  </div>
+                  <div className="mt-0.5 text-xs">
+                    <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px]">
+                      {selectedNode.type}
+                    </span>
+                  </div>
+                </div>
+
                 <div>
                   <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
                     الملف المصدر
                   </div>
                   <div className="mt-0.5 flex items-center gap-1.5 text-xs">
                     <FileCode className="h-3 w-3 text-muted-foreground" />
-                    <code className="font-mono text-foreground">
-                      {selectedNode.source_file}
+                    <code className="font-mono text-foreground break-all">
+                      {selectedNode.source_file || "—"}
                     </code>
                   </div>
-                  <div className="text-[10px] text-muted-foreground">
-                    {selectedNode.source_location}
-                  </div>
+                  {selectedNode.source_location && (
+                    <div className="text-[10px] text-muted-foreground">
+                      {selectedNode.source_location}
+                    </div>
+                  )}
                 </div>
 
-                {/* Type */}
-                {selectedNode.metadata && (
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                        النوع
-                      </div>
-                      <div className="mt-0.5 text-xs">
-                        {String(selectedNode.metadata.kind || "—")}
-                      </div>
+                {/* Summary (Understand Anything) */}
+                {selectedNode.metadata?.summary && (
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                      الشرح
                     </div>
-                    <div>
-                      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                        اللغة
-                      </div>
-                      <div className="mt-0.5 text-xs">
-                        {String(selectedNode.metadata.language || "—")}
-                      </div>
+                    <div className="mt-0.5 rounded-md border border-border bg-muted/30 p-2 text-xs leading-relaxed">
+                      {String(selectedNode.metadata.summary)}
                     </div>
                   </div>
                 )}
 
-                {/* Community */}
+                {/* Metadata */}
+                {selectedNode.metadata && (
+                  <div className="grid grid-cols-2 gap-3">
+                    {selectedNode.metadata.language && (
+                      <div>
+                        <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                          اللغة
+                        </div>
+                        <div className="mt-0.5 text-xs">
+                          {String(selectedNode.metadata.language)}
+                        </div>
+                      </div>
+                    )}
+                    {selectedNode.metadata.complexity && (
+                      <div>
+                        <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                          التعقيد
+                        </div>
+                        <div className="mt-0.5 text-xs">
+                          {String(selectedNode.metadata.complexity)}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div>
                   <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                    Community
+                    {source === "graphify" ? "Community" : "المجلد"}
                   </div>
                   <div className="mt-0.5 text-xs">
                     #{selectedNode.community} ·{" "}
@@ -568,20 +756,24 @@ export default function GraphifyPage() {
                         >
                           <div className="flex items-center gap-1.5">
                             <span
-                              className={`rounded px-1 py-0.5 text-[9px] font-bold ${
+                              className={cn(
+                                "rounded px-1 py-0.5 text-[9px] font-bold",
                                 conn.direction === "out"
                                   ? "bg-blue-500/10 text-blue-600"
                                   : "bg-emerald-500/10 text-emerald-600"
-                              }`}
+                              )}
                             >
                               {conn.direction === "out" ? "→" : "←"}
                             </span>
-                            <code className="font-mono text-foreground">
+                            <code className="font-mono text-foreground break-all">
                               {conn.node.label}
                             </code>
                           </div>
                           <div className="mt-0.5 text-[10px] text-muted-foreground">
-                            {conn.relation} · {conn.node.source_file}
+                            {conn.relation}
+                            {conn.node.source_file && (
+                              <span className="mr-1">· {conn.node.source_file}</span>
+                            )}
                           </div>
                         </li>
                       ))}
