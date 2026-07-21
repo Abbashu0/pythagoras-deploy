@@ -144,7 +144,7 @@ export default function GraphifyPage() {
           color="purple"
           stats={understandStats}
           loading={loading}
-          onOpenViewer={() => window.open("/understand-dashboard/?token=pythagoras-demo", "_blank")}
+          onOpenViewer={() => window.open("/understand-dashboard", "_blank")}
           onOpenJson={() => window.open("/graphs/understand.json", "_blank")}
           description="يحلل functions, classes, imports مع شروحات لكل node. الـ schema يدعم 27 نوع (file, function, class, service, endpoint, schema, ...) و 38 نوع edge."
         />
