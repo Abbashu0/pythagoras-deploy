@@ -187,20 +187,18 @@ export default function GraphifyPage() {
   const [status, setStatus] = useState<Record<string, unknown> | null>(null);
   const [graph, setGraph] = useState<NormGraph | null>(null);
   const [loading, setLoading] = useState(false);
-  const [loadRequested, setLoadRequested] = useState(false);
   const [search, setSearch] = useState("");
   const [selectedCommunity, setSelectedCommunity] = useState<number | null>(null);
   const [selectedNode, setSelectedNode] = useState<NormNode | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
 
-  // ---- Fetch graph + status when user requests ----
+  // ---- Fetch graph data ----
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
       const graphData = source === "graphify" ? fetchGraphify() : fetchUnderstand();
       const graph = await graphData;
       setGraph(graph);
-      // Set status from graph data itself (no extra API call)
       setStatus({
         built: true,
         nodes: graph.nodes.length,
@@ -220,19 +218,17 @@ export default function GraphifyPage() {
     }
   }, [source, toast]);
 
-  useEffect(() => {
-    if (loadRequested) {
-      void fetchData();
-    }
-  }, [loadRequested, fetchData]);
-
-  // When user switches source, reset and require explicit reload
+  // ---- Fetch graph on mount + when source changes ----
+  // (with delay to avoid memory spike during page transitions)
   useEffect(() => {
     setGraph(null);
-    setLoadRequested(false);
     setSelectedNode(null);
     setSelectedCommunity(null);
-  }, [source]);
+    const timer = setTimeout(() => {
+      void fetchData();
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [source, fetchData]);
 
   // ---- Communities list ----
   const communities = useMemo(() => {
@@ -636,7 +632,7 @@ export default function GraphifyPage() {
                 </div>
                 <Button
                   size="sm"
-                  onClick={() => setLoadRequested(true)}
+                  onClick={() => void fetchData()}
                   className="gap-1.5 text-xs"
                 >
                   <Sparkles className="h-3.5 w-3.5" />
