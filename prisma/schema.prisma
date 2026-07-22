@@ -40,7 +40,7 @@ model PremiumSubscription {
   plan      String   @default("monthly")
   /// Status: "active", "cancelled", "expired", "pending"
   status    String   @default("active")
-  /// Price paid in SYP (Syrian Pounds)
+  /// Price paid in IQD (Iraqi Dinar)
   price     Int      @default(0)
   /// When the subscription started
   startedAt DateTime @default(now())
