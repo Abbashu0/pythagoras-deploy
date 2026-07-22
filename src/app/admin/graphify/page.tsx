@@ -131,7 +131,7 @@ export default function GraphifyPage() {
           color="blue"
           stats={graphifyStats}
           loading={loading}
-          onOpenViewer={() => window.open("https://github.com/Abbashu0/pythagoras-deploy/raw/gh-pages/graphify.html", "_blank")}
+          onOpenViewer={() => window.open("/graphs/graphify-full.html", "_blank")}
           onOpenJson={() => window.open("/graphs/graphify.json", "_blank")}
           description="يكتشف calls, imports, defines عبر ~40 لغة. سريع جداً، بدون LLM. الـ graph يكتشف communities تلقائياً (Leiden algorithm)."
         />
@@ -144,7 +144,7 @@ export default function GraphifyPage() {
           color="purple"
           stats={understandStats}
           loading={loading}
-          onOpenViewer={() => window.open("https://github.com/Abbashu0/pythagoras-deploy/raw/gh-pages/understand-anything/index-standalone.html", "_blank")}
+          onOpenViewer={() => window.open("/graphs/understand-full.html", "_blank")}
           onOpenJson={() => window.open("/graphs/understand.json", "_blank")}
           description="يحلل functions, classes, imports مع شروحات لكل node. الـ schema يدعم 27 نوع (file, function, class, service, endpoint, schema, ...) و 38 نوع edge."
         />
