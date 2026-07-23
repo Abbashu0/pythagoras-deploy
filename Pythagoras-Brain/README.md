@@ -27,8 +27,15 @@ Pythagoras-Brain/
 ├── Roadmap/                  ← المستقبل
 │   ├── Future-Features.md
 │   └── Ideas.md
+├── Templates/                ← قوالب لإنشاء ملاحظات جديدة
+│   ├── task-template.md
+│   ├── problem-template.md
+│   ├── decision-template.md
+│   └── lesson-template.md
 ├── README.md                 ← هذا الملف
-└── SETUP.md                  ← دليل الإعداد على حاسوبك
+├── SETUP.md                  ← دليل الإعداد على حاسوبك
+├── PLUGINS.md                ← plugins الموصى بها
+└── Workflow.md               ← الـ workflow المتكامل
 ```
 
 ## 🔗 الروابط (Wikilinks)
@@ -102,6 +109,14 @@ git push
 2. ثم `[[Mistakes-To-Avoid]]` (مهم جداً!)
 3. ثم `[[Technology-Decisions]]`
 4. ثم `[[Tasks]]` لمعرفة الحالة الحالية
+5. ثم `[[Workflow]]` لفهم كيفية العمل
+
+### للمستخدم (أنت)
+
+1. اقرأ `[[SETUP]]` لتثبيت Obsidian على حاسوبك
+2. اقرأ `[[PLUGINS]]` لتثبيت plugins الموصى بها
+3. اقرأ `[[Workflow]]` لفهم الـ workflow المتكامل
+4. استكشف الـ graph view (`Ctrl+G`)
 
 ---
 
