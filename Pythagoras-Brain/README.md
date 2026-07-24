@@ -1,76 +1,114 @@
-# Pythagoras Brain — Second Brain للمشروع
+# 🧠 Pythagoras Second Brain — العقل الحي للمشروع
 
-هذا الـ vault هو **ذاكرة طويلة المدى** لمشروع Pythagoras Platform. يحفظ تاريخ التطوير، القرارات، المشاكل، الحلول، والمعرفة المكتسبة.
+> **هذا ليس مجرد توثيق. هذا هو عقل المشروع.**
+> **الكود يشرح كيف يعمل التطبيق. هذا الـ vault يشرح لماذا.**
 
-## 📁 الهيكل
+## 🚀 ابدأ هنا
+
+### للـ AI الجديد (اقرأ بالترتيب)
+1. [[00-Index]] — البوابة الذكية
+2. [[Project-DNA]] — شخصية المشروع وخطوطه الحمراء
+3. [[AI-Personality-Guide]] — كيف تفكر وتعمل
+4. [[Mistakes-To-Avoid]] — أخطاء لا تكررها
+5. [[Anti-Repetition-Brain]] — أفكار رُفضت
+6. [[Application-Encyclopedia]] — مرجع التطبيق
+
+### للمستخدم
+1. [[SETUP]] — إعداد Obsidian على حاسوبك
+2. [[PLUGINS]] — plugins الموصى بها
+3. [[Workflow]] — الـ workflow المتكامل
+
+## 📁 الهيكل الجديد
 
 ```
 Pythagoras-Brain/
-├── Project-Overview/         ← رؤية وأهداف المشروع
-│   ├── Vision.md
-│   ├── Goals.md
-│   └── Product-Strategy.md
-├── Development-History/      ← سجل التطوير
-│   ├── Tasks.md
-│   ├── Milestones.md
-│   └── Important-Changes.md
-├── Decisions/                ← القرارات المعمارية والـ UX
-│   ├── Architecture-Decisions.md
-│   ├── UX-Decisions.md
-│   └── Technology-Decisions.md
-├── Problems-and-Solutions/   ← سجل المشاكل وحلولها
+├── 00-Index.md                 ← البوابة الذكية (ابدأ هنا)
+├── Project-DNA.md              ← شخصية المشروع ومبادئه
+├── Design-Language-Bible.md    ← فلسفة التصميم
+├── AI-Personality-Guide.md     ← كيف يفكر الـ AI
+├── Application-Encyclopedia.md ← مرجع التطبيق الشامل
+├── Project-Glossary.md         ← قاموس المصطلحات
+├── Anti-Repetition-Brain.md    ← أفكار رُفضت
+├── Why-Log.md                  ← لماذا اتخذنا كل قرار
+├── Feature-Lifecycle.md        ← دورة حياة الميزات
+├── Knowledge-Confidence.md     ← مستويات الثقة
+├── Workflow.md                 ← الـ workflow المتكامل
+├── SETUP.md                    ← دليل الإعداد
+├── PLUGINS.md                  ← plugins الموصى بها
+│
+├── Timeline/                   ← سجل زمني لكل الأحداث
+│   ├── TL-001-Initial-Build.md
+│   ├── TL-002-Supabase-Failure.md
+│   ├── TL-003-Graphify-Understand.md
+│   └── TL-004-GitHub-Pages-Cleanup.md
+│
+├── Collaboration-History/      ← سجل المحادثات المهمة
+│   ├── CH-001-Supabase-Discussion.md
+│   ├── CH-002-Graphify-Understand-Discussion.md
+│   └── CH-003-Iraq-Obsidian-Second-Brain.md
+│
+├── Decisions/                  ← القرارات
+│   ├── ADR/                    ← Architecture Decision Records
+│   │   ├── ADR-001-Prisma-SQLite.md
+│   │   ├── ADR-002-Production-Build.md
+│   │   └── ADR-003-GitHub-Pages-For-Graphs.md
+│   ├── Architecture-Decisions.md  (ملخص)
+│   ├── Technology-Decisions.md    (ملخص)
+│   └── UX-Decisions.md            (ملخص)
+│
+├── Problems-and-Solutions/     ← المشاكل والحلول
 │   └── Problem-Log.md
-├── AI-Memory/                ← ذاكرة الـ AI (مهم!)
+│
+├── AI-Memory/                  ← المعرفة المكتسبة
 │   ├── Lessons-Learned.md
 │   ├── Patterns-To-Follow.md
 │   └── Mistakes-To-Avoid.md
-├── Roadmap/                  ← المستقبل
+│
+├── AI-Engineers/               ← ملفات النماذج
+│   └── GLM.md
+│
+├── Reviews/                    ← المراجعات
+│   ├── Self-Reflection/
+│   │   └── SR-001-Second-Brain-Creation.md
+│   ├── Prediction-Log/
+│   │   └── PL-001-Second-Brain-Creation.md
+│   └── Weekly-Reviews/
+│
+├── Impact-Maps/                ← خرائط التأثير
+│
+├── Features/                   ← ميزات قيد التطوير
+│
+├── Roadmap/                    ← المستقبل
 │   ├── Future-Features.md
 │   └── Ideas.md
-├── Templates/                ← قوالب لإنشاء ملاحظات جديدة
-│   ├── task-template.md
-│   ├── problem-template.md
-│   ├── decision-template.md
-│   └── lesson-template.md
-├── README.md                 ← هذا الملف
-├── SETUP.md                  ← دليل الإعداد على حاسوبك
-├── PLUGINS.md                ← plugins الموصى بها
-└── Workflow.md               ← الـ workflow المتكامل
+│
+├── Project-Overview/           ← رؤية وأهداف
+│   ├── Vision.md
+│   ├── Goals.md
+│   └── Product-Strategy.md
+│
+├── Development-History/        ← سجل التطوير
+│   ├── Tasks.md
+│   ├── Milestones.md
+│   └── Important-Changes.md
+│
+└── Templates/                  ← قوالب
+    ├── task-template.md
+    ├── problem-template.md
+    ├── decision-template.md
+    └── lesson-template.md
 ```
 
-## 🔗 الروابط (Wikilinks)
+## 📊 إحصائيات
 
-كل ملف يربط بملفات أخرى باستخدام `[[اسم الملف]]`. مثلاً:
-
-- `[[Mistakes-To-Avoid]]` يربط لـ `AI-Memory/Mistakes-To-Avoid.md`
-- `[[Architecture-Decisions]]` يربط لـ `Decisions/Architecture-Decisions.md`
-
-في Obsidian، هذه الروابط تُصبح clickable وتظهر في الـ graph view.
-
-## 📝 الـ Workflow
-
-### قبل أي مهمة تطوير
-
-1. اقرأ `[[Mistakes-To-Avoid]]` — لا تكرر أخطاء سابقة
-2. اقرأ `[[Decisions]]` ذات الصلة — افهم السياق
-3. استخدم Graphify لفهم الكود
-4. ابدأ التنفيذ
-
-### بعد كل مهمة مهمة
-
-1. اختبر النتيجة
-2. حدّث Graphify (تلقائي عبر git hook)
-3. حدّث هذا الـ vault بالمعرفة الجديدة:
-   - إذا كانت مشكلة جديدة → `[[Problem-Log]]`
-   - إذا كان قرار جديد → `[[Decisions]]`
-   - إذا كان درس جديد → `[[Lessons-Learned]]`
-   - إذا كان نمط جديد → `[[Patterns-To-Follow]]`
-   - إذا كان خطأ يجب تجنبه → `[[Mistakes-To-Avoid]]`
-4. `git commit` + `git push`
+- **40+ ملف Markdown**
+- **6 مجلدات رئيسية جديدة**
+- **3 ADRs موثقة**
+- **4 Timeline events**
+- **3 Collaboration History records**
+- **روابط `[[wikilinks]]` كثيفة بين كل الملفات**
 
 ## 🔄 المزامنة
-
-هذا الـ vault في نفس repo المشروع (`pythagoras-deploy`). المزامنة عبر Git:
 
 ```bash
 # للحصول على آخر تحديثاتي
@@ -78,50 +116,21 @@ git pull
 
 # لإرسال تعديلاتك
 git add Pythagoras-Brain/
-git commit -m "update brain: ..."
+git commit -m "brain: ..."
 git push
 ```
 
-## 📖 كيف تقرأ هذا الـ vault
-
-### في Obsidian (موصى به)
-1. ثبّت Obsidian (مجاني من https://obsidian.md)
-2. اتبع `[[SETUP]]` للإعداد
-3. افتح `Pythagoras-Brain/` كـ vault
-4. استكشف الـ graph view (Ctrl+G)
-
-### في أي محرر Markdown
-- VS Code, Typora, أو حتى Notepad
-- لكن بدون روابط clickable أو graph view
-
-### في GitHub
-- تصفح مباشرة على https://github.com/Abbashu0/pythagoras-deploy/tree/main/Pythagoras-Brain
-
-## 🎯 الهدف
+## 🎯 الهدف النهائي
 
 > **تحويل Pythagoras Platform إلى مشروع لديه ذاكرة طويلة المدى يستطيع أي AI Engineer فهمه والعمل عليه حتى بعد مرور أشهر أو تغيير نموذج الذكاء الاصطناعي.**
 
-## 📚 ابدأ من هنا
-
-إذا كنت AI جديد يعمل على هذا المشروع:
-
-1. اقرأ `[[Vision]]` أولاً
-2. ثم `[[Mistakes-To-Avoid]]` (مهم جداً!)
-3. ثم `[[Technology-Decisions]]`
-4. ثم `[[Tasks]]` لمعرفة الحالة الحالية
-5. ثم `[[Workflow]]` لفهم كيفية العمل
-
-### للمستخدم (أنت)
-
-1. اقرأ `[[SETUP]]` لتثبيت Obsidian على حاسوبك
-2. اقرأ `[[PLUGINS]]` لتثبيت plugins الموصى بها
-3. اقرأ `[[Workflow]]` لفهم الـ workflow المتكامل
-4. استكشف الـ graph view (`Ctrl+G`)
-
 ---
 
-## الروابط
+## 📚 روابط سريعة
 
-- [[SETUP]] — دليل الإعداد على حاسوبك
-- [[Vision]] — رؤية المشروع
-- [[Mistakes-To-Avoid]] — اقرأ هذا أولاً!
+- [[00-Index]] — البوابة
+- [[Project-DNA]] — المبادئ
+- [[Application-Encyclopedia]] — المرجع
+- [[Timeline]] — التاريخ
+- [[Workflow]] — الـ workflow
+- [[SETUP]] — الإعداد
