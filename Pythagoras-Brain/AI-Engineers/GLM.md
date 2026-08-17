@@ -1,68 +1,59 @@
 ---
 type: ai-engineer
-model: GLM
+model: GLM 5.2
+developer: Z.ai
 status: active
-last-used: 2026-07-22
-tags: [ai-engineer, glm]
+last-used: 2026-08-17
+tags: [ai-engineer, glm, glm-5.2]
 ---
 
-# AI Engineer: GLM
+# AI Engineer: GLM 5.2
 
 ## المعلومات الأساسية
 
-- **الاسم:** GLM
-- **النوع:** Large Language Model
-- **الدور في المشروع:** المطور الرئيسي الوحيد حتى الآن
+- **الاسم:** GLM 5.2
+- **المطور:** Z.ai
+- **الإصدار:** 5.2
+- **المنصة:** Z.ai Web Chat (Agent Mode)
+- **الدور في المشروع:** المطور الرئيسي الوحيد
 
 ## نقاط القوة
 
-- ✅ فهم سريع للمتطلبات
-- ✅ كتابة كود TypeScript/React جيدة
-- ✅ التعامل مع Next.js 16
-- ✅ إنشاء مكونات shadcn/ui
-- ✅ كتابة توثيق عربي واضح
+- ✅ فهم سريع للمتطلبات المعقدة
+- ✅ كتابة كود TypeScript/React/Next.js عالي الجودة
+- ✅ التعامل مع Prisma + SQLite بكفاءة
+- ✅ إنشاء مكونات shadcn/ui احترافية
+- ✅ كتابة توثيق عربي واضح ومنظم
 - ✅ التعلم من الأخطاء (بعد توثيقها)
-
-## المهارات التي يجيدها
-
-- Next.js App Router
-- Prisma ORM
-- TypeScript
-- React + shadcn/ui
-- Tailwind CSS
-- Obsidian vault design
-- Git operations
-- Arabic RTL UI
+- ✅ إنشاء أنظمة معرفة مترابطة (Obsidian Second Brain)
+- ✅ التعامل مع الأزمات التقنية بهدوء
 
 ## المهام التي نفذها
 
-1. [[TL-001-Initial-Build]] — M1-M8 (ثم التراجع)
-2. [[TL-002-Supabase-Failure]] — فشل Supabase
-3. [[TL-003-Graphify-Understand]] — تثبيت Graphs
-4. [[TL-004-GitHub-Pages-Cleanup]] — تنظيف + GitHub Pages
-5. إنشاء Second Brain (هذا الـ vault)
+1. بناء المشروع الكامل (M1-M8) — ثم التراجع
+2. محاولة Supabase migration — فشل
+3. تثبيت Graphify + Understand Anything
+4. نقل الـ graphs لـ GitHub Pages
+5. تغيير سوريا → العراق
+6. إنشاء Obsidian Second Brain (46 ملف)
+7. محاولة إعادة تصميم AdminLTE — تراجع
+8. تنظيف المشروع وإعادة هيكلته
 
 ## نقاط الضعف
 
 - ⚠️ يفترض أحياناً بدل السؤال
 - ⚠️ يكرر أخطاء سابقة إذا لم يراجع الـ memory
-- ⚠️ يثقل الـ container أحياناً (graphs)
-- ⚠️ يحاول حلول معقدة قبل البساطة
-
-## ملاحظات خاصة بطريقة عمله
-
-- **العمل الأفضل:** عندما يقرأ [[Mistakes-To-Avoid]] أولاً
-- **العمل الأسوأ:** عندما يبدأ بدون مراجعة الـ memory
-- **يحتاج:** تذكير بـ [[Anti-Repetition-Brain]] بين الحين والآخر
+- ⚠️ يحاول حلول معقدة قبل البساطة أحياناً
+- ⚠️ لا يتحقق من توافق المكتبات مع React 19 قبل التثبيت
 
 ## آخر مهمة
 
-- **التاريخ:** 2026-07-22
-- **المهمة:** إنشاء Second Brain (هذا الـ vault)
+- **التاريخ:** 2026-08-17
+- **المهمة:** تنظيف المشروع + إعادة للتصميم الأصلي + إنشاء transcript
 - **النتيجة:** نجح
 
 ## 🔗 الروابط
 
+- [[CH-004-Full-Conversation-Transcript]] — المحادثة الكاملة
 - [[Timeline]] — كل الأحداث
-- [[Collaboration-History]] — سجل التعاون
 - [[00-Index]] — العودة للبوابة
