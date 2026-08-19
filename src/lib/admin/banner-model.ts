@@ -165,6 +165,7 @@ export function makeBanner(input: BannerInput): SponsoredBanner {
     createdAt: now,
     updatedAt: now,
     image: input.image ?? "",
+    imageKey: input.imageKey,
     gradient: input.gradient ?? "linear-gradient(135deg, oklch(58% 0.13 145), oklch(48% 0.10 165))",
     iconKey: input.iconKey ?? "biology",
     title: input.title ?? "",

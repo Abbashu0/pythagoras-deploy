@@ -10,9 +10,11 @@ import { toolsScreen } from "../pages/ToolsPage.js";
 import { renderQuestionBankPlaceholder } from "../pages/QuestionBankPlaceholderPage.js";
 import "./image-db.js";
 import {
+  ADMIN_BANNERS_KEY,
   ADMIN_MATERIALS_KEY,
   ADMIN_MATERIALS_SETTINGS_KEY,
   ADMIN_NAV_ITEMS_KEY,
+  getSponsoredBanners,
   getSubjectByView,
   getTestSubjects,
 } from "./data.js";
@@ -25,13 +27,13 @@ import { showToast } from "./toast.js";
 
 let carouselController = null;
 
-async function hydrateStudentMaterialImages() {
+async function hydrateStudentImages() {
   const imageDB = window.ImageDB;
   if (!imageDB) return;
 
   await imageDB.preloadAllImages();
   await Promise.all(
-    getTestSubjects()
+    [...getTestSubjects(), ...getSponsoredBanners()]
       .map((subject) => subject.imageKey)
       .filter(Boolean)
       .map((key) => imageDB.getImage(key))
@@ -84,9 +86,9 @@ window.addEventListener("storage", (event) => {
   if (event.key === ADMIN_NAV_ITEMS_KEY || event.key === ADMIN_MATERIALS_SETTINGS_KEY) {
     renderView();
   }
-  if (event.key === ADMIN_MATERIALS_KEY) {
-    hydrateStudentMaterialImages();
+  if (event.key === ADMIN_MATERIALS_KEY || event.key === ADMIN_BANNERS_KEY) {
+    hydrateStudentImages();
   }
 });
 renderView();
-hydrateStudentMaterialImages();
+hydrateStudentImages();

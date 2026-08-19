@@ -71,6 +71,7 @@ import { getBannerDimensions } from "@/lib/admin/dimensions";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { useFlipReorder } from "@/lib/admin/use-flip-reorder";
+import { setImage as setImageInDB } from "@/lib/admin/image-db";
 
 export default function AdminBannersPage() {
   const { toast } = useToast();
@@ -127,11 +128,16 @@ export default function AdminBannersPage() {
     });
   };
 
-  const handleUploadNew = (dataUrl: string) => {
+  const handleUploadNew = async (dataUrl: string) => {
     if (!canAddMore) return;
+
+    const imageKey = `banner-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    await setImageInDB(imageKey, dataUrl);
+
     const input: BannerInput = {
       bannerType: "full", // new banners default to full-banner mode
-      image: dataUrl,
+      image: "",
+      imageKey,
       gradient: "linear-gradient(135deg, #4f9cff, #2a6fcc)",
       iconKey: "tests",
       title: "بانر جديد",

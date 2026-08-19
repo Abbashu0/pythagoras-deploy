@@ -1,4 +1,4 @@
-const ADMIN_BANNERS_KEY = "pythagoras-admin-banners";
+export const ADMIN_BANNERS_KEY = "pythagoras-admin-banners";
 export const ADMIN_MATERIALS_KEY = "pythagoras-admin-materials";
 export const ADMIN_MATERIALS_SETTINGS_KEY = `${ADMIN_MATERIALS_KEY}-settings`;
 const ADMIN_TOOLS_KEY = "pythagoras-admin-tools";
@@ -81,7 +81,7 @@ function clamp(value, min, max, fallback) {
     : fallback;
 }
 
-function materialImage(item) {
+function storedImage(item) {
   if (typeof item.image === "string" && item.image) return item.image;
   if (typeof item.imageKey === "string" && window.ImageDB) {
     return window.ImageDB.getImageSync(item.imageKey);
@@ -99,11 +99,29 @@ function normalizeMaterial(item, index) {
     description: typeof item.description === "string" ? item.description : "",
     icon: typeof item.icon === "string" ? item.icon : "book",
     stateLabel: item.available === false ? "قريبًا" : "متاح",
-    image: materialImage(item),
+    image: storedImage(item),
     order: Number.isFinite(item.order) ? item.order : index,
   };
 }
-export function getSponsoredBanners() { return readLocalArray(ADMIN_BANNERS_KEY, defaultBanners); }
+
+function normalizeBanner(item, index) {
+  return {
+    ...item,
+    id: typeof item.id === "string" ? item.id : `banner-${index}`,
+    title: typeof item.title === "string" ? item.title : "",
+    subtitle: typeof item.subtitle === "string" ? item.subtitle : "",
+    iconKey: typeof item.iconKey === "string" ? item.iconKey : "brain",
+    image: storedImage(item),
+    enabled: item.enabled !== false && item.status !== "archived",
+    displayOrder: Number.isFinite(item.displayOrder) ? item.displayOrder : index,
+  };
+}
+export function getSponsoredBanners() {
+  return readLocalArray(ADMIN_BANNERS_KEY, defaultBanners)
+    .map(normalizeBanner)
+    .filter((banner) => banner.enabled)
+    .sort((left, right) => left.displayOrder - right.displayOrder);
+}
 export function getTestSubjects() {
   return readLocalArray(ADMIN_MATERIALS_KEY, defaultSubjects)
     .map(normalizeMaterial)
