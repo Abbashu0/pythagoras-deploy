@@ -14,6 +14,7 @@ import {
   ADMIN_MATERIALS_KEY,
   ADMIN_MATERIALS_SETTINGS_KEY,
   ADMIN_NAV_ITEMS_KEY,
+  ADMIN_TOOLS_KEY,
   getSponsoredBanners,
   getSubjectByView,
   getTestSubjects,
@@ -83,7 +84,11 @@ applyTheme(getStoredTheme());
 applyDensity(getStoredDensity());
 window.addEventListener("hashchange", () => renderView());
 window.addEventListener("storage", (event) => {
-  if (event.key === ADMIN_NAV_ITEMS_KEY || event.key === ADMIN_MATERIALS_SETTINGS_KEY) {
+  if (
+    event.key === ADMIN_NAV_ITEMS_KEY ||
+    event.key === ADMIN_MATERIALS_SETTINGS_KEY ||
+    event.key === ADMIN_TOOLS_KEY
+  ) {
     renderView();
   }
   if (event.key === ADMIN_MATERIALS_KEY || event.key === ADMIN_BANNERS_KEY) {

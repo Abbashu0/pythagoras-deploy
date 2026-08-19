@@ -1,7 +1,7 @@
 export const ADMIN_BANNERS_KEY = "pythagoras-admin-banners";
 export const ADMIN_MATERIALS_KEY = "pythagoras-admin-materials";
 export const ADMIN_MATERIALS_SETTINGS_KEY = `${ADMIN_MATERIALS_KEY}-settings`;
-const ADMIN_TOOLS_KEY = "pythagoras-admin-tools";
+export const ADMIN_TOOLS_KEY = "pythagoras-admin-tools";
 export const ADMIN_NAV_ITEMS_KEY = "pythagoras-admin-nav-items";
 
 export const screens = {
@@ -116,6 +116,27 @@ function normalizeBanner(item, index) {
     displayOrder: Number.isFinite(item.displayOrder) ? item.displayOrder : index,
   };
 }
+
+function normalizeTool(item, index) {
+  const available = item.available === true;
+  const title = typeof item.label === "string" ? item.label : item.title || "";
+  return {
+    ...item,
+    id: typeof item.id === "string" ? item.id : `tool-${index}`,
+    title,
+    description: typeof item.description === "string"
+      ? item.description
+      : available
+      ? "أداة دراسية متاحة ضمن منصة فيثاغورس."
+      : "هذه الأداة ستتوفر لاحقًا.",
+    icon: item.icon === "lectures" ? "play" : typeof item.icon === "string" ? item.icon : "toolbox",
+    available,
+    status: available ? "متاح" : "قريبًا",
+    statusClass: available ? "is-live" : "is-soon",
+    hint: available ? "ابدأ الآن" : "قريبًا",
+    order: Number.isFinite(item.order) ? item.order : index,
+  };
+}
 export function getSponsoredBanners() {
   return readLocalArray(ADMIN_BANNERS_KEY, defaultBanners)
     .map(normalizeBanner)
@@ -128,7 +149,11 @@ export function getTestSubjects() {
     .filter((subject) => subject.available !== false)
     .sort((left, right) => left.order - right.order);
 }
-export function getTools() { return readLocalArray(ADMIN_TOOLS_KEY, defaultTools); }
+export function getTools() {
+  return readLocalArray(ADMIN_TOOLS_KEY, defaultTools)
+    .map(normalizeTool)
+    .sort((left, right) => left.order - right.order);
+}
 export function getMaterialsSettings() {
   const settings = readLocalObject(ADMIN_MATERIALS_SETTINGS_KEY, {});
   return {
