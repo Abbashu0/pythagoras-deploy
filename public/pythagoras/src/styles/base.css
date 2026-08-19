@@ -16,13 +16,12 @@ html {
 }
 
 body {
-  background:
-    radial-gradient(circle at 50% 0%, var(--body-glow), transparent 34%),
-    linear-gradient(180deg, var(--body-top), var(--body-bottom));
+  /* Keep the desktop canvas fixed; theme colors apply inside .app-device only. */
+  background: #05070a;
   color: var(--fg);
   font-family: var(--font-ui);
   direction: rtl;
-  transition: background 260ms ease, color 260ms ease;
+  transition: color 260ms ease;
 }
 
 button,
