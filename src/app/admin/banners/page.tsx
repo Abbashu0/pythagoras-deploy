@@ -142,7 +142,6 @@ export default function AdminBannersPage() {
       iconKey: "tests",
       title: "بانر جديد",
       subtitle: "أدخل الوصف هنا",
-      destination: "tests",
       enabled: true,
       displayOrder: 99, // store will assign the real order
       transform: { ...BANNER_TRANSFORM_DEFAULT },

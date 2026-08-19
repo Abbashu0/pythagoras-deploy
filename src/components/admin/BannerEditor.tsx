@@ -91,11 +91,7 @@ type DirtyField =
   | "title"
   | "subtitle"
   | "enabled"
-  | "transform"
-  | "destination"
-  | "destinationType"
-  | "startDate"
-  | "endDate";
+  | "transform";
 
 /** Simulated save latency (ms) — gives the user a visible "saving" state. */
 const SAVE_LATENCY_MS = 1200;
@@ -253,10 +249,6 @@ export function BannerEditor({
       if (dirty.has("title")) patch.title = draft.title;
       if (dirty.has("subtitle")) patch.subtitle = draft.subtitle;
       if (dirty.has("enabled")) patch.enabled = draft.enabled;
-      if (dirty.has("destination")) patch.destination = draft.destination;
-      if (dirty.has("destinationType")) patch.destinationType = draft.destinationType;
-      if (dirty.has("startDate")) patch.startDate = draft.startDate;
-      if (dirty.has("endDate")) patch.endDate = draft.endDate;
       if (dirty.has("transform")) patch.transform = draft.transform;
       onSave(banner.id, patch, summary);
       setSaveState("saved");
@@ -495,92 +487,6 @@ export function BannerEditor({
             />
           </section>
 
-          {/* ---------- Destination type ---------- */}
-          <section className="space-y-2">
-            <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              إجراء النقر
-            </Label>
-            <div className="grid grid-cols-2 gap-2">
-              {([
-                { value: "internal", label: "مسار داخلي" },
-                { value: "external", label: "رابط خارجي" },
-                { value: "pdf", label: "ملف PDF" },
-                { value: "none", label: "بدون إجراء" },
-              ] as const).map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  disabled={isSaving}
-                  onClick={() => updateField("destinationType", opt.value)}
-                  className={`rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
-                    (draft.destinationType || "internal") === opt.value
-                      ? "border-primary bg-primary/10 text-primary"
-                      : "border-border text-muted-foreground hover:border-primary/40 hover:bg-muted/40 hover:text-foreground"
-                  } ${isSaving ? "cursor-not-allowed opacity-60" : ""}`}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-            {(draft.destinationType || "internal") !== "none" && (
-              <Input
-                value={draft.destination || ""}
-                onChange={(e) => updateField("destination", e.target.value)}
-                placeholder={
-                  (draft.destinationType || "internal") === "external"
-                    ? "https://example.com"
-                    : (draft.destinationType || "internal") === "pdf"
-                    ? "pdf-id أو رابط الملف"
-                    : "tests-biology"
-                }
-                dir="ltr"
-                disabled={isSaving}
-                className="font-mono text-xs"
-              />
-            )}
-          </section>
-
-          {/* ---------- Scheduling ---------- */}
-          <section className="space-y-2">
-            <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              الجدولة (اختياري)
-            </Label>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1">
-                <label className="text-[10px] text-muted-foreground">تاريخ البدء</label>
-                <Input
-                  type="date"
-                  value={draft.startDate ? draft.startDate.slice(0, 10) : ""}
-                  onChange={(e) =>
-                    updateField(
-                      "startDate",
-                      e.target.value ? new Date(e.target.value).toISOString() : null
-                    )
-                  }
-                  disabled={isSaving}
-                  className="text-xs"
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-[10px] text-muted-foreground">تاريخ الانتهاء</label>
-                <Input
-                  type="date"
-                  value={draft.endDate ? draft.endDate.slice(0, 10) : ""}
-                  onChange={(e) =>
-                    updateField(
-                      "endDate",
-                      e.target.value ? new Date(e.target.value).toISOString() : null
-                    )
-                  }
-                  disabled={isSaving}
-                  className="text-xs"
-                />
-              </div>
-            </div>
-            <p className="text-[10px] text-muted-foreground">
-              اتركها فارغة لعرض البانر فوراً وبلا تاريخ انتهاء.
-            </p>
-          </section>
         </div>
       </div>
 

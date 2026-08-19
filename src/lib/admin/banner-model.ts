@@ -38,13 +38,8 @@ export type BannerType = "full" | "split";
 export const DEFAULT_BANNER_TYPE: BannerType = "full";
 
 /**
- * Destination type — controls what happens when a student taps a banner.
- */
-export type DestinationType = "internal" | "external" | "pdf" | "none";
-
-/**
  * Banner status — controls visibility in the carousel.
- *   - "active":   shown in the carousel (subject to scheduling)
+ *   - "active":   shown in the carousel
  *   - "archived": hidden from carousel but kept in the library
  */
 export type BannerStatus = "active" | "archived";
@@ -68,19 +63,11 @@ export interface SponsoredBanner {
   iconKey: string;
   title: string;
   subtitle: string;
-  /** Destination value — interpretation depends on `destinationType`. */
-  destination: string;
-  /** What happens when the banner is tapped. */
-  destinationType?: DestinationType;
   /** Whether the banner is enabled (old field — kept for backward compat).
    *  When status is "archived", enabled is false. */
   enabled: boolean;
   /** Banner status — "active" shows in carousel, "archived" hides it. */
   status?: BannerStatus;
-  /** Scheduling: start date (ISO). null = immediately. */
-  startDate?: string | null;
-  /** Scheduling: end date (ISO). null = no end. */
-  endDate?: string | null;
   displayOrder: number;
   /** Saved image positioning (drag + zoom) chosen in the admin image positioner. */
   transform: BannerImageTransform;
@@ -170,7 +157,6 @@ export function makeBanner(input: BannerInput): SponsoredBanner {
     iconKey: input.iconKey ?? "biology",
     title: input.title ?? "",
     subtitle: input.subtitle ?? "",
-    destination: input.destination ?? "tests",
     enabled: input.enabled ?? true,
     displayOrder: input.displayOrder ?? 99,
   };
