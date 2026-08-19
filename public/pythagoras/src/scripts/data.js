@@ -1,5 +1,6 @@
 const ADMIN_BANNERS_KEY = "pythagoras-admin-banners";
-const ADMIN_MATERIALS_KEY = "pythagoras-admin-materials";
+export const ADMIN_MATERIALS_KEY = "pythagoras-admin-materials";
+export const ADMIN_MATERIALS_SETTINGS_KEY = `${ADMIN_MATERIALS_KEY}-settings`;
 const ADMIN_TOOLS_KEY = "pythagoras-admin-tools";
 export const ADMIN_NAV_ITEMS_KEY = "pythagoras-admin-nav-items";
 
@@ -14,10 +15,14 @@ export const screens = {
 };
 
 const defaultSubjects = [
-  { id: "biology", title: "الأحياء", englishTitle: "BIOLOGY", description: "مادة الأحياء للسادس العلمي.", icon: "biology", stateLabel: "متاح", gradient: "linear-gradient(135deg, #166534, #0a3d20)" },
-  { id: "math", title: "الرياضيات", englishTitle: "MATHEMATICS", description: "مادة الرياضيات للسادس العلمي.", icon: "math", stateLabel: "متاح", gradient: "linear-gradient(135deg, #7c2d12, #4a1a08)" },
-  { id: "physics", title: "الفيزياء", englishTitle: "PHYSICS", description: "مادة الفيزياء للسادس العلمي.", icon: "physics", stateLabel: "متاح", gradient: "linear-gradient(135deg, #1e3a8a, #0f1e4a)" },
-  { id: "chemistry", title: "الكيمياء", englishTitle: "CHEMISTRY", description: "مادة الكيمياء للسادس العلمي.", icon: "chemistry", stateLabel: "متاح", gradient: "linear-gradient(135deg, #6b21a8, #3b0764)" },
+  { id: "islamic", title: "التربية الإسلامية", englishTitle: "ISLAMIC", icon: "islamic", available: true, order: 0, gradient: "linear-gradient(135deg, #1a5c3a, #0d3a24)" },
+  { id: "arabic", title: "اللغة العربية", englishTitle: "ARABIC", icon: "arabic", available: true, order: 1, gradient: "linear-gradient(135deg, #8b4513, #5c2e0a)" },
+  { id: "english", title: "اللغة الإنجليزية", englishTitle: "ENGLISH", icon: "english", available: true, order: 2, gradient: "linear-gradient(135deg, #1e3a8a, #0f1e4a)" },
+  { id: "biology", title: "الأحياء", englishTitle: "BIOLOGY", icon: "biology", available: true, order: 3, gradient: "linear-gradient(135deg, #166534, #0a3d20)" },
+  { id: "math", title: "الرياضيات", englishTitle: "MATHEMATICS", icon: "math", available: true, order: 4, gradient: "linear-gradient(135deg, #7c2d12, #4a1a08)" },
+  { id: "chemistry", title: "الكيمياء", englishTitle: "CHEMISTRY", icon: "chemistry", available: true, order: 5, gradient: "linear-gradient(135deg, #581c87, #2e0a4a)" },
+  { id: "physics", title: "الفيزياء", englishTitle: "PHYSICS", icon: "physics", available: true, order: 6, gradient: "linear-gradient(135deg, #0c4a6e, #062840)" },
+  { id: "french", title: "اللغة الفرنسية", englishTitle: "FRENCH", icon: "french", available: false, order: 7, gradient: "linear-gradient(135deg, #1e40af, #0a1e5a)" },
 ];
 
 const defaultTools = [
@@ -60,10 +65,61 @@ export function getNavItems() {
     })
     .map(({ item }) => item);
 }
+
+function readLocalObject(key, fallback) {
+  try {
+    const value = JSON.parse(localStorage.getItem(key) || "");
+    return value && typeof value === "object" && !Array.isArray(value) ? value : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function clamp(value, min, max, fallback) {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.min(max, Math.max(min, value))
+    : fallback;
+}
+
+function materialImage(item) {
+  if (typeof item.image === "string" && item.image) return item.image;
+  if (typeof item.imageKey === "string" && window.ImageDB) {
+    return window.ImageDB.getImageSync(item.imageKey);
+  }
+  return "";
+}
+
+function normalizeMaterial(item, index) {
+  const title = typeof item.label === "string" ? item.label : item.title || "";
+  return {
+    ...item,
+    id: typeof item.id === "string" ? item.id : `material-${index}`,
+    title,
+    englishTitle: typeof item.englishTitle === "string" ? item.englishTitle : "",
+    description: typeof item.description === "string" ? item.description : "",
+    icon: typeof item.icon === "string" ? item.icon : "book",
+    stateLabel: item.available === false ? "قريبًا" : "متاح",
+    image: materialImage(item),
+    order: Number.isFinite(item.order) ? item.order : index,
+  };
+}
 export function getSponsoredBanners() { return readLocalArray(ADMIN_BANNERS_KEY, defaultBanners); }
-export function getTestSubjects() { return readLocalArray(ADMIN_MATERIALS_KEY, defaultSubjects); }
+export function getTestSubjects() {
+  return readLocalArray(ADMIN_MATERIALS_KEY, defaultSubjects)
+    .map(normalizeMaterial)
+    .filter((subject) => subject.available !== false)
+    .sort((left, right) => left.order - right.order);
+}
 export function getTools() { return readLocalArray(ADMIN_TOOLS_KEY, defaultTools); }
-export function getMaterialsSettings() { return { fadeIntensity: 0.72, textVerticalPosition: 0, textScale: 1, cardHeight: 213 }; }
+export function getMaterialsSettings() {
+  const settings = readLocalObject(ADMIN_MATERIALS_SETTINGS_KEY, {});
+  return {
+    fadeIntensity: clamp(settings.fadeIntensity, 0, 1, 0.72),
+    textVerticalPosition: clamp(settings.textVerticalPosition, -100, 100, 0),
+    textScale: clamp(settings.textScale, 0.8, 1.4, 1),
+    cardHeight: Math.round(clamp(settings.cardHeight, 160, 340, 213)),
+  };
+}
 export function getMaterialsFadeIntensity() { return getMaterialsSettings().fadeIntensity; }
 export function getTestsSubjectView(subjectId) { return `subject-${subjectId}`; }
 export function getSubjectByView(view) { return view.startsWith("subject-") ? getTestSubjects().find((subject) => subject.id === view.slice(8)) || null : null; }

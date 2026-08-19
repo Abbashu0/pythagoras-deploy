@@ -9,7 +9,13 @@ import { testsSubjectsScreen } from "../pages/TestsSubjectsPage.js";
 import { toolsScreen } from "../pages/ToolsPage.js";
 import { renderQuestionBankPlaceholder } from "../pages/QuestionBankPlaceholderPage.js";
 import "./image-db.js";
-import { ADMIN_NAV_ITEMS_KEY, getSubjectByView } from "./data.js";
+import {
+  ADMIN_MATERIALS_KEY,
+  ADMIN_MATERIALS_SETTINGS_KEY,
+  ADMIN_NAV_ITEMS_KEY,
+  getSubjectByView,
+  getTestSubjects,
+} from "./data.js";
 import { bindNavigationInteractions } from "./navigation.js";
 import { pushRoute, viewFromHash } from "./router.js";
 import { applyTheme, getStoredTheme, syncThemeControls } from "./theme.js";
@@ -18,6 +24,20 @@ import { SponsoredCarouselController } from "../components/SponsoredCarouselCard
 import { showToast } from "./toast.js";
 
 let carouselController = null;
+
+async function hydrateStudentMaterialImages() {
+  const imageDB = window.ImageDB;
+  if (!imageDB) return;
+
+  await imageDB.preloadAllImages();
+  await Promise.all(
+    getTestSubjects()
+      .map((subject) => subject.imageKey)
+      .filter(Boolean)
+      .map((key) => imageDB.getImage(key))
+  );
+  renderView();
+}
 
 function renderView(view = viewFromHash()) {
   const subject = getSubjectByView(view);
@@ -61,6 +81,12 @@ applyTheme(getStoredTheme());
 applyDensity(getStoredDensity());
 window.addEventListener("hashchange", () => renderView());
 window.addEventListener("storage", (event) => {
-  if (event.key === ADMIN_NAV_ITEMS_KEY) renderView();
+  if (event.key === ADMIN_NAV_ITEMS_KEY || event.key === ADMIN_MATERIALS_SETTINGS_KEY) {
+    renderView();
+  }
+  if (event.key === ADMIN_MATERIALS_KEY) {
+    hydrateStudentMaterialImages();
+  }
 });
 renderView();
+hydrateStudentMaterialImages();
