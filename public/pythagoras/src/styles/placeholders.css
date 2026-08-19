@@ -1,0 +1,1004 @@
+.placeholder-wrap {
+  display: grid;
+  align-content: center;
+  min-height: calc(100dvh - 220px);
+}
+
+.placeholder-card,
+.tests-card {
+  padding: 24px;
+}
+
+.placeholder-card {
+  display: grid;
+  gap: 16px;
+  text-align: center;
+}
+
+.placeholder-title,
+.tests-title {
+  font-size: 1.5rem;
+}
+
+.placeholder-text,
+.tests-text {
+  font-size: 0.875rem;
+}
+
+.tests-stack {
+  display: grid;
+  gap: 14px;
+}
+
+.tests-card {
+  display: grid;
+  gap: 16px;
+}
+
+.tests-list {
+  display: grid;
+  gap: 10px;
+}
+
+.tests-list-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+
+.tests-list-item::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--accent) 66%, white);
+  box-shadow: 0 0 18px rgba(79, 221, 255, 0.4);
+  flex: 0 0 auto;
+}
+
+.settings-stack {
+  display: grid;
+  gap: 14px;
+}
+
+.settings-card {
+  position: relative;
+  overflow: hidden;
+  padding: 22px;
+  border-radius: var(--radius-xl);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--surface-soft);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  box-shadow: var(--shadow-md);
+  display: grid;
+  gap: 18px;
+}
+
+.appearance-card {
+  padding: 0;
+  gap: 0;
+  border-radius: 24px;
+  transition:
+    border-radius 380ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 280ms ease,
+    background 320ms ease,
+    box-shadow 320ms ease;
+}
+
+.appearance-card.is-expanded {
+  border-radius: 30px;
+  border-color: color-mix(in oklab, var(--accent) 30%, rgba(255, 255, 255, 0.08));
+  background:
+    linear-gradient(180deg, color-mix(in oklab, var(--accent) 7%, transparent), transparent 42%),
+    var(--surface-soft);
+}
+
+.appearance-card-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px;
+  text-align: right;
+  cursor: pointer;
+  border-radius: inherit;
+  transition:
+    padding 320ms cubic-bezier(0.22, 1, 0.36, 1),
+    background 240ms ease;
+}
+
+.appearance-card-toggle:hover,
+.appearance-card-toggle:focus-visible {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.appearance-card-toggle:active {
+  transform: scale(0.996);
+}
+
+.appearance-card-leading {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.appearance-card-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 18px;
+}
+
+.appearance-card-copy {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.appearance-card-title {
+  font-size: 1.375rem;
+  line-height: 1.2;
+  font-weight: 600;
+}
+
+.appearance-card-description {
+  color: var(--muted);
+  font-size: 0.8125rem;
+  line-height: 1.8;
+}
+
+.appearance-card-chevron {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  transition:
+    transform 380ms cubic-bezier(0.22, 1, 0.36, 1),
+    color 240ms ease,
+    background 240ms ease,
+    border-color 240ms ease;
+}
+
+.appearance-card.is-expanded .appearance-card-chevron {
+  transform: rotate(180deg);
+  color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 12%, rgba(255, 255, 255, 0.05));
+  border-color: color-mix(in oklab, var(--accent) 24%, rgba(255, 255, 255, 0.06));
+}
+
+.appearance-card-chevron .app-icon {
+  width: 18px;
+  height: 18px;
+}
+
+.appearance-card-panel-wrap {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.appearance-card.is-expanded .appearance-card-panel-wrap {
+  grid-template-rows: 1fr;
+}
+
+.appearance-card-panel {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.appearance-card-panel-inner {
+  display: grid;
+  gap: 16px;
+  padding: 0 20px 20px;
+  opacity: 0;
+  transform: translateY(-10px);
+  transition:
+    opacity 180ms ease,
+    transform 280ms ease;
+}
+
+.appearance-card.is-expanded .appearance-card-panel-inner {
+  opacity: 1;
+  transform: translateY(0);
+  transition-delay: 110ms;
+}
+
+.appearance-card-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.8;
+}
+
+.settings-card.subtle {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 42%),
+    var(--surface-soft);
+}
+
+.settings-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.settings-copy {
+  display: grid;
+  gap: 8px;
+}
+
+.settings-title {
+  margin: 0;
+  font-size: 1.375rem;
+  line-height: 1.35;
+  font-weight: 600;
+}
+
+.settings-text,
+.settings-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8125rem;
+  line-height: 1.85;
+}
+
+.theme-switcher {
+  display: grid;
+  gap: 10px;
+}
+
+.theme-option {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 20px;
+  text-align: right;
+  cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    background 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.theme-option:hover,
+.theme-option:focus-visible {
+  transform: translateY(-1px);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.theme-option:active {
+  transform: scale(0.988);
+}
+
+.theme-option.is-selected {
+  background: color-mix(in oklab, var(--accent) 10%, var(--surface-strong));
+  border-color: color-mix(in oklab, var(--accent) 34%, rgba(255, 255, 255, 0.08));
+  box-shadow: 0 16px 28px rgba(0, 0, 0, 0.14);
+}
+
+.theme-option-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.theme-option-copy strong {
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+.theme-option-copy small {
+  color: var(--muted-soft);
+  font-size: 0.75rem;
+}
+
+.theme-swatch {
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  flex: 0 0 auto;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.theme-swatch.dark {
+  background:
+    radial-gradient(circle at 30% 25%, rgba(138, 227, 255, 0.3), transparent 40%),
+    linear-gradient(180deg, #233348, #0d111a);
+}
+
+.theme-swatch.light {
+  background:
+    radial-gradient(circle at 30% 20%, rgba(79, 124, 255, 0.28), transparent 45%),
+    radial-gradient(circle at 80% 90%, rgba(255, 200, 140, 0.30), transparent 50%),
+    linear-gradient(180deg, #fffaf2, #f0e6d6);
+}
+
+.theme-swatch.aurora {
+  background:
+    radial-gradient(circle at 30% 25%, rgba(255, 110, 199, 0.45), transparent 45%),
+    radial-gradient(circle at 75% 80%, rgba(170, 130, 255, 0.35), transparent 50%),
+    linear-gradient(180deg, #2a0f4a, #14071f);
+}
+
+.theme-check {
+  margin-right: auto;
+  color: var(--accent);
+}
+
+.theme-check .app-icon {
+  width: 18px;
+  height: 18px;
+}
+
+.theme-preview-device {
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+  transition: background 0.3s ease, border-color 0.3s ease;
+}
+
+.theme-preview-device.is-dark {
+  background: oklch(12% 0.016 255);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.theme-preview-device.is-light {
+  background: oklch(95% 0.01 245);
+  border-color: rgba(0, 0, 0, 0.08);
+}
+
+.theme-preview-device.is-aurora {
+  background: oklch(13% 0.040 300);
+  border-color: rgba(255, 110, 199, 0.18);
+}
+
+.tpd-bar {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  padding: 0 2px;
+}
+
+.tpd-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  transition: background 0.3s;
+}
+
+.is-dark .tpd-dot {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.is-light .tpd-dot {
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.is-aurora .tpd-dot {
+  background: rgba(255, 175, 220, 0.22);
+}
+
+.tpd-card {
+  border-radius: 8px;
+  padding: 10px;
+  display: grid;
+  gap: 6px;
+  transition: background 0.3s;
+}
+
+.is-dark .tpd-card {
+  background: oklch(21% 0.02 252);
+}
+
+.is-light .tpd-card {
+  background: #fff;
+}
+
+.is-aurora .tpd-card {
+  background: oklch(22% 0.040 298);
+}
+
+.tpd-line {
+  height: 6px;
+  border-radius: 3px;
+  transition: background 0.3s;
+}
+
+.tpd-line.long {
+  width: 70%;
+}
+
+.tpd-line.short {
+  width: 40%;
+}
+
+.is-dark .tpd-line {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.is-light .tpd-line {
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.is-aurora .tpd-line {
+  background: rgba(255, 175, 220, 0.18);
+}
+
+.tpd-nav {
+  display: flex;
+  justify-content: space-around;
+  padding: 6px 4px 2px;
+}
+
+.tpd-orb {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  transition: background 0.3s;
+}
+
+.is-dark .tpd-orb {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.is-light .tpd-orb {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.is-aurora .tpd-orb {
+  background: rgba(255, 175, 220, 0.12);
+}
+
+.is-dark .tpd-orb.active {
+  background: oklch(74% 0.09 205 / 0.4);
+}
+
+.is-light .tpd-orb.active {
+  background: oklch(67% 0.09 210 / 0.35);
+}
+
+.is-aurora .tpd-orb.active {
+  background: oklch(73% 0.180 350 / 0.45);
+}
+
+.home-stack {
+  display: grid;
+  gap: 14px;
+}
+
+.home-greeting {
+  padding: 20px 22px;
+  border-radius: var(--radius-xl);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--surface-soft);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+}
+
+.greeting-text {
+  font-size: 1.375rem;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.greeting-sub {
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+
+.home-shortcuts {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.shortcut-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 8px;
+  border-radius: var(--radius-lg);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--surface-soft);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  cursor: pointer;
+  transition: transform 180ms ease, border-color 180ms ease, background 180ms ease;
+  text-align: center;
+}
+
+.shortcut-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.shortcut-card:active {
+  transform: scale(0.97);
+}
+
+.shortcut-label {
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.home-tip {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.tip-icon .app-icon {
+  width: 18px;
+  height: 18px;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.tip-text {
+  font-size: 0.8125rem;
+  color: var(--muted);
+  line-height: 1.7;
+  margin: 0;
+}
+
+.section-link {
+  font-size: 0.75rem;
+  color: var(--accent);
+  font-weight: 500;
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+/* ============================================
+   Density slider — text/card size control
+   ============================================ */
+
+.appearance-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 20px 0 18px;
+  opacity: 0.7;
+}
+
+.density-block {
+  display: grid;
+  gap: 14px;
+  padding: 4px 2px 2px;
+}
+
+.density-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.density-title {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.density-hint {
+  font-size: 0.75rem;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.density-slider {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 6px 22px;
+  /* Force LTR so small A is on the visual left, large A on the visual right,
+     matching the standard A...A text-size slider convention. The surrounding
+     UI stays RTL; only the slider itself is LTR. */
+  direction: ltr;
+}
+
+.density-letter {
+  font-family: var(--font-ui);
+  color: var(--muted);
+  line-height: 1;
+  user-select: none;
+  pointer-events: none;
+}
+
+.density-letter-sm {
+  font-size: 0.875rem;
+}
+
+.density-letter-lg {
+  font-size: 1.375rem;
+}
+
+.density-track-wrap {
+  position: relative;
+  height: 28px;
+  display: flex;
+  align-items: center;
+}
+
+.density-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--fg) 12%, var(--border));
+}
+
+.density-fill {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 4px;
+  border-radius: 999px;
+  width: var(--density-thumb-pct, 50%);
+  background: var(--accent);
+  transition: width 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.density-ticks {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  pointer-events: none;
+}
+
+.density-tick {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--fg) 22%, var(--border-strong));
+  transition: transform 200ms ease, background 200ms ease;
+}
+
+/* Active tick is NOT highlighted — the thumb already shows the position,
+   and adding color here creates a confusing extra "blue dot". */
+
+.density-thumb {
+  position: absolute;
+  top: 50%;
+  /* Position is driven by --density-thumb-pct set on the slider container.
+     translateX(-50%) keeps the thumb centered on the percentage point.
+     In RTL the visual layout is flipped automatically because the slider
+     container inherits dir=rtl from body. */
+  left: var(--density-thumb-pct, 50%);
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--fg);
+  border: 3px solid var(--surface-strong);
+  box-shadow:
+    0 4px 12px rgba(0, 0, 0, 0.22),
+    0 0 0 1px var(--border-strong);
+  transform: translate(-50%, -50%);
+  transition: left 240ms cubic-bezier(0.22, 1, 0.36, 1), background 200ms ease;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.density-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+  /* invisible but interactive */
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+}
+
+.density-input::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+}
+
+.density-input::-moz-range-thumb {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.density-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  /* Match the slider's LTR direction so button order aligns with thumb position:
+     leftmost button = compact (smallest), rightmost = spacious (largest). */
+  direction: ltr;
+}
+
+.density-option {
+  padding: 10px 8px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  font-family: var(--font-ui);
+  cursor: pointer;
+  transition: all 200ms ease;
+}
+
+.density-option:hover {
+  border-color: var(--border-strong);
+  color: var(--fg);
+}
+
+.density-option.is-selected {
+  border-color: color-mix(in oklab, var(--accent) 50%, var(--border-strong));
+  background: color-mix(in oklab, var(--accent) 14%, var(--surface));
+  color: var(--accent);
+}
+
+/* ============================================
+   Sponsored Carousel Card — Home page
+   Inherits featured-card design language: same
+   radius, shadow, surface tokens, padding rhythm.
+   ============================================ */
+
+.sponsored-carousel {
+  position: relative;
+  /* No padding, no gap — the frame fills the entire card so the image
+     goes edge-to-edge. Card height = frame height (image height). */
+  margin-bottom: 18px;
+  border-radius: var(--radius-xl);
+  border: 1px solid color-mix(in oklab, var(--accent) 18%, var(--border));
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+  transform: translateZ(0);
+}
+
+.sponsored-carousel-frame {
+  position: relative;
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+  /* Compact 5:2 aspect ratio (~30% shorter than the original 16:9).
+     Keeps the slide visually balanced against the other Home cards
+     without sacrificing readability of title + subtitle. */
+  aspect-ratio: 5 / 2;
+  background: var(--surface-soft);
+}
+
+.sponsored-carousel-track {
+  /* display:flex — the track is a block-level flex container that fills the
+     frame width (366px). Each child slide is flex:0 0 100% = 366px = one frame.
+     With 5 children, they overflow horizontally (5 × 366 = 1830px total) but
+     the frame's overflow:hidden clips them. translateX(N×100%) moves the track
+     to show slide N. */
+  display: flex;
+  height: 100%;
+  transition: transform 360ms cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
+}
+
+.sponsored-carousel-track > * {
+  /* Each slide is exactly one frame wide (100% of the track = 366px).
+     flex: 0 0 100% = don't grow, don't shrink, basis = 100%. */
+  flex: 0 0 100%;
+  min-width: 100%;
+  height: 100%;
+}
+
+.sponsored-slide {
+  display: grid;
+  grid-template-columns: 42% 1fr;
+  align-items: stretch;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  outline: none;
+  /* Disable default tap highlight on mobile */
+  -webkit-tap-highlight-color: transparent;
+}
+
+.sponsored-slide:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  border-radius: var(--radius-lg);
+}
+
+.sponsored-slide-visual {
+  position: relative;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+
+.sponsored-slide-visual::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  /* Subtle radial sheen to keep the icon legible on any gradient */
+  background: radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.22), transparent 60%);
+}
+
+.sponsored-slide-glyph {
+  position: relative;
+  z-index: 1;
+  color: rgba(255, 255, 255, 0.95);
+  filter: drop-shadow(0 6px 16px rgba(0, 0, 0, 0.25));
+}
+
+/* Uploaded banner image — covers the visual panel, respects saved transform */
+.sponsored-slide-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+  transform-origin: center;
+  transition: transform 200ms ease;
+}
+
+/* ---------- Full Banner layout ----------
+   One image fills the entire carousel frame edge-to-edge.
+   No split, no title, no icon. The image IS the banner. */
+.sponsored-slide-full {
+  display: block;
+  padding: 0;
+  /* CRITICAL: position:relative so the absolute-positioned <img> inside
+     positions relative to THIS slide, not the frame. Without this, all 5
+     full-banner images stack on top of each other at the frame's position. */
+  position: relative;
+  overflow: hidden;
+}
+
+.sponsored-slide-image-full {
+  /* Inherits from .sponsored-slide-image but explicitly: full frame cover */
+  border-radius: 0;
+}
+
+.sponsored-slide-full-placeholder {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.sponsored-slide-glyph .app-icon {
+  width: 36px;
+  height: 36px;
+  stroke-width: 1.6;
+}
+
+.sponsored-slide-copy {
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  padding: 10px 14px;
+  text-align: start;
+}
+
+.sponsored-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.5625rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--accent);
+  opacity: 0.85;
+}
+
+.sponsored-title {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--fg);
+}
+
+.sponsored-subtitle {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+/* Floating glassmorphism pagination capsule */
+.sponsored-indicators {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(12px) saturate(140%);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  pointer-events: auto;
+}
+
+.sponsored-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  padding: 0;
+  border: 0;
+  background: rgba(255, 255, 255, 0.55);
+  cursor: pointer;
+  transition: width 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    background 280ms ease,
+    opacity 280ms ease;
+  opacity: 0.7;
+}
+
+.sponsored-dot.is-active {
+  width: 18px;
+  border-radius: 999px;
+  background: #ffffff;
+  opacity: 1;
+}
+
+/* Light theme tweaks for better contrast on warm paper */
+body[data-theme="light"] .sponsored-carousel {
+  border-color: color-mix(in oklab, var(--accent) 22%, rgba(35, 28, 18, 0.10));
+}
+
+body[data-theme="light"] .sponsored-slide-copy {
+  /* Slightly deeper title color for readability */
+  color: var(--fg);
+}
+
+/* Note: sponsored-dot colors are NOT overridden in light theme because
+   the dots live inside the glass capsule which is always dark. */

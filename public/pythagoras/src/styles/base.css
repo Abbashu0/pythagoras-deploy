@@ -1,0 +1,114 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
+html {
+  /* The density slider sets --density-multiplier (0.92 / 1 / 1.12) on :root.
+     Because all sizes in this app use rem/em, scaling the root font-size
+     proportionally scales every text element, card padding, gap, etc. */
+  font-size: calc(16px * var(--density-multiplier, 1));
+}
+
+body {
+  background:
+    radial-gradient(circle at 50% 0%, var(--body-glow), transparent 34%),
+    linear-gradient(180deg, var(--body-top), var(--body-bottom));
+  color: var(--fg);
+  font-family: var(--font-ui);
+  direction: rtl;
+  transition: background 260ms ease, color 260ms ease;
+}
+
+button,
+a,
+input,
+textarea {
+  font: inherit;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button {
+  background: none;
+  border: 0;
+  color: inherit;
+  padding: 0;
+}
+
+.is-entering {
+  animation: enterScreen 380ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.stagger {
+  opacity: 0;
+  animation: riseIn 560ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes enterScreen {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes riseIn {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes navRippleOut {
+  0% {
+    transform: scale(0.6);
+    opacity: 0.5;
+  }
+
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+
+@keyframes navLabelLift {
+  0% {
+    transform: translateY(0);
+  }
+
+  100% {
+    transform: translateY(-5px);
+  }
+}
+
+@keyframes navOrbBounce {
+  0% {
+    transform: translateY(-22px) scale(0.96);
+  }
+
+  55% {
+    transform: translateY(-30px) scale(1.04);
+  }
+
+  100% {
+    transform: translateY(-26px) scale(1);
+  }
+}

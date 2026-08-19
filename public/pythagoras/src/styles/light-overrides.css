@@ -1,0 +1,226 @@
+/*
+ * light-overrides.css
+ * Strengthened borders, surfaces, chips, badges, and icon wraps
+ * for the light theme. Loaded AFTER all other stylesheets so it wins cascade ties.
+ *
+ * Strategy: every rgba(255,255,255,0.0X) that was tuned for dark mode
+ * is re-tuned here to rgba(0,0,0,X) with a stronger opacity so elements
+ * remain visible and well-contrasted on warm paper backgrounds.
+ */
+
+body[data-theme="light"] .app-device {
+  border-color: rgba(35, 28, 18, 0.18);
+}
+
+body[data-theme="light"] .app-device::before {
+  background:
+    radial-gradient(circle at top, rgba(0, 0, 0, 0.04), transparent 28%),
+    linear-gradient(180deg, rgba(0, 0, 0, 0.02), transparent 26%);
+}
+
+/* Top-of-page chips: brand + status — used to nearly vanish on light bg */
+body[data-theme="light"] .brand-chip,
+body[data-theme="light"] .status-chip {
+  background: rgba(35, 28, 18, 0.05);
+  border-color: rgba(35, 28, 18, 0.14);
+  color: var(--muted);
+}
+
+/* Cards: featured, tool, placeholder, tests, settings */
+body[data-theme="light"] .featured-card,
+body[data-theme="light"] .tool-card,
+body[data-theme="light"] .placeholder-card,
+body[data-theme="light"] .tests-card {
+  border-color: rgba(35, 28, 18, 0.14);
+}
+
+/* Icon wraps — were almost invisible (rgba(255,255,255,0.06) on cream) */
+body[data-theme="light"] .icon-wrap {
+  background: rgba(35, 28, 18, 0.05);
+  border-color: rgba(35, 28, 18, 0.12);
+}
+
+body[data-theme="light"] .icon-wrap.featured {
+  background: color-mix(in oklab, var(--accent) 14%, rgba(35, 28, 18, 0.04));
+  border-color: color-mix(in oklab, var(--accent) 32%, rgba(35, 28, 18, 0.10));
+}
+
+/* Status badges — both default and live variants */
+body[data-theme="light"] .status-badge {
+  border-color: rgba(35, 28, 18, 0.14);
+  color: var(--muted);
+}
+
+body[data-theme="light"] .status-badge.is-live {
+  background: var(--success-soft);
+  border-color: color-mix(in oklab, var(--accent) 28%, rgba(35, 28, 18, 0.12));
+  color: var(--fg);
+}
+
+body[data-theme="light"] .status-badge.is-soon {
+  background: rgba(35, 28, 18, 0.05);
+}
+
+/* Tool card available state + hover */
+body[data-theme="light"] .tool-card.available {
+  border-color: color-mix(in oklab, var(--accent) 26%, rgba(35, 28, 18, 0.10));
+}
+
+body[data-theme="light"] .tool-card.available:hover {
+  border-color: color-mix(in oklab, var(--accent) 38%, rgba(35, 28, 18, 0.14));
+}
+
+body[data-theme="light"] .tool-card:hover {
+  border-color: rgba(35, 28, 18, 0.20);
+}
+
+/* Featured card hover */
+body[data-theme="light"] .featured-card:hover {
+  border-color: color-mix(in oklab, var(--accent) 30%, rgba(35, 28, 18, 0.12));
+}
+
+/* Tests cards */
+body[data-theme="light"] .tests-card {
+  border-color: rgba(35, 28, 18, 0.14);
+}
+
+/* Subject action cards (tests page) */
+body[data-theme="light"] .subject-action-card {
+  border-color: rgba(35, 28, 18, 0.12);
+}
+
+body[data-theme="light"] .subject-action-card:hover {
+  border-color: rgba(35, 28, 18, 0.20);
+}
+
+body[data-theme="light"] .subject-action-card:focus-visible {
+  border-color: color-mix(in oklab, var(--accent) 36%, rgba(35, 28, 18, 0.16));
+}
+
+body[data-theme="light"] .subject-action-card.is-secondary,
+body[data-theme="light"] .subject-action-card.is-diagram,
+body[data-theme="light"] .subject-action-card.is-wide {
+  border-color: rgba(35, 28, 18, 0.14);
+}
+
+/* Subject cards */
+body[data-theme="light"] .subject-card {
+  border-color: rgba(35, 28, 18, 0.14);
+}
+
+body[data-theme="light"] .subject-card:hover {
+  border-color: color-mix(in oklab, var(--accent) 28%, rgba(35, 28, 18, 0.16));
+}
+
+/* Settings cards */
+body[data-theme="light"] .settings-card {
+  border-color: rgba(35, 28, 18, 0.14);
+}
+
+body[data-theme="light"] .settings-card.subtle {
+  border-color: rgba(35, 28, 18, 0.12);
+  background: rgba(35, 28, 18, 0.03);
+}
+
+/* Appearance card */
+body[data-theme="light"] .appearance-card {
+  border-color: rgba(35, 28, 18, 0.14);
+}
+
+body[data-theme="light"] .appearance-card.is-expanded {
+  border-color: color-mix(in oklab, var(--accent) 24%, rgba(35, 28, 18, 0.16));
+}
+
+body[data-theme="light"] .appearance-card-toggle:hover {
+  background: rgba(35, 28, 18, 0.04);
+}
+
+body[data-theme="light"] .appearance-card.is-expanded .appearance-card-chevron {
+  background: rgba(35, 28, 18, 0.05);
+}
+
+/* Theme options */
+body[data-theme="light"] .theme-option {
+  border-color: rgba(35, 28, 18, 0.12);
+}
+
+body[data-theme="light"] .theme-option:hover {
+  border-color: rgba(35, 28, 18, 0.20);
+  background: rgba(35, 28, 18, 0.03);
+}
+
+body[data-theme="light"] .theme-option.is-selected {
+  border-color: color-mix(in oklab, var(--accent) 36%, rgba(35, 28, 18, 0.16));
+}
+
+body[data-theme="light"] .theme-option:focus-visible {
+  border-color: color-mix(in oklab, var(--accent) 40%, rgba(35, 28, 18, 0.18));
+}
+
+/* Theme swatch — keep the white border so the swatch stays defined */
+body[data-theme="light"] .theme-swatch {
+  border-color: rgba(35, 28, 18, 0.14);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
+/* Theme preview device — keep its dedicated light variant border */
+body[data-theme="light"] .theme-preview-device {
+  border-color: rgba(35, 28, 18, 0.14);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
+/* Home greeting + shortcut cards */
+body[data-theme="light"] .home-greeting {
+  border-color: rgba(35, 28, 18, 0.14);
+}
+
+body[data-theme="light"] .shortcut-card {
+  border-color: rgba(35, 28, 18, 0.12);
+}
+
+body[data-theme="light"] .shortcut-card:hover {
+  border-color: rgba(35, 28, 18, 0.20);
+}
+
+/* Toast (override the existing light toast with stronger contrast) */
+body[data-theme="light"] .toast {
+  border-color: color-mix(in oklab, var(--accent) 18%, var(--border-strong));
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.85), transparent 70%),
+    color-mix(in oklab, var(--surface) 92%, white);
+  color: var(--fg);
+  box-shadow: var(--shadow-lg);
+}
+
+/* Liquid glass wrapper borders (used for nav) */
+body[data-theme="light"] .liquidGlass-wrapper {
+  border-color: rgba(35, 28, 18, 0.14);
+}
+
+/* Nav orb hover — keep a subtle hover background, but no default circle */
+body[data-theme="light"] .nav-item:not(.is-active):hover .nav-orb {
+  background: rgba(35, 28, 18, 0.06);
+  border-color: rgba(35, 28, 18, 0.14);
+}
+
+/* App back button hover */
+body[data-theme="light"] .app-back-button:hover {
+  background: rgba(35, 28, 18, 0.06);
+}
+
+/* Make muted text in eyebrow/page-copy/section-meta readable */
+body[data-theme="light"] .eyebrow,
+body[data-theme="light"] .page-copy,
+body[data-theme="light"] .section-meta,
+body[data-theme="light"] .appearance-card-description,
+body[data-theme="light"] .appearance-card-note,
+body[data-theme="light"] .settings-text,
+body[data-theme="light"] .settings-note,
+body[data-theme="light"] .theme-option-copy small {
+  color: var(--muted);
+}
+
+/* Status chip text — was var(--muted) which is okay, but strengthen */
+body[data-theme="light"] .status-chip {
+  color: var(--muted);
+}

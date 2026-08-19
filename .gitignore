@@ -1,0 +1,56 @@
+# Dependencies and build output
+node_modules/
+.next/
+out/
+build/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Environment and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+service-account*.json
+credentials*.json
+
+# Local data and logs
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+db/
+*.log
+*.pid
+*.tmp
+*.temp
+npm-debug.log*
+
+# Local-only developer tooling (never commit)
+Pythagoras-Brain/
+graphify-out/
+.graphify/
+.ua/
+understand-anything/
+local-ai-tools/
+.mcp/
+.codex/
+
+# Tool output and IDE files
+tool-results/
+agent-ctx/
+upload/
+download/
+playwright-report/
+test-results/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
