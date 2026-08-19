@@ -50,7 +50,7 @@ function readLocalArray(key, fallback) {
   }
 }
 
-export const viewNavMap = { home: "home", materials: "materials", lectures: "materials", tests: "tools", questions: "tools", tools: "tools", settings: "settings" };
+export const viewNavMap = { home: "home", materials: "materials", lectures: "lectures", tests: "tools", questions: "tools", tools: "tools", settings: "settings" };
 export const themeLabels = { dark: "داكن", light: "فاتح", aurora: "شفق" };
 export const densityLabels = { compact: "صغير", comfortable: "قياسي", spacious: "كبير" };
 
