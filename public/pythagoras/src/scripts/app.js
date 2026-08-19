@@ -9,7 +9,7 @@ import { testsSubjectsScreen } from "../pages/TestsSubjectsPage.js";
 import { toolsScreen } from "../pages/ToolsPage.js";
 import { renderQuestionBankPlaceholder } from "../pages/QuestionBankPlaceholderPage.js";
 import "./image-db.js";
-import { getSubjectByView } from "./data.js";
+import { ADMIN_NAV_ITEMS_KEY, getSubjectByView } from "./data.js";
 import { bindNavigationInteractions } from "./navigation.js";
 import { pushRoute, viewFromHash } from "./router.js";
 import { applyTheme, getStoredTheme, syncThemeControls } from "./theme.js";
@@ -60,4 +60,7 @@ function renderView(view = viewFromHash()) {
 applyTheme(getStoredTheme());
 applyDensity(getStoredDensity());
 window.addEventListener("hashchange", () => renderView());
+window.addEventListener("storage", (event) => {
+  if (event.key === ADMIN_NAV_ITEMS_KEY) renderView();
+});
 renderView();

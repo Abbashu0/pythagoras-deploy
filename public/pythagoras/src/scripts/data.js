@@ -1,7 +1,7 @@
 const ADMIN_BANNERS_KEY = "pythagoras-admin-banners";
 const ADMIN_MATERIALS_KEY = "pythagoras-admin-materials";
 const ADMIN_TOOLS_KEY = "pythagoras-admin-tools";
-const ADMIN_NAV_KEY = "pythagoras-admin-nav";
+export const ADMIN_NAV_ITEMS_KEY = "pythagoras-admin-nav-items";
 
 export const screens = {
   home: { eyebrow: "منصة فيثاغورس", title: "مرحبًا بك", copy: "مساحتك الدراسية الهادئة.", stateLabel: "محلي", icon: "home" },
@@ -49,7 +49,17 @@ export const viewNavMap = { home: "home", materials: "materials", lectures: "mat
 export const themeLabels = { dark: "داكن", light: "فاتح", aurora: "شفق" };
 export const densityLabels = { compact: "صغير", comfortable: "قياسي", spacious: "كبير" };
 
-export function getNavItems() { return readLocalArray(ADMIN_NAV_KEY, defaultNav); }
+export function getNavItems() {
+  return readLocalArray(ADMIN_NAV_ITEMS_KEY, defaultNav)
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => item && item.enabled !== false)
+    .sort(({ item: left, index: leftIndex }, { item: right, index: rightIndex }) => {
+      const leftOrder = Number.isFinite(left.order) ? left.order : leftIndex;
+      const rightOrder = Number.isFinite(right.order) ? right.order : rightIndex;
+      return leftOrder - rightOrder;
+    })
+    .map(({ item }) => item);
+}
 export function getSponsoredBanners() { return readLocalArray(ADMIN_BANNERS_KEY, defaultBanners); }
 export function getTestSubjects() { return readLocalArray(ADMIN_MATERIALS_KEY, defaultSubjects); }
 export function getTools() { return readLocalArray(ADMIN_TOOLS_KEY, defaultTools); }

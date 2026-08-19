@@ -6,7 +6,7 @@
  *
  * Edits the student app's bottom-nav items (5 entries). Persists to
  * localStorage under `pythagoras-admin-nav-items` (the student app will
- * read from there in a future task).
+ * read from there immediately).
  *
  * Layout (provided by `<AdminPageLayout>`):
  *   - Left: reorderable list of nav items (FLIP animation, move up/down).
