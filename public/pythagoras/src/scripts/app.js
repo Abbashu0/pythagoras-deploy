@@ -42,6 +42,13 @@ function renderView(view = viewFromHash()) {
   });
   document.querySelectorAll("[data-locked]").forEach((button) => button.addEventListener("click", () => showToast(`${button.dataset.toolName} قيد البناء`)));
   document.querySelectorAll("[data-tests-action-message]").forEach((button) => button.addEventListener("click", () => showToast(button.dataset.testsActionMessage)));
+  document.querySelectorAll("[data-appearance-toggle]").forEach((button) => button.addEventListener("click", () => {
+    const card = button.closest("[data-appearance-card]");
+    if (!card) return;
+
+    const isExpanded = card.classList.toggle("is-expanded");
+    button.setAttribute("aria-expanded", String(isExpanded));
+  }));
   document.querySelectorAll("[data-theme-choice]").forEach((button) => button.addEventListener("click", () => syncThemeControls(applyTheme(button.dataset.themeChoice))));
   document.querySelectorAll("[data-density-choice]").forEach((button) => button.addEventListener("click", () => syncDensityControls(applyDensity(button.dataset.densityChoice))));
   const densityInput = document.querySelector("[data-density-input]");
