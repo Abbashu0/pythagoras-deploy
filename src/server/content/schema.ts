@@ -2,6 +2,13 @@ import { sql } from "drizzle-orm";
 import { check, index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 import type { AdminRole } from "../admin-auth/contracts";
 import type { AssetMediaKind } from "../assets/contracts";
+import type {
+  ChangeConflictState,
+  ChangeEventType,
+  ChangeOperation,
+  ChangeSetStatus,
+  ChangeSnapshot,
+} from "../change-management/contracts";
 
 export type ContentPayload = Record<string, unknown>;
 
@@ -175,3 +182,150 @@ export const assets = sqliteTable(
 
 export type AssetRow = typeof assets.$inferSelect;
 export type NewAssetRow = typeof assets.$inferInsert;
+
+export const changeSets = sqliteTable(
+  "change_sets",
+  {
+    id: text("id").primaryKey(),
+    title: text("title").notNull(),
+    description: text("description"),
+    createdBy: text("created_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+    status: text("status").$type<ChangeSetStatus>().notNull(),
+    basePublicationRevision: integer("base_publication_revision").notNull(),
+    reviewNote: text("review_note"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    submittedAt: integer("submitted_at"),
+    reviewedBy: text("reviewed_by").references(() => adminUsers.id, { onDelete: "restrict" }),
+    reviewedAt: integer("reviewed_at"),
+    approvedAt: integer("approved_at"),
+    publishedAt: integer("published_at"),
+    revision: integer("revision").notNull().default(1),
+  },
+  (table) => [
+    index("change_sets_status_index").on(table.status),
+    index("change_sets_created_by_index").on(table.createdBy),
+    index("change_sets_updated_at_index").on(table.updatedAt),
+    check("change_sets_status_valid", sql`${table.status} in ('DRAFT','SUBMITTED','NEEDS_CHANGES','APPROVED','REJECTED','CONFLICTED','PUBLISHED','CANCELLED','SUPERSEDED')`),
+    check("change_sets_title_valid", sql`length(trim(${table.title})) between 1 and 160`),
+    check("change_sets_description_valid", sql`${table.description} is null or length(${table.description}) <= 2000`),
+    check("change_sets_review_note_valid", sql`${table.reviewNote} is null or length(trim(${table.reviewNote})) between 1 and 2000`),
+    check("change_sets_base_publication_revision_nonnegative", sql`${table.basePublicationRevision} >= 0`),
+    check("change_sets_revision_positive", sql`${table.revision} >= 1`),
+    check("change_sets_timestamps_ordered", sql`${table.updatedAt} >= ${table.createdAt}`),
+  ],
+);
+
+export const changeSetItems = sqliteTable(
+  "change_set_items",
+  {
+    id: text("id").primaryKey(),
+    changeSetId: text("change_set_id").notNull().references(() => changeSets.id, { onDelete: "cascade" }),
+    resourceType: text("resource_type").notNull(),
+    resourceId: text("resource_id").notNull(),
+    operation: text("operation").$type<ChangeOperation>().notNull(),
+    baseResourceRevision: integer("base_resource_revision").notNull(),
+    beforeSnapshot: text("before_snapshot", { mode: "json" }).$type<ChangeSnapshot>().notNull(),
+    proposedSnapshot: text("proposed_snapshot", { mode: "json" }).$type<ChangeSnapshot>().notNull(),
+    changedPaths: text("changed_paths", { mode: "json" }).$type<string[]>().notNull(),
+    conflictState: text("conflict_state").$type<ChangeConflictState>().notNull().default("NONE"),
+    conflictDetails: text("conflict_details", { mode: "json" }).$type<ChangeSnapshot>(),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    revision: integer("revision").notNull().default(1),
+  },
+  (table) => [
+    uniqueIndex("change_set_items_resource_unique").on(table.changeSetId, table.resourceType, table.resourceId),
+    index("change_set_items_change_set_index").on(table.changeSetId),
+    index("change_set_items_resource_index").on(table.resourceType, table.resourceId),
+    check("change_set_items_operation_valid", sql`${table.operation} = 'UPDATE'`),
+    check("change_set_items_resource_type_valid", sql`length(trim(${table.resourceType})) between 1 and 80`),
+    check("change_set_items_resource_id_valid", sql`length(trim(${table.resourceId})) > 0`),
+    check("change_set_items_base_revision_positive", sql`${table.baseResourceRevision} >= 1`),
+    check("change_set_items_changed_paths_array", sql`json_valid(${table.changedPaths}) and json_type(${table.changedPaths}) = 'array'`),
+    check("change_set_items_before_snapshot_object", sql`json_valid(${table.beforeSnapshot}) and json_type(${table.beforeSnapshot}) = 'object'`),
+    check("change_set_items_proposed_snapshot_object", sql`json_valid(${table.proposedSnapshot}) and json_type(${table.proposedSnapshot}) = 'object'`),
+    check("change_set_items_conflict_state_valid", sql`${table.conflictState} in ('NONE','BLOCKING','AUTO_MERGED')`),
+    check("change_set_items_revision_positive", sql`${table.revision} >= 1`),
+    check("change_set_items_timestamps_ordered", sql`${table.updatedAt} >= ${table.createdAt}`),
+  ],
+);
+
+export const changeSetEvents = sqliteTable(
+  "change_set_events",
+  {
+    id: text("id").primaryKey(),
+    changeSetId: text("change_set_id").notNull().references(() => changeSets.id, { onDelete: "cascade" }),
+    eventType: text("event_type").$type<ChangeEventType>().notNull(),
+    actorUserId: text("actor_user_id").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+    createdAt: integer("created_at").notNull(),
+    note: text("note"),
+    metadata: text("metadata", { mode: "json" }).$type<ChangeSnapshot>(),
+  },
+  (table) => [
+    index("change_set_events_change_set_time_index").on(table.changeSetId, table.createdAt),
+    index("change_set_events_actor_index").on(table.actorUserId),
+    check("change_set_events_type_valid", sql`${table.eventType} in ('CREATED','ITEM_ADDED','ITEM_UPDATED','ITEM_REMOVED','SUBMITTED','REQUESTED_CHANGES','RESUBMITTED','APPROVED','REJECTED','CONFLICT_DETECTED','AUTO_MERGED_DISJOINT_FIELDS','REBASED','PUBLISHED','CANCELLED')`),
+    check("change_set_events_note_valid", sql`${table.note} is null or length(trim(${table.note})) between 1 and 2000`),
+  ],
+);
+
+export const publications = sqliteTable(
+  "publications",
+  {
+    id: text("id").primaryKey(),
+    revision: integer("revision").notNull(),
+    changeSetId: text("change_set_id").notNull().references(() => changeSets.id, { onDelete: "restrict" }),
+    publishedBy: text("published_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+    publishedAt: integer("published_at").notNull(),
+    summary: text("summary").notNull(),
+  },
+  (table) => [
+    uniqueIndex("publications_revision_unique").on(table.revision),
+    uniqueIndex("publications_change_set_unique").on(table.changeSetId),
+    index("publications_published_at_index").on(table.publishedAt),
+    check("publications_revision_positive", sql`${table.revision} >= 1`),
+    check("publications_summary_valid", sql`length(trim(${table.summary})) between 1 and 500`),
+  ],
+);
+
+export const publicationItems = sqliteTable(
+  "publication_items",
+  {
+    id: text("id").primaryKey(),
+    publicationId: text("publication_id").notNull().references(() => publications.id, { onDelete: "restrict" }),
+    resourceType: text("resource_type").notNull(),
+    resourceId: text("resource_id").notNull(),
+    operation: text("operation").$type<ChangeOperation>().notNull(),
+    beforeSnapshot: text("before_snapshot", { mode: "json" }).$type<ChangeSnapshot>().notNull(),
+    afterSnapshot: text("after_snapshot", { mode: "json" }).$type<ChangeSnapshot>().notNull(),
+    resultingResourceRevision: integer("resulting_resource_revision").notNull(),
+  },
+  (table) => [
+    index("publication_items_publication_index").on(table.publicationId),
+    index("publication_items_resource_index").on(table.resourceType, table.resourceId),
+    check("publication_items_operation_valid", sql`${table.operation} = 'UPDATE'`),
+    check("publication_items_before_snapshot_object", sql`json_valid(${table.beforeSnapshot}) and json_type(${table.beforeSnapshot}) = 'object'`),
+    check("publication_items_after_snapshot_object", sql`json_valid(${table.afterSnapshot}) and json_type(${table.afterSnapshot}) = 'object'`),
+    check("publication_items_result_revision_positive", sql`${table.resultingResourceRevision} >= 1`),
+  ],
+);
+
+export const publicationState = sqliteTable(
+  "publication_state",
+  {
+    id: text("id").primaryKey(),
+    currentRevision: integer("current_revision").notNull().default(0),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    check("publication_state_singleton", sql`${table.id} = 'global'`),
+    check("publication_state_revision_nonnegative", sql`${table.currentRevision} >= 0`),
+  ],
+);
+
+export type ChangeSetRow = typeof changeSets.$inferSelect;
+export type ChangeSetItemRow = typeof changeSetItems.$inferSelect;
+export type ChangeSetEventRow = typeof changeSetEvents.$inferSelect;
+export type PublicationRow = typeof publications.$inferSelect;
+export type PublicationItemRow = typeof publicationItems.$inferSelect;

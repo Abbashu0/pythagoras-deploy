@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AlertTriangle, CheckCircle2, Download, Loader2, ShieldCheck } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Download, FilePenLine, Loader2, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AssetPreview } from "./AssetPreview";
@@ -13,6 +13,7 @@ import {
   type AssetIntegrityResponse,
   type LibraryAsset,
 } from "./library-types";
+import { AssetProposalDialog } from "./AssetProposalDialog";
 
 export function AssetDetailsDialog({
   asset,
@@ -24,6 +25,7 @@ export function AssetDetailsDialog({
   const [fetchedDetails, setFetchedDetails] = useState<LibraryAsset | null>(null);
   const [integrityResult, setIntegrityResult] = useState<AssetIntegrityResponse["integrity"] | null>(null);
   const [requestError, setRequestError] = useState<{ assetId: string; message: string } | null>(null);
+  const [proposalOpen, setProposalOpen] = useState(false);
   const details = fetchedDetails?.id === asset?.id ? fetchedDetails : asset;
   const integrity = integrityResult?.assetId === asset?.id ? integrityResult : null;
   const error = requestError && requestError.assetId === asset?.id ? requestError.message : null;
@@ -99,7 +101,8 @@ export function AssetDetailsDialog({
                 </dl>
               </details>
 
-              <Button asChild className="mt-5 w-full">
+              <Button variant="outline" className="mt-5 w-full" onClick={() => setProposalOpen(true)}><FilePenLine className="h-4 w-4" /> اقتراح تعديل البيانات</Button>
+              <Button asChild className="mt-2 w-full">
                 <a href={`/api/admin/assets/${details.id}/content`} download><Download className="h-4 w-4" /> تنزيل الملف</a>
               </Button>
               <p className="mt-3 flex items-start gap-2 text-[10px] leading-5 text-muted-foreground"><ShieldCheck className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" /> الملفات الخطرة لا تُعرض كصفحة نشطة، ومفتاح التخزين ومساره غير مكشوفين.</p>
@@ -107,6 +110,7 @@ export function AssetDetailsDialog({
           </>
         )}
       </DialogContent>
+      {details && <AssetProposalDialog asset={details} open={proposalOpen} onOpenChange={setProposalOpen} />}
     </Dialog>
   );
 }

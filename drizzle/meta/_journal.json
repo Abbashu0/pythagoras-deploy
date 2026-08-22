@@ -22,6 +22,13 @@
       "when": 1787411002496,
       "tag": "0002_assets",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1787414518299,
+      "tag": "0003_change-management",
+      "breakpoints": true
     }
   ]
 }

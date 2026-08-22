@@ -406,7 +406,7 @@ test("the current migration chain upgrades an existing M1 database without losin
       dataDirectory: dataRoot,
       migrationsDirectory,
     });
-    assert.equal(getContentDatabaseStatus(upgraded).migrationsApplied, 3);
+    assert.equal(getContentDatabaseStatus(upgraded).migrationsApplied, 4);
     const tables = upgraded.client
       .prepare(
         "select name from sqlite_master where type = 'table' and name in ('admin_users', 'admin_sessions') order by name",
