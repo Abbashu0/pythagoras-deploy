@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BookOpen, ClipboardCheck, Compass, FileQuestion, FolderOpen, ImagePlus, LayoutDashboard, Settings, Wrench, type LucideIcon } from "lucide-react";
+import { BookOpen, ClipboardCheck, Compass, DatabaseBackup, FileQuestion, FolderOpen, ImagePlus, LayoutDashboard, Settings, Wrench, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import type { SafeAdminIdentity } from "@/server/admin-auth";
 
 interface NavItem { label: string; href: string; icon: LucideIcon; }
 
@@ -18,8 +19,11 @@ const items: NavItem[] = [
   { label: "بانرات الصفحة الرئيسية", href: "/admin/banners", icon: ImagePlus },
 ];
 
-export function AdminSidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function AdminSidebar({ identity, open, onClose }: { identity: SafeAdminIdentity; open: boolean; onClose: () => void }) {
   const pathname = usePathname();
+  const visibleItems = identity.role === "OWNER"
+    ? [...items, { label: "ترحيل البيانات المحلية", href: "/admin/system/migration", icon: DatabaseBackup }]
+    : items;
   return (
     <>
       {open && <div className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm lg:hidden" onClick={onClose} aria-hidden="true" />}
@@ -29,7 +33,7 @@ export function AdminSidebar({ open, onClose }: { open: boolean; onClose: () => 
           <div><div className="text-sm font-bold text-foreground">فيثاغورس</div><div className="text-[10px] text-muted-foreground">لوحة التحكم المحلية</div></div>
         </div>
         <nav className="admin-scroll flex-1 space-y-0.5 overflow-y-auto px-3 py-4">
-          {items.map(({ label, href, icon: Icon }) => {
+          {visibleItems.map(({ label, href, icon: Icon }) => {
             const active = pathname === href;
             return <Link key={href} href={href} onClick={onClose} className={cn("flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium transition-colors", active ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground")}><Icon className="h-4 w-4" /><span>{label}</span></Link>;
           })}

@@ -7,13 +7,18 @@ import { pipeline } from "node:stream/promises";
 import Busboy, { type BusboyFileStream } from "@fastify/busboy";
 import { AssetTooLargeError, AssetUploadError } from "./errors";
 
-const MAX_DISPLAY_NAME_FIELD_BYTES = 1024;
+const MAX_MULTIPART_FIELD_BYTES = 16 * 1024;
 const MAX_MULTIPART_OVERHEAD_BYTES = 1024 * 1024;
 
 export interface ParsedAssetUpload {
   filePath: string;
   originalFilename: string;
   displayName?: string;
+  fields?: Record<string, string>;
+}
+
+export interface ParseAssetUploadOptions {
+  additionalFields?: readonly string[];
 }
 
 export async function removeParsedAssetUpload(filePath: string): Promise<void> {
@@ -24,6 +29,7 @@ export async function parseAssetUpload(
   request: Request,
   stagingRoot: string,
   maximumBytes: number,
+  options: ParseAssetUploadOptions = {},
 ): Promise<ParsedAssetUpload> {
   const contentType = request.headers.get("content-type")?.trim();
   if (!contentType?.toLowerCase().startsWith("multipart/form-data;")) {
@@ -61,23 +67,25 @@ export async function parseAssetUpload(
     })(),
   );
 
+  const allowedAdditionalFields = new Set(options.additionalFields ?? []);
   return new Promise<ParsedAssetUpload>((resolve, reject) => {
     const parser = new Busboy({
       headers: { "content-type": contentType },
       preservePath: false,
       limits: {
         fieldNameSize: 64,
-        fieldSize: MAX_DISPLAY_NAME_FIELD_BYTES,
-        fields: 1,
+        fieldSize: MAX_MULTIPART_FIELD_BYTES,
+        fields: 1 + allowedAdditionalFields.size,
         fileSize: maximumBytes,
         files: 1,
-        parts: 2,
+        parts: 2 + allowedAdditionalFields.size,
         headerPairs: 50,
         headerSize: 16 * 1024,
       },
     });
     let originalFilename = "";
     let displayName: string | undefined;
+    const fields: Record<string, string> = {};
     let fileWrite: Promise<void> | null = null;
     let fileStream: BusboyFileStream | null = null;
     let uploadError: Error | null = null;
@@ -116,11 +124,15 @@ export async function parseAssetUpload(
     });
 
     parser.on("field", (fieldName, value, _nameTruncated, valueTruncated) => {
-      if (fieldName !== "displayName" || displayName !== undefined || valueTruncated) {
-        uploadError = new AssetUploadError("The upload fields are invalid.");
+      if (fieldName === "displayName" && displayName === undefined && !valueTruncated) {
+        displayName = value;
         return;
       }
-      displayName = value;
+      if (allowedAdditionalFields.has(fieldName) && fields[fieldName] === undefined && !valueTruncated) {
+        fields[fieldName] = value;
+        return;
+      }
+      uploadError = new AssetUploadError("The upload fields are invalid.");
     });
 
     parser.on("filesLimit", () => {
@@ -149,7 +161,7 @@ export async function parseAssetUpload(
             throw new AssetUploadError("Exactly one non-empty file is required.");
           }
           settled = true;
-          resolve({ filePath, originalFilename, displayName });
+          resolve({ filePath, originalFilename, displayName, fields });
         } catch (error) {
           finishWithError(
             error instanceof Error ? error : new AssetUploadError(),

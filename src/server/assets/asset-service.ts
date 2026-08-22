@@ -111,6 +111,11 @@ export class AssetService {
     });
   }
 
+  async inspectStagedDigest(filePath: string): Promise<{ sha256: string; byteSize: number }> {
+    this.assertStagedPath(filePath);
+    return sha256File(filePath);
+  }
+
   getById(id: string): Asset {
     const asset = this.repository.findById(id);
     if (!asset) throw new AssetNotFoundError(id);

@@ -29,6 +29,13 @@
       "when": 1787414518299,
       "tag": "0003_change-management",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1787417725847,
+      "tag": "0004_legacy-migration",
+      "breakpoints": true
     }
   ]
 }

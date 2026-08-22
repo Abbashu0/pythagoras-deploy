@@ -183,6 +183,99 @@ export const assets = sqliteTable(
 export type AssetRow = typeof assets.$inferSelect;
 export type NewAssetRow = typeof assets.$inferInsert;
 
+export const legacyMigrationRuns = sqliteTable(
+  "legacy_migration_runs",
+  {
+    id: text("id").primaryKey(),
+    createdBy: text("created_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+    sourceOrigin: text("source_origin").notNull(),
+    sourceFingerprint: text("source_fingerprint"),
+    status: text("status").notNull().default("DRAFT"),
+    snapshot: text("snapshot", { mode: "json" }).$type<Record<string, unknown>>(),
+    snapshotVersion: integer("snapshot_version"),
+    bannerCount: integer("banner_count").notNull().default(0),
+    materialCount: integer("material_count").notNull().default(0),
+    toolCount: integer("tool_count").notNull().default(0),
+    navigationCount: integer("navigation_count").notNull().default(0),
+    imageReferenceCount: integer("image_reference_count").notNull().default(0),
+    imageImportedCount: integer("image_imported_count").notNull().default(0),
+    issueCount: integer("issue_count").notNull().default(0),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    finalizedAt: integer("finalized_at"),
+    revision: integer("revision").notNull().default(1),
+  },
+  (table) => [
+    index("legacy_migration_runs_fingerprint_index").on(table.sourceFingerprint),
+    index("legacy_migration_runs_status_index").on(table.status),
+    index("legacy_migration_runs_created_by_index").on(table.createdBy),
+    check("legacy_migration_runs_status_valid", sql`${table.status} in ('DRAFT','IMPORTING','READY','FAILED','CANCELLED','APPLIED')`),
+    check("legacy_migration_runs_revision_positive", sql`${table.revision} >= 1`),
+    check("legacy_migration_runs_snapshot_version_valid", sql`${table.snapshotVersion} is null or ${table.snapshotVersion} = 1`),
+    check("legacy_migration_runs_snapshot_valid", sql`${table.snapshot} is null or (json_valid(${table.snapshot}) and json_type(${table.snapshot}) = 'object')`),
+    check("legacy_migration_runs_counts_nonnegative", sql`${table.bannerCount} >= 0 and ${table.materialCount} >= 0 and ${table.toolCount} >= 0 and ${table.navigationCount} >= 0 and ${table.imageReferenceCount} >= 0 and ${table.imageImportedCount} >= 0 and ${table.issueCount} >= 0`),
+    check("legacy_migration_runs_timestamps_ordered", sql`${table.updatedAt} >= ${table.createdAt}`),
+  ],
+);
+
+export const legacyMigrationAssets = sqliteTable(
+  "legacy_migration_assets",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id").notNull().references(() => legacyMigrationRuns.id, { onDelete: "cascade" }),
+    legacyReference: text("legacy_reference").notNull(),
+    sourceKind: text("source_kind").notNull(),
+    assetId: text("asset_id").notNull().references(() => assets.id, { onDelete: "restrict" }),
+    referenceContexts: text("reference_contexts", { mode: "json" }).$type<string[]>().notNull(),
+    reused: integer("reused", { mode: "boolean" }).notNull().default(false),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("legacy_migration_assets_run_reference_unique").on(table.runId, table.legacyReference),
+    index("legacy_migration_assets_asset_index").on(table.assetId),
+    check("legacy_migration_assets_source_kind_valid", sql`${table.sourceKind} in ('INDEXED_DB','INLINE')`),
+    check("legacy_migration_assets_contexts_valid", sql`json_valid(${table.referenceContexts}) and json_type(${table.referenceContexts}) = 'array'`),
+    check("legacy_migration_assets_reused_boolean", sql`${table.reused} in (0,1)`),
+    check("legacy_migration_assets_reference_valid", sql`length(trim(${table.legacyReference})) between 1 and 500`),
+  ],
+);
+
+export const legacyMigrationIssues = sqliteTable(
+  "legacy_migration_issues",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id").notNull().references(() => legacyMigrationRuns.id, { onDelete: "cascade" }),
+    severity: text("severity").notNull(),
+    code: text("code").notNull(),
+    section: text("section"),
+    legacyReference: text("legacy_reference"),
+    message: text("message").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    index("legacy_migration_issues_run_severity_index").on(table.runId, table.severity),
+    check("legacy_migration_issues_severity_valid", sql`${table.severity} in ('ERROR','WARNING','INFO')`),
+    check("legacy_migration_issues_message_valid", sql`length(trim(${table.message})) between 1 and 1000`),
+  ],
+);
+
+export const legacyMigrationEvents = sqliteTable(
+  "legacy_migration_events",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id").notNull().references(() => legacyMigrationRuns.id, { onDelete: "cascade" }),
+    eventType: text("event_type").notNull(),
+    actorUserId: text("actor_user_id").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+    createdAt: integer("created_at").notNull(),
+    metadata: text("metadata", { mode: "json" }).$type<Record<string, unknown>>(),
+  },
+  (table) => [
+    index("legacy_migration_events_run_time_index").on(table.runId, table.createdAt),
+    check("legacy_migration_events_type_valid", sql`${table.eventType} in ('RUN_CREATED','SNAPSHOT_STORED','IMAGE_IMPORTED','IMAGE_REUSED','ISSUE_RECORDED','FINALIZED_READY','FAILED','CANCELLED')`),
+    check("legacy_migration_events_metadata_valid", sql`${table.metadata} is null or (json_valid(${table.metadata}) and json_type(${table.metadata}) = 'object')`),
+  ],
+);
+
 export const changeSets = sqliteTable(
   "change_sets",
   {

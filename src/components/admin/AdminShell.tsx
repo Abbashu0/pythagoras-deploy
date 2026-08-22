@@ -5,7 +5,7 @@
  */
 
 import { useEffect, useState, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { AdminSidebar } from "./AdminSidebar";
 import { AdminTopBar } from "./AdminTopBar";
 import { ActivityCenterDrawer } from "./ActivityCenterDrawer";
@@ -22,6 +22,7 @@ interface Props {
 
 export function AdminShell({ children, identity }: Props) {
   const router = useRouter();
+  const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -35,9 +36,12 @@ export function AdminShell({ children, identity }: Props) {
   }, [adminTheme]);
 
   useEffect(() => {
+    // The M6 migration workspace must inspect the source browser before any
+    // legacy store hydration can normalize/persist that source state.
+    if (pathname === "/admin/system/migration") return;
     store.loadFromStorage();
     store.hydrateImagesFromIDB();
-  }, [store]);
+  }, [pathname, store]);
 
   // Global Ctrl+K / Cmd+K
   useEffect(() => {
@@ -66,7 +70,7 @@ export function AdminShell({ children, identity }: Props) {
 
   return (
     <div className="flex h-screen overflow-hidden bg-background" dir="rtl">
-      <AdminSidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+      <AdminSidebar identity={identity} open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
       <div className="flex flex-1 flex-col overflow-hidden">
         <AdminTopBar

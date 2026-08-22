@@ -46,6 +46,7 @@ export { LocalFileAssetStorage } from "./local-file-asset-storage";
 export {
   parseAssetUpload,
   removeParsedAssetUpload,
+  type ParseAssetUploadOptions,
   type ParsedAssetUpload,
 } from "./multipart-upload";
 export {
