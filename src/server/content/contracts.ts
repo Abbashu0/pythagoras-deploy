@@ -47,11 +47,14 @@ export interface StoredAssetObject {
   storageKey: string;
   sha256: string;
   byteSize: number;
+  created: boolean;
 }
 
 export interface AssetStorage {
   put(bytes: Uint8Array): Promise<StoredAssetObject>;
+  putStream(source: AsyncIterable<Uint8Array>): Promise<StoredAssetObject>;
   read(storageKey: string): Promise<Uint8Array>;
+  openReadStream(storageKey: string): Promise<ReadableStream<Uint8Array>>;
   exists(storageKey: string): Promise<boolean>;
   delete(storageKey: string): Promise<void>;
 }

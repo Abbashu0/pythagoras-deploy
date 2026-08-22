@@ -369,7 +369,7 @@ test("owner and active sessions persist across database and service restarts", a
   }
 });
 
-test("migration 0001 applies to both a fresh database and an existing M1 database", () => {
+test("the current migration chain upgrades an existing M1 database without losing M2", () => {
   const dataRoot = createTemporaryDirectory("pythagoras-m1-upgrade-");
   const m1Migrations = createTemporaryDirectory("pythagoras-m1-migrations-");
   try {
@@ -406,7 +406,7 @@ test("migration 0001 applies to both a fresh database and an existing M1 databas
       dataDirectory: dataRoot,
       migrationsDirectory,
     });
-    assert.equal(getContentDatabaseStatus(upgraded).migrationsApplied, 2);
+    assert.equal(getContentDatabaseStatus(upgraded).migrationsApplied, 3);
     const tables = upgraded.client
       .prepare(
         "select name from sqlite_master where type = 'table' and name in ('admin_users', 'admin_sessions') order by name",

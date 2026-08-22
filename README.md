@@ -4,7 +4,7 @@
 
 ## التشغيل على Windows
 
-المتطلبات: Node.js 20.9 أو أحدث وnpm.
+المتطلبات: Node.js 22 أو أحدث وnpm.
 
 ```powershell
 npm install

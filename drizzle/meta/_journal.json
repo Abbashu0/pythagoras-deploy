@@ -15,6 +15,13 @@
       "when": 1787408709277,
       "tag": "0001_admin-identity",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1787411002496,
+      "tag": "0002_assets",
+      "breakpoints": true
     }
   ]
 }
