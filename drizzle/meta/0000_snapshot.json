@@ -1,0 +1,107 @@
+{
+  "version": "6",
+  "dialect": "sqlite",
+  "id": "ec6e16b5-57b1-42da-ae16-d103282d8f99",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "tables": {
+    "content_resources": {
+      "name": "content_resources",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "resource_type": {
+          "name": "resource_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "resource_key": {
+          "name": "resource_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "payload": {
+          "name": "payload",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "content_resources_type_key_unique": {
+          "name": "content_resources_type_key_unique",
+          "columns": [
+            "resource_type",
+            "resource_key"
+          ],
+          "isUnique": true
+        },
+        "content_resources_type_index": {
+          "name": "content_resources_type_index",
+          "columns": [
+            "resource_type"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "content_resources_revision_positive": {
+          "name": "content_resources_revision_positive",
+          "value": "\"content_resources\".\"revision\" >= 1"
+        },
+        "content_resources_type_not_empty": {
+          "name": "content_resources_type_not_empty",
+          "value": "length(\"content_resources\".\"resource_type\") > 0"
+        },
+        "content_resources_key_not_empty": {
+          "name": "content_resources_key_not_empty",
+          "value": "length(\"content_resources\".\"resource_key\") > 0"
+        }
+      }
+    }
+  },
+  "views": {},
+  "enums": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "indexes": {}
+  }
+}
