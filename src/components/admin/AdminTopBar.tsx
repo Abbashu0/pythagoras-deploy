@@ -29,6 +29,7 @@ import {
   Compass,
   Wrench,
   FileQuestion,
+  FolderOpen,
   CornerDownLeft,
   Loader2,
   LogOut,
@@ -53,6 +54,7 @@ interface Props {
 
 const BREADCRUMB_MAP: Record<string, { label: string; parent?: string; parentLabel?: string }> = {
   "/admin": { label: "لوحة التحكم" },
+  "/admin/library": { label: "مكتبة المحتوى", parent: "/admin", parentLabel: "المحتوى" },
   "/admin/banners": { label: "البانرات", parent: "/admin", parentLabel: "التسويق" },
   "/admin/materials": { label: "المواد الدراسية", parent: "/admin", parentLabel: "المحتوى" },
   "/admin/tools": { label: "الأدوات", parent: "/admin", parentLabel: "المحتوى" },
@@ -71,6 +73,7 @@ interface SearchSuggestion {
 
 const SUGGESTIONS: SearchSuggestion[] = [
   { label: "لوحة التحكم", href: "/admin", icon: LayoutDashboard, group: "تنقل", keywords: ["dashboard", "home"] },
+  { label: "مكتبة المحتوى", href: "/admin/library", icon: FolderOpen, group: "تنقل", keywords: ["assets", "library", "files", "مكتبة"] },
   { label: "بانرات الصفحة الرئيسية", href: "/admin/banners", icon: ImagePlus, group: "تنقل", keywords: ["banners", "carousel"] },
   { label: "المواد الدراسية", href: "/admin/materials", icon: BookOpen, group: "تنقل", keywords: ["materials", "subjects"] },
   { label: "إدارة التنقل", href: "/admin/navigation", icon: Compass, group: "تنقل", keywords: ["navigation", "nav"] },

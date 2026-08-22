@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BookOpen, Compass, FileQuestion, ImagePlus, LayoutDashboard, Settings, Wrench, type LucideIcon } from "lucide-react";
+import { BookOpen, Compass, FileQuestion, FolderOpen, ImagePlus, LayoutDashboard, Settings, Wrench, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface NavItem { label: string; href: string; icon: LucideIcon; }
 
 const items: NavItem[] = [
   { label: "لوحة التحكم", href: "/admin", icon: LayoutDashboard },
+  { label: "مكتبة المحتوى", href: "/admin/library", icon: FolderOpen },
   { label: "المواد الدراسية", href: "/admin/materials", icon: BookOpen },
   { label: "إدارة التنقل", href: "/admin/navigation", icon: Compass },
   { label: "إدارة الأدوات", href: "/admin/tools", icon: Wrench },

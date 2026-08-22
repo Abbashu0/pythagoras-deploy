@@ -1,12 +1,15 @@
 import type { NextRequest } from "next/server";
 import { assertTrustedMutationRequest, getAdminActor } from "@/server/admin-auth";
 import {
+  ASSET_MEDIA_KINDS,
+  ASSET_SORT_OPTIONS,
   getAssetService,
   parseAssetUpload,
   removeParsedAssetUpload,
   resolveMaximumAssetBytes,
-  toSafeAsset,
+  toSafeAssetWithCreator,
 } from "@/server/assets";
+import type { AssetMediaKind, AssetSort } from "@/server/assets";
 import { getContentDatabase } from "@/server/content";
 import {
   assetApiErrorResponse,
@@ -22,15 +25,35 @@ function parseOptionalInteger(value: string | null): number | undefined {
   return Number(value);
 }
 
+function parseMediaKind(value: string | null): AssetMediaKind | undefined {
+  if (value === null) return undefined;
+  return ASSET_MEDIA_KINDS.find((kind) => kind === value) ?? (value as AssetMediaKind);
+}
+
+function parseSort(value: string | null): AssetSort | undefined {
+  if (value === null) return undefined;
+  return ASSET_SORT_OPTIONS.find((sort) => sort === value) ?? (value as AssetSort);
+}
+
 export async function GET(request: NextRequest) {
   try {
     requireAssetApiAdmin(request);
     const limit = parseOptionalInteger(request.nextUrl.searchParams.get("limit"));
     const offset = parseOptionalInteger(request.nextUrl.searchParams.get("offset"));
-    const assets = getAssetService()
-      .list({ limit, offset })
-      .map(toSafeAsset);
-    return noStoreAssetJson({ ok: true, assets });
+    const page = getAssetService().browse({
+      limit,
+      offset,
+      query: request.nextUrl.searchParams.get("q") ?? undefined,
+      mediaKind: parseMediaKind(request.nextUrl.searchParams.get("mediaKind")),
+      sort: parseSort(request.nextUrl.searchParams.get("sort")),
+    });
+    return noStoreAssetJson({
+      ok: true,
+      items: page.items.map(toSafeAssetWithCreator),
+      total: page.total,
+      limit: page.limit,
+      offset: page.offset,
+    });
   } catch (error) {
     return assetApiErrorResponse(error);
   }
@@ -52,8 +75,9 @@ export async function POST(request: NextRequest) {
       upload,
       getAdminActor(authentication),
     );
+    const asset = getAssetService().getByIdWithCreator(result.asset.id);
     return noStoreAssetJson(
-      { ok: true, asset: toSafeAsset(result.asset), reused: result.reused },
+      { ok: true, asset: toSafeAssetWithCreator(asset), reused: result.reused },
       { status: result.reused ? 200 : 201 },
     );
   } catch (error) {

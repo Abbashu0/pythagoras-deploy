@@ -1,10 +1,10 @@
 import type { NextRequest } from "next/server";
-import { getAssetService, toSafeAssetWithCreator } from "@/server/assets";
+import { getAssetService } from "@/server/assets";
 import {
   assetApiErrorResponse,
   noStoreAssetJson,
   requireAssetApiAdmin,
-} from "../_shared";
+} from "../../_shared";
 
 export const runtime = "nodejs";
 
@@ -15,9 +15,16 @@ export async function GET(
   try {
     requireAssetApiAdmin(request);
     const { id } = await context.params;
+    const result = await getAssetService().verifyIntegrity(id);
     return noStoreAssetJson({
       ok: true,
-      asset: toSafeAssetWithCreator(getAssetService().getByIdWithCreator(id)),
+      integrity: {
+        assetId: result.assetId,
+        healthy: result.ok,
+        status: result.status,
+        expectedByteSize: result.expectedByteSize,
+        actualByteSize: result.actualByteSize,
+      },
     });
   } catch (error) {
     return assetApiErrorResponse(error);

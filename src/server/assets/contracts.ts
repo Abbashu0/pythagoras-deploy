@@ -11,6 +11,10 @@ export const ASSET_MEDIA_KINDS = [
 
 export type AssetMediaKind = (typeof ASSET_MEDIA_KINDS)[number];
 
+export const ASSET_SORT_OPTIONS = ["newest", "oldest", "name", "size"] as const;
+
+export type AssetSort = (typeof ASSET_SORT_OPTIONS)[number];
+
 export interface Asset {
   id: string;
   originalFilename: string;
@@ -31,6 +35,20 @@ export interface Asset {
 }
 
 export type SafeAsset = Omit<Asset, "storageKey">;
+
+export interface AssetCreatorSummary {
+  id: string;
+  displayName: string;
+}
+
+export interface AssetWithCreator {
+  asset: Asset;
+  creator: AssetCreatorSummary;
+}
+
+export type SafeAssetWithCreator = SafeAsset & {
+  creator: AssetCreatorSummary;
+};
 
 export interface CreateAssetRecord {
   id?: string;
@@ -59,11 +77,33 @@ export interface ListAssetsOptions {
   offset?: number;
 }
 
+export interface BrowseAssetsOptions extends ListAssetsOptions {
+  query?: string;
+  mediaKind?: AssetMediaKind;
+  sort?: AssetSort;
+}
+
+export interface AssetPage {
+  items: AssetWithCreator[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface AssetInventoryStats {
+  totalCount: number;
+  totalBytes: number;
+  byMediaKind: Record<AssetMediaKind, number>;
+}
+
 export interface AssetRepository {
   create(input: CreateAssetRecord): Asset;
   findById(id: string): Asset | null;
   findBySha256(sha256: string): Asset | null;
   list(options?: ListAssetsOptions): Asset[];
+  findByIdWithCreator(id: string): AssetWithCreator | null;
+  browse(options?: BrowseAssetsOptions): AssetPage;
+  getInventoryStats(): AssetInventoryStats;
   updateMetadata(input: UpdateAssetMetadata): Asset;
 }
 
@@ -91,4 +131,10 @@ export interface AssetIntegrityResult {
 export function toSafeAsset(asset: Asset): SafeAsset {
   const { storageKey: _storageKey, ...safe } = asset;
   return safe;
+}
+
+export function toSafeAssetWithCreator(
+  record: AssetWithCreator,
+): SafeAssetWithCreator {
+  return { ...toSafeAsset(record.asset), creator: record.creator };
 }

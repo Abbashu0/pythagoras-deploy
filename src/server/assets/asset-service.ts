@@ -4,8 +4,12 @@ import type { AdminActor } from "../admin-auth/contracts";
 import type { AssetStorage } from "../content/contracts";
 import type {
   Asset,
+  AssetInventoryStats,
   AssetIntegrityResult,
+  AssetPage,
   AssetRepository,
+  AssetWithCreator,
+  BrowseAssetsOptions,
   IngestAssetInput,
   IngestAssetResult,
   ListAssetsOptions,
@@ -113,8 +117,22 @@ export class AssetService {
     return asset;
   }
 
+  getByIdWithCreator(id: string): AssetWithCreator {
+    const record = this.repository.findByIdWithCreator(id);
+    if (!record) throw new AssetNotFoundError(id);
+    return record;
+  }
+
   list(options: ListAssetsOptions = {}): Asset[] {
     return this.repository.list(options);
+  }
+
+  browse(options: BrowseAssetsOptions = {}): AssetPage {
+    return this.repository.browse(options);
+  }
+
+  getInventoryStats(): AssetInventoryStats {
+    return this.repository.getInventoryStats();
   }
 
   updateDisplayName(

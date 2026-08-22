@@ -1,15 +1,24 @@
 export { AssetService, type AssetServiceOptions } from "./asset-service";
 export {
   ASSET_MEDIA_KINDS,
+  ASSET_SORT_OPTIONS,
   toSafeAsset,
+  toSafeAssetWithCreator,
   type Asset,
+  type AssetCreatorSummary,
+  type AssetInventoryStats,
   type AssetIntegrityResult,
   type AssetMediaKind,
+  type AssetPage,
   type AssetRepository,
+  type AssetSort,
+  type AssetWithCreator,
+  type BrowseAssetsOptions,
   type IngestAssetInput,
   type IngestAssetResult,
   type ListAssetsOptions,
   type SafeAsset,
+  type SafeAssetWithCreator,
 } from "./contracts";
 export {
   ASSET_ERROR_CODES,
