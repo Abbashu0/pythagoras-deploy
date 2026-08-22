@@ -3,6 +3,7 @@ export type LegacyMigrationErrorCode =
   | "LEGACY_MIGRATION_CONFLICT"
   | "LEGACY_MIGRATION_INVALID"
   | "LEGACY_MIGRATION_IMMUTABLE"
+  | "LEGACY_MIGRATION_SOURCE_CHANGED"
   | "LEGACY_MIGRATION_NOT_READY";
 
 export class LegacyMigrationError extends Error {

@@ -53,7 +53,7 @@ export class SQLiteLegacyMigrationRepository {
 
   storeSnapshot(input: { id: string; expectedRevision: number; fingerprint: string; snapshot: LegacyBrowserSnapshot; counts: number[]; issues: LegacyMigrationIssue[]; actorId: string; now: number; eventId: string }): LegacyMigrationRun | null {
     const transaction = this.database.client.transaction(() => {
-      const result = this.database.client.prepare(`update legacy_migration_runs set source_fingerprint=?,snapshot=?,snapshot_version=1,status='IMPORTING',banner_count=?,material_count=?,tool_count=?,navigation_count=?,image_reference_count=?,issue_count=?,updated_at=?,revision=revision+1 where id=? and revision=? and status in ('DRAFT','IMPORTING','FAILED')`).run(
+      const result = this.database.client.prepare(`update legacy_migration_runs set source_fingerprint=?,snapshot=?,snapshot_version=1,status='IMPORTING',banner_count=?,material_count=?,tool_count=?,navigation_count=?,image_reference_count=?,issue_count=?,updated_at=?,revision=revision+1 where id=? and revision=? and status='DRAFT' and snapshot is null and source_fingerprint is null`).run(
         input.fingerprint, JSON.stringify(input.snapshot), ...input.counts, input.issues.length, input.now, input.id, input.expectedRevision,
       );
       if (result.changes !== 1) return false;
@@ -73,7 +73,8 @@ export class SQLiteLegacyMigrationRepository {
     const transaction = this.database.client.transaction(() => {
       const existing = this.database.client.prepare(`select * from legacy_migration_assets where run_id=? and legacy_reference=?`).get(input.runId, input.legacyReference) as Record<string, unknown> | undefined;
       if (existing) {
-        if (existing.asset_id !== input.assetId) return "DIFFERENT" as const;
+        const sameContexts = JSON.stringify(parseJson<string[]>(String(existing.reference_contexts), [])) === JSON.stringify(input.contexts);
+        if (existing.asset_id !== input.assetId || existing.source_kind !== input.sourceKind || !sameContexts) return "DIFFERENT" as const;
         return "IDEMPOTENT" as const;
       }
       // Mapping rows are independently unique and immutable. Keeping the run
@@ -98,9 +99,15 @@ export class SQLiteLegacyMigrationRepository {
     const transaction = this.database.client.transaction(() => {
       const blockers = this.database.client.prepare(`select count(*) as count from legacy_migration_issues where run_id=? and severity='ERROR'`).get(input.id) as { count: number };
       const run = this.findById(input.id);
-      const mappedReferences = new Set((this.database.client.prepare(`select legacy_reference from legacy_migration_assets where run_id=?`).all(input.id) as Array<{ legacy_reference: string }>).map((row) => row.legacy_reference));
+      const mappings = this.getDetail(input.id)?.assets ?? [];
+      const inventory = new Map(run?.snapshot?.references.images.map((image) => [image.legacyReference, image]) ?? []);
+      const mappedReferences = new Set(mappings.map((mapping) => mapping.legacyReference));
       const hasUnmappedReference = run?.snapshot?.references.images.some((image) => image.state === "REFERENCED" && !mappedReferences.has(image.legacyReference)) ?? true;
-      if (!run || !run.snapshot || blockers.count > 0 || hasUnmappedReference) return "NOT_READY" as const;
+      const hasStaleMapping = mappings.some((mapping) => {
+        const expected = inventory.get(mapping.legacyReference);
+        return !expected || expected.sourceKind !== mapping.sourceKind || JSON.stringify(expected.contexts) !== JSON.stringify(mapping.referenceContexts);
+      });
+      if (!run || !run.snapshot || blockers.count > 0 || hasUnmappedReference || hasStaleMapping) return "NOT_READY" as const;
       const result = this.database.client.prepare(`update legacy_migration_runs set status='READY',finalized_at=?,updated_at=?,revision=revision+1 where id=? and revision=? and status='IMPORTING'`).run(input.now, input.now, input.id, input.expectedRevision);
       if (result.changes !== 1) return "CONFLICT" as const;
       this.addEvent(input.eventId, input.id, "FINALIZED_READY", input.actorId, input.now, null);

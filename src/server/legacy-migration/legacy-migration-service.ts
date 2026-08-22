@@ -19,7 +19,7 @@ import { SQLiteLegacyMigrationRepository } from "./sqlite-legacy-migration-repos
 const ISSUE_CODES = new Set([
   "MALFORMED_JSON", "MISSING_LOCALSTORAGE_KEY", "UNKNOWN_FIELD", "INVALID_RECORD", "MISSING_IMAGE_REFERENCE",
   "ORPHAN_IMAGE", "INLINE_IMAGE_FOUND", "DUPLICATE_IMAGE_BYTES", "UNSUPPORTED_IMAGE", "INVALID_IMAGE_DATA_URL",
-  "UNKNOWN_LEGACY_KEY_VERSION", "ORDER_GAP", "DUPLICATE_RECORD_ID",
+  "UNKNOWN_LEGACY_KEY_VERSION", "ORDER_GAP", "DUPLICATE_ORDER", "INVALID_ORDER", "DUPLICATE_RECORD_ID",
 ]);
 const FORBIDDEN_PROPERTY = /(?:password|token|secret|cookie|session|storagekey|filesystem|filepath)/iu;
 
@@ -60,11 +60,31 @@ export class LegacyMigrationService {
   }
   get(id: string, actor: AdminActor): LegacyMigrationDetail { requireOwnerActor(actor); return this.repository.getDetail(id) ?? this.notFound(); }
 
+  findReadyByFingerprint(fingerprint: string, actor: AdminActor): LegacyMigrationRun | null {
+    requireOwnerActor(actor);
+    if (!/^[0-9a-f]{64}$/u.test(fingerprint)) throw new LegacyMigrationError("LEGACY_MIGRATION_INVALID", "Invalid migration fingerprint.");
+    const run = this.repository.findReadyByFingerprint(fingerprint);
+    return run ? { ...run, snapshot: null } : null;
+  }
+
+  resume(id: string, sourceFingerprint: string, actor: AdminActor): LegacyMigrationDetail {
+    requireOwnerActor(actor);
+    if (!/^[0-9a-f]{64}$/u.test(sourceFingerprint)) throw new LegacyMigrationError("LEGACY_MIGRATION_INVALID", "Invalid migration fingerprint.");
+    const detail = this.repository.getDetail(id) ?? this.notFound();
+    if (!detail.run.snapshot || detail.run.status !== "IMPORTING") {
+      throw new LegacyMigrationError("LEGACY_MIGRATION_IMMUTABLE", "Only a frozen importing source can be resumed.");
+    }
+    if (detail.run.sourceFingerprint !== sourceFingerprint) {
+      throw new LegacyMigrationError("LEGACY_MIGRATION_SOURCE_CHANGED", "The local source changed after this migration snapshot was created.");
+    }
+    return detail;
+  }
+
   storeSnapshot(id: string, expectedRevision: number, snapshot: LegacyBrowserSnapshot, submittedFingerprint: string, actor: AdminActor): { run: LegacyMigrationRun; duplicateReadyRun: LegacyMigrationRun | null } {
     requireOwnerActor(actor);
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1 || !/^[0-9a-f]{64}$/u.test(submittedFingerprint)) throw new LegacyMigrationError("LEGACY_MIGRATION_INVALID", "Invalid migration revision or fingerprint.");
     const run = this.repository.findById(id) ?? this.notFound();
-    if (run.status === "READY" || run.status === "CANCELLED" || run.status === "APPLIED") throw new LegacyMigrationError("LEGACY_MIGRATION_IMMUTABLE", "This migration run is immutable.");
+    if (run.status !== "DRAFT" || run.snapshot !== null || run.sourceFingerprint !== null) throw new LegacyMigrationError("LEGACY_MIGRATION_IMMUTABLE", "A migration source snapshot can only be stored once.");
     this.validateSnapshot(snapshot, run.sourceOrigin);
     const serialized = canonicalLegacyJson(snapshot);
     if (Buffer.byteLength(serialized, "utf8") > resolveLegacySnapshotMaximumBytes()) throw new LegacyMigrationError("LEGACY_MIGRATION_INVALID", "The non-binary snapshot is too large.");

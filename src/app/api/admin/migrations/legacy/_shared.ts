@@ -30,7 +30,7 @@ export async function readLegacyJson(request: Request): Promise<Record<string, u
 export function legacyErrorResponse(error: unknown) {
   if (isAdminAuthError(error)) return legacyJson({ ok: false, code: error.code }, { status: error.code === "ADMIN_AUTH_REQUIRED" ? 401 : 403 });
   if (isLegacyMigrationError(error)) {
-    const status = error.code === "LEGACY_MIGRATION_NOT_FOUND" ? 404 : error.code === "LEGACY_MIGRATION_CONFLICT" || error.code === "LEGACY_MIGRATION_IMMUTABLE" || error.code === "LEGACY_MIGRATION_NOT_READY" ? 409 : 400;
+    const status = error.code === "LEGACY_MIGRATION_NOT_FOUND" ? 404 : error.code === "LEGACY_MIGRATION_CONFLICT" || error.code === "LEGACY_MIGRATION_IMMUTABLE" || error.code === "LEGACY_MIGRATION_SOURCE_CHANGED" || error.code === "LEGACY_MIGRATION_NOT_READY" ? 409 : 400;
     return legacyJson({ ok: false, code: error.code }, { status });
   }
   if (isAssetError(error)) {

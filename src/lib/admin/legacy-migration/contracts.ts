@@ -82,14 +82,18 @@ export interface LegacyImageCandidate {
   sourceKind: LegacyImageSourceKind;
   contexts: string[];
   state: "REFERENCED" | "ORPHAN";
-  blob: Blob;
   mimeType: string;
   byteSize: number;
   sha256: string;
+}
+
+export interface LegacyImageBinaryReader {
+  readBlob(legacyReference: string, sourceKind: LegacyImageSourceKind): Promise<Blob>;
 }
 
 export interface LegacyBrowserScanResult {
   snapshot: LegacyBrowserSnapshot;
   sourceFingerprint: string;
   imageCandidates: LegacyImageCandidate[];
+  imageReader: LegacyImageBinaryReader;
 }

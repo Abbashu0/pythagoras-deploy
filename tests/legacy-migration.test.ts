@@ -50,6 +50,28 @@ async function usefulScan(png: Buffer) {
   }), [{ key: "banner-one", dataUrl: dataUrl(png) }, { key: "orphan-one", dataUrl: dataUrl(png) }], "http://localhost:3000", "2026-08-22T00:00:00.000Z");
 }
 
+async function fiveImageScan(png: Buffer, title = "خمسة مراجع") {
+  const banners = Array.from({ length: 5 }, (_, index) => ({ id: `banner-${index}`, title, displayOrder: index + 1, imageKey: `image-${index}` }));
+  return scanLegacySource(mapStorage({
+    "pythagoras-admin-banners": JSON.stringify(banners),
+    "pythagoras-admin-materials": "[]", "pythagoras-admin-tools": "[]", "pythagoras-admin-nav-items": "[]",
+  }), banners.map((_, index) => ({ key: `image-${index}`, dataUrl: dataUrl(png) })), "http://localhost:3000", "2026-08-22T00:00:00.000Z");
+}
+
+async function stageCandidate(fixture: Fixture, run: { id: string; revision: number }, candidate: Awaited<ReturnType<typeof fiveImageScan>>["imageCandidates"][number], bytes: Buffer) {
+  return fixture.service.stageAsset({
+    runId: run.id,
+    expectedRevision: run.revision,
+    legacyReference: candidate.legacyReference,
+    sourceKind: candidate.sourceKind,
+    referenceContexts: candidate.contexts,
+    filePath: fixture.stage(bytes),
+    originalFilename: `${candidate.legacyReference}.png`,
+    displayName: candidate.legacyReference,
+    actor: fixture.owner,
+  });
+}
+
 test("client scanner reads only the closed whitelist and distinguishes missing, malformed, duplicates, ordering and inline images", async () => {
   const reads: string[] = [];
   const png = await sharp({ create: { width: 3, height: 2, channels: 4, background: "#123456" } }).png().toBuffer();
@@ -62,7 +84,7 @@ test("client scanner reads only the closed whitelist and distinguishes missing, 
     "pythagoras-admin-nav-items": "[]",
     "pythagoras-admin-tools": "[]",
   }, reads), [{ key: "orphan", dataUrl: dataUrl(png) }], "http://localhost:3000", "2026-01-01T00:00:00.000Z");
-  assert.deepEqual(reads, [...LEGACY_STORAGE_KEYS]);
+  assert.deepEqual([...new Set(reads)], [...LEGACY_STORAGE_KEYS]);
   assert.ok(result.snapshot.issues.some((issue) => issue.code === "MALFORMED_JSON"));
   assert.ok(result.snapshot.issues.some((issue) => issue.code === "DUPLICATE_RECORD_ID"));
   assert.ok(result.snapshot.issues.some((issue) => issue.code === "ORDER_GAP"));
@@ -70,6 +92,8 @@ test("client scanner reads only the closed whitelist and distinguishes missing, 
   assert.ok(result.snapshot.issues.some((issue) => issue.code === "ORPHAN_IMAGE"));
   assert.ok(result.snapshot.issues.some((issue) => issue.code === "INLINE_IMAGE_FOUND"));
   assert.equal(JSON.stringify(result.snapshot).includes(";base64,"), false);
+  assert.equal(JSON.stringify(result).includes(";base64,"), false);
+  assert.equal(result.imageCandidates.some((candidate) => Object.values(candidate).some((value) => value instanceof Blob)), false);
   assert.equal(result.imageCandidates.some((candidate) => candidate.sourceKind === "INLINE"), true);
 });
 
@@ -86,8 +110,57 @@ test("scanner source has static read-only guards and never calls legacy mutators
   const scanner = readFileSync(path.join(process.cwd(), "src/lib/admin/legacy-migration/browser-scanner.ts"), "utf8");
   for (const forbidden of ["localStorage.setItem", "localStorage.removeItem", "localStorage.clear", "deleteImage", "clearAllImages", "cleanupOrphans", '"readwrite"']) assert.equal(scanner.includes(forbidden), false, forbidden);
   assert.ok(scanner.includes('"readonly"'));
+  assert.equal(scanner.includes(".getAll("), false);
+  assert.equal(scanner.includes(".getAllKeys("), false);
+  assert.ok(scanner.includes("openKeyCursor"));
   const shell = readFileSync(path.join(process.cwd(), "src/components/admin/AdminShell.tsx"), "utf8");
   assert.ok(shell.includes('pathname === "/admin/system/migration"'));
+});
+
+test("scanner prioritizes keyed references and retains metadata only while image values are inspected sequentially", async () => {
+  const png = await sharp({ create: { width: 2, height: 2, channels: 4, background: "#112233" } }).png().toBuffer();
+  const encoded = dataUrl(png);
+  const events: string[] = [];
+  let active = 0;
+  let maximumActive = 0;
+  const reader = {
+    async readDataUrl(key: string) {
+      events.push(`read:${key}`);
+      active += 1;
+      maximumActive = Math.max(maximumActive, active);
+      await Promise.resolve();
+      active -= 1;
+      return encoded;
+    },
+    async listKeys() { events.push("list"); return ["referenced", "orphan-a", "orphan-b"]; },
+  };
+  const result = await scanLegacySource(mapStorage({
+    "pythagoras-admin-banners": JSON.stringify([{ id: "banner", displayOrder: 1, imageKey: "referenced" }]),
+    "pythagoras-admin-materials": "[]", "pythagoras-admin-tools": "[]", "pythagoras-admin-nav-items": "[]",
+  }), reader, "http://localhost:3000");
+  assert.deepEqual(events, ["read:referenced", "list", "read:orphan-a", "read:orphan-b"]);
+  assert.equal(maximumActive, 1);
+  assert.equal(result.imageCandidates.length, 3);
+  assert.equal(JSON.stringify(result).includes("data:image"), false);
+  assert.equal(result.imageCandidates.some((candidate) => Object.values(candidate).some((value) => value instanceof Blob)), false);
+});
+
+test("order diagnostics accept zero- and one-based sequences while detecting actual gaps, duplicates and invalid values", async () => {
+  const scanOrders = async (orders: unknown[]) => scanLegacySource(mapStorage({
+    "pythagoras-admin-banners": JSON.stringify(orders.map((displayOrder, index) => ({ id: `banner-${index}`, displayOrder }))),
+    "pythagoras-admin-materials": "[]", "pythagoras-admin-tools": "[]", "pythagoras-admin-nav-items": "[]",
+  }), [], "http://localhost:3000");
+  const oneBased = await scanOrders([1, 2, 3, 4, 5]);
+  const zeroBased = await scanOrders([0, 1, 2, 3]);
+  const gap = await scanOrders([0, 2, 3]);
+  const duplicate = await scanOrders([1, 1, 2]);
+  const invalid = await scanOrders([0, "2", 3]);
+  assert.equal(oneBased.snapshot.issues.some((issue) => issue.code.startsWith("ORDER_") || issue.code === "DUPLICATE_ORDER" || issue.code === "INVALID_ORDER"), false);
+  assert.equal(zeroBased.snapshot.issues.some((issue) => issue.code.startsWith("ORDER_") || issue.code === "DUPLICATE_ORDER" || issue.code === "INVALID_ORDER"), false);
+  assert.equal(gap.snapshot.issues.some((issue) => issue.code === "ORDER_GAP"), true);
+  assert.equal(duplicate.snapshot.issues.some((issue) => issue.code === "DUPLICATE_ORDER"), true);
+  assert.equal(invalid.snapshot.issues.some((issue) => issue.code === "INVALID_ORDER"), true);
+  assert.deepEqual((oneBased.snapshot.sections.banners as Array<{ displayOrder: number }>).map((record) => record.displayOrder), [1, 2, 3, 4, 5]);
 });
 
 test("OWNER stages a persistent snapshot and image mapping, deduplicates bytes, and READY survives restart", async () => {
@@ -154,6 +227,126 @@ test("snapshot validation rejects sensitive fields, binary payloads and unknown 
     const unsafe = structuredClone(scan.snapshot) as typeof scan.snapshot & { password?: string };
     unsafe.password = "not-allowed";
     assert.throws(() => fixture.service.storeSnapshot(run.id, run.revision, unsafe, scan.sourceFingerprint, fixture.owner), (error) => error instanceof LegacyMigrationError && error.code === "LEGACY_MIGRATION_INVALID");
+  } finally { fixture.close(); }
+});
+
+test("IMPORTING run resumes after restart, stages only five required mappings, and finalizes without a duplicate run", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "pythagoras-legacy-resume-"));
+  let database = openContentDatabase({ dataDirectory: root, migrationsDirectory });
+  const identities = new SQLiteAdminIdentityRepository(database);
+  const ownerUser = identities.createInitialOwner({ id: uuidv7(), email: "resume@legacy.test", displayName: "Resume Owner", passwordHash: "$argon2id$test", createdAt: 1_900_000_000_000 });
+  const owner: AdminActor = { actorUserId: ownerUser.id, actorRole: "OWNER" };
+  const png = await sharp({ create: { width: 4, height: 4, channels: 4, background: "#445566" } }).png().toBuffer();
+  const source = await fiveImageScan(png);
+  const makeService = (db: ContentDatabase) => createLegacyMigrationService(db, new AssetService(new SQLiteAssetRepository(db), new LocalFileAssetStorage(db.paths.objectStorageDirectory), { stagingDirectory: db.paths.tempDirectory, maximumAssetBytes: 1024 * 1024 }));
+  const stageFile = (db: ContentDatabase) => { const file = path.join(db.paths.tempDirectory, `${uuidv7()}.upload`); writeFileSync(file, png); return file; };
+  try {
+    let service = makeService(database);
+    let run = service.createRun(source.snapshot.origin, owner);
+    run = service.storeSnapshot(run.id, run.revision, source.snapshot, source.sourceFingerprint, owner).run;
+    for (const candidate of source.imageCandidates.slice(0, 2)) {
+      await service.stageAsset({ runId: run.id, expectedRevision: run.revision, legacyReference: candidate.legacyReference, sourceKind: candidate.sourceKind, referenceContexts: candidate.contexts, filePath: stageFile(database), originalFilename: `${candidate.legacyReference}.png`, displayName: candidate.legacyReference, actor: owner });
+    }
+    assert.equal(service.get(run.id, owner).assets.length, 2);
+    database.close();
+    database = openContentDatabase({ dataDirectory: root, migrationsDirectory });
+    service = makeService(database);
+    const rescanned = await fiveImageScan(png);
+    const resumed = service.resume(run.id, rescanned.sourceFingerprint, owner);
+    assert.equal(resumed.run.status, "IMPORTING");
+    assert.equal(resumed.assets.length, 2);
+    const mapped = new Set(resumed.assets.map((mapping) => mapping.legacyReference));
+    for (const candidate of rescanned.imageCandidates.filter((item) => !mapped.has(item.legacyReference))) {
+      await service.stageAsset({ runId: run.id, expectedRevision: resumed.run.revision, legacyReference: candidate.legacyReference, sourceKind: candidate.sourceKind, referenceContexts: candidate.contexts, filePath: stageFile(database), originalFilename: `${candidate.legacyReference}.png`, displayName: candidate.legacyReference, actor: owner });
+    }
+    const beforeFinalize = service.get(run.id, owner);
+    assert.equal(beforeFinalize.assets.length, 5);
+    const ready = service.finalize(run.id, beforeFinalize.run.revision, owner);
+    assert.equal(ready.status, "READY");
+    assert.equal(service.list(owner).length, 1);
+  } finally {
+    database.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("changed source fingerprint is refused while the original IMPORTING run and mappings remain intact", async () => {
+  const fixture = createFixture();
+  const png = await sharp({ create: { width: 3, height: 3, channels: 4, background: "#778899" } }).png().toBuffer();
+  try {
+    const sourceA = await fiveImageScan(png, "A");
+    const sourceB = await fiveImageScan(png, "B");
+    let run = fixture.service.createRun(sourceA.snapshot.origin, fixture.owner);
+    run = fixture.service.storeSnapshot(run.id, run.revision, sourceA.snapshot, sourceA.sourceFingerprint, fixture.owner).run;
+    await stageCandidate(fixture, run, sourceA.imageCandidates[0], png);
+    assert.throws(() => fixture.service.resume(run.id, sourceB.sourceFingerprint, fixture.owner), (error) => error instanceof LegacyMigrationError && error.code === "LEGACY_MIGRATION_SOURCE_CHANGED");
+    const intact = fixture.service.get(run.id, fixture.owner);
+    assert.equal(intact.run.sourceFingerprint, sourceA.sourceFingerprint);
+    assert.equal(intact.run.status, "IMPORTING");
+    assert.equal(intact.assets.length, 1);
+  } finally { fixture.close(); }
+});
+
+test("READY fingerprint is reusable without creating another migration run", async () => {
+  const fixture = createFixture();
+  const png = await sharp({ create: { width: 2, height: 2, channels: 4, background: "#aa5500" } }).png().toBuffer();
+  try {
+    const source = await usefulScan(png);
+    let run = fixture.service.createRun(source.snapshot.origin, fixture.owner);
+    run = fixture.service.storeSnapshot(run.id, run.revision, source.snapshot, source.sourceFingerprint, fixture.owner).run;
+    const candidate = source.imageCandidates.find((item) => item.state === "REFERENCED")!;
+    await stageCandidate(fixture, run, candidate, png);
+    run = fixture.service.finalize(run.id, run.revision, fixture.owner);
+    const reusable = fixture.service.findReadyByFingerprint(source.sourceFingerprint, fixture.owner);
+    assert.equal(reusable?.id, run.id);
+    assert.equal(fixture.service.list(fixture.owner).length, 1);
+  } finally { fixture.close(); }
+});
+
+test("source snapshot is immutable after first store and old mappings remain attached to snapshot A", async () => {
+  const fixture = createFixture();
+  const png = await sharp({ create: { width: 2, height: 3, channels: 4, background: "#225588" } }).png().toBuffer();
+  try {
+    const sourceA = await usefulScan(png);
+    const sourceB = await fiveImageScan(png, "replacement");
+    let run = fixture.service.createRun(sourceA.snapshot.origin, fixture.owner);
+    run = fixture.service.storeSnapshot(run.id, run.revision, sourceA.snapshot, sourceA.sourceFingerprint, fixture.owner).run;
+    const candidate = sourceA.imageCandidates.find((item) => item.state === "REFERENCED")!;
+    await stageCandidate(fixture, run, candidate, png);
+    assert.throws(() => fixture.service.storeSnapshot(run.id, run.revision, sourceB.snapshot, sourceB.sourceFingerprint, fixture.owner), (error) => error instanceof LegacyMigrationError && error.code === "LEGACY_MIGRATION_IMMUTABLE");
+    const intact = fixture.service.get(run.id, fixture.owner);
+    assert.equal(intact.run.sourceFingerprint, sourceA.sourceFingerprint);
+    assert.equal(intact.assets.length, 1);
+    assert.equal(intact.assets[0].legacyReference, candidate.legacyReference);
+  } finally { fixture.close(); }
+});
+
+test("finalization rejects a stale mapping not represented by the immutable snapshot", async () => {
+  const fixture = createFixture();
+  const png = await sharp({ create: { width: 2, height: 2, channels: 4, background: "#882244" } }).png().toBuffer();
+  try {
+    const source = await usefulScan(png);
+    let run = fixture.service.createRun(source.snapshot.origin, fixture.owner);
+    run = fixture.service.storeSnapshot(run.id, run.revision, source.snapshot, source.sourceFingerprint, fixture.owner).run;
+    const candidate = source.imageCandidates.find((item) => item.state === "REFERENCED")!;
+    const staged = await stageCandidate(fixture, run, candidate, png);
+    fixture.database.client.prepare(`insert into legacy_migration_assets (id,run_id,legacy_reference,source_kind,asset_id,reference_contexts,reused,created_at) values (?,?,?,?,?,?,?,?)`).run(uuidv7(), run.id, "stale-reference", "INDEXED_DB", staged.assetId, "[]", 1, Date.now());
+    assert.throws(() => fixture.service.finalize(run.id, run.revision, fixture.owner), (error) => error instanceof LegacyMigrationError && error.code === "LEGACY_MIGRATION_NOT_READY");
+    assert.equal(fixture.service.get(run.id, fixture.owner).run.status, "IMPORTING");
+  } finally { fixture.close(); }
+});
+
+test("mapping idempotency rejects inconsistent source metadata even when the Asset bytes are identical", async () => {
+  const fixture = createFixture();
+  const png = await sharp({ create: { width: 2, height: 2, channels: 4, background: "#337744" } }).png().toBuffer();
+  try {
+    const source = await usefulScan(png);
+    let run = fixture.service.createRun(source.snapshot.origin, fixture.owner);
+    run = fixture.service.storeSnapshot(run.id, run.revision, source.snapshot, source.sourceFingerprint, fixture.owner).run;
+    const candidate = source.imageCandidates.find((item) => item.state === "REFERENCED")!;
+    await stageCandidate(fixture, run, candidate, png);
+    fixture.database.client.prepare("update legacy_migration_assets set reference_contexts=? where run_id=? and legacy_reference=?").run('["stale.context"]', run.id, candidate.legacyReference);
+    await assert.rejects(() => stageCandidate(fixture, run, candidate, png), (error) => error instanceof LegacyMigrationError && error.code === "LEGACY_MIGRATION_CONFLICT");
   } finally { fixture.close(); }
 });
 

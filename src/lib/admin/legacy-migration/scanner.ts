@@ -5,6 +5,8 @@ import {
   type LegacyBrowserScanResult,
   type LegacyBrowserSnapshot,
   type LegacyImageCandidate,
+  type LegacyImageBinaryReader,
+  type LegacyImageSourceKind,
   type LegacyMigrationIssue,
   type LegacyStorageEvidence,
   type LegacyStorageKey,
@@ -17,6 +19,17 @@ export interface ReadonlyLegacyStorage {
 export interface LegacyImageInput {
   key: string;
   dataUrl: string;
+}
+
+export interface LegacyIndexedImageReader {
+  readDataUrl(key: string): Promise<string | null>;
+  listKeys(): Promise<string[]>;
+}
+
+interface LegacyInlineLocator {
+  storageKey: LegacyStorageKey;
+  path: Array<string | number>;
+  contexts: string[];
 }
 
 const JSON_KEYS = new Set<LegacyStorageKey>([
@@ -69,14 +82,14 @@ async function sha256(bytes: Uint8Array): Promise<string> {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-async function decodeSafeImageDataUrl(dataUrl: string): Promise<{ blob: Blob; mimeType: string; bytes: Uint8Array }> {
+async function decodeSafeImageDataUrl(dataUrl: string): Promise<{ mimeType: string; bytes: Uint8Array }> {
   const match = /^data:([^;,]+);base64,([A-Za-z0-9+/=\s]+)$/u.exec(dataUrl);
   if (!match || !SAFE_DATA_MIMES.has(match[1].toLowerCase())) throw new Error("UNSUPPORTED_IMAGE");
   const binary = atob(match[2].replace(/\s/gu, ""));
   const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
   if (bytes.byteLength === 0) throw new Error("INVALID_IMAGE_DATA_URL");
   const mimeType = match[1].toLowerCase();
-  return { bytes, mimeType, blob: new Blob([bytes], { type: mimeType }) };
+  return { bytes, mimeType };
 }
 
 function recordIssue(
@@ -91,12 +104,19 @@ function recordIssue(
 }
 
 function inspectOrdering(records: unknown[], section: string, issues: LegacyMigrationIssue[]) {
-  const orders = records
+  const present = records
     .map((record) => record && typeof record === "object" ? (record as Record<string, unknown>).order ?? (record as Record<string, unknown>).displayOrder : undefined)
-    .filter((order): order is number => typeof order === "number" && Number.isInteger(order))
-    .sort((a, b) => a - b);
-  if (orders.length > 1 && orders.some((order, index) => order !== index)) {
-    recordIssue(issues, "WARNING", "ORDER_GAP", section, "ترتيب السجلات يحتوي على فجوة أو قيمة غير متوقعة.");
+    .filter((order) => order !== undefined);
+  if (present.some((order) => typeof order !== "number" || !Number.isInteger(order))) {
+    recordIssue(issues, "WARNING", "INVALID_ORDER", section, "توجد قيمة ترتيب غير صحيحة؛ تم الاحتفاظ بالقيمة الأصلية دون تعديل.");
+  }
+  const orders = present.filter((order): order is number => typeof order === "number" && Number.isInteger(order)).sort((a, b) => a - b);
+  if (new Set(orders).size !== orders.length) {
+    recordIssue(issues, "WARNING", "DUPLICATE_ORDER", section, "توجد قيم ترتيب مكررة؛ تم الاحتفاظ بالقيم الأصلية دون إعادة فهرسة.");
+  }
+  const unique = [...new Set(orders)];
+  if (unique.some((order, index) => index > 0 && order - unique[index - 1] > 1)) {
+    recordIssue(issues, "WARNING", "ORDER_GAP", section, "توجد فجوة داخل تسلسل الترتيب؛ تم الاحتفاظ بالقيم الأصلية دون إعادة فهرسة.");
   }
 }
 
@@ -116,18 +136,42 @@ function inspectIds(records: unknown[], section: string, issues: LegacyMigration
 function extractInlineImages(
   value: unknown,
   context: string,
-  inline: Map<string, { dataUrl: string; contexts: string[] }>,
+  storageKey: LegacyStorageKey,
+  path: Array<string | number>,
+  inline: Map<string, LegacyInlineLocator>,
 ): unknown {
   if (typeof value === "string" && value.startsWith("data:")) {
     const reference = `inline:${context}`;
-    inline.set(reference, { dataUrl: value, contexts: [context] });
+    inline.set(reference, { storageKey, path, contexts: [context] });
     return { legacyImageReference: reference, originallyInline: true };
   }
-  if (Array.isArray(value)) return value.map((child, index) => extractInlineImages(child, `${context}[${index}]`, inline));
+  if (Array.isArray(value)) return value.map((child, index) => extractInlineImages(child, `${context}[${index}]`, storageKey, [...path, index], inline));
   if (value && typeof value === "object") {
-    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, child]) => [key, extractInlineImages(child, `${context}.${key}`, inline)]));
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, child]) => [key, extractInlineImages(child, `${context}.${key}`, storageKey, [...path, key], inline)]));
   }
   return value;
+}
+
+function createArrayImageReader(images: readonly LegacyImageInput[]): LegacyIndexedImageReader {
+  const values = new Map(images.map((image) => [image.key, image.dataUrl]));
+  return {
+    async readDataUrl(key) { return values.get(key) ?? null; },
+    async listKeys() { return [...values.keys()]; },
+  };
+}
+
+function readInlineDataUrl(storage: ReadonlyLegacyStorage, locator: LegacyInlineLocator): string | null {
+  const raw = storage.getItem(locator.storageKey);
+  if (raw === null) return null;
+  try {
+    let value: unknown = JSON.parse(raw);
+    for (const segment of locator.path) {
+      if (typeof segment === "number" && Array.isArray(value)) value = value[segment];
+      else if (typeof segment === "string" && value && typeof value === "object" && !Array.isArray(value)) value = (value as Record<string, unknown>)[segment];
+      else return null;
+    }
+    return typeof value === "string" ? value : null;
+  } catch { return null; }
 }
 
 function collectImageKeyReferences(value: unknown, context: string, output: Map<string, string[]>) {
@@ -148,15 +192,18 @@ function collectImageKeyReferences(value: unknown, context: string, output: Map<
 
 export async function scanLegacySource(
   storage: ReadonlyLegacyStorage,
-  indexedImages: readonly LegacyImageInput[],
+  indexedImages: readonly LegacyImageInput[] | LegacyIndexedImageReader,
   origin: string,
   capturedAt = new Date().toISOString(),
 ): Promise<LegacyBrowserScanResult> {
   const evidence: LegacyStorageEvidence[] = [];
   const sections: Record<string, unknown> = {};
   const issues: LegacyMigrationIssue[] = [];
-  const inline = new Map<string, { dataUrl: string; contexts: string[] }>();
+  const inline = new Map<string, LegacyInlineLocator>();
   const references = new Map<string, string[]>();
+  const indexedReader: LegacyIndexedImageReader = Array.isArray(indexedImages)
+    ? createArrayImageReader(indexedImages)
+    : indexedImages as LegacyIndexedImageReader;
 
   for (const key of LEGACY_STORAGE_KEYS) {
     const raw = storage.getItem(key);
@@ -173,7 +220,7 @@ export async function scanLegacySource(
     }
     try {
       const parsed = JSON.parse(raw) as unknown;
-      const sanitized = extractInlineImages(parsed, SECTION_NAMES[key], inline);
+      const sanitized = extractInlineImages(parsed, SECTION_NAMES[key], key, [], inline);
       sections[SECTION_NAMES[key]] = sanitized;
       evidence.push({ key, present: true, parsedStatus: "JSON", rawValue: canonicalLegacyJson(sanitized) });
       collectImageKeyReferences(sanitized, SECTION_NAMES[key], references);
@@ -191,22 +238,26 @@ export async function scanLegacySource(
     }
   }
 
-  const imageByKey = new Map(indexedImages.map((image) => [image.key, image.dataUrl]));
   const imageCandidates: LegacyImageCandidate[] = [];
   const imageReferences: LegacyBrowserSnapshot["references"]["images"] = [];
 
+  const inspectImage = async (legacyReference: string, sourceKind: LegacyImageSourceKind, contexts: string[], state: "REFERENCED" | "ORPHAN", dataUrl: string) => {
+    const decoded = await decodeSafeImageDataUrl(dataUrl);
+    const digest = await sha256(decoded.bytes);
+    const metadata = { legacyReference, sourceKind, contexts, state, mimeType: decoded.mimeType, byteSize: decoded.bytes.byteLength, sha256: digest } satisfies LegacyImageCandidate;
+    imageCandidates.push(metadata);
+    imageReferences.push(metadata);
+  };
+
   for (const [legacyReference, contexts] of references) {
-    const dataUrl = imageByKey.get(legacyReference);
+    const dataUrl = await indexedReader.readDataUrl(legacyReference);
     if (!dataUrl) {
       imageReferences.push({ legacyReference, sourceKind: "INDEXED_DB", contexts, state: "MISSING_REFERENCE", mimeType: null, byteSize: null, sha256: null });
       recordIssue(issues, "ERROR", "MISSING_IMAGE_REFERENCE", "images", "مرجع صورة مستخدم غير موجود في IndexedDB.", legacyReference);
       continue;
     }
     try {
-      const decoded = await decodeSafeImageDataUrl(dataUrl);
-      const digest = await sha256(decoded.bytes);
-      imageCandidates.push({ legacyReference, sourceKind: "INDEXED_DB", contexts, state: "REFERENCED", blob: decoded.blob, mimeType: decoded.mimeType, byteSize: decoded.bytes.byteLength, sha256: digest });
-      imageReferences.push({ legacyReference, sourceKind: "INDEXED_DB", contexts, state: "REFERENCED", mimeType: decoded.mimeType, byteSize: decoded.bytes.byteLength, sha256: digest });
+      await inspectImage(legacyReference, "INDEXED_DB", contexts, "REFERENCED", dataUrl);
     } catch (error) {
       const code = error instanceof Error ? error.message : "INVALID_IMAGE_DATA_URL";
       recordIssue(issues, "ERROR", code, "images", "صورة قديمة غير صالحة أو من نوع غير آمن.", legacyReference);
@@ -215,10 +266,9 @@ export async function scanLegacySource(
 
   for (const [legacyReference, source] of inline) {
     try {
-      const decoded = await decodeSafeImageDataUrl(source.dataUrl);
-      const digest = await sha256(decoded.bytes);
-      imageCandidates.push({ legacyReference, sourceKind: "INLINE", contexts: source.contexts, state: "REFERENCED", blob: decoded.blob, mimeType: decoded.mimeType, byteSize: decoded.bytes.byteLength, sha256: digest });
-      imageReferences.push({ legacyReference, sourceKind: "INLINE", contexts: source.contexts, state: "REFERENCED", mimeType: decoded.mimeType, byteSize: decoded.bytes.byteLength, sha256: digest });
+      const dataUrl = readInlineDataUrl(storage, source);
+      if (!dataUrl) throw new Error("INVALID_IMAGE_DATA_URL");
+      await inspectImage(legacyReference, "INLINE", source.contexts, "REFERENCED", dataUrl);
       recordIssue(issues, "INFO", "INLINE_IMAGE_FOUND", "images", "تم استخراج صورة مضمنة من snapshot قبل الإرسال.", legacyReference);
     } catch (error) {
       const code = error instanceof Error ? error.message : "INVALID_IMAGE_DATA_URL";
@@ -226,16 +276,15 @@ export async function scanLegacySource(
     }
   }
 
-  for (const image of indexedImages) {
-    if (references.has(image.key)) continue;
+  for (const key of await indexedReader.listKeys()) {
+    if (references.has(key)) continue;
     try {
-      const decoded = await decodeSafeImageDataUrl(image.dataUrl);
-      const digest = await sha256(decoded.bytes);
-      imageCandidates.push({ legacyReference: image.key, sourceKind: "INDEXED_DB", contexts: [], state: "ORPHAN", blob: decoded.blob, mimeType: decoded.mimeType, byteSize: decoded.bytes.byteLength, sha256: digest });
-      imageReferences.push({ legacyReference: image.key, sourceKind: "INDEXED_DB", contexts: [], state: "ORPHAN", mimeType: decoded.mimeType, byteSize: decoded.bytes.byteLength, sha256: digest });
-      recordIssue(issues, "WARNING", "ORPHAN_IMAGE", "images", "صورة قديمة غير مرتبطة بسجل حالي؛ لم تُحذف.", image.key);
+      const dataUrl = await indexedReader.readDataUrl(key);
+      if (!dataUrl) continue;
+      await inspectImage(key, "INDEXED_DB", [], "ORPHAN", dataUrl);
+      recordIssue(issues, "WARNING", "ORPHAN_IMAGE", "images", "صورة قديمة غير مرتبطة بسجل حالي؛ لم تُحذف.", key);
     } catch {
-      recordIssue(issues, "WARNING", "UNSUPPORTED_IMAGE", "images", "صورة يتيمة غير صالحة أو غير مدعومة؛ لم تُحذف.", image.key);
+      recordIssue(issues, "WARNING", "UNSUPPORTED_IMAGE", "images", "صورة يتيمة غير صالحة أو غير مدعومة؛ لم تُحذف.", key);
     }
   }
 
@@ -251,5 +300,16 @@ export async function scanLegacySource(
   };
   const fingerprintPayload = { format: snapshot.format, version: snapshot.version, origin, sections, images: snapshot.references.images.map(({ legacyReference, sourceKind, state, sha256: digest }) => ({ legacyReference, sourceKind, state, sha256: digest })) };
   const sourceFingerprint = await sha256(new TextEncoder().encode(canonicalLegacyJson(fingerprintPayload)));
-  return { snapshot, sourceFingerprint, imageCandidates };
+  const imageReader: LegacyImageBinaryReader = {
+    async readBlob(legacyReference, sourceKind) {
+      const dataUrl = sourceKind === "INDEXED_DB"
+        ? await indexedReader.readDataUrl(legacyReference)
+        : (() => { const locator = inline.get(legacyReference); return locator ? readInlineDataUrl(storage, locator) : null; })();
+      if (!dataUrl) throw new Error("LEGACY_IMAGE_NOT_FOUND");
+      const decoded = await decodeSafeImageDataUrl(dataUrl);
+      const bytes = decoded.bytes.buffer.slice(decoded.bytes.byteOffset, decoded.bytes.byteOffset + decoded.bytes.byteLength) as ArrayBuffer;
+      return new Blob([bytes], { type: decoded.mimeType });
+    },
+  };
+  return { snapshot, sourceFingerprint, imageCandidates, imageReader };
 }

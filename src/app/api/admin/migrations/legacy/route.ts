@@ -7,7 +7,12 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
-  try { const actor = requireLegacyOwner(request); return legacyJson({ ok: true, runs: getLegacyMigrationService().list(actor) }); }
+  try {
+    const actor = requireLegacyOwner(request);
+    const fingerprint = request.nextUrl.searchParams.get("fingerprint");
+    if (fingerprint) return legacyJson({ ok: true, readyRun: getLegacyMigrationService().findReadyByFingerprint(fingerprint, actor) });
+    return legacyJson({ ok: true, runs: getLegacyMigrationService().list(actor) });
+  }
   catch (error) { return legacyErrorResponse(error); }
 }
 
