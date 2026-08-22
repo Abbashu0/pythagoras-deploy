@@ -156,14 +156,14 @@ function normalizeTool(item, index) {
   };
 }
 export function getSponsoredBanners() {
-  if (!isLegacyRuntimeContent()) return runtimeContent.content.banners.map((item) => normalizeBanner({ ...item, enabled: item.status === "ACTIVE", image: item.imageUrl })).filter((banner) => banner.enabled).sort((left, right) => left.displayOrder - right.displayOrder);
+  if (!isLegacyRuntimeContent()) return runtimeContent.content.banners.map((item) => normalizeBanner({ ...item, bannerType: String(item.bannerType).toLowerCase(), transform: { offsetX: item.offsetX, offsetY: item.offsetY, scale: item.scale }, enabled: item.status === "ACTIVE", image: item.imageUrl })).filter((banner) => banner.enabled).sort((left, right) => left.displayOrder - right.displayOrder);
   return readLocalArray(ADMIN_BANNERS_KEY, defaultBanners)
     .map(normalizeBanner)
     .filter((banner) => banner.enabled)
     .sort((left, right) => left.displayOrder - right.displayOrder);
 }
 export function getTestSubjects() {
-  if (!isLegacyRuntimeContent()) return runtimeContent.content.materials.map((item) => normalizeMaterial({ ...item, id: item.subjectKey, icon: item.iconKey, order: item.displayOrder, image: item.imageUrl })).filter((subject) => subject.available !== false).sort((left, right) => left.order - right.order);
+  if (!isLegacyRuntimeContent()) return runtimeContent.content.materials.map((item) => normalizeMaterial({ ...item, id: item.subjectKey, icon: item.iconKey, order: item.displayOrder, transform: { offsetX: item.offsetX, offsetY: item.offsetY, scale: item.scale }, image: item.imageUrl })).filter((subject) => subject.available !== false).sort((left, right) => left.order - right.order);
   return readLocalArray(ADMIN_MATERIALS_KEY, defaultSubjects)
     .map(normalizeMaterial)
     .filter((subject) => subject.available !== false)

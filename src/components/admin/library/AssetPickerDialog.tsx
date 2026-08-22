@@ -12,25 +12,27 @@ interface BrowseResponse { ok: true; items: LibraryAsset[]; total: number }
 
 export function AssetPickerDialog({ open, onOpenChange, onSelect }: { open: boolean; onOpenChange: (open: boolean) => void; onSelect: (asset: LibraryAsset) => void }) {
   const [assets, setAssets] = useState<LibraryAsset[]>([]);
+  const [total, setTotal] = useState(0);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (offset = 0) => {
     setLoading(true); setError(null);
     try {
-      const params = new URLSearchParams({ mediaKind: "image", limit: "200", sort: "newest" });
+      const params = new URLSearchParams({ mediaKind: "image", limit: "24", offset: String(offset), sort: "newest" });
       if (query.trim()) params.set("q", query.trim());
       const response = await fetch(`/api/admin/assets?${params}`, { cache: "no-store" });
       const body = await parseApiResponse<BrowseResponse>(response);
-      setAssets(body.items);
+      setAssets((current) => offset === 0 ? body.items : [...current, ...body.items]);
+      setTotal(body.total);
     } catch (cause) {
       if (!handleExpiredSession(cause)) setError(cause instanceof Error ? cause.message : "تعذر تحميل الصور.");
     } finally { setLoading(false); }
   }, [query]);
 
-  useEffect(() => { if (open) void load(); }, [open, load]);
+  useEffect(() => { if (open) void load(0); }, [open, load]);
 
   return <>
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -44,9 +46,10 @@ export function AssetPickerDialog({ open, onOpenChange, onSelect }: { open: bool
         {loading ? <div className="grid min-h-64 place-items-center"><Loader2 className="h-7 w-7 animate-spin text-primary"/></div>
           : assets.length ? <AssetBrowser assets={assets} view="grid" onSelectAsset={(asset) => { onSelect(asset); onOpenChange(false); }} />
             : <AssetBrowserEmpty filtered={Boolean(query.trim())}/>}<span className="sr-only">قائمة الصور</span>
+        {assets.length < total && !loading ? <Button type="button" variant="outline" className="mx-auto" onClick={() => void load(assets.length)}>تحميل المزيد</Button> : null}
         <div className="flex items-center gap-2 text-xs text-muted-foreground"><ImagePlus className="h-4 w-4"/>لا تُنسخ الصورة داخل السجل؛ يُحفظ Asset ID فقط.</div>
       </DialogContent>
     </Dialog>
-    <AssetUploadDialog open={uploadOpen} onOpenChange={setUploadOpen} onCompleted={() => void load()} />
+    <AssetUploadDialog open={uploadOpen} onOpenChange={setUploadOpen} onCompleted={() => void load(0)} />
   </>;
 }

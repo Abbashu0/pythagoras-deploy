@@ -141,4 +141,10 @@ test("M7 Admin surfaces no longer import legacy product stores and Student has o
   assert.equal(/localStorage|indexedDB|ImageDB/u.test(workspace), false);
   const student = readFileSync(path.join(process.cwd(), "public/pythagoras/src/scripts/data.js"), "utf8");
   assert.ok(student.includes('/api/content/app')); assert.ok(student.includes('runtimeSourceMode === "LEGACY"'));
+  assert.ok(student.includes("bannerType: String(item.bannerType).toLowerCase()"));
+  assert.ok(student.includes("transform: { offsetX: item.offsetX, offsetY: item.offsetY, scale: item.scale }"));
+  const picker = readFileSync(path.join(process.cwd(), "src/components/admin/library/AssetPickerDialog.tsx"), "utf8");
+  assert.ok(picker.includes("تحميل المزيد"));
+  const cutover = readFileSync(path.join(process.cwd(), "src/components/admin/CanonicalCutoverPanel.tsx"), "utf8");
+  assert.ok(cutover.includes("معاينة Canonical"));
 });
