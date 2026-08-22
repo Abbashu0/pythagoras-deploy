@@ -15,7 +15,7 @@ export const CHANGE_SET_STATUSES = [
 
 export type ChangeSetStatus = (typeof CHANGE_SET_STATUSES)[number];
 
-export const CHANGE_OPERATIONS = ["UPDATE"] as const;
+export const CHANGE_OPERATIONS = ["CREATE", "UPDATE"] as const;
 export type ChangeOperation = (typeof CHANGE_OPERATIONS)[number];
 
 export const CHANGE_CONFLICT_STATES = ["NONE", "BLOCKING", "AUTO_MERGED"] as const;
@@ -133,20 +133,22 @@ export interface ChangeResourceAdapter {
   readonly resourceType: string;
   readonly areaLabel: string;
   loadCurrent(database: ContentDatabase, resourceId: string): ResourceState;
-  captureProposal(database: ContentDatabase, resourceId: string, desired: unknown): {
+  captureProposal(database: ContentDatabase, resourceId: string, desired: unknown, operation?: ChangeOperation): {
     current: ResourceState;
     proposedSnapshot: ChangeSnapshot;
     changedPaths: string[];
   };
-  validateSnapshot(snapshot: ChangeSnapshot): void;
-  describe(resourceId: string, before: ChangeSnapshot, proposed: ChangeSnapshot): ChangePresentation;
+  validateSnapshot(snapshot: ChangeSnapshot, operation?: ChangeOperation): void;
+  describe(resourceId: string, before: ChangeSnapshot, proposed: ChangeSnapshot, operation?: ChangeOperation): ChangePresentation;
   apply(
     database: ContentDatabase,
     resourceId: string,
     snapshot: ChangeSnapshot,
     expectedRevision: number,
     actor: AdminActor,
+    operation?: ChangeOperation,
   ): ResourceState;
+  validatePublication?(database: ContentDatabase): void;
 }
 
 export interface ChangeSetAuthor {
@@ -203,7 +205,15 @@ export interface CreateChangeSetInput {
     resourceId: string;
     expectedRevision: number;
     desired: unknown;
+    operation?: ChangeOperation;
   };
+  initialItems?: Array<{
+    resourceType: string;
+    resourceId: string;
+    expectedRevision: number;
+    desired: unknown;
+    operation?: ChangeOperation;
+  }>;
   submit?: boolean;
 }
 

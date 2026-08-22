@@ -406,7 +406,7 @@ test("the current migration chain upgrades an existing M1 database without losin
       dataDirectory: dataRoot,
       migrationsDirectory,
     });
-    assert.equal(getContentDatabaseStatus(upgraded).migrationsApplied, 5);
+    assert.equal(getContentDatabaseStatus(upgraded).migrationsApplied, 6);
     const tables = upgraded.client
       .prepare(
         "select name from sqlite_master where type = 'table' and name in ('admin_users', 'admin_sessions') order by name",
@@ -418,7 +418,7 @@ test("the current migration chain upgrades an existing M1 database without losin
     );
     upgraded.close();
   } finally {
-    rmSync(dataRoot, { recursive: true, force: true });
+    rmSync(dataRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
     rmSync(m1Migrations, { recursive: true, force: true });
   }
 });

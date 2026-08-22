@@ -51,7 +51,7 @@ test("creates the complete local data layout", () => {
       assert.equal(existsSync(directory), true, `missing directory: ${directory}`);
     }
   } finally {
-    rmSync(temporaryDirectory, { recursive: true, force: true });
+    rmSync(temporaryDirectory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
 
@@ -70,7 +70,7 @@ test("runs migrations and persists repository data across database restarts", ()
     });
     assert.equal(created.revision, 1);
     assert.match(created.id, /^[0-9a-f-]{36}$/);
-    assert.equal(getContentDatabaseStatus(firstDatabase).migrationsApplied, 5);
+    assert.equal(getContentDatabaseStatus(firstDatabase).migrationsApplied, 6);
     firstDatabase.close();
 
     const secondDatabase = openContentDatabase({
@@ -95,7 +95,7 @@ test("runs migrations and persists repository data across database restarts", ()
     assert.equal(secondRepository.listByType("system-setting").length, 1);
     secondDatabase.close();
   } finally {
-    rmSync(temporaryDirectory, { recursive: true, force: true });
+    rmSync(temporaryDirectory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
 

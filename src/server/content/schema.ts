@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { check, index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { check, index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 import type { AdminRole } from "../admin-auth/contracts";
 import type { AssetMediaKind } from "../assets/contracts";
 import type {
@@ -183,6 +183,203 @@ export const assets = sqliteTable(
 export type AssetRow = typeof assets.$inferSelect;
 export type NewAssetRow = typeof assets.$inferInsert;
 
+export const canonicalContentState = sqliteTable(
+  "canonical_content_state",
+  {
+    id: text("id").primaryKey(),
+    bootstrapVersion: integer("bootstrap_version").notNull(),
+    bootstrapCompletedAt: integer("bootstrap_completed_at").notNull(),
+    runtimeSourceMode: text("runtime_source_mode").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    updatedBy: text("updated_by").references(() => adminUsers.id, { onDelete: "restrict" }),
+    revision: integer("revision").notNull().default(1),
+  },
+  (table) => [
+    check("canonical_content_state_singleton", sql`${table.id} = 'global'`),
+    check("canonical_content_state_bootstrap_positive", sql`${table.bootstrapVersion} >= 1`),
+    check("canonical_content_state_source_valid", sql`${table.runtimeSourceMode} in ('LEGACY','CANONICAL')`),
+    check("canonical_content_state_revision_positive", sql`${table.revision} >= 1`),
+    check("canonical_content_state_timestamps_ordered", sql`${table.updatedAt} >= ${table.bootstrapCompletedAt}`),
+  ],
+);
+
+export const canonicalBanners = sqliteTable(
+  "canonical_banners",
+  {
+    id: text("id").primaryKey(),
+    bannerType: text("banner_type").notNull(),
+    title: text("title").notNull(),
+    subtitle: text("subtitle").notNull(),
+    iconKey: text("icon_key").notNull(),
+    gradient: text("gradient").notNull(),
+    assetId: text("asset_id").references(() => assets.id, { onDelete: "restrict" }),
+    status: text("status").notNull(),
+    displayOrder: integer("display_order").notNull(),
+    offsetX: real("offset_x").notNull().default(0),
+    offsetY: real("offset_y").notNull().default(0),
+    scale: real("scale").notNull().default(1),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    updatedBy: text("updated_by").references(() => adminUsers.id, { onDelete: "restrict" }),
+    revision: integer("revision").notNull().default(1),
+  },
+  (table) => [
+    index("canonical_banners_status_order_index").on(table.status, table.displayOrder),
+    index("canonical_banners_asset_index").on(table.assetId),
+    check("canonical_banners_type_valid", sql`${table.bannerType} in ('FULL','SPLIT')`),
+    check("canonical_banners_status_valid", sql`${table.status} in ('ACTIVE','ARCHIVED')`),
+    check("canonical_banners_title_valid", sql`length(${table.title}) <= 160`),
+    check("canonical_banners_subtitle_valid", sql`length(${table.subtitle}) <= 500`),
+    check("canonical_banners_icon_valid", sql`length(trim(${table.iconKey})) between 1 and 80`),
+    check("canonical_banners_gradient_valid", sql`length(trim(${table.gradient})) between 1 and 500`),
+    check("canonical_banners_order_nonnegative", sql`${table.displayOrder} >= 0`),
+    check("canonical_banners_offset_x_valid", sql`${table.offsetX} between -50 and 50`),
+    check("canonical_banners_offset_y_valid", sql`${table.offsetY} between -50 and 50`),
+    check("canonical_banners_scale_valid", sql`${table.scale} between 0.5 and 3`),
+    check("canonical_banners_revision_positive", sql`${table.revision} >= 1`),
+    check("canonical_banners_timestamps_ordered", sql`${table.updatedAt} >= ${table.createdAt}`),
+  ],
+);
+
+export const canonicalMaterials = sqliteTable(
+  "canonical_materials",
+  {
+    id: text("id").primaryKey(),
+    subjectKey: text("subject_key").notNull(),
+    label: text("label").notNull(),
+    englishTitle: text("english_title").notNull(),
+    iconKey: text("icon_key").notNull(),
+    available: integer("available", { mode: "boolean" }).notNull(),
+    displayOrder: integer("display_order").notNull(),
+    assetId: text("asset_id").references(() => assets.id, { onDelete: "restrict" }),
+    gradient: text("gradient").notNull(),
+    offsetX: real("offset_x").notNull().default(0),
+    offsetY: real("offset_y").notNull().default(0),
+    scale: real("scale").notNull().default(1),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    updatedBy: text("updated_by").references(() => adminUsers.id, { onDelete: "restrict" }),
+    revision: integer("revision").notNull().default(1),
+  },
+  (table) => [
+    uniqueIndex("canonical_materials_subject_key_unique").on(table.subjectKey),
+    index("canonical_materials_display_order_index").on(table.displayOrder),
+    index("canonical_materials_asset_index").on(table.assetId),
+    check("canonical_materials_subject_key_valid", sql`length(trim(${table.subjectKey})) between 1 and 80 and ${table.subjectKey} not glob '*[^a-z0-9-]*'`),
+    check("canonical_materials_label_valid", sql`length(trim(${table.label})) between 1 and 160`),
+    check("canonical_materials_english_title_valid", sql`length(trim(${table.englishTitle})) between 1 and 160`),
+    check("canonical_materials_icon_valid", sql`length(trim(${table.iconKey})) between 1 and 80`),
+    check("canonical_materials_available_boolean", sql`${table.available} in (0,1)`),
+    check("canonical_materials_order_nonnegative", sql`${table.displayOrder} >= 0`),
+    check("canonical_materials_gradient_valid", sql`length(trim(${table.gradient})) between 1 and 500`),
+    check("canonical_materials_offset_x_valid", sql`${table.offsetX} between -50 and 50`),
+    check("canonical_materials_offset_y_valid", sql`${table.offsetY} between -50 and 50`),
+    check("canonical_materials_scale_valid", sql`${table.scale} between 0.5 and 3`),
+    check("canonical_materials_revision_positive", sql`${table.revision} >= 1`),
+    check("canonical_materials_timestamps_ordered", sql`${table.updatedAt} >= ${table.createdAt}`),
+  ],
+);
+
+export const canonicalMaterialSettings = sqliteTable(
+  "canonical_material_settings",
+  {
+    id: text("id").primaryKey(),
+    fadeIntensity: real("fade_intensity").notNull(),
+    textVerticalPosition: real("text_vertical_position").notNull(),
+    textScale: real("text_scale").notNull(),
+    cardHeight: integer("card_height").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    updatedBy: text("updated_by").references(() => adminUsers.id, { onDelete: "restrict" }),
+    revision: integer("revision").notNull().default(1),
+  },
+  (table) => [
+    check("canonical_material_settings_singleton", sql`${table.id} = 'global'`),
+    check("canonical_material_settings_fade_valid", sql`${table.fadeIntensity} between 0 and 1`),
+    check("canonical_material_settings_position_valid", sql`${table.textVerticalPosition} between -100 and 100`),
+    check("canonical_material_settings_scale_valid", sql`${table.textScale} between 0.8 and 1.4`),
+    check("canonical_material_settings_height_valid", sql`${table.cardHeight} between 160 and 340`),
+    check("canonical_material_settings_revision_positive", sql`${table.revision} >= 1`),
+  ],
+);
+
+export const canonicalTools = sqliteTable(
+  "canonical_tools",
+  {
+    id: text("id").primaryKey(),
+    toolKey: text("tool_key").notNull(),
+    label: text("label").notNull(),
+    iconKey: text("icon_key").notNull(),
+    available: integer("available", { mode: "boolean" }).notNull(),
+    displayOrder: integer("display_order").notNull(),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    updatedBy: text("updated_by").references(() => adminUsers.id, { onDelete: "restrict" }),
+    revision: integer("revision").notNull().default(1),
+  },
+  (table) => [
+    uniqueIndex("canonical_tools_tool_key_unique").on(table.toolKey),
+    index("canonical_tools_display_order_index").on(table.displayOrder),
+    check("canonical_tools_key_valid", sql`length(trim(${table.toolKey})) between 1 and 80 and ${table.toolKey} not glob '*[^a-z0-9-]*'`),
+    check("canonical_tools_label_valid", sql`length(trim(${table.label})) between 1 and 160`),
+    check("canonical_tools_icon_valid", sql`length(trim(${table.iconKey})) between 1 and 80`),
+    check("canonical_tools_available_boolean", sql`${table.available} in (0,1)`),
+    check("canonical_tools_order_nonnegative", sql`${table.displayOrder} >= 0`),
+    check("canonical_tools_revision_positive", sql`${table.revision} >= 1`),
+    check("canonical_tools_timestamps_ordered", sql`${table.updatedAt} >= ${table.createdAt}`),
+  ],
+);
+
+export const canonicalNavigation = sqliteTable(
+  "canonical_navigation",
+  {
+    id: text("id").primaryKey(),
+    navKey: text("nav_key").notNull(),
+    label: text("label").notNull(),
+    iconKey: text("icon_key").notNull(),
+    enabled: integer("enabled", { mode: "boolean" }).notNull(),
+    displayOrder: integer("display_order").notNull(),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    updatedBy: text("updated_by").references(() => adminUsers.id, { onDelete: "restrict" }),
+    revision: integer("revision").notNull().default(1),
+  },
+  (table) => [
+    uniqueIndex("canonical_navigation_nav_key_unique").on(table.navKey),
+    index("canonical_navigation_display_order_index").on(table.displayOrder),
+    check("canonical_navigation_key_valid", sql`length(trim(${table.navKey})) between 1 and 80 and ${table.navKey} not glob '*[^a-z0-9-]*'`),
+    check("canonical_navigation_label_valid", sql`length(trim(${table.label})) between 1 and 160`),
+    check("canonical_navigation_icon_valid", sql`length(trim(${table.iconKey})) between 1 and 80`),
+    check("canonical_navigation_enabled_boolean", sql`${table.enabled} in (0,1)`),
+    check("canonical_navigation_order_nonnegative", sql`${table.displayOrder} >= 0`),
+    check("canonical_navigation_revision_positive", sql`${table.revision} >= 1`),
+    check("canonical_navigation_timestamps_ordered", sql`${table.updatedAt} >= ${table.createdAt}`),
+  ],
+);
+
+export const canonicalCarouselSettings = sqliteTable(
+  "canonical_carousel_settings",
+  {
+    id: text("id").primaryKey(),
+    autoSlideInterval: integer("auto_slide_interval").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    updatedBy: text("updated_by").references(() => adminUsers.id, { onDelete: "restrict" }),
+    revision: integer("revision").notNull().default(1),
+  },
+  (table) => [
+    check("canonical_carousel_settings_singleton", sql`${table.id} = 'global'`),
+    check("canonical_carousel_settings_interval_valid", sql`${table.autoSlideInterval} between 1000 and 120000`),
+    check("canonical_carousel_settings_revision_positive", sql`${table.revision} >= 1`),
+  ],
+);
+
+export type CanonicalContentStateRow = typeof canonicalContentState.$inferSelect;
+export type CanonicalBannerRow = typeof canonicalBanners.$inferSelect;
+export type CanonicalMaterialRow = typeof canonicalMaterials.$inferSelect;
+export type CanonicalMaterialSettingsRow = typeof canonicalMaterialSettings.$inferSelect;
+export type CanonicalToolRow = typeof canonicalTools.$inferSelect;
+export type CanonicalNavigationRow = typeof canonicalNavigation.$inferSelect;
+export type CanonicalCarouselSettingsRow = typeof canonicalCarouselSettings.$inferSelect;
+
 export const legacyMigrationRuns = sqliteTable(
   "legacy_migration_runs",
   {
@@ -331,10 +528,10 @@ export const changeSetItems = sqliteTable(
     uniqueIndex("change_set_items_resource_unique").on(table.changeSetId, table.resourceType, table.resourceId),
     index("change_set_items_change_set_index").on(table.changeSetId),
     index("change_set_items_resource_index").on(table.resourceType, table.resourceId),
-    check("change_set_items_operation_valid", sql`${table.operation} = 'UPDATE'`),
+    check("change_set_items_operation_valid", sql`${table.operation} in ('CREATE','UPDATE')`),
     check("change_set_items_resource_type_valid", sql`length(trim(${table.resourceType})) between 1 and 80`),
     check("change_set_items_resource_id_valid", sql`length(trim(${table.resourceId})) > 0`),
-    check("change_set_items_base_revision_positive", sql`${table.baseResourceRevision} >= 1`),
+    check("change_set_items_base_revision_nonnegative", sql`${table.baseResourceRevision} >= 0`),
     check("change_set_items_changed_paths_array", sql`json_valid(${table.changedPaths}) and json_type(${table.changedPaths}) = 'array'`),
     check("change_set_items_before_snapshot_object", sql`json_valid(${table.beforeSnapshot}) and json_type(${table.beforeSnapshot}) = 'object'`),
     check("change_set_items_proposed_snapshot_object", sql`json_valid(${table.proposedSnapshot}) and json_type(${table.proposedSnapshot}) = 'object'`),
@@ -397,7 +594,7 @@ export const publicationItems = sqliteTable(
   (table) => [
     index("publication_items_publication_index").on(table.publicationId),
     index("publication_items_resource_index").on(table.resourceType, table.resourceId),
-    check("publication_items_operation_valid", sql`${table.operation} = 'UPDATE'`),
+    check("publication_items_operation_valid", sql`${table.operation} in ('CREATE','UPDATE')`),
     check("publication_items_before_snapshot_object", sql`json_valid(${table.beforeSnapshot}) and json_type(${table.beforeSnapshot}) = 'object'`),
     check("publication_items_after_snapshot_object", sql`json_valid(${table.afterSnapshot}) and json_type(${table.afterSnapshot}) = 'object'`),
     check("publication_items_result_revision_positive", sql`${table.resultingResourceRevision} >= 1`),

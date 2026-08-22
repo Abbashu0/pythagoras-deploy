@@ -14,6 +14,7 @@ import type {
   ChangeSetRepository,
   ChangeSetStatus,
   ChangeSnapshot,
+  ChangeOperation,
   CreateChangeSetInput,
   PublicationRepository,
   ReviewStats,
@@ -70,6 +71,12 @@ function requireExpectedRevision(value: number): void {
   if (!Number.isInteger(value) || value < 1) throw new ChangeManagementError("CHANGE_VALIDATION_FAILED", "Expected revision is invalid.");
 }
 
+function requireResourceExpectedRevision(value: number, operation: ChangeOperation): void {
+  if (!Number.isInteger(value) || value < (operation === "CREATE" ? 0 : 1)) {
+    throw new ChangeManagementError("CHANGE_VALIDATION_FAILED", "Expected resource revision is invalid.");
+  }
+}
+
 export class ChangeManagementService {
   private readonly unitOfWork: ContentUnitOfWork;
 
@@ -96,9 +103,8 @@ export class ChangeManagementService {
         basePublicationRevision: this.publications.getCurrentRevision(),
       });
       this.appendEvent(changeSet.id, "CREATED", actor);
-      if (input.initialItem) {
-        changeSet = this.addItemInternal(changeSet, input.initialItem, actor);
-      }
+      const initialItems = [...(input.initialItem ? [input.initialItem] : []), ...(input.initialItems ?? [])];
+      for (const initialItem of initialItems) changeSet = this.addItemInternal(changeSet, initialItem, actor);
       if (input.submit) changeSet = this.submitInternal(changeSet, actor);
       return this.getDetailsInternal(changeSet.id);
     });
@@ -114,7 +120,7 @@ export class ChangeManagementService {
 
   addItem(
     changeSetId: string,
-    input: { resourceType: string; resourceId: string; expectedRevision: number; desired: unknown; expectedChangeSetRevision: number },
+    input: { resourceType: string; resourceId: string; expectedRevision: number; desired: unknown; operation?: ChangeOperation; expectedChangeSetRevision: number },
     actor: AdminActor,
   ): ChangeSetDetails {
     requireExpectedRevision(input.expectedChangeSetRevision);
@@ -140,7 +146,7 @@ export class ChangeManagementService {
       const item = this.changeSets.findItem(changeSetId, itemId);
       if (!item) throw new ChangeManagementError("CHANGE_NOT_FOUND", "The Change Set item was not found.");
       const adapter = this.registry.require(item.resourceType);
-      const captured = adapter.captureProposal(this.database, item.resourceId, input.desired);
+      const captured = adapter.captureProposal(this.database, item.resourceId, input.desired, item.operation);
       if (captured.current.revision !== item.baseResourceRevision) {
         throw new ChangeManagementError("CHANGE_CONFLICT", "The resource changed; rebase the proposal before editing it.");
       }
@@ -222,18 +228,21 @@ export class ChangeManagementService {
 
         for (const item of items) {
           const adapter = this.registry.require(item.resourceType);
-          adapter.validateSnapshot(item.proposedSnapshot);
-          const current = adapter.loadCurrent(this.database, item.resourceId);
+          adapter.validateSnapshot(item.proposedSnapshot, item.operation);
+          const current = item.operation === "CREATE"
+            ? (this.tryLoadCurrent(adapter, item.resourceId) ?? { resourceId: item.resourceId, revision: 0, snapshot: {} })
+            : adapter.loadCurrent(this.database, item.resourceId);
           const merge = current.revision === item.baseResourceRevision
             ? { kind: "clean" as const, finalSnapshot: item.proposedSnapshot }
             : threeWayMerge(item.beforeSnapshot, current.snapshot, item.proposedSnapshot, item.changedPaths);
           if (merge.kind === "conflict" || !merge.finalSnapshot) {
             throw new PublicationConflict({ item, details: { base: item.beforeSnapshot, current: current.snapshot, proposed: item.proposedSnapshot } });
           }
-          const result = adapter.apply(this.database, item.resourceId, merge.finalSnapshot, current.revision, actor);
+          const result = adapter.apply(this.database, item.resourceId, merge.finalSnapshot, current.revision, actor, item.operation);
           applied.push({ item, before: current.snapshot, after: result.snapshot, revision: result.revision, autoMerged: merge.kind === "auto-merged" });
         }
 
+        this.registry.validatePublication(this.database, items.map((item) => item.resourceType));
         const now = this.clock();
         const revision = this.publications.incrementRevision(now);
         const publication = this.publications.create({
@@ -286,9 +295,12 @@ export class ChangeManagementService {
       if (changeSet.revision !== expectedRevision) throw new ChangeManagementError("CHANGE_CONFLICT", "The Change Set changed since it was opened.");
       for (const item of this.changeSets.listItems(id)) {
         const adapter = this.registry.require(item.resourceType);
-        const current = adapter.loadCurrent(this.database, item.resourceId);
-        adapter.validateSnapshot(item.proposedSnapshot);
-        const captured = adapter.captureProposal(this.database, item.resourceId, item.proposedSnapshot);
+        const current = item.operation === "CREATE"
+          ? (this.tryLoadCurrent(adapter, item.resourceId) ?? { resourceId: item.resourceId, revision: 0, snapshot: {} })
+          : adapter.loadCurrent(this.database, item.resourceId);
+        if (item.operation === "CREATE" && current.revision !== 0) throw new ChangeManagementError("CHANGE_CONFLICT", "The proposed resource identifier is already in use.");
+        adapter.validateSnapshot(item.proposedSnapshot, item.operation);
+        const captured = adapter.captureProposal(this.database, item.resourceId, item.proposedSnapshot, item.operation);
         this.changeSets.updateItem({ item: { ...item, baseResourceRevision: current.revision, beforeSnapshot: current.snapshot, proposedSnapshot: captured.proposedSnapshot, changedPaths: captured.changedPaths, conflictState: "NONE", conflictDetails: null, updatedAt: this.clock() }, expectedRevision: item.revision });
       }
       this.changeSets.transition({ id, expectedRevision, from: ["CONFLICTED"], to: "NEEDS_CHANGES", actor });
@@ -364,11 +376,13 @@ export class ChangeManagementService {
 
   private addItemInternal(
     changeSet: ChangeSet,
-    input: { resourceType: string; resourceId: string; expectedRevision: number; desired: unknown },
+    input: { resourceType: string; resourceId: string; expectedRevision: number; desired: unknown; operation?: ChangeOperation },
     actor: AdminActor,
   ): ChangeSet {
+    const operation = input.operation ?? "UPDATE";
+    requireResourceExpectedRevision(input.expectedRevision, operation);
     const adapter = this.registry.require(input.resourceType);
-    const captured = adapter.captureProposal(this.database, input.resourceId, input.desired);
+    const captured = adapter.captureProposal(this.database, input.resourceId, input.desired, operation);
     if (captured.current.revision !== input.expectedRevision) throw new ChangeManagementError("CHANGE_CONFLICT", "The resource changed before the proposal was captured.");
     const now = this.clock();
     const existing = this.changeSets.listItems(changeSet.id).find((item) => item.resourceType === input.resourceType && item.resourceId === input.resourceId);
@@ -378,7 +392,7 @@ export class ChangeManagementService {
       this.appendEvent(changeSet.id, "ITEM_UPDATED", actor, null, { itemId: existing.id, resourceType: input.resourceType });
     } else {
       const itemId = uuidv7();
-      this.changeSets.addItem({ id: itemId, changeSetId: changeSet.id, resourceType: input.resourceType, resourceId: input.resourceId, operation: "UPDATE", baseResourceRevision: captured.current.revision, beforeSnapshot: captured.current.snapshot, proposedSnapshot: captured.proposedSnapshot, changedPaths: captured.changedPaths, conflictState: "NONE", conflictDetails: null, createdAt: now, updatedAt: now });
+      this.changeSets.addItem({ id: itemId, changeSetId: changeSet.id, resourceType: input.resourceType, resourceId: input.resourceId, operation, baseResourceRevision: captured.current.revision, beforeSnapshot: captured.current.snapshot, proposedSnapshot: captured.proposedSnapshot, changedPaths: captured.changedPaths, conflictState: "NONE", conflictDetails: null, createdAt: now, updatedAt: now });
       this.appendEvent(changeSet.id, "ITEM_ADDED", actor, null, { itemId, resourceType: input.resourceType });
     }
     return this.changeSets.touch(changeSet.id, changeSet.revision);
@@ -390,9 +404,11 @@ export class ChangeManagementService {
     if (!items.length) throw new ChangeManagementError("CHANGE_VALIDATION_FAILED", "An empty Change Set cannot be submitted.");
     for (const item of items) {
       const adapter = this.registry.require(item.resourceType);
-      adapter.validateSnapshot(item.beforeSnapshot);
-      adapter.validateSnapshot(item.proposedSnapshot);
-      adapter.loadCurrent(this.database, item.resourceId);
+      if (item.operation !== "CREATE") adapter.validateSnapshot(item.beforeSnapshot, item.operation);
+      adapter.validateSnapshot(item.proposedSnapshot, item.operation);
+      if (item.operation === "CREATE") {
+        if (this.tryLoadCurrent(adapter, item.resourceId)) throw new ChangeManagementError("CHANGE_CONFLICT", "The proposed resource identifier is already in use.");
+      } else adapter.loadCurrent(this.database, item.resourceId);
     }
     const resubmission = changeSet.status === "NEEDS_CHANGES";
     const submitted = this.changeSets.transition({ id: changeSet.id, expectedRevision: changeSet.revision, from: [changeSet.status], to: "SUBMITTED", actor });
@@ -412,7 +428,10 @@ export class ChangeManagementService {
   private findBlockingConflict(changeSet: ChangeSet): ConflictCandidate | null {
     for (const item of this.changeSets.listItems(changeSet.id)) {
       const adapter = this.registry.require(item.resourceType);
-      const current = adapter.loadCurrent(this.database, item.resourceId);
+      const current = item.operation === "CREATE"
+        ? (this.tryLoadCurrent(adapter, item.resourceId) ?? { resourceId: item.resourceId, revision: 0, snapshot: {} })
+        : adapter.loadCurrent(this.database, item.resourceId);
+      if (item.operation === "CREATE" && current.revision !== 0) return { item, details: { base: item.beforeSnapshot, current: current.snapshot, proposed: item.proposedSnapshot } };
       if (current.revision === item.baseResourceRevision) continue;
       const merge = threeWayMerge(item.beforeSnapshot, current.snapshot, item.proposedSnapshot, item.changedPaths);
       if (merge.kind === "conflict") return { item, details: { base: item.beforeSnapshot, current: current.snapshot, proposed: item.proposedSnapshot } };
@@ -450,7 +469,7 @@ export class ChangeManagementService {
       let current;
       try { current = adapter.loadCurrent(this.database, item.resourceId); }
       catch { current = { snapshot: item.beforeSnapshot, revision: item.baseResourceRevision }; }
-      return { ...item, presentation: adapter.describe(item.resourceId, item.beforeSnapshot, item.proposedSnapshot), currentSnapshot: current.snapshot, currentResourceRevision: current.revision };
+      return { ...item, presentation: adapter.describe(item.resourceId, item.beforeSnapshot, item.proposedSnapshot, item.operation), currentSnapshot: current.snapshot, currentResourceRevision: current.revision };
     });
     return {
       changeSet: row.changeSet,
@@ -468,5 +487,13 @@ export class ChangeManagementService {
 
   private publicationSummary(itemCount: number): string {
     return `${itemCount} ${itemCount === 1 ? "تغيير منشور" : "تغييرات منشورة"} · مكتبة المحتوى`;
+  }
+
+  private tryLoadCurrent(adapter: ReturnType<ChangeResourceAdapterRegistry["require"]>, resourceId: string) {
+    try { return adapter.loadCurrent(this.database, resourceId); }
+    catch (error) {
+      if (error instanceof ChangeManagementError && error.code === "CHANGE_NOT_FOUND") return null;
+      throw error;
+    }
   }
 }

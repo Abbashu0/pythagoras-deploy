@@ -4,6 +4,19 @@ export const ADMIN_MATERIALS_SETTINGS_KEY = `${ADMIN_MATERIALS_KEY}-settings`;
 export const ADMIN_TOOLS_KEY = "pythagoras-admin-tools";
 export const ADMIN_NAV_ITEMS_KEY = "pythagoras-admin-nav-items";
 
+let runtimeContent = { runtimeSourceMode: "LEGACY", contentRevision: 0, content: null };
+
+export async function loadRuntimeContent() {
+  const response = await fetch("/api/content/app", { cache: "no-store" });
+  const body = await response.json();
+  if (!response.ok || body.ok !== true || !["LEGACY", "CANONICAL"].includes(body.runtimeSourceMode)) throw new Error("CONTENT_UNAVAILABLE");
+  if (body.runtimeSourceMode === "CANONICAL" && (!body.content || typeof body.content !== "object")) throw new Error("CANONICAL_CONTENT_MISSING");
+  runtimeContent = { runtimeSourceMode: body.runtimeSourceMode, contentRevision: body.contentRevision || 0, content: body.content || null };
+  return runtimeContent;
+}
+
+export function isLegacyRuntimeContent() { return runtimeContent.runtimeSourceMode === "LEGACY"; }
+
 export const screens = {
   home: { eyebrow: "منصة فيثاغورس", title: "مرحبًا بك", copy: "مساحتك الدراسية الهادئة.", stateLabel: "محلي", icon: "home" },
   materials: { eyebrow: "المواد", title: "المواد الدراسية", copy: "اختر المادة التي تريد مراجعتها.", stateLabel: "متاح", icon: "book" },
@@ -55,6 +68,10 @@ export const themeLabels = { dark: "داكن", light: "فاتح", aurora: "شف�
 export const densityLabels = { compact: "صغير", comfortable: "قياسي", spacious: "كبير" };
 
 export function getNavItems() {
+  if (!isLegacyRuntimeContent()) return runtimeContent.content.navigation
+    .filter((item) => item.enabled !== false)
+    .sort((left, right) => left.displayOrder - right.displayOrder)
+    .map((item) => ({ id: item.navKey, label: item.label, icon: item.iconKey }));
   return readLocalArray(ADMIN_NAV_ITEMS_KEY, defaultNav)
     .map((item, index) => ({ item, index }))
     .filter(({ item }) => item && item.enabled !== false)
@@ -82,6 +99,7 @@ function clamp(value, min, max, fallback) {
 }
 
 function storedImage(item) {
+  if (!isLegacyRuntimeContent() && typeof item.imageUrl === "string") return item.imageUrl;
   if (typeof item.image === "string" && item.image) return item.image;
   if (typeof item.imageKey === "string" && window.ImageDB) {
     return window.ImageDB.getImageSync(item.imageKey);
@@ -138,23 +156,27 @@ function normalizeTool(item, index) {
   };
 }
 export function getSponsoredBanners() {
+  if (!isLegacyRuntimeContent()) return runtimeContent.content.banners.map((item) => normalizeBanner({ ...item, enabled: item.status === "ACTIVE", image: item.imageUrl })).filter((banner) => banner.enabled).sort((left, right) => left.displayOrder - right.displayOrder);
   return readLocalArray(ADMIN_BANNERS_KEY, defaultBanners)
     .map(normalizeBanner)
     .filter((banner) => banner.enabled)
     .sort((left, right) => left.displayOrder - right.displayOrder);
 }
 export function getTestSubjects() {
+  if (!isLegacyRuntimeContent()) return runtimeContent.content.materials.map((item) => normalizeMaterial({ ...item, id: item.subjectKey, icon: item.iconKey, order: item.displayOrder, image: item.imageUrl })).filter((subject) => subject.available !== false).sort((left, right) => left.order - right.order);
   return readLocalArray(ADMIN_MATERIALS_KEY, defaultSubjects)
     .map(normalizeMaterial)
     .filter((subject) => subject.available !== false)
     .sort((left, right) => left.order - right.order);
 }
 export function getTools() {
+  if (!isLegacyRuntimeContent()) return runtimeContent.content.tools.map((item) => normalizeTool({ ...item, id: item.toolKey, icon: item.iconKey, order: item.displayOrder })).sort((left, right) => left.order - right.order);
   return readLocalArray(ADMIN_TOOLS_KEY, defaultTools)
     .map(normalizeTool)
     .sort((left, right) => left.order - right.order);
 }
 export function getMaterialsSettings() {
+  if (!isLegacyRuntimeContent()) return runtimeContent.content.materialSettings;
   const settings = readLocalObject(ADMIN_MATERIALS_SETTINGS_KEY, {});
   return {
     fadeIntensity: clamp(settings.fadeIntensity, 0, 1, 0.72),
@@ -162,6 +184,11 @@ export function getMaterialsSettings() {
     textScale: clamp(settings.textScale, 0.8, 1.4, 1),
     cardHeight: Math.round(clamp(settings.cardHeight, 160, 340, 213)),
   };
+}
+export function getCarouselAutoSlideInterval() {
+  if (!isLegacyRuntimeContent()) return runtimeContent.content.carouselSettings.autoSlideInterval;
+  const settings = readLocalObject("pythagoras-admin-carousel-settings", {});
+  return clamp(settings.autoSlideInterval, 1000, 120000, 10_000);
 }
 export function getMaterialsFadeIntensity() { return getMaterialsSettings().fadeIntensity; }
 export function getTestsSubjectView(subjectId) { return `subject-${subjectId}`; }

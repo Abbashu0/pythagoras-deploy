@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { assertTrustedMutationRequest, getAdminActor } from "@/server/admin-auth";
-import { CHANGE_SET_STATUSES, ChangeManagementError, getChangeManagementService, type ChangeSetStatus } from "@/server/change-management";
+import { CHANGE_OPERATIONS, CHANGE_SET_STATUSES, ChangeManagementError, getChangeManagementService, type ChangeOperation, type ChangeSetStatus } from "@/server/change-management";
 import { changeApiError, changeJson, integer, readChangeJson, requireChangeAdmin } from "./_shared";
 
 export const runtime = "nodejs";
@@ -33,16 +33,22 @@ export async function POST(request: NextRequest) {
     const authentication = requireChangeAdmin(request);
     const body = await readChangeJson(request);
     const initial = typeof body.initialItem === "object" && body.initialItem !== null ? body.initialItem as Record<string, unknown> : undefined;
+    const parseInitial = (item: Record<string, unknown>) => ({
+      resourceType: typeof item.resourceType === "string" ? item.resourceType : "",
+      resourceId: typeof item.resourceId === "string" ? item.resourceId : "",
+      expectedRevision: integer(item.expectedRevision),
+      desired: item.desired,
+      operation: CHANGE_OPERATIONS.includes(item.operation as ChangeOperation) ? item.operation as ChangeOperation : undefined,
+    });
+    const initialItems = Array.isArray(body.initialItems)
+      ? body.initialItems.filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null && !Array.isArray(item)).map(parseInitial)
+      : undefined;
     const details = getChangeManagementService().createChangeSet({
       title: typeof body.title === "string" ? body.title : "",
       description: typeof body.description === "string" ? body.description : undefined,
       submit: body.submit === true,
-      initialItem: initial ? {
-        resourceType: typeof initial.resourceType === "string" ? initial.resourceType : "",
-        resourceId: typeof initial.resourceId === "string" ? initial.resourceId : "",
-        expectedRevision: integer(initial.expectedRevision),
-        desired: initial.desired,
-      } : undefined,
+      initialItem: initial ? parseInitial(initial) : undefined,
+      initialItems,
     }, getAdminActor(authentication));
     return changeJson({ ok: true, changeSet: details }, { status: 201 });
   } catch (error) { return changeApiError(error); }

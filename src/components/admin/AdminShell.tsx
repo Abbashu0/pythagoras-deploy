@@ -5,7 +5,7 @@
  */
 
 import { useEffect, useState, type ReactNode } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { AdminSidebar } from "./AdminSidebar";
 import { AdminTopBar } from "./AdminTopBar";
 import { ActivityCenterDrawer } from "./ActivityCenterDrawer";
@@ -22,7 +22,6 @@ interface Props {
 
 export function AdminShell({ children, identity }: Props) {
   const router = useRouter();
-  const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -36,12 +35,10 @@ export function AdminShell({ children, identity }: Props) {
   }, [adminTheme]);
 
   useEffect(() => {
-    // The M6 migration workspace must inspect the source browser before any
-    // legacy store hydration can normalize/persist that source state.
-    if (pathname === "/admin/system/migration") return;
-    store.loadFromStorage();
-    store.hydrateImagesFromIDB();
-  }, [pathname, store]);
+    // Product content is server-canonical from M7 onward. Only the Admin UI
+    // theme remains a browser preference; legacy content stays untouched for M6.
+    store.loadThemePreference();
+  }, [store]);
 
   // Global Ctrl+K / Cmd+K
   useEffect(() => {

@@ -114,7 +114,8 @@ test("scanner source has static read-only guards and never calls legacy mutators
   assert.equal(scanner.includes(".getAllKeys("), false);
   assert.ok(scanner.includes("openKeyCursor"));
   const shell = readFileSync(path.join(process.cwd(), "src/components/admin/AdminShell.tsx"), "utf8");
-  assert.ok(shell.includes('pathname === "/admin/system/migration"'));
+  assert.equal(shell.includes("store.loadFromStorage()"), false);
+  assert.equal(shell.includes("store.hydrateImagesFromIDB()"), false);
 });
 
 test("scanner prioritizes keyed references and retains metadata only while image values are inspected sequentially", async () => {
@@ -360,13 +361,13 @@ test("0004 applies to fresh and existing M5 databases", () => {
     for (const file of ["0000_snapshot.json", "0001_snapshot.json", "0002_snapshot.json", "0003_snapshot.json"]) copyFileSync(path.join(migrationsDirectory, "meta", file), path.join(oldMigrations, "meta", file));
     const journal = JSON.parse(readFileSync(path.join(migrationsDirectory, "meta", "_journal.json"), "utf8")) as { version: string; dialect: string; entries: unknown[] };
     writeFileSync(path.join(oldMigrations, "meta", "_journal.json"), JSON.stringify({ ...journal, entries: journal.entries.slice(0, 4) }));
-    const fresh = openContentDatabase({ dataDirectory: freshRoot, migrationsDirectory }); assert.equal(getContentDatabaseStatus(fresh).migrationsApplied, 5); fresh.close();
+    const fresh = openContentDatabase({ dataDirectory: freshRoot, migrationsDirectory }); assert.equal(getContentDatabaseStatus(fresh).migrationsApplied, 6); fresh.close();
     openContentDatabase({ dataDirectory: upgradeRoot, migrationsDirectory: oldMigrations }).close();
     const upgraded = openContentDatabase({ dataDirectory: upgradeRoot, migrationsDirectory });
-    assert.equal(getContentDatabaseStatus(upgraded).migrationsApplied, 5);
+    assert.equal(getContentDatabaseStatus(upgraded).migrationsApplied, 6);
     assert.deepEqual((upgraded.client.prepare("select name from sqlite_master where type='table' and name like 'legacy_migration_%' order by name").all() as Array<{ name: string }>).map((row) => row.name), ["legacy_migration_assets", "legacy_migration_events", "legacy_migration_issues", "legacy_migration_runs"]);
     upgraded.close();
-  } finally { rmSync(freshRoot, { recursive: true, force: true }); rmSync(upgradeRoot, { recursive: true, force: true }); rmSync(oldMigrations, { recursive: true, force: true }); }
+  } finally { rmSync(freshRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); rmSync(upgradeRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); rmSync(oldMigrations, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 });
 
 test("legacy APIs deny unauthenticated reads and cross-origin mutations", async () => {

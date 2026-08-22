@@ -225,6 +225,16 @@ class AdminStore {
     }
   }
 
+  /** Reads only the Admin UI preference. Canonical content pages must never hydrate or rewrite legacy product data. */
+  loadThemePreference(): void {
+    if (typeof window === "undefined") return;
+    const theme = localStorage.getItem(THEME_KEY);
+    if (theme === "light" || theme === "dark") {
+      this.adminTheme = theme;
+      this.emit();
+    }
+  }
+
   /**
    * Asynchronously hydrate banner images from IndexedDB.
    * Call after loadFromStorage() on admin pages so list cards + the

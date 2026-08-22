@@ -15,6 +15,12 @@ import {
 } from "./library-types";
 import { AssetProposalDialog } from "./AssetProposalDialog";
 
+interface CanonicalUsage {
+  assetId: string;
+  banners: Array<{ id: string; title: string }>;
+  materials: Array<{ id: string; subjectKey: string; label: string }>;
+}
+
 export function AssetDetailsDialog({
   asset,
   onOpenChange,
@@ -26,6 +32,7 @@ export function AssetDetailsDialog({
   const [integrityResult, setIntegrityResult] = useState<AssetIntegrityResponse["integrity"] | null>(null);
   const [requestError, setRequestError] = useState<{ assetId: string; message: string } | null>(null);
   const [proposalOpen, setProposalOpen] = useState(false);
+  const [usage, setUsage] = useState<CanonicalUsage | null>(null);
   const details = fetchedDetails?.id === asset?.id ? fetchedDetails : asset;
   const integrity = integrityResult?.assetId === asset?.id ? integrityResult : null;
   const error = requestError && requestError.assetId === asset?.id ? requestError.message : null;
@@ -35,11 +42,12 @@ export function AssetDetailsDialog({
     if (!asset) return;
     const controller = new AbortController();
     Promise.all([
-      fetch(`/api/admin/assets/${asset.id}`, { signal: controller.signal }).then((response) => parseApiResponse<{ ok: true; asset: LibraryAsset }>(response)),
+      fetch(`/api/admin/assets/${asset.id}`, { signal: controller.signal }).then((response) => parseApiResponse<{ ok: true; asset: LibraryAsset; usage: CanonicalUsage }>(response)),
       fetch(`/api/admin/assets/${asset.id}/integrity`, { signal: controller.signal }).then((response) => parseApiResponse<AssetIntegrityResponse>(response)),
     ])
       .then(([detailBody, integrityBody]) => {
         setFetchedDetails(detailBody.asset);
+        setUsage(detailBody.usage);
         setIntegrityResult(integrityBody.integrity);
       })
       .catch((requestError: unknown) => {
@@ -91,6 +99,8 @@ export function AssetDetailsDialog({
                 <Info label="آخر تحديث" value={formatDate(details.updatedAt)} />
                 <Info label="المراجعة" value={details.revision.toLocaleString("ar-IQ")} />
               </dl>
+
+              {usage && <section className="mt-4 rounded-2xl border bg-card p-4 text-xs"><h3 className="font-bold">الاستخدام في المحتوى القانوني</h3>{usage.banners.length + usage.materials.length === 0 ? <p className="mt-2 text-muted-foreground">غير مستخدم حاليًا.</p> : <ul className="mt-2 space-y-1 text-muted-foreground">{usage.banners.map((item) => <li key={`banner-${item.id}`}>بانر: {item.title}</li>)}{usage.materials.map((item) => <li key={`material-${item.id}`}>مادة: {item.label}</li>)}</ul>}</section>}
 
               <details className="mt-4 rounded-2xl border bg-card p-4 text-xs">
                 <summary className="cursor-pointer font-semibold text-foreground">معلومات تقنية</summary>

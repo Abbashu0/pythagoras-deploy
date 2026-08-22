@@ -18,6 +18,8 @@ import {
   getSponsoredBanners,
   getSubjectByView,
   getTestSubjects,
+  isLegacyRuntimeContent,
+  loadRuntimeContent,
 } from "./data.js";
 import { bindNavigationInteractions } from "./navigation.js";
 import { pushRoute, viewFromHash } from "./router.js";
@@ -29,6 +31,7 @@ import { showToast } from "./toast.js";
 let carouselController = null;
 
 async function hydrateStudentImages() {
+  if (!isLegacyRuntimeContent()) return;
   const imageDB = window.ImageDB;
   if (!imageDB) return;
 
@@ -84,6 +87,7 @@ applyTheme(getStoredTheme());
 applyDensity(getStoredDensity());
 window.addEventListener("hashchange", () => renderView());
 window.addEventListener("storage", (event) => {
+  if (!isLegacyRuntimeContent()) return;
   if (
     event.key === ADMIN_NAV_ITEMS_KEY ||
     event.key === ADMIN_MATERIALS_SETTINGS_KEY ||
@@ -95,5 +99,14 @@ window.addEventListener("storage", (event) => {
     hydrateStudentImages();
   }
 });
-renderView();
-hydrateStudentImages();
+async function start() {
+  try {
+    await loadRuntimeContent();
+    renderView();
+    if (isLegacyRuntimeContent()) await hydrateStudentImages();
+  } catch {
+    document.getElementById("app").innerHTML = `<main class="app-shell"><section class="placeholder-card" dir="rtl"><h1>تعذّر تحميل المحتوى</h1><p>أعد تحميل الصفحة بعد التأكد من تشغيل خادم Pythagoras.</p></section></main>`;
+  }
+}
+
+void start();
