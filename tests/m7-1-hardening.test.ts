@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 import { NextRequest } from "next/server";
 import { v7 as uuidv7 } from "uuid";
 import { POST as createCanonicalChanges } from "../src/app/api/admin/content/change-sets/route";
@@ -133,4 +134,20 @@ test("specialized canonical editors do not restore browser persistence or direct
   assert.ok(source.includes("LiveCarouselPreview"));
   assert.ok(source.includes("MaterialCardPreview"));
   assert.ok(source.includes("/api/admin/content/change-sets"));
+});
+
+test("Student image rendering accepts canonical public Asset URLs without allowing active-content schemes", async () => {
+  const dataModuleUrl = pathToFileURL(path.join(process.cwd(), "public/pythagoras/src/scripts/data.js")).href;
+  const { isDisplayableImageSource } = await import(dataModuleUrl) as { isDisplayableImageSource: (value: unknown) => boolean };
+  assert.equal(isDisplayableImageSource("/api/content/assets/01a02b8f-c243-705f-9a3d-cfcfa00f80b5"), true);
+  assert.equal(isDisplayableImageSource("data:image/png;base64,AA=="), true);
+  assert.equal(isDisplayableImageSource("https://example.test/image.png"), true);
+  assert.equal(isDisplayableImageSource("/api/content/assets/not-a-valid-id"), false);
+  assert.equal(isDisplayableImageSource("linear-gradient(red, blue)"), false);
+  assert.equal(isDisplayableImageSource("javascript:alert(1)"), false);
+  assert.equal(isDisplayableImageSource("data:text/html,<script>alert(1)</script>"), false);
+  const materials = readFileSync(path.join(process.cwd(), "public/pythagoras/src/pages/MaterialsPage.js"), "utf8");
+  const carousel = readFileSync(path.join(process.cwd(), "public/pythagoras/src/components/SponsoredCarouselCard.js"), "utf8");
+  assert.ok(materials.includes("isDisplayableImageSource(subject.image)"));
+  assert.ok(carousel.includes("isDisplayableImageSource(slide.image)"));
 });

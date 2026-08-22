@@ -17,6 +17,13 @@ export async function loadRuntimeContent() {
 
 export function isLegacyRuntimeContent() { return runtimeContent.runtimeSourceMode === "LEGACY"; }
 
+export function isDisplayableImageSource(value) {
+  if (typeof value !== "string") return false;
+  if (value.startsWith("data:image/")) return true;
+  if (/^https?:\/\//i.test(value)) return true;
+  return /^\/api\/content\/assets\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
 export const screens = {
   home: { eyebrow: "منصة فيثاغورس", title: "مرحبًا بك", copy: "مساحتك الدراسية الهادئة.", stateLabel: "محلي", icon: "home" },
   materials: { eyebrow: "المواد", title: "المواد الدراسية", copy: "اختر المادة التي تريد مراجعتها.", stateLabel: "متاح", icon: "book" },

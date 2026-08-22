@@ -1,5 +1,5 @@
 import { icon } from "../scripts/icons.js?v=20260715b";
-import { getCarouselAutoSlideInterval } from "../scripts/data.js";
+import { getCarouselAutoSlideInterval, isDisplayableImageSource } from "../scripts/data.js";
 
 /**
  * SponsoredCarouselCard
@@ -116,11 +116,9 @@ export function sponsoredCarouselCard(banners) {
           ${slides
             .map(
               (slide, i) => {
-                // Determine if `image` is a real uploaded image (data URL or http URL)
-                // vs. a CSS gradient string. The admin store keeps uploaded images
-                // as data URLs; the seed data uses gradient strings.
-                const isImage = typeof slide.image === "string" &&
-                  (slide.image.startsWith("data:") || slide.image.startsWith("http"));
+                // Distinguish safe image sources (including canonical public Asset
+                // URLs) from CSS gradient fallbacks.
+                const isImage = isDisplayableImageSource(slide.image);
                 const transform = slide.transform || { offsetX: 0, offsetY: 0, scale: 1 };
                 const isFull = slide.bannerType === "full";
 

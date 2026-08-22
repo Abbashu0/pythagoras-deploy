@@ -6,6 +6,7 @@ import {
   getTestSubjects,
   getMaterialsFadeIntensity,
   getMaterialsSettings,
+  isDisplayableImageSource,
 } from "../scripts/data.js";
 
 /**
@@ -34,7 +35,7 @@ import {
  *   - cardHeight: 160–340px, default 213 (16:9 at ~378px width)
  */
 function subjectCard(subject, settings, delay) {
-  const hasImage = subject.image && subject.image.startsWith("data:");
+  const hasImage = isDisplayableImageSource(subject.image);
   const transform = subject.transform || { offsetX: 0, offsetY: 0, scale: 1 };
   const bg = hasImage
     ? ""
