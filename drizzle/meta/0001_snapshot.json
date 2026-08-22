@@ -1,0 +1,352 @@
+{
+  "version": "6",
+  "dialect": "sqlite",
+  "id": "1d7af736-695d-4545-ae1e-43e8b079777c",
+  "prevId": "ec6e16b5-57b1-42da-ae16-d103282d8f99",
+  "tables": {
+    "admin_sessions": {
+      "name": "admin_sessions",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "token_hash": {
+          "name": "token_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "last_seen_at": {
+          "name": "last_seen_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revoked_at": {
+          "name": "revoked_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "admin_sessions_token_hash_unique": {
+          "name": "admin_sessions_token_hash_unique",
+          "columns": [
+            "token_hash"
+          ],
+          "isUnique": true
+        },
+        "admin_sessions_user_index": {
+          "name": "admin_sessions_user_index",
+          "columns": [
+            "user_id"
+          ],
+          "isUnique": false
+        },
+        "admin_sessions_expires_index": {
+          "name": "admin_sessions_expires_index",
+          "columns": [
+            "expires_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "admin_sessions_user_id_admin_users_id_fk": {
+          "name": "admin_sessions_user_id_admin_users_id_fk",
+          "tableFrom": "admin_sessions",
+          "tableTo": "admin_users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "admin_sessions_token_hash_sha256": {
+          "name": "admin_sessions_token_hash_sha256",
+          "value": "length(\"admin_sessions\".\"token_hash\") = 64 and \"admin_sessions\".\"token_hash\" not glob '*[^0-9a-f]*'"
+        },
+        "admin_sessions_expiration_after_creation": {
+          "name": "admin_sessions_expiration_after_creation",
+          "value": "\"admin_sessions\".\"expires_at\" > \"admin_sessions\".\"created_at\""
+        },
+        "admin_sessions_last_seen_not_before_creation": {
+          "name": "admin_sessions_last_seen_not_before_creation",
+          "value": "\"admin_sessions\".\"last_seen_at\" >= \"admin_sessions\".\"created_at\""
+        }
+      }
+    },
+    "admin_users": {
+      "name": "admin_users",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "display_name": {
+          "name": "display_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "password_hash": {
+          "name": "password_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "role": {
+          "name": "role",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "enabled": {
+          "name": "enabled",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "last_login_at": {
+          "name": "last_login_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "password_changed_at": {
+          "name": "password_changed_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        }
+      },
+      "indexes": {
+        "admin_users_email_unique": {
+          "name": "admin_users_email_unique",
+          "columns": [
+            "email"
+          ],
+          "isUnique": true
+        },
+        "admin_users_single_owner": {
+          "name": "admin_users_single_owner",
+          "columns": [
+            "role"
+          ],
+          "isUnique": true,
+          "where": "\"admin_users\".\"role\" = 'OWNER'"
+        },
+        "admin_users_role_index": {
+          "name": "admin_users_role_index",
+          "columns": [
+            "role"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "admin_users_role_valid": {
+          "name": "admin_users_role_valid",
+          "value": "\"admin_users\".\"role\" in ('OWNER', 'ADMIN')"
+        },
+        "admin_users_enabled_boolean": {
+          "name": "admin_users_enabled_boolean",
+          "value": "\"admin_users\".\"enabled\" in (0, 1)"
+        },
+        "admin_users_revision_positive": {
+          "name": "admin_users_revision_positive",
+          "value": "\"admin_users\".\"revision\" >= 1"
+        },
+        "admin_users_email_not_empty": {
+          "name": "admin_users_email_not_empty",
+          "value": "length(trim(\"admin_users\".\"email\")) > 0"
+        },
+        "admin_users_display_name_not_empty": {
+          "name": "admin_users_display_name_not_empty",
+          "value": "length(trim(\"admin_users\".\"display_name\")) > 0"
+        },
+        "admin_users_password_hash_not_empty": {
+          "name": "admin_users_password_hash_not_empty",
+          "value": "length(\"admin_users\".\"password_hash\") > 0"
+        }
+      }
+    },
+    "content_resources": {
+      "name": "content_resources",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "resource_type": {
+          "name": "resource_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "resource_key": {
+          "name": "resource_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "payload": {
+          "name": "payload",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "content_resources_type_key_unique": {
+          "name": "content_resources_type_key_unique",
+          "columns": [
+            "resource_type",
+            "resource_key"
+          ],
+          "isUnique": true
+        },
+        "content_resources_type_index": {
+          "name": "content_resources_type_index",
+          "columns": [
+            "resource_type"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "content_resources_revision_positive": {
+          "name": "content_resources_revision_positive",
+          "value": "\"content_resources\".\"revision\" >= 1"
+        },
+        "content_resources_type_not_empty": {
+          "name": "content_resources_type_not_empty",
+          "value": "length(\"content_resources\".\"resource_type\") > 0"
+        },
+        "content_resources_key_not_empty": {
+          "name": "content_resources_key_not_empty",
+          "value": "length(\"content_resources\".\"resource_key\") > 0"
+        }
+      }
+    }
+  },
+  "views": {},
+  "enums": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "indexes": {}
+  }
+}

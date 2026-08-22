@@ -30,6 +30,8 @@ import {
   Wrench,
   FileQuestion,
   CornerDownLeft,
+  Loader2,
+  LogOut,
   type LucideIcon,
 } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
@@ -37,12 +39,16 @@ import { Button } from "@/components/ui/button";
 import { useAdminStore } from "@/lib/admin/use-admin-store";
 import { getAdminStore } from "@/lib/admin/admin-store";
 import { cn } from "@/lib/utils";
+import type { SafeAdminIdentity } from "@/server/admin-auth/contracts";
 
 interface Props {
+  identity: SafeAdminIdentity;
   onMenuClick: () => void;
   onActivityClick: () => void;
   onNotificationsClick: () => void;
   onSearchNavigate: (href: string) => void;
+  onLogout: () => void;
+  loggingOut: boolean;
 }
 
 const BREADCRUMB_MAP: Record<string, { label: string; parent?: string; parentLabel?: string }> = {
@@ -72,7 +78,15 @@ const SUGGESTIONS: SearchSuggestion[] = [
   { label: "بنك الأسئلة", href: "/admin/questions", icon: FileQuestion, group: "تنقل", keywords: ["questions", "bank"] },
 ];
 
-export function AdminTopBar({ onMenuClick, onActivityClick, onNotificationsClick, onSearchNavigate }: Props) {
+export function AdminTopBar({
+  identity,
+  onMenuClick,
+  onActivityClick,
+  onNotificationsClick,
+  onSearchNavigate,
+  onLogout,
+  loggingOut,
+}: Props) {
   const pathname = usePathname();
   const { adminTheme } = useAdminStore();
   const store = getAdminStore();
@@ -267,12 +281,25 @@ export function AdminTopBar({ onMenuClick, onActivityClick, onNotificationsClick
       {/* Admin profile */}
       <div className="flex flex-shrink-0 items-center gap-2 border-r pr-3">
         <div className="grid h-8 w-8 place-items-center rounded-full bg-primary/10 text-sm font-bold text-primary ring-1 ring-primary/20">
-          أ
+          {identity.displayName.trim().charAt(0) || "أ"}
         </div>
         <div className="hidden sm:block">
-          <div className="text-xs font-semibold text-foreground">المدير</div>
-          <div className="text-[10px] text-muted-foreground">admin@pythagoras</div>
+          <div className="max-w-28 truncate text-xs font-semibold text-foreground">{identity.displayName}</div>
+          <div className="text-[10px] text-muted-foreground">
+            {identity.role === "OWNER" ? "المالك · OWNER" : "مدير · ADMIN"}
+          </div>
         </div>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onLogout}
+          disabled={loggingOut}
+          aria-label="تسجيل الخروج"
+          title="تسجيل الخروج"
+          className="h-8 w-8"
+        >
+          {loggingOut ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
+        </Button>
       </div>
     </header>
   );

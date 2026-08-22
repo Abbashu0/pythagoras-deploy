@@ -70,7 +70,7 @@ test("runs migrations and persists repository data across database restarts", ()
     });
     assert.equal(created.revision, 1);
     assert.match(created.id, /^[0-9a-f-]{36}$/);
-    assert.equal(getContentDatabaseStatus(firstDatabase).migrationsApplied, 1);
+    assert.equal(getContentDatabaseStatus(firstDatabase).migrationsApplied, 2);
     firstDatabase.close();
 
     const secondDatabase = openContentDatabase({

@@ -16,7 +16,7 @@ export function DashboardView() {
         <p className="text-sm text-muted-foreground">إدارة محلية</p>
         <h1 className="mt-1 text-2xl font-bold">لوحة تحكم فيثاغورس</h1>
         <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-          هذه المرحلة تعمل محليًا فقط. لا توجد حسابات أو تحليلات أو خدمة بيانات خلفية.
+          لوحة الإدارة محمية بهوية محلية وجلسة خادمية. وحدات المحتوى الحالية ما زالت محفوظة في هذا المتصفح إلى أن تبدأ مرحلة ترحيلها المعتمدة.
         </p>
       </section>
       <section className="grid gap-4 sm:grid-cols-2">
