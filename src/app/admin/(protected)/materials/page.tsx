@@ -1,2 +1,2 @@
-import { CanonicalContentWorkspace } from "@/components/admin/CanonicalContentWorkspace";
-export default function AdminMaterialsPage() { return <CanonicalContentWorkspace area="materials" />; }
+import { CanonicalMaterialsWorkspace } from "@/components/admin/canonical/CanonicalMaterialsWorkspace";
+export default function AdminMaterialsPage() { return <CanonicalMaterialsWorkspace/>; }

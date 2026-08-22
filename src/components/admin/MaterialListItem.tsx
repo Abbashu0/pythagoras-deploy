@@ -24,10 +24,22 @@
 import { ChevronUp, ChevronDown, Pencil } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import type { ContentItem } from "@/lib/admin/content-store";
+import type { BannerImageTransform } from "@/lib/admin/banner-model";
+
+export interface MaterialListItemValue {
+  id: string;
+  label: string;
+  englishTitle?: string;
+  icon: string;
+  image?: string;
+  gradient?: string;
+  transform?: BannerImageTransform;
+  available: boolean;
+  order: number;
+}
 
 export interface MaterialListItemProps {
-  item: ContentItem;
+  item: MaterialListItemValue;
   order: number;
   total: number;
   isSelected: boolean;
@@ -45,7 +57,7 @@ export function MaterialListItem({
   onMoveUp,
   onMoveDown,
 }: MaterialListItemProps) {
-  const hasImage = !!item.image && item.image.startsWith("data:");
+  const hasImage = Boolean(item.image);
   const gradient = item.gradient || "linear-gradient(135deg, #1a3a5c, #0d1e30)";
   const transform = item.transform || { offsetX: 0, offsetY: 0, scale: 1 };
 

@@ -33,7 +33,12 @@ import { useCallback, useState } from "react";
 import { Save, RotateCcw, Check, SlidersHorizontal } from "lucide-react";
 import { Slider } from "@/components/ui/slider";
 import { Button } from "@/components/ui/button";
-import type { MaterialsSettings } from "@/lib/admin/content-store";
+export interface MaterialsSettings {
+  fadeIntensity: number;
+  textVerticalPosition: number;
+  textScale: number;
+  cardHeight: number;
+}
 
 interface Props {
   /** Currently-saved settings from the store. */
@@ -46,6 +51,8 @@ interface Props {
   onSave: () => void;
   /** Discards the draft and falls back to `committed`. */
   onReset: () => void;
+  /** Use draft-oriented copy when a parent workspace still requires a final Change Set save. */
+  buffered?: boolean;
 }
 
 const SUCCESS_DISPLAY_MS = 2000;
@@ -134,6 +141,7 @@ export function AppearanceSettings({
   onDraftChange,
   onSave,
   onReset,
+  buffered = false,
 }: Props) {
   const [saved, setSaved] = useState(false);
 
@@ -268,7 +276,7 @@ export function AppearanceSettings({
       {saved && (
         <div className="mt-3 flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-600 dark:text-emerald-400">
           <Check className="h-3.5 w-3.5" />
-          تم حفظ إعدادات المظهر
+          {buffered ? "تم اعتماد إعدادات المظهر في المسودة" : "تم حفظ إعدادات المظهر"}
         </div>
       )}
 
@@ -292,7 +300,7 @@ export function AppearanceSettings({
             className="gap-1.5 text-xs"
           >
             <Save className="h-3.5 w-3.5" />
-            حفظ الإعدادات
+            {buffered ? "اعتماد في المسودة" : "حفظ الإعدادات"}
           </Button>
         </div>
       )}

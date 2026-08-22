@@ -137,8 +137,10 @@ test("M7 Admin surfaces no longer import legacy product stores and Student has o
     const source = readFileSync(path.join(process.cwd(), "src", "app", "admin", "(protected)", area, "page.tsx"), "utf8");
     assert.equal(/admin-store|content-store|nav-store|image-db|localStorage|indexedDB/u.test(source), false);
   }
-  const workspace = readFileSync(path.join(process.cwd(), "src/components/admin/CanonicalContentWorkspace.tsx"), "utf8");
-  assert.equal(/localStorage|indexedDB|ImageDB/u.test(workspace), false);
+  for (const workspaceName of ["CanonicalBannersWorkspace.tsx", "CanonicalMaterialsWorkspace.tsx", "CanonicalSimpleWorkspace.tsx", "useCanonicalContentDraft.ts"]) {
+    const workspace = readFileSync(path.join(process.cwd(), "src/components/admin/canonical", workspaceName), "utf8");
+    assert.equal(/localStorage|indexedDB|ImageDB/u.test(workspace), false);
+  }
   const student = readFileSync(path.join(process.cwd(), "public/pythagoras/src/scripts/data.js"), "utf8");
   assert.ok(student.includes('/api/content/app')); assert.ok(student.includes('runtimeSourceMode === "LEGACY"'));
   assert.ok(student.includes("bannerType: String(item.bannerType).toLowerCase()"));

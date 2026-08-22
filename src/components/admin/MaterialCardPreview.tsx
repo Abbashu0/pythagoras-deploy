@@ -75,7 +75,7 @@ export function MaterialCardPreview({
     );
   }
 
-  const hasImage = !!image && image.startsWith("data:");
+  const hasImage = Boolean(image);
   const tf = transform || BANNER_TRANSFORM_DEFAULT;
   const bg = gradient || "linear-gradient(135deg, #1a3a5c, #0d1e30)";
 

@@ -1,2 +1,2 @@
-import { CanonicalContentWorkspace } from "@/components/admin/CanonicalContentWorkspace";
-export default function AdminToolsPage() { return <CanonicalContentWorkspace area="tools" />; }
+import { CanonicalSimpleWorkspace } from "@/components/admin/canonical/CanonicalSimpleWorkspace";
+export default function AdminToolsPage() { return <CanonicalSimpleWorkspace area="tools"/>; }

@@ -34,13 +34,15 @@ interface Props {
   interval: number;
   /** Called when the user clicks Save — receives the new interval in ms. */
   onSave: (ms: number) => void;
+  /** Use draft-oriented copy when a parent workspace still requires a final Change Set save. */
+  buffered?: boolean;
 }
 
 const MIN_SECONDS = 5;
 const MAX_SECONDS = 30;
 const SUCCESS_DISPLAY_MS = 2000;
 
-export function CarouselSettings({ interval, onSave }: Props) {
+export function CarouselSettings({ interval, onSave, buffered = false }: Props) {
   const committedSeconds = Math.round(interval / 1000);
   const [draftSeconds, setDraftSeconds] = useState<number>(committedSeconds);
   const [saved, setSaved] = useState(false);
@@ -138,7 +140,7 @@ export function CarouselSettings({ interval, onSave }: Props) {
       {saved && (
         <div className="mt-3 flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-600 dark:text-emerald-400">
           <Check className="h-3.5 w-3.5" />
-          تم حفظ الإعدادات
+          {buffered ? "تم اعتماد الإعدادات في المسودة" : "تم حفظ الإعدادات"}
         </div>
       )}
 
@@ -162,7 +164,7 @@ export function CarouselSettings({ interval, onSave }: Props) {
             className="gap-1.5 text-xs"
           >
             <Save className="h-3.5 w-3.5" />
-            حفظ
+            {buffered ? "اعتماد في المسودة" : "حفظ"}
           </Button>
         </div>
       )}

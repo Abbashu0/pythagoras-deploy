@@ -168,10 +168,10 @@ export class SQLiteCanonicalContentRepository implements CanonicalContentReposit
       contentRevision: snapshot.contentRevision,
       content: {
         banners: snapshot.banners.filter((item) => item.status === "ACTIVE").map(({ asset, assetId: _assetId, createdAt: _createdAt, updatedAt: _updatedAt, revision: _revision, ...item }) => ({ ...item, imageUrl: asset?.url ?? null })),
-        materials: snapshot.materials.map(({ asset, assetId: _assetId, createdAt: _createdAt, updatedAt: _updatedAt, revision: _revision, ...item }) => ({ ...item, imageUrl: asset?.url ?? null })),
+        materials: snapshot.materials.filter((item) => item.available).map(({ asset, assetId: _assetId, createdAt: _createdAt, updatedAt: _updatedAt, revision: _revision, ...item }) => ({ ...item, imageUrl: asset?.url ?? null })),
         materialSettings: { id: "global", fadeIntensity: snapshot.materialSettings.fadeIntensity, textVerticalPosition: snapshot.materialSettings.textVerticalPosition, textScale: snapshot.materialSettings.textScale, cardHeight: snapshot.materialSettings.cardHeight },
         tools: snapshot.tools.map(({ createdAt: _createdAt, updatedAt: _updatedAt, revision: _revision, ...item }) => item),
-        navigation: snapshot.navigation.map(({ createdAt: _createdAt, updatedAt: _updatedAt, revision: _revision, ...item }) => item),
+        navigation: snapshot.navigation.filter((item) => item.enabled).map(({ createdAt: _createdAt, updatedAt: _updatedAt, revision: _revision, ...item }) => item),
         carouselSettings: { id: "global", autoSlideInterval: snapshot.carouselSettings.autoSlideInterval },
       },
     };
@@ -188,7 +188,7 @@ export class SQLiteCanonicalContentRepository implements CanonicalContentReposit
     if (state?.mode !== "CANONICAL") return false;
     const banner = this.database.db.select({ id: canonicalBanners.id }).from(canonicalBanners).where(sql`${canonicalBanners.assetId} = ${assetId} and ${canonicalBanners.status} = 'ACTIVE'`).get();
     if (banner) return true;
-    return Boolean(this.database.db.select({ id: canonicalMaterials.id }).from(canonicalMaterials).where(eq(canonicalMaterials.assetId, assetId)).get());
+    return Boolean(this.database.db.select({ id: canonicalMaterials.id }).from(canonicalMaterials).where(sql`${canonicalMaterials.assetId} = ${assetId} and ${canonicalMaterials.available} = 1`).get());
   }
 
   requireActor(actor: AdminActor): void {

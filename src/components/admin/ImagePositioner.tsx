@@ -74,14 +74,15 @@ interface Props {
    * "unsaved changes" warnings during live drags, or to pause auto-save.
    */
   onEditingChange?: (editing: boolean) => void;
+  /** Optional domain limits; canonical content uses stricter server ranges. */
+  minScale?: number;
+  maxScale?: number;
+  maxOffset?: number;
 }
 
-const MIN_SCALE = 1;
-const MAX_SCALE = 5;
 const SCALE_STEP = 0.25;
 const WHEEL_ZOOM_STEP = 0.1; // Smaller step for smooth wheel zoom
 /** Max offset in % (±150%) — wide range for precise editing. */
-const MAX_OFFSET = 150;
 /** Long-press arrow button repeat interval (ms). */
 const ARROW_INTERVAL_MS = 50;
 /** Per-tick offset for arrow buttons (in %). */
@@ -98,6 +99,9 @@ export function ImagePositioner({
   aspectRatio = "5 / 2",
   fullFrame = false,
   onEditingChange,
+  minScale = 1,
+  maxScale = 5,
+  maxOffset = 150,
 }: Props) {
   const frameRef = useRef<HTMLDivElement>(null);
 
@@ -126,10 +130,10 @@ export function ImagePositioner({
   }, [value]);
 
   // ---- Clamps ----
-  const clampOffset = (v: number) =>
-    Math.max(-MAX_OFFSET, Math.min(MAX_OFFSET, v));
-  const clampScale = (v: number) =>
-    Math.max(MIN_SCALE, Math.min(MAX_SCALE, +v.toFixed(2)));
+  const clampOffset = useCallback((v: number) =>
+    Math.max(-maxOffset, Math.min(maxOffset, v)), [maxOffset]);
+  const clampScale = useCallback((v: number) =>
+    Math.max(minScale, Math.min(maxScale, +v.toFixed(2))), [maxScale, minScale]);
 
   // ---- Pointer handlers ----
   const onPointerDown = useCallback(
@@ -170,7 +174,7 @@ export function ImagePositioner({
       const nextY = clampOffset(dragStartRef.current.offY + dyPct);
       onChange({ ...valueRef.current, offsetX: nextX, offsetY: nextY });
     },
-    [onChange]
+    [clampOffset, onChange]
   );
 
   const endDrag = useCallback(
@@ -195,7 +199,7 @@ export function ImagePositioner({
       ...valueRef.current,
       scale: clampScale(valueRef.current.scale + SCALE_STEP),
     });
-  }, [onChange]);
+  }, [clampScale, onChange]);
 
   const zoomOut = useCallback(() => {
     const s = clampScale(valueRef.current.scale - SCALE_STEP);
@@ -206,7 +210,7 @@ export function ImagePositioner({
       offsetX: s === 1 ? 0 : valueRef.current.offsetX,
       offsetY: s === 1 ? 0 : valueRef.current.offsetY,
     });
-  }, [onChange]);
+  }, [clampScale, onChange]);
 
   const reset = useCallback(() => {
     onChange({ ...BANNER_TRANSFORM_DEFAULT });
@@ -230,7 +234,7 @@ export function ImagePositioner({
       }
       arrowTimerRef.current = window.setInterval(move, ARROW_INTERVAL_MS);
     },
-    [onChange]
+    [clampOffset, onChange]
   );
   const stopArrow = useCallback(() => {
     if (arrowTimerRef.current !== null) {
@@ -273,7 +277,7 @@ export function ImagePositioner({
       /* ignore — image may be invalid */
     };
     img.src = imageSrc;
-  }, [imageSrc, onChange]);
+  }, [clampScale, imageSrc, onChange]);
 
   // ---- Keyboard shortcuts (global listener gated by positionerActiveRef) ----
   useEffect(() => {
@@ -363,8 +367,8 @@ export function ImagePositioner({
     positionerActiveRef.current = false;
   };
 
-  const canZoomOut = value.scale > MIN_SCALE + 0.001;
-  const canZoomIn = value.scale < MAX_SCALE - 0.001;
+  const canZoomOut = value.scale > minScale + 0.001;
+  const canZoomIn = value.scale < maxScale - 0.001;
   const isDefault =
     value.offsetX === 0 && value.offsetY === 0 && value.scale === 1;
 

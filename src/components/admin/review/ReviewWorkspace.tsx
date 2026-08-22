@@ -21,7 +21,7 @@ const STATUS: Record<string, { label: string; className: string }> = {
 };
 type Action = "request-changes" | "reject" | "publish" | null;
 
-export function ReviewWorkspace() {
+export function ReviewWorkspace({ initialChangeSetId }: { initialChangeSetId?: string } = {}) {
   const [role, setRole] = useState<"OWNER" | "ADMIN">("ADMIN");
   const [filter, setFilter] = useState<ReviewStatus | "ALL">("ALL");
   const [items, setItems] = useState<ChangeSummary[]>([]);
@@ -45,13 +45,14 @@ export function ReviewWorkspace() {
         reviewApi<{ items: typeof publications }>("/api/admin/publications?limit=8"),
       ]);
       setRole(session.identity.role); setItems(page.items); setStats(statsBody.stats); setPublications(history.items);
-      if (keepSelection && selected) {
-        const detail = await reviewApi<{ changeSet: ChangeDetails }>(`/api/admin/change-sets/${selected.changeSet.id}`);
+      const selectedId = keepSelection && selected ? selected.changeSet.id : initialChangeSetId;
+      if (selectedId) {
+        const detail = await reviewApi<{ changeSet: ChangeDetails }>(`/api/admin/change-sets/${selectedId}`);
         setSelected(detail.changeSet);
       } else setSelected(null);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "تعذر تحميل مساحة المراجعة."); }
     finally { setLoading(false); }
-  }, [filter, selected]);
+  }, [filter, initialChangeSetId, selected]);
 
   useEffect(() => { void load(false); }, [filter]);
 

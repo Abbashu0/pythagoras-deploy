@@ -64,8 +64,7 @@ export function LiveCarouselPreview({
 
   const isFull = banner.bannerType === "full";
   const hasImage = banner.image && banner.image.length > 0;
-  const isImageDataUrl =
-    hasImage && (banner.image.startsWith("data:") || banner.image.startsWith("http"));
+  const isImageDataUrl = hasImage;
 
   // Pagination dots — count comes from allBanners (or 1 if not provided).
   // The active dot is always index 0 (we always render the same banner).

@@ -76,6 +76,8 @@ interface Props {
   ) => void;
   onClose: () => void;
   onDraftChange?: (draft: EditableItem | null) => void;
+  /** Use draft-oriented copy when a parent workspace still requires a final Change Set save. */
+  buffered?: boolean;
 }
 
 const SAVE_LATENCY_MS = 900;
@@ -123,6 +125,7 @@ export function SimpleItemEditor({
   onSave,
   onClose,
   onDraftChange,
+  buffered = false,
 }: Props) {
   const [draft, setDraft] = useState<EditableItem | null>(item);
   const [saveState, setSaveState] = useState<SaveState>("idle");
@@ -332,7 +335,7 @@ export function SimpleItemEditor({
             ) : isSaved ? (
               <>
                 <Check className="h-3.5 w-3.5" />
-                تم الحفظ
+                {buffered ? "تم الاعتماد في المسودة" : "تم الحفظ"}
               </>
             ) : isError ? (
               <>
@@ -342,7 +345,7 @@ export function SimpleItemEditor({
             ) : (
               <>
                 <Save className="h-3.5 w-3.5" />
-                حفظ التغييرات
+                {buffered ? "اعتماد في المسودة" : "حفظ التغييرات"}
               </>
             )}
           </Button>

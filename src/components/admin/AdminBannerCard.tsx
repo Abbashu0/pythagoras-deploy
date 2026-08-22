@@ -42,7 +42,7 @@ interface Props {
   onMoveUp: () => void;
   onMoveDown: () => void;
   onDuplicate: () => void;
-  onDelete: () => void;
+  onDelete?: () => void;
   onArchive?: () => void;
 }
 
@@ -211,7 +211,7 @@ export function AdminBannerCard({
             <Archive className="h-4 w-4" />
           </Button>
         )}
-        <Button
+        {onDelete ? <Button
           variant="ghost"
           size="icon"
           className="h-8 w-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
@@ -219,7 +219,7 @@ export function AdminBannerCard({
           title="حذف"
         >
           <Trash2 className="h-4 w-4" />
-        </Button>
+        </Button> : null}
       </div>
     </div>
   );
