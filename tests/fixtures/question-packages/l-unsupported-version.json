@@ -1,0 +1,6 @@
+{
+  "$schema": "https://schemas.pythagoras.local/question-package/2.0.0",
+  "format": "pythagoras.question-package",
+  "schemaVersion": "2.0.0",
+  "contentMode": "question-bank"
+}

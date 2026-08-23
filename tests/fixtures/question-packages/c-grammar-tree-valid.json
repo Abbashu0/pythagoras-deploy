@@ -1,0 +1,35 @@
+{
+  "$schema": "https://schemas.pythagoras.local/question-package/1.0.0",
+  "format": "pythagoras.question-package",
+  "schemaVersion": "1.0.0",
+  "contentMode": "question-bank",
+  "package": { "id": "01910000-0000-7000-8000-000000000020", "key": "grammar-synthetic", "title": "القواعد — تسعة موضوعات اصطناعية", "subjectKey": "arabic", "language": "ar-IQ", "contentRevision": 1 },
+  "taxonomy": [
+    { "id": "01910000-0000-7000-8000-000000000021", "key": "topic-1", "label": "الموضوع 1", "kind": "topic", "parentId": null, "order": 1 },
+    { "id": "01910000-0000-7000-8000-000000000022", "key": "topic-2", "label": "الموضوع 2", "kind": "topic", "parentId": null, "order": 2 },
+    { "id": "01910000-0000-7000-8000-000000000023", "key": "topic-3", "label": "الموضوع 3", "kind": "topic", "parentId": null, "order": 3 },
+    { "id": "01910000-0000-7000-8000-000000000024", "key": "topic-4", "label": "الموضوع 4", "kind": "topic", "parentId": null, "order": 4 },
+    { "id": "01910000-0000-7000-8000-000000000025", "key": "topic-5", "label": "الموضوع 5", "kind": "topic", "parentId": null, "order": 5 },
+    { "id": "01910000-0000-7000-8000-000000000026", "key": "topic-6", "label": "الموضوع 6", "kind": "topic", "parentId": null, "order": 6 },
+    { "id": "01910000-0000-7000-8000-000000000027", "key": "topic-7", "label": "الموضوع 7", "kind": "topic", "parentId": null, "order": 7 },
+    { "id": "01910000-0000-7000-8000-000000000028", "key": "topic-8", "label": "الموضوع 8", "kind": "topic", "parentId": null, "order": 8 },
+    { "id": "01910000-0000-7000-8000-000000000029", "key": "topic-9", "label": "الموضوع 9", "kind": "topic", "parentId": null, "order": 9 }
+  ],
+  "bankBrowse": {
+    "mode": "TREE",
+    "entry": { "key": "grammar", "label": "أسئلة القواعد", "order": 1 },
+    "nodes": [
+      { "id": "01910000-0000-7000-8000-000000000031", "key": "browse-1", "label": "الموضوع 1", "type": "QUESTION_LIST", "parentId": null, "order": 1, "filter": { "taxonomyNodeId": "01910000-0000-7000-8000-000000000021", "includeDescendants": true } },
+      { "id": "01910000-0000-7000-8000-000000000032", "key": "browse-2", "label": "الموضوع 2", "type": "QUESTION_LIST", "parentId": null, "order": 2, "filter": { "taxonomyNodeId": "01910000-0000-7000-8000-000000000022", "includeDescendants": true } },
+      { "id": "01910000-0000-7000-8000-000000000033", "key": "browse-3", "label": "الموضوع 3", "type": "QUESTION_LIST", "parentId": null, "order": 3, "filter": { "taxonomyNodeId": "01910000-0000-7000-8000-000000000023", "includeDescendants": true } },
+      { "id": "01910000-0000-7000-8000-000000000034", "key": "browse-4", "label": "الموضوع 4", "type": "QUESTION_LIST", "parentId": null, "order": 4, "filter": { "taxonomyNodeId": "01910000-0000-7000-8000-000000000024", "includeDescendants": true } },
+      { "id": "01910000-0000-7000-8000-000000000035", "key": "browse-5", "label": "الموضوع 5", "type": "QUESTION_LIST", "parentId": null, "order": 5, "filter": { "taxonomyNodeId": "01910000-0000-7000-8000-000000000025", "includeDescendants": true } },
+      { "id": "01910000-0000-7000-8000-000000000036", "key": "browse-6", "label": "الموضوع 6", "type": "QUESTION_LIST", "parentId": null, "order": 6, "filter": { "taxonomyNodeId": "01910000-0000-7000-8000-000000000026", "includeDescendants": true } },
+      { "id": "01910000-0000-7000-8000-000000000037", "key": "browse-7", "label": "الموضوع 7", "type": "QUESTION_LIST", "parentId": null, "order": 7, "filter": { "taxonomyNodeId": "01910000-0000-7000-8000-000000000027", "includeDescendants": true } },
+      { "id": "01910000-0000-7000-8000-000000000038", "key": "browse-8", "label": "الموضوع 8", "type": "QUESTION_LIST", "parentId": null, "order": 8, "filter": { "taxonomyNodeId": "01910000-0000-7000-8000-000000000028", "includeDescendants": true } },
+      { "id": "01910000-0000-7000-8000-000000000039", "key": "browse-9", "label": "الموضوع 9", "type": "QUESTION_LIST", "parentId": null, "order": 9, "filter": { "taxonomyNodeId": "01910000-0000-7000-8000-000000000029", "includeDescendants": true } }
+    ]
+  },
+  "assetsManifest": [],
+  "questions": []
+}

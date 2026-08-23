@@ -4,8 +4,11 @@ import type {
   AssetSort,
   SafeAssetWithCreator,
 } from "@/server/assets";
+import type { QuestionPackageInspection } from "@/server/question-packages";
 
-export type LibraryAsset = SafeAssetWithCreator;
+export type LibraryAsset = SafeAssetWithCreator & {
+  questionPackageInspection: QuestionPackageInspection | null;
+};
 export type LibraryStats = AssetInventoryStats;
 export type LibraryMediaKind = AssetMediaKind;
 export type LibrarySort = AssetSort;

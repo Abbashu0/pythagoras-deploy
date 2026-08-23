@@ -43,6 +43,13 @@
       "when": 1787424329335,
       "tag": "0005_canonical-content",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1787512457298,
+      "tag": "0006_pretty_marvex",
+      "breakpoints": true
     }
   ]
 }

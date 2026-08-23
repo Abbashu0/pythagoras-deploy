@@ -16,6 +16,7 @@ import {
   ADMIN_NAV_ITEMS_KEY,
   ADMIN_TOOLS_KEY,
   getSponsoredBanners,
+  getQuestionBankSubjectByView,
   getSubjectByView,
   getTestSubjects,
   isLegacyRuntimeContent,
@@ -47,12 +48,12 @@ async function hydrateStudentImages() {
 
 function renderView(view = viewFromHash()) {
   const subject = getSubjectByView(view);
-  const content = subject ? subjectTestsScreen(subject) : ({
+  const questionBankSubject = getQuestionBankSubjectByView(view);
+  const content = subject ? subjectTestsScreen(subject) : questionBankSubject ? renderQuestionBankPlaceholder(questionBankSubject) : ({
     home: homeScreen,
     materials: materialsScreen,
     lectures: lecturesScreen,
     tests: testsSubjectsScreen,
-    questions: renderQuestionBankPlaceholder,
     tools: toolsScreen,
     settings: settingsScreen,
   }[view] || (() => placeholderScreen("tools")))();

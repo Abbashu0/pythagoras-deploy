@@ -3,6 +3,10 @@ import { check, index, integer, real, sqliteTable, text, uniqueIndex } from "dri
 import type { AdminRole } from "../admin-auth/contracts";
 import type { AssetMediaKind } from "../assets/contracts";
 import type {
+  QuestionPackageDiagnostic,
+  QuestionPackageRecognitionStatus,
+} from "../question-packages/contracts";
+import type {
   ChangeConflictState,
   ChangeEventType,
   ChangeOperation,
@@ -614,8 +618,61 @@ export const publicationState = sqliteTable(
   ],
 );
 
+export const questionPackageInspections = sqliteTable(
+  "question_package_inspections",
+  {
+    assetId: text("asset_id")
+      .primaryKey()
+      .references(() => assets.id, { onDelete: "cascade" }),
+    sourceSha256: text("source_sha256").notNull(),
+    status: text("status").$type<QuestionPackageRecognitionStatus>().notNull(),
+    format: text("format"),
+    schemaVersion: text("schema_version"),
+    packageId: text("package_id"),
+    packageKey: text("package_key"),
+    title: text("title"),
+    subjectKey: text("subject_key"),
+    questionCount: integer("question_count").notNull(),
+    variantCount: integer("variant_count").notNull(),
+    errorCount: integer("error_count").notNull(),
+    warningCount: integer("warning_count").notNull(),
+    diagnostics: text("diagnostics", { mode: "json" })
+      .$type<QuestionPackageDiagnostic[]>()
+      .notNull(),
+    inspectorVersion: integer("inspector_version").notNull(),
+    inspectedAt: integer("inspected_at").notNull(),
+  },
+  (table) => [
+    index("question_package_inspections_status_index").on(table.status),
+    index("question_package_inspections_subject_index").on(table.subjectKey),
+    index("question_package_inspections_package_id_index").on(table.packageId),
+    check(
+      "question_package_inspections_status_valid",
+      sql`${table.status} in ('GENERIC_JSON','VALID','VALID_WITH_WARNINGS','INVALID','UNSUPPORTED_VERSION')`,
+    ),
+    check(
+      "question_package_inspections_source_sha256_valid",
+      sql`length(${table.sourceSha256}) = 64 and ${table.sourceSha256} not glob '*[^0-9a-f]*'`,
+    ),
+    check(
+      "question_package_inspections_counts_nonnegative",
+      sql`${table.questionCount} >= 0 and ${table.variantCount} >= 0 and ${table.errorCount} >= 0 and ${table.warningCount} >= 0`,
+    ),
+    check(
+      "question_package_inspections_diagnostics_array",
+      sql`json_valid(${table.diagnostics}) and json_type(${table.diagnostics}) = 'array'`,
+    ),
+    check(
+      "question_package_inspections_version_positive",
+      sql`${table.inspectorVersion} >= 1`,
+    ),
+  ],
+);
+
 export type ChangeSetRow = typeof changeSets.$inferSelect;
 export type ChangeSetItemRow = typeof changeSetItems.$inferSelect;
 export type ChangeSetEventRow = typeof changeSetEvents.$inferSelect;
 export type PublicationRow = typeof publications.$inferSelect;
 export type PublicationItemRow = typeof publicationItems.$inferSelect;
+export type QuestionPackageInspectionRow =
+  typeof questionPackageInspections.$inferSelect;

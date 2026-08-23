@@ -1,6 +1,6 @@
 import { pageHead } from "../components/PageHeader.js";
 import { badge, icon } from "../scripts/icons.js";
-import { getViewMeta } from "../scripts/data.js";
+import { getQuestionBankView, getViewMeta } from "../scripts/data.js";
 
 function actionCard({ title, description, iconName, message, navTo, className = "" }) {
   const classes = ["subject-action-card", className].filter(Boolean).join(" ");
@@ -51,7 +51,7 @@ export function subjectTestsScreen(subject) {
           title: "بنك الأسئلة",
           description: "تصفح أسئلة المادة حسب الفصل والموضوع ونوع السؤال لاحقًا.",
           iconName: "tests",
-          navTo: "questions",
+          navTo: getQuestionBankView(subject.id),
           className: "is-secondary",
         })}
         ${actionCard({

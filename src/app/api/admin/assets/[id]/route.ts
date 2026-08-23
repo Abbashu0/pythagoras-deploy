@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { getAssetService, toSafeAssetWithCreator } from "@/server/assets";
 import { getCanonicalContentRepository } from "@/server/canonical-content";
+import { getQuestionPackageInspectionService } from "@/server/question-packages";
 import {
   assetApiErrorResponse,
   noStoreAssetJson,
@@ -16,9 +17,16 @@ export async function GET(
   try {
     requireAssetApiAdmin(request);
     const { id } = await context.params;
+    const asset = getAssetService().getByIdWithCreator(id);
     return noStoreAssetJson({
       ok: true,
-      asset: toSafeAssetWithCreator(getAssetService().getByIdWithCreator(id)),
+      asset: {
+        ...toSafeAssetWithCreator(asset),
+        questionPackageInspection:
+          asset.asset.mediaKind === "json"
+            ? await getQuestionPackageInspectionService().inspectAsset(id)
+            : null,
+      },
       usage: getCanonicalContentRepository().getAssetUsage(id),
     });
   } catch (error) {

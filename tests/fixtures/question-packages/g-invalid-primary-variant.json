@@ -1,0 +1,8 @@
+{
+  "$schema": "https://schemas.pythagoras.local/question-package/1.0.0",
+  "format": "pythagoras.question-package", "schemaVersion": "1.0.0", "contentMode": "question-bank",
+  "package": { "id": "01910000-0000-7000-8000-000000000070", "key": "invalid-primary", "title": "اختبار مرجع الصيغة", "subjectKey": "arabic", "language": "ar", "contentRevision": 1 },
+  "taxonomy": [{ "id": "01910000-0000-7000-8000-000000000071", "key": "topic", "label": "موضوع", "kind": "topic", "parentId": null, "order": 1 }],
+  "bankBrowse": { "mode": "ALL_PACKAGE_QUESTIONS", "entry": { "key": "all", "label": "الكل", "order": 1 }, "nodes": [] }, "assetsManifest": [],
+  "questions": [{ "id": "01910000-0000-7000-8000-000000000072", "order": 1, "primaryVariantId": "01910000-0000-7000-8000-000000000079", "taxonomyAssignments": [{ "taxonomyNodeId": "01910000-0000-7000-8000-000000000071", "role": "PRIMARY" }], "variants": [{ "id": "01910000-0000-7000-8000-000000000073", "order": 1, "content": { "type": "doc", "version": 1, "blocks": [] }, "occurrences": [] }], "sharedAnswer": { "type": "doc", "version": 1, "blocks": [] } }]
+}

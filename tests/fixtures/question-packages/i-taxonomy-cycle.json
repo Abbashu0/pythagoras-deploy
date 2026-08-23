@@ -1,0 +1,9 @@
+{
+  "$schema": "https://schemas.pythagoras.local/question-package/1.0.0", "format": "pythagoras.question-package", "schemaVersion": "1.0.0", "contentMode": "question-bank",
+  "package": { "id": "01910000-0000-7000-8000-000000000090", "key": "taxonomy-cycle", "title": "دورة تصنيف", "subjectKey": "arabic", "language": "ar", "contentRevision": 1 },
+  "taxonomy": [
+    { "id": "01910000-0000-7000-8000-000000000091", "key": "one", "label": "واحد", "kind": "topic", "parentId": "01910000-0000-7000-8000-000000000092", "order": 1 },
+    { "id": "01910000-0000-7000-8000-000000000092", "key": "two", "label": "اثنان", "kind": "topic", "parentId": "01910000-0000-7000-8000-000000000091", "order": 2 }
+  ],
+  "bankBrowse": { "mode": "ALL_PACKAGE_QUESTIONS", "entry": { "key": "all", "label": "الكل", "order": 1 }, "nodes": [] }, "assetsManifest": [], "questions": []
+}

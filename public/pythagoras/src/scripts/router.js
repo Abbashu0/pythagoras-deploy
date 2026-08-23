@@ -1,4 +1,4 @@
-import { getSubjectByView, screens } from "./data.js";
+import { getQuestionBankSubjectByView, getSubjectByView, screens } from "./data.js";
 
 export function pushRoute(view) {
   const hash = `#${view}`;
@@ -7,5 +7,5 @@ export function pushRoute(view) {
 
 export function viewFromHash() {
   const view = window.location.hash.replace("#", "");
-  return screens[view] || getSubjectByView(view) ? view : "home";
+  return screens[view] || getSubjectByView(view) || getQuestionBankSubjectByView(view) ? view : "home";
 }

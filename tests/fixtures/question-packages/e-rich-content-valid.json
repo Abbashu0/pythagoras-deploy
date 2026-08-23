@@ -1,0 +1,30 @@
+{
+  "$schema": "https://schemas.pythagoras.local/question-package/1.0.0",
+  "format": "pythagoras.question-package",
+  "schemaVersion": "1.0.0",
+  "contentMode": "question-bank",
+  "package": { "id": "01910000-0000-7000-8000-000000000050", "key": "rich-content", "title": "محتوى غني اصطناعي", "subjectKey": "islamic", "language": "ar-IQ", "contentRevision": 1 },
+  "taxonomy": [{ "id": "01910000-0000-7000-8000-000000000051", "key": "topic", "label": "موضوع", "kind": "topic", "parentId": null, "order": 1 }],
+  "bankBrowse": { "mode": "ALL_PACKAGE_QUESTIONS", "entry": { "key": "all", "label": "الكل", "order": 1 }, "nodes": [] },
+  "assetsManifest": [],
+  "questions": [{
+    "id": "01910000-0000-7000-8000-000000000052", "order": 1,
+    "primaryVariantId": "01910000-0000-7000-8000-000000000053",
+    "taxonomyAssignments": [{ "taxonomyNodeId": "01910000-0000-7000-8000-000000000051", "role": "PRIMARY" }],
+    "variants": [{
+      "id": "01910000-0000-7000-8000-000000000053", "order": 1,
+      "content": { "type": "doc", "version": 1, "blocks": [
+        { "type": "heading", "level": 2, "spans": [{ "text": "عنوان", "marks": ["bold", "underline"] }] },
+        { "type": "paragraph", "spans": [{ "text": "نص " }, { "text": "مميز", "marks": ["italic"] }] },
+        { "type": "ordered-list", "items": [{ "spans": [{ "text": "عنصر" }] }] },
+        { "type": "bullet-list", "items": [{ "spans": [{ "text": "نقطة" }] }] },
+        { "type": "quran", "verses": [{ "text": "نص قرآني اصطناعي للاختبار", "surah": "اختبار", "ayah": 1 }] },
+        { "type": "poetry", "verses": [{ "sadr": "صدر اصطناعي", "ajuz": "عجز اصطناعي" }] },
+        { "type": "table", "rows": [{ "cells": [{ "spans": [{ "text": "خلية 1" }] }, { "spans": [{ "text": "خلية 2" }] }] }] },
+        { "type": "divider" }
+      ] },
+      "occurrences": []
+    }],
+    "sharedAnswer": { "type": "doc", "version": 1, "blocks": [{ "type": "paragraph", "spans": [{ "text": "إجابة" }] }] }
+  }]
+}

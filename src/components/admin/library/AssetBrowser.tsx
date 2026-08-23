@@ -35,6 +35,7 @@ export function AssetBrowser({
                 <span className="rounded-full bg-muted px-2 py-1">{MEDIA_KIND_LABELS[asset.mediaKind]}</span>
                 <span>{formatBytes(asset.byteSize)}</span>
               </div>
+              <QuestionPackageBadge asset={asset} />
             </div>
           </button>
         ))}
@@ -66,7 +67,10 @@ export function AssetBrowser({
               </div>
             </div>
             <div className="space-y-1 text-[11px] text-muted-foreground lg:contents">
-              <span className="block lg:inline">{MEDIA_KIND_LABELS[asset.mediaKind]}</span>
+              <span className="block lg:inline">
+                {MEDIA_KIND_LABELS[asset.mediaKind]}
+                <QuestionPackageBadge asset={asset} compact />
+              </span>
               <span className="block lg:inline">{formatBytes(asset.byteSize)}</span>
               <span className="hidden lg:inline">{formatDimensions(asset.width, asset.height)}</span>
               <span className="hidden truncate lg:inline" title={asset.creator.displayName}>{asset.creator.displayName}</span>
@@ -77,6 +81,26 @@ export function AssetBrowser({
       </div>
     </div>
   );
+}
+
+function QuestionPackageBadge({ asset, compact = false }: { asset: LibraryAsset; compact?: boolean }) {
+  const inspection = asset.questionPackageInspection;
+  if (!inspection || inspection.status === "GENERIC_JSON") return null;
+  const valid = inspection.status === "VALID";
+  const warning = inspection.status === "VALID_WITH_WARNINGS";
+  const className = valid
+    ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+    : warning
+      ? "bg-amber-500/10 text-amber-700 dark:text-amber-300"
+      : "bg-destructive/10 text-destructive";
+  const label = inspection.status === "UNSUPPORTED_VERSION"
+    ? "حزمة أسئلة بإصدار غير مدعوم"
+    : valid
+      ? "حزمة أسئلة صالحة"
+      : warning
+        ? "حزمة أسئلة مع تحذيرات"
+        : "حزمة أسئلة غير صالحة";
+  return <span className={cn("inline-flex w-fit rounded-full px-2 py-1 text-[10px] font-semibold", compact ? "mt-1" : "", className)}>{label}</span>;
 }
 
 export function AssetBrowserEmpty({ filtered }: { filtered: boolean }) {

@@ -9,6 +9,11 @@ import {
   resolveMaximumAssetBytes,
   toSafeAssetWithCreator,
 } from "@/server/assets";
+import {
+  getQuestionPackageInspectionService,
+  type QuestionPackageInspection,
+} from "@/server/question-packages";
+import type { SafeAssetWithCreator } from "@/server/assets";
 import type { AssetMediaKind, AssetSort } from "@/server/assets";
 import { getContentDatabase } from "@/server/content";
 import {
@@ -47,9 +52,21 @@ export async function GET(request: NextRequest) {
       mediaKind: parseMediaKind(request.nextUrl.searchParams.get("mediaKind")),
       sort: parseSort(request.nextUrl.searchParams.get("sort")),
     });
+    let inspectionService: ReturnType<typeof getQuestionPackageInspectionService> | undefined;
+    const items: Array<SafeAssetWithCreator & { questionPackageInspection: QuestionPackageInspection | null }> = [];
+    for (const record of page.items) {
+      const asset = toSafeAssetWithCreator(record);
+      items.push({
+        ...asset,
+        questionPackageInspection:
+          record.asset.mediaKind === "json"
+            ? await (inspectionService ??= getQuestionPackageInspectionService()).inspectAsset(record.asset.id)
+            : null,
+      });
+    }
     return noStoreAssetJson({
       ok: true,
-      items: page.items.map(toSafeAssetWithCreator),
+      items,
       total: page.total,
       limit: page.limit,
       offset: page.offset,
@@ -76,8 +93,16 @@ export async function POST(request: NextRequest) {
       getAdminActor(authentication),
     );
     const asset = getAssetService().getByIdWithCreator(result.asset.id);
+    const questionPackageInspection =
+      result.asset.mediaKind === "json"
+        ? await getQuestionPackageInspectionService().inspectAsset(result.asset.id)
+        : null;
     return noStoreAssetJson(
-      { ok: true, asset: toSafeAssetWithCreator(asset), reused: result.reused },
+      {
+        ok: true,
+        asset: { ...toSafeAssetWithCreator(asset), questionPackageInspection },
+        reused: result.reused,
+      },
       { status: result.reused ? 200 : 201 },
     );
   } catch (error) {

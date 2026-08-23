@@ -102,6 +102,10 @@ export function AssetDetailsDialog({
 
               {usage && <section className="mt-4 rounded-2xl border bg-card p-4 text-xs"><h3 className="font-bold">الاستخدام في المحتوى القانوني</h3>{usage.banners.length + usage.materials.length === 0 ? <p className="mt-2 text-muted-foreground">غير مستخدم حاليًا.</p> : <ul className="mt-2 space-y-1 text-muted-foreground">{usage.banners.map((item) => <li key={`banner-${item.id}`}>بانر: {item.title}</li>)}{usage.materials.map((item) => <li key={`material-${item.id}`}>مادة: {item.label}</li>)}</ul>}</section>}
 
+              {details.questionPackageInspection && details.questionPackageInspection.status !== "GENERIC_JSON" && (
+                <QuestionPackageInspectionPanel inspection={details.questionPackageInspection} />
+              )}
+
               <details className="mt-4 rounded-2xl border bg-card p-4 text-xs">
                 <summary className="cursor-pointer font-semibold text-foreground">معلومات تقنية</summary>
                 <dl className="mt-4 space-y-3 text-[11px]">
@@ -123,6 +127,51 @@ export function AssetDetailsDialog({
       {details && <AssetProposalDialog asset={details} open={proposalOpen} onOpenChange={setProposalOpen} />}
     </Dialog>
   );
+}
+
+function QuestionPackageInspectionPanel({ inspection }: { inspection: NonNullable<LibraryAsset["questionPackageInspection"]> }) {
+  const statusLabels = {
+    VALID: "صالحة",
+    VALID_WITH_WARNINGS: "صالحة مع تحذيرات",
+    INVALID: "غير صالحة",
+    UNSUPPORTED_VERSION: "إصدار غير مدعوم",
+    GENERIC_JSON: "JSON عام",
+  } as const;
+  return (
+    <section className="mt-4 rounded-2xl border bg-card p-4 text-xs">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="font-bold">فحص حزمة الأسئلة</h3>
+        <span className="rounded-full bg-muted px-2 py-1 text-[10px] font-semibold">{statusLabels[inspection.status]}</span>
+      </div>
+      <dl className="mt-3 grid grid-cols-2 gap-2 text-[11px]">
+        <InfoCompact label="المادة" value={inspection.subjectKey ?? "—"} />
+        <InfoCompact label="الإصدار" value={inspection.schemaVersion ?? "—"} />
+        <InfoCompact label="الأسئلة" value={String(inspection.questionCount)} />
+        <InfoCompact label="الصيغ" value={String(inspection.variantCount)} />
+        <InfoCompact label="الأخطاء" value={String(inspection.errorCount)} />
+        <InfoCompact label="التحذيرات" value={String(inspection.warningCount)} />
+      </dl>
+      {inspection.title && <p className="mt-3 font-semibold" dir="auto">{inspection.title}</p>}
+      {inspection.diagnostics.length > 0 && (
+        <details className="mt-3 rounded-xl bg-muted/40 p-3">
+          <summary className="cursor-pointer font-semibold">التشخيصات ({inspection.diagnostics.length})</summary>
+          <ul className="mt-3 space-y-2">
+            {inspection.diagnostics.map((item, index) => (
+              <li key={`${item.code}-${item.jsonPointer}-${index}`} className="rounded-lg border bg-background p-2">
+                <div className="flex items-center justify-between gap-2"><code className="text-[9px]">{item.code}</code><span className="text-[9px] text-muted-foreground">{item.severity}</span></div>
+                <p className="mt-1 text-[10px] leading-5 text-muted-foreground">{item.message}</p>
+                <code className="mt-1 block break-all text-[9px] text-muted-foreground">{item.jsonPointer || "/"}</code>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </section>
+  );
+}
+
+function InfoCompact({ label, value }: { label: string; value: string }) {
+  return <div className="rounded-lg bg-muted/40 p-2"><dt className="text-muted-foreground">{label}</dt><dd className="mt-1 truncate font-semibold" dir="auto" title={value}>{value}</dd></div>;
 }
 
 function Info({ label, value, auto = false }: { label: string; value: string; auto?: boolean }) {

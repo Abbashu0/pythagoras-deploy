@@ -200,4 +200,6 @@ export function getCarouselAutoSlideInterval() {
 export function getMaterialsFadeIntensity() { return getMaterialsSettings().fadeIntensity; }
 export function getTestsSubjectView(subjectId) { return `subject-${subjectId}`; }
 export function getSubjectByView(view) { return view.startsWith("subject-") ? getTestSubjects().find((subject) => subject.id === view.slice(8)) || null : null; }
+export function getQuestionBankView(subjectId) { return `questions-${subjectId}`; }
+export function getQuestionBankSubjectByView(view) { return view.startsWith("questions-") ? getTestSubjects().find((subject) => subject.id === view.slice(10)) || null : null; }
 export function getViewMeta(view) { return screens[view] || screens.tests; }

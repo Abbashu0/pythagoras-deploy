@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.pythagoras.local/question-package/1.0.0",
+  "title": "Pythagoras Question Package V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "format", "schemaVersion", "contentMode", "package", "taxonomy", "bankBrowse", "assetsManifest", "questions"],
+  "properties": {
+    "$schema": { "const": "https://schemas.pythagoras.local/question-package/1.0.0" },
+    "format": { "const": "pythagoras.question-package" },
+    "schemaVersion": { "const": "1.0.0" },
+    "contentMode": { "const": "question-bank" },
+    "package": { "$ref": "#/$defs/packageMetadata" },
+    "taxonomy": { "type": "array", "maxItems": 10000, "items": { "$ref": "#/$defs/taxonomyNode" } },
+    "bankBrowse": { "$ref": "#/$defs/bankBrowse" },
+    "assetsManifest": { "type": "array", "maxItems": 10000, "items": { "$ref": "#/$defs/assetManifestEntry" } },
+    "questions": { "type": "array", "maxItems": 100000, "items": { "$ref": "#/$defs/question" } }
+  },
+  "$defs": {
+    "uuid": { "type": "string", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$" },
+    "key": { "type": "string", "minLength": 1, "maxLength": 120, "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+    "nonEmpty": { "type": "string", "minLength": 1, "maxLength": 1000 },
+    "spans": {
+      "type": "array",
+      "maxItems": 10000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["text"],
+        "properties": {
+          "text": { "type": "string", "maxLength": 100000 },
+          "marks": { "type": "array", "uniqueItems": true, "maxItems": 3, "items": { "enum": ["bold", "italic", "underline"] } }
+        }
+      }
+    },
+    "richDocument": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "version", "blocks"],
+      "properties": {
+        "type": { "const": "doc" },
+        "version": { "const": 1 },
+        "blocks": { "type": "array", "maxItems": 10000, "items": { "$ref": "#/$defs/richBlock" } }
+      }
+    },
+    "richBlock": {
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["type", "spans"], "properties": { "type": { "const": "paragraph" }, "spans": { "$ref": "#/$defs/spans" } } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "level", "spans"], "properties": { "type": { "const": "heading" }, "level": { "enum": [2, 3, 4] }, "spans": { "$ref": "#/$defs/spans" } } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "items"], "properties": { "type": { "enum": ["ordered-list", "bullet-list"] }, "items": { "type": "array", "maxItems": 10000, "items": { "type": "object", "additionalProperties": false, "required": ["spans"], "properties": { "spans": { "$ref": "#/$defs/spans" } } } } } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "verses"], "properties": { "type": { "const": "quran" }, "verses": { "type": "array", "maxItems": 10000, "items": { "type": "object", "additionalProperties": false, "required": ["text"], "properties": { "text": { "$ref": "#/$defs/nonEmpty" }, "surah": { "type": "string", "maxLength": 160 }, "ayah": { "type": "integer", "minimum": 1 } } } } } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "verses"], "properties": { "type": { "const": "poetry" }, "verses": { "type": "array", "maxItems": 10000, "items": { "type": "object", "additionalProperties": false, "required": ["sadr", "ajuz"], "properties": { "sadr": { "$ref": "#/$defs/nonEmpty" }, "ajuz": { "$ref": "#/$defs/nonEmpty" } } } } } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "rows"], "properties": { "type": { "const": "table" }, "rows": { "type": "array", "maxItems": 10000, "items": { "type": "object", "additionalProperties": false, "required": ["cells"], "properties": { "cells": { "type": "array", "maxItems": 1000, "items": { "type": "object", "additionalProperties": false, "required": ["spans"], "properties": { "spans": { "$ref": "#/$defs/spans" } } } } } } } } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "assetRef", "alt"], "properties": { "type": { "const": "image" }, "assetRef": { "$ref": "#/$defs/key" }, "alt": { "type": "string", "maxLength": 1000 }, "caption": { "type": "string", "maxLength": 2000 } } },
+        { "type": "object", "additionalProperties": false, "required": ["type"], "properties": { "type": { "const": "divider" } } }
+      ]
+    },
+    "packageMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "key", "title", "subjectKey", "language", "contentRevision"],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" }, "key": { "$ref": "#/$defs/key" }, "title": { "$ref": "#/$defs/nonEmpty" },
+        "subjectKey": { "$ref": "#/$defs/key" }, "language": { "type": "string", "minLength": 2, "maxLength": 35 },
+        "contentRevision": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "taxonomyNode": {
+      "type": "object", "additionalProperties": false, "required": ["id", "key", "label", "kind", "parentId", "order"],
+      "properties": { "id": { "$ref": "#/$defs/uuid" }, "key": { "$ref": "#/$defs/key" }, "label": { "$ref": "#/$defs/nonEmpty" }, "kind": { "$ref": "#/$defs/key" }, "parentId": { "oneOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] }, "order": { "type": "integer", "minimum": 1 } }
+    },
+    "browseNode": {
+      "type": "object", "additionalProperties": false, "required": ["id", "key", "label", "type", "parentId", "order"],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" }, "key": { "$ref": "#/$defs/key" }, "label": { "$ref": "#/$defs/nonEmpty" }, "type": { "enum": ["GROUP", "QUESTION_LIST"] }, "parentId": { "oneOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] }, "order": { "type": "integer", "minimum": 1 },
+        "filter": { "type": "object", "additionalProperties": false, "required": ["taxonomyNodeId", "includeDescendants"], "properties": { "taxonomyNodeId": { "$ref": "#/$defs/uuid" }, "includeDescendants": { "type": "boolean" } } }
+      }
+    },
+    "bankBrowse": {
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["mode", "entry", "nodes"], "properties": { "mode": { "const": "ALL_PACKAGE_QUESTIONS" }, "entry": { "$ref": "#/$defs/browseEntry" }, "nodes": { "type": "array", "maxItems": 0 } } },
+        { "type": "object", "additionalProperties": false, "required": ["mode", "entry", "nodes"], "properties": { "mode": { "const": "TREE" }, "entry": { "$ref": "#/$defs/browseEntry" }, "nodes": { "type": "array", "minItems": 1, "maxItems": 10000, "items": { "$ref": "#/$defs/browseNode" } } } }
+      ]
+    },
+    "browseEntry": { "type": "object", "additionalProperties": false, "required": ["key", "label", "order"], "properties": { "key": { "$ref": "#/$defs/key" }, "label": { "$ref": "#/$defs/nonEmpty" }, "order": { "type": "integer", "minimum": 1 } } },
+    "assetManifestEntry": {
+      "type": "object", "additionalProperties": false, "required": ["ref", "sha256", "filename", "mimeType", "byteSize"],
+      "properties": { "ref": { "$ref": "#/$defs/key" }, "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }, "filename": { "$ref": "#/$defs/nonEmpty" }, "mimeType": { "type": "string", "minLength": 1, "maxLength": 127 }, "byteSize": { "type": "integer", "minimum": 1 }, "metadata": { "type": "object", "additionalProperties": { "type": ["string", "number", "boolean", "null"] }, "maxProperties": 100 } }
+    },
+    "occurrence": {
+      "type": "object", "additionalProperties": false, "required": ["id", "sourceKind"],
+      "properties": { "id": { "$ref": "#/$defs/uuid" }, "sourceKind": { "enum": ["ministerial", "discussion-question", "educational-tv", "end-of-chapter", "book-question", "book-exercise", "enrichment", "other"] }, "year": { "type": "integer", "minimum": 1900, "maximum": 2200 }, "round": { "type": "string", "maxLength": 160 }, "branch": { "type": "string", "maxLength": 160 }, "session": { "type": "string", "maxLength": 160 }, "locationScope": { "type": "string", "maxLength": 160 }, "attemptType": { "type": "string", "maxLength": 160 }, "sourceName": { "type": "string", "maxLength": 500 }, "notes": { "type": "string", "maxLength": 5000 }, "rawLabel": { "type": "string", "maxLength": 1000 } }
+    },
+    "variant": {
+      "type": "object", "additionalProperties": false, "required": ["id", "order", "content", "occurrences"],
+      "properties": { "id": { "$ref": "#/$defs/uuid" }, "order": { "type": "integer", "minimum": 1 }, "content": { "$ref": "#/$defs/richDocument" }, "occurrences": { "type": "array", "maxItems": 10000, "items": { "$ref": "#/$defs/occurrence" } } }
+    },
+    "question": {
+      "type": "object", "additionalProperties": false, "required": ["id", "order", "primaryVariantId", "taxonomyAssignments", "variants"],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" }, "order": { "type": "integer", "minimum": 1 }, "primaryVariantId": { "$ref": "#/$defs/uuid" },
+        "taxonomyAssignments": { "type": "array", "minItems": 1, "maxItems": 1000, "items": { "type": "object", "additionalProperties": false, "required": ["taxonomyNodeId", "role"], "properties": { "taxonomyNodeId": { "$ref": "#/$defs/uuid" }, "role": { "enum": ["PRIMARY", "RELATED"] } } } },
+        "variants": { "type": "array", "minItems": 1, "maxItems": 10000, "items": { "$ref": "#/$defs/variant" } },
+        "sharedAnswer": { "$ref": "#/$defs/richDocument" }
+      }
+    }
+  }
+}
