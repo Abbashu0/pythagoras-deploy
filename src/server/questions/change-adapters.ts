@@ -84,12 +84,15 @@ export class QuestionChangeAdapter implements ChangeResourceAdapter {
     const repository = new SQLiteQuestionRepository(database);
     switch (this.resourceType) {
       case "question.package": {
-        const entity = repository.getPackage(resourceId);
-        if (!entity) notFound("Question Package");
+        const aggregate = repository.getPackageAggregate(resourceId);
+        if (!aggregate) notFound("Question Package");
         return {
           resourceId,
-          revision: entity.revision,
-          snapshot: packageSnapshot(entity),
+          revision: aggregate.package.revision,
+          snapshot: packageSnapshot({
+            ...aggregate.package,
+            assetBindings: aggregate.assetBindings.map(({ packageId: _packageId, ...binding }) => binding),
+          }),
         };
       }
       case "question.taxonomy": {
@@ -279,17 +282,42 @@ function normalizeSnapshot(type: QuestionChangeResourceType, value: unknown): Ch
 }
 
 function normalizePackage(value: unknown): ChangeSnapshot {
-  const input = objectWithKeys(value, ["packageKey", "title", "subjectKey", "language", "bankBrowseMode", "bankBrowseEntryKey", "bankBrowseEntryLabel", "bankBrowseEntryOrder", "sourceAssetId"]);
+  const input = objectWithKeys(value, ["packageKey", "title", "subjectKey", "language", "contentRevision", "bankBrowseMode", "bankBrowseEntryKey", "bankBrowseEntryLabel", "bankBrowseEntryOrder", "sourceAssetId", "assetBindings"]);
+  const assetBindings = arrayValue(input.assetBindings, "assetBindings").map((binding, index) => {
+    const row = objectWithKeys(binding, ["assetRef", "expectedSha256", "assetId", "filename", "mimeType", "byteSize", "metadata", "position"], `assetBindings[${index}]`);
+    const expectedSha256 = normalizedText(row.expectedSha256, "expectedSha256", 64, 64).toLowerCase();
+    if (!/^[0-9a-f]{64}$/u.test(expectedSha256)) validationError("Asset binding SHA-256 is invalid.");
+    if (row.metadata !== null && (typeof row.metadata !== "object" || Array.isArray(row.metadata))) validationError("Asset binding metadata must be an object or null.");
+    let metadata: ChangeSnapshot | null = null;
+    if (row.metadata !== null) {
+      validateChangeSnapshot(row.metadata);
+      metadata = structuredClone(row.metadata);
+    }
+    return {
+      assetRef: semanticKey(row.assetRef, "assetRef"),
+      expectedSha256,
+      assetId: nullableUuid(row.assetId, "assetId"),
+      filename: exactText(row.filename, "filename", 1, 1000),
+      mimeType: normalizedText(row.mimeType, "mimeType", 1, 127).toLowerCase(),
+      byteSize: positiveInteger(row.byteSize, "byteSize"),
+      metadata,
+      position: nonNegativeInteger(row.position, "position"),
+    };
+  });
+  assertUnique(assetBindings.map((binding) => String(binding.assetRef)), "Asset binding references must be unique.");
+  assertUnique(assetBindings.map((binding) => Number(binding.position)), "Asset binding positions must be unique.");
   return {
     packageKey: semanticKey(input.packageKey, "packageKey"),
     title: normalizedText(input.title, "title", 1, 1000),
     subjectKey: semanticKey(input.subjectKey, "subjectKey"),
     language: normalizedText(input.language, "language", 2, 35),
+    contentRevision: positiveInteger(input.contentRevision, "contentRevision"),
     bankBrowseMode: enumValue(input.bankBrowseMode, ["ALL_PACKAGE_QUESTIONS", "TREE"], "bankBrowseMode"),
     bankBrowseEntryKey: semanticKey(input.bankBrowseEntryKey, "bankBrowseEntryKey"),
     bankBrowseEntryLabel: normalizedText(input.bankBrowseEntryLabel, "bankBrowseEntryLabel", 1, 1000),
     bankBrowseEntryOrder: positiveInteger(input.bankBrowseEntryOrder, "bankBrowseEntryOrder"),
     sourceAssetId: nullableUuid(input.sourceAssetId, "sourceAssetId"),
+    assetBindings,
   };
 }
 
@@ -406,6 +434,14 @@ function validateDatabaseLocalReferences(database: ContentDatabase, type: Questi
         .where(eq(assets.id, String(snapshot.sourceAssetId))).get();
       if (!source || source.mediaKind !== "json" || source.mimeType !== "application/json") {
         validationError("Question Package sourceAssetId must reference an immutable JSON Asset.");
+      }
+    }
+    for (const binding of snapshot.assetBindings as unknown as QuestionPackageContent["assetBindings"]) {
+      if (binding.assetId === null) continue;
+      const resolved = database.db.select({ sha256: assets.sha256, byteSize: assets.byteSize, mimeType: assets.mimeType }).from(assets)
+        .where(eq(assets.id, binding.assetId)).get();
+      if (!resolved || resolved.sha256 !== binding.expectedSha256 || resolved.byteSize !== binding.byteSize || resolved.mimeType !== binding.mimeType) {
+        validationError("Question Package Asset binding no longer matches the immutable Asset.");
       }
     }
   }
@@ -589,17 +625,19 @@ function describeQuestionItem(resourceId: string, before: ChangeSnapshot, propos
   };
 }
 
-function packageSnapshot(value: QuestionPackageContent): ChangeSnapshot {
+function packageSnapshot(value: QuestionPackageContent | (Omit<QuestionPackageContent, "assetBindings"> & { assetBindings?: QuestionPackageContent["assetBindings"] })): ChangeSnapshot {
   return normalizePackage({
     packageKey: value.packageKey,
     title: value.title,
     subjectKey: value.subjectKey,
     language: value.language,
+    contentRevision: value.contentRevision,
     bankBrowseMode: value.bankBrowseMode,
     bankBrowseEntryKey: value.bankBrowseEntryKey,
     bankBrowseEntryLabel: value.bankBrowseEntryLabel,
     bankBrowseEntryOrder: value.bankBrowseEntryOrder,
     sourceAssetId: value.sourceAssetId,
+    assetBindings: value.assetBindings ?? [],
   });
 }
 function taxonomySnapshot(value: QuestionTaxonomyContent): ChangeSnapshot {
@@ -641,7 +679,7 @@ function stripOccurrence(value: QuestionOccurrenceContent): QuestionOccurrenceCo
 
 function assertImmutableOwnership(type: QuestionChangeResourceType, before: ChangeSnapshot, proposed: ChangeSnapshot): void {
   if (type === "question.package") {
-    for (const key of ["packageKey", "subjectKey", "language", "sourceAssetId"] as const) if (!sameJson(before[key], proposed[key])) validationError(`Question Package ${key} is immutable after creation.`);
+    for (const key of ["packageKey", "subjectKey", "language", "contentRevision", "sourceAssetId", "assetBindings"] as const) if (!sameJson(before[key], proposed[key])) validationError(`Question Package ${key} is immutable after creation.`);
   }
   if (["question.taxonomy", "question.browse", "question.item"].includes(type) && before.packageId !== proposed.packageId) validationError("Question resource Package ownership is immutable.");
 }

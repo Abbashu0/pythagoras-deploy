@@ -9,6 +9,7 @@ export interface ChangeSummary {
 }
 
 export interface ChangeDetails extends ChangeSummary {
+  itemPage?: { total: number; limit: number; offset: number };
   items: Array<{
     id: string;
     revision: number;

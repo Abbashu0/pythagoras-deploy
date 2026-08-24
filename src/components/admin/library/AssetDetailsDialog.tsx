@@ -14,6 +14,7 @@ import {
   type LibraryAsset,
 } from "./library-types";
 import { AssetProposalDialog } from "./AssetProposalDialog";
+import { QuestionPackageImportDialog } from "@/components/admin/questions/QuestionPackageImportDialog";
 
 interface CanonicalUsage {
   assetId: string;
@@ -103,7 +104,7 @@ export function AssetDetailsDialog({
               {usage && <section className="mt-4 rounded-2xl border bg-card p-4 text-xs"><h3 className="font-bold">الاستخدام في المحتوى القانوني</h3>{usage.banners.length + usage.materials.length === 0 ? <p className="mt-2 text-muted-foreground">غير مستخدم حاليًا.</p> : <ul className="mt-2 space-y-1 text-muted-foreground">{usage.banners.map((item) => <li key={`banner-${item.id}`}>بانر: {item.title}</li>)}{usage.materials.map((item) => <li key={`material-${item.id}`}>مادة: {item.label}</li>)}</ul>}</section>}
 
               {details.questionPackageInspection && details.questionPackageInspection.status !== "GENERIC_JSON" && (
-                <QuestionPackageInspectionPanel inspection={details.questionPackageInspection} />
+                <QuestionPackageInspectionPanel assetId={details.id} inspection={details.questionPackageInspection} />
               )}
 
               <details className="mt-4 rounded-2xl border bg-card p-4 text-xs">
@@ -129,7 +130,7 @@ export function AssetDetailsDialog({
   );
 }
 
-function QuestionPackageInspectionPanel({ inspection }: { inspection: NonNullable<LibraryAsset["questionPackageInspection"]> }) {
+function QuestionPackageInspectionPanel({ assetId, inspection }: { assetId: string; inspection: NonNullable<LibraryAsset["questionPackageInspection"]> }) {
   const statusLabels = {
     VALID: "صالحة",
     VALID_WITH_WARNINGS: "صالحة مع تحذيرات",
@@ -166,6 +167,7 @@ function QuestionPackageInspectionPanel({ inspection }: { inspection: NonNullabl
           </ul>
         </details>
       )}
+      <QuestionPackageImportDialog assetId={assetId} inspection={inspection} />
     </section>
   );
 }

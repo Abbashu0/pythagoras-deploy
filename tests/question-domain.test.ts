@@ -716,7 +716,7 @@ test("sibling and cross-aggregate foreign keys reject relational corruption", ()
   }
 });
 
-test("M9 adds no Question HTTP surface, Editor, Student read, search, or corpus data", () => {
+test("Question foundation still adds no Editor, Student read, search, or corpus data", () => {
   const apiFiles = readFileTree(path.join(process.cwd(), "src/app/api"));
   assert.equal(/api[\\/]admin[\\/]questions|api[\\/]content[\\/]questions/u.test(apiFiles.paths), false);
   assert.equal(/getQuestionDomainService|materializePlan|createMaterializationPlan/u.test(apiFiles.contents), false);
@@ -724,7 +724,7 @@ test("M9 adds no Question HTTP surface, Editor, Student read, search, or corpus 
     path.join(process.cwd(), "src/app/admin/(protected)/questions/page.tsx"),
     "utf8",
   );
-  assert.ok(adminQuestions.includes("FileQuestion"));
+  assert.ok(adminQuestions.includes("QuestionPackagesWorkspace"));
   assert.equal(/server\/questions|api\/admin\/questions/u.test(adminQuestions), false);
   const student = readFileSync(
     path.join(process.cwd(), "public/pythagoras/src/pages/QuestionBankPlaceholderPage.js"),

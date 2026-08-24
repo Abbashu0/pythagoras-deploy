@@ -186,6 +186,17 @@ export interface ChangeSetDetails extends ChangeSetSummary {
   events: Array<ChangeSetEvent & { actor: ChangeSetAuthor }>;
 }
 
+export interface ChangeSetDetailsPage extends Omit<ChangeSetDetails, "items"> {
+  items: ChangeSetDetails["items"];
+  itemPage: { total: number; limit: number; offset: number };
+}
+
+export interface CompactChangeSetResult {
+  changeSet: ChangeSet;
+  itemCount: number;
+  areaLabels: string[];
+}
+
 export interface ChangeSetListOptions {
   status?: ChangeSetStatus;
   limit?: number;
@@ -230,6 +241,12 @@ export interface CreateChangeSetInput {
   submit?: boolean;
 }
 
+export interface CreateBulkChangeSetInput {
+  title: string;
+  description?: string;
+  items: NonNullable<CreateChangeSetInput["initialItems"]>;
+}
+
 export interface ChangeSetRepository {
   create(input: { id?: string; title: string; description: string | null; actor: AdminActor; basePublicationRevision: number }): ChangeSet;
   findById(id: string): ChangeSet | null;
@@ -249,6 +266,7 @@ export interface ChangeSetRepository {
   updateItem(input: { item: ChangeSetItem; expectedRevision: number }): ChangeSetItem;
   removeItem(changeSetId: string, itemId: string): boolean;
   listItems(changeSetId: string): ChangeSetItem[];
+  listItemsPage(changeSetId: string, limit: number, offset: number): ChangeSetItem[];
   findItem(changeSetId: string, itemId: string): ChangeSetItem | null;
   countItems(changeSetId: string): number;
   markConflict(changeSetId: string, itemId: string, details: ChangeSnapshot, actor: AdminActor): void;

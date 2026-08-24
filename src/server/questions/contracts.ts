@@ -197,6 +197,11 @@ export interface QuestionPackageAssetBindingEntity {
   position: number;
 }
 
+export type QuestionPackageAssetBindingContent = Omit<
+  QuestionPackageAssetBindingEntity,
+  "packageId"
+>;
+
 export interface QuestionAggregate extends QuestionEntity {
   primaryVariantId: string;
   taxonomyAssignments: QuestionTaxonomyAssignmentEntity[];
@@ -219,11 +224,15 @@ export interface QuestionPackageContent {
   title: string;
   subjectKey: string;
   language: string;
+  /** Preserved exactly from the portable package; manual empty packages start at 1. */
+  contentRevision: number;
   bankBrowseMode: QuestionBankBrowseMode;
   bankBrowseEntryKey: string;
   bankBrowseEntryLabel: string;
   bankBrowseEntryOrder: number;
   sourceAssetId: string | null;
+  /** Immutable import provenance persisted only when the reviewed package is published. */
+  assetBindings: QuestionPackageAssetBindingContent[];
 }
 
 export interface QuestionTaxonomyContent {

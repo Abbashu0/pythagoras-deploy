@@ -27,6 +27,9 @@ export function ReviewWorkspace({ initialChangeSetId }: { initialChangeSetId?: s
   const [filter, setFilter] = useState<ReviewStatus | "ALL">("ALL");
   const [items, setItems] = useState<ChangeSummary[]>([]);
   const [selected, setSelected] = useState<ChangeDetails | null>(null);
+  const [itemOffset, setItemOffset] = useState(0);
+  const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
+  const [taxonomyLabels, setTaxonomyLabels] = useState<Record<string, string>>({});
   const [stats, setStats] = useState({ currentPublicationRevision: 0, actionable: 0, published: 0 });
   const [publications, setPublications] = useState<Array<{ publication: { id: string; revision: number; summary: string; publishedAt: number }; publisher: { displayName: string }; itemCount: number }>>([]);
   const [loading, setLoading] = useState(true);
@@ -48,18 +51,18 @@ export function ReviewWorkspace({ initialChangeSetId }: { initialChangeSetId?: s
       setRole(session.identity.role); setItems(page.items); setStats(statsBody.stats); setPublications(history.items);
       const selectedId = keepSelection && selected ? selected.changeSet.id : initialChangeSetId;
       if (selectedId) {
-        const detail = await reviewApi<{ changeSet: ChangeDetails }>(`/api/admin/change-sets/${selectedId}`);
-        setSelected(detail.changeSet);
+        const detail = await reviewApi<{ changeSet: ChangeDetails; questionTaxonomyLabels: Record<string, string> }>(`/api/admin/change-sets/${selectedId}?itemsLimit=25&itemsOffset=${itemOffset}`);
+        setSelected(detail.changeSet); setTaxonomyLabels(detail.questionTaxonomyLabels); setSelectedItemId((current) => detail.changeSet.items.some((item) => item.id === current) ? current : detail.changeSet.items[0]?.id ?? null);
       } else setSelected(null);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "تعذر تحميل مساحة المراجعة."); }
     finally { setLoading(false); }
-  }, [filter, initialChangeSetId, selected]);
+  }, [filter, initialChangeSetId, itemOffset, selected]);
 
   useEffect(() => { void load(false); }, [filter]);
 
-  const openDetails = async (id: string) => {
+  const openDetails = async (id: string, offset = 0) => {
     setBusy(true); setError(null);
-    try { setSelected((await reviewApi<{ changeSet: ChangeDetails }>(`/api/admin/change-sets/${id}`)).changeSet); }
+    try { const detail = await reviewApi<{ changeSet: ChangeDetails; questionTaxonomyLabels: Record<string, string> }>(`/api/admin/change-sets/${id}?itemsLimit=25&itemsOffset=${offset}`); setItemOffset(offset); setSelected(detail.changeSet); setTaxonomyLabels(detail.questionTaxonomyLabels); setSelectedItemId(detail.changeSet.items[0]?.id ?? null); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "تعذر فتح المقترح."); }
     finally { setBusy(false); }
   };
@@ -68,7 +71,7 @@ export function ReviewWorkspace({ initialChangeSetId }: { initialChangeSetId?: s
     if (!selected) return;
     setBusy(true); setError(null);
     try {
-      await reviewApi(`/api/admin/change-sets/${selected.changeSet.id}/${operation}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expectedRevision: selected.changeSet.revision, ...body }) });
+      await reviewApi(`/api/admin/change-sets/${selected.changeSet.id}/${operation}?compact=1`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expectedRevision: selected.changeSet.revision, ...body }) });
       setAction(null); setNote(""); await load(true);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "تعذر تنفيذ العملية."); }
     finally { setBusy(false); }
@@ -112,7 +115,7 @@ export function ReviewWorkspace({ initialChangeSetId }: { initialChangeSetId?: s
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><div className="flex items-center gap-2"><span className={cn("rounded-full px-2.5 py-1 text-[10px] font-semibold", selectedStatus?.className)}>{selectedStatus?.label}</span><span className="text-[10px] text-muted-foreground">نسخة #{selected.changeSet.revision}</span></div><h2 className="mt-3 text-xl font-black">{selected.changeSet.title}</h2><p className="mt-1 text-xs text-muted-foreground">بواسطة {selected.author.displayName} · أساس النشر #{selected.changeSet.basePublicationRevision}</p></div><ActionButtons role={role} details={selected} busy={busy} mutate={mutate} setAction={setAction} /></div>
             {selected.changeSet.description && <p className="mt-5 rounded-xl bg-muted/40 p-4 text-xs leading-6">{selected.changeSet.description}</p>}
             {selected.changeSet.reviewNote && <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/5 p-4"><p className="text-[10px] font-semibold text-amber-600">ملاحظة المراجعة</p><p className="mt-2 text-xs">{selected.changeSet.reviewNote}</p></div>}
-            <div className="mt-6 space-y-4">{selected.items.map((item) => item.resourceType === "question.item" ? <div key={item.id}><QuestionReviewItem item={item} />{item.conflictDetails && <ConflictPanel details={item.conflictDetails} />}</div> : <article key={item.id} className="rounded-2xl border p-4"><div className="flex items-center justify-between gap-3"><div><p className="text-xs font-bold">{item.presentation.resourceLabel}</p><p className="mt-1 text-[10px] text-muted-foreground" dir="auto">{item.presentation.resourceSubtitle}</p></div><span className="rounded-full bg-primary/10 px-2 py-1 text-[9px] text-primary">{item.presentation.areaLabel}</span></div><div className="mt-4 space-y-2">{item.presentation.fieldDiffs.map((diff) => <div key={diff.path} className="grid gap-2 rounded-xl bg-muted/35 p-3 sm:grid-cols-[110px_1fr_auto_1fr]"><span className="text-[10px] text-muted-foreground">{diff.label}</span><Value value={diff.before} tone="old" /><ArrowLeftRight className="h-3.5 w-3.5 self-center text-muted-foreground" /><Value value={diff.after} tone="new" /></div>)}</div>{item.conflictDetails && <ConflictPanel details={item.conflictDetails} />}</article>)}</div>
+            <ReviewItemPage details={selected} selectedItemId={selectedItemId} taxonomyLabels={taxonomyLabels} onSelect={setSelectedItemId} onPage={(offset) => void openDetails(selected.changeSet.id, offset)} />
             <section className="mt-6"><h3 className="flex items-center gap-2 text-sm font-bold"><History className="h-4 w-4" />السجل الزمني</h3><div className="mt-3 border-r pr-4">{selected.events.map((event) => <div key={event.id} className="relative pb-4"><span className="absolute -right-[21px] top-1 h-2.5 w-2.5 rounded-full border-2 border-card bg-primary" /><p className="text-xs font-semibold">{eventLabel(event.eventType)}</p><p className="mt-1 text-[10px] text-muted-foreground">{event.actor.displayName} · {new Date(event.createdAt).toLocaleString("ar-IQ")}</p>{event.note && <p className="mt-1 text-xs">{event.note}</p>}</div>)}</div></section>
           </>}
         </div>
@@ -123,6 +126,12 @@ export function ReviewWorkspace({ initialChangeSetId }: { initialChangeSetId?: s
       <ReviewActionDialog action={action} note={note} setNote={setNote} currentRevision={stats.currentPublicationRevision} busy={busy} onClose={() => { setAction(null); setNote(""); }} onConfirm={() => action && void mutate(action, action === "request-changes" ? { note } : action === "reject" ? { reason: note } : {})} />
     </main>
   );
+}
+
+function ReviewItemPage({ details, selectedItemId, taxonomyLabels, onSelect, onPage }: { details: ChangeDetails; selectedItemId: string | null; taxonomyLabels: Record<string, string>; onSelect: (id: string) => void; onPage: (offset: number) => void }) {
+  const page = details.itemPage ?? { total: details.itemCount, limit: Math.max(details.items.length, 1), offset: 0 };
+  const selectedItem = details.items.find((item) => item.id === selectedItemId) ?? details.items[0];
+  return <section className="mt-6 space-y-4"><div className="rounded-2xl border bg-muted/20 p-3"><div className="flex items-center justify-between gap-3"><p className="text-xs font-bold">عناصر التغيير {page.offset + 1}–{Math.min(page.offset + details.items.length, page.total)} من {page.total}</p><div className="flex gap-1"><Button size="sm" variant="outline" disabled={page.offset === 0} onClick={() => onPage(Math.max(0, page.offset - page.limit))}>السابق</Button><Button size="sm" variant="outline" disabled={page.offset + page.limit >= page.total} onClick={() => onPage(page.offset + page.limit)}>التالي</Button></div></div><div className="admin-scroll mt-3 flex gap-2 overflow-x-auto pb-1">{details.items.map((item) => <button key={item.id} type="button" onClick={() => onSelect(item.id)} className={cn("min-w-44 rounded-xl border bg-card p-3 text-right", selectedItem?.id === item.id && "border-primary bg-primary/5")}><span className="line-clamp-1 text-xs font-bold">{item.presentation.resourceLabel}</span><span className="mt-1 block text-[9px] text-muted-foreground">{item.presentation.resourceSubtitle}</span></button>)}</div></div>{selectedItem ? selectedItem.resourceType === "question.item" ? <div><QuestionReviewItem item={selectedItem} taxonomyLabels={taxonomyLabels} />{selectedItem.conflictDetails && <ConflictPanel details={selectedItem.conflictDetails} />}</div> : <article className="rounded-2xl border p-4"><div className="flex items-center justify-between gap-3"><div><p className="text-xs font-bold">{selectedItem.presentation.resourceLabel}</p><p className="mt-1 text-[10px] text-muted-foreground" dir="auto">{selectedItem.presentation.resourceSubtitle}</p></div><span className="rounded-full bg-primary/10 px-2 py-1 text-[9px] text-primary">{selectedItem.presentation.areaLabel}</span></div><div className="mt-4 space-y-2">{selectedItem.presentation.fieldDiffs.map((diff) => <div key={diff.path} className="grid gap-2 rounded-xl bg-muted/35 p-3 sm:grid-cols-[110px_1fr_auto_1fr]"><span className="text-[10px] text-muted-foreground">{diff.label}</span><Value value={diff.before} tone="old" /><ArrowLeftRight className="h-3.5 w-3.5 self-center text-muted-foreground" /><Value value={diff.after} tone="new" /></div>)}</div>{selectedItem.conflictDetails && <ConflictPanel details={selectedItem.conflictDetails} />}</article> : null}</section>;
 }
 
 function Metric({ icon: Icon, label, value }: { icon: typeof ShieldCheck; label: string; value: string }) { return <div className="rounded-2xl border bg-card p-4"><Icon className="h-4 w-4 text-primary" /><p className="mt-3 text-[10px] text-muted-foreground">{label}</p><p className="mt-1 text-lg font-black">{value}</p></div>; }

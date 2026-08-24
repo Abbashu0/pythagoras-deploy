@@ -325,15 +325,22 @@ export class SQLiteQuestionRepository implements QuestionRepository {
     assertMutationActor(input.actor);
     const now = this.clock();
     try {
-      this.database.db.insert(questionPackages).values({
-        id: input.id,
-        ...input.content,
-        contentRevision: 1,
-        createdAt: now,
-        updatedAt: now,
-        updatedBy: input.actor.actorUserId,
-        revision: 1,
-      }).run();
+      this.database.client.transaction(() => {
+        const { assetBindings, ...packageContent } = input.content;
+        this.database.db.insert(questionPackages).values({
+          id: input.id,
+          ...packageContent,
+          createdAt: now,
+          updatedAt: now,
+          updatedBy: input.actor.actorUserId,
+          revision: 1,
+        }).run();
+        if (assetBindings.length) {
+          this.database.db.insert(questionPackageAssetBindings).values(
+            assetBindings.map((binding) => ({ ...binding, packageId: input.id })),
+          ).run();
+        }
+      })();
     } catch (error) {
       throw mapConstraintError(error);
     }
@@ -347,7 +354,9 @@ export class SQLiteQuestionRepository implements QuestionRepository {
       current.packageKey !== input.content.packageKey ||
       current.subjectKey !== input.content.subjectKey ||
       current.language !== input.content.language ||
-      current.sourceAssetId !== input.content.sourceAssetId
+      current.contentRevision !== input.content.contentRevision ||
+      current.sourceAssetId !== input.content.sourceAssetId ||
+      JSON.stringify(this.listAssetBindings(input.id).map(({ packageId: _packageId, ...binding }) => binding)) !== JSON.stringify(input.content.assetBindings)
     ) {
       invalid("Question Package identity and source provenance are immutable.");
     }

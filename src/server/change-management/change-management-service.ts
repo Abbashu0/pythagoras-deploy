@@ -8,6 +8,7 @@ import type {
   ChangeEventRepository,
   ChangeSet,
   ChangeSetDetails,
+  ChangeSetDetailsPage,
   ChangeSetItem,
   ChangeSetListOptions,
   ChangeSetPage,
@@ -15,6 +16,8 @@ import type {
   ChangeSetStatus,
   ChangeSnapshot,
   ChangeOperation,
+  CompactChangeSetResult,
+  CreateBulkChangeSetInput,
   CreateChangeSetInput,
   PublicationRepository,
   ReviewStats,
@@ -107,6 +110,68 @@ export class ChangeManagementService {
       for (const initialItem of initialItems) changeSet = this.addItemInternal(changeSet, initialItem, actor);
       if (input.submit) changeSet = this.submitInternal(changeSet, actor);
       return this.getDetailsInternal(changeSet.id);
+    });
+  }
+
+  /** Atomic, bounded-response staging path for generated domain plans. */
+  createBulkChangeSet(
+    input: CreateBulkChangeSetInput,
+    actor: AdminActor,
+  ): CompactChangeSetResult {
+    requireActor(actor);
+    const title = normalizeTitle(input.title);
+    const description = normalizeDescription(input.description);
+    if (!input.items.length || input.items.length > 10_000) {
+      throw new ChangeManagementError("CHANGE_VALIDATION_FAILED", "Bulk Change Set item count is invalid.");
+    }
+    const identities = new Set<string>();
+    return this.unitOfWork.run(() => {
+      const changeSet = this.changeSets.create({
+        title,
+        description,
+        actor,
+        basePublicationRevision: this.publications.getCurrentRevision(),
+      });
+      this.appendEvent(changeSet.id, "CREATED", actor, null, { stagedItemCount: input.items.length });
+      const staged: ChangeSetItem[] = [];
+      const now = this.clock();
+      for (const item of input.items) {
+        const operation = item.operation ?? "UPDATE";
+        requireResourceExpectedRevision(item.expectedRevision, operation);
+        const identity = `${item.resourceType}\u0000${item.resourceId}`;
+        if (identities.has(identity)) {
+          throw new ChangeManagementError("CHANGE_VALIDATION_FAILED", "Bulk Change Set contains a duplicate resource.");
+        }
+        identities.add(identity);
+        const adapter = this.registry.require(item.resourceType);
+        const captured = adapter.captureProposal(this.database, item.resourceId, item.desired, operation);
+        if (captured.current.revision !== item.expectedRevision) {
+          throw new ChangeManagementError("CHANGE_CONFLICT", "A resource changed before bulk staging completed.");
+        }
+        const stagedItem = this.changeSets.addItem({
+          id: uuidv7(),
+          changeSetId: changeSet.id,
+          resourceType: item.resourceType,
+          resourceId: item.resourceId,
+          operation,
+          baseResourceRevision: captured.current.revision,
+          beforeSnapshot: captured.current.snapshot,
+          proposedSnapshot: captured.proposedSnapshot,
+          changedPaths: captured.changedPaths,
+          conflictState: "NONE",
+          conflictDetails: null,
+          createdAt: now,
+          updatedAt: now,
+        });
+        staged.push(stagedItem);
+      }
+      this.registry.validateChangeSet(this.database, staged, "SUBMIT");
+      const touched = this.changeSets.touch(changeSet.id, changeSet.revision);
+      return {
+        changeSet: touched,
+        itemCount: staged.length,
+        areaLabels: [...new Set(staged.map((item) => this.registry.require(item.resourceType).areaLabel))],
+      };
     });
   }
 
@@ -324,6 +389,46 @@ export class ChangeManagementService {
     return this.getDetailsInternal(id);
   }
 
+  getDetailsPage(
+    id: string,
+    actor: AdminActor,
+    limit = 25,
+    offset = 0,
+  ): ChangeSetDetailsPage {
+    requireActor(actor);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100 || !Number.isInteger(offset) || offset < 0) {
+      throw new ChangeManagementError("CHANGE_VALIDATION_FAILED", "Change Set item pagination is invalid.");
+    }
+    const changeSet = this.changeSets.findById(id);
+    if (!changeSet) throw new ChangeManagementError("CHANGE_NOT_FOUND", "The Change Set was not found.");
+    if (actor.actorRole !== "OWNER" && changeSet.createdBy !== actor.actorUserId) {
+      throw new ChangeManagementError("CHANGE_AUTHORIZATION_FAILED", "This Change Set belongs to another Admin.");
+    }
+    const details = this.getDetailsInternal(id, { limit, offset });
+    return { ...details, itemPage: { total: details.itemCount, limit, offset } };
+  }
+
+  getQuestionTaxonomyLabels(changeSetId: string, actor: AdminActor): Record<string, string> {
+    requireActor(actor);
+    const changeSet = this.changeSets.findById(changeSetId);
+    if (!changeSet) throw new ChangeManagementError("CHANGE_NOT_FOUND", "The Change Set was not found.");
+    if (actor.actorRole !== "OWNER" && changeSet.createdBy !== actor.actorUserId) throw new ChangeManagementError("CHANGE_AUTHORIZATION_FAILED", "This Change Set belongs to another Admin.");
+    const canonical = this.database.client.prepare("select id,label,parent_id as parentId from question_taxonomy_nodes").all() as Array<{ id: string; label: string; parentId: string | null }>;
+    const proposed = this.database.client.prepare("select resource_id as id, proposed_snapshot as snapshot from change_set_items where change_set_id = ? and resource_type = 'question.taxonomy'").all(changeSetId) as Array<{ id: string; snapshot: string }>;
+    const nodes = new Map(canonical.map((node) => [node.id, node]));
+    for (const row of proposed) {
+      const snapshot = JSON.parse(row.snapshot) as { label?: unknown; parentId?: unknown };
+      if (typeof snapshot.label === "string") nodes.set(row.id, { id: row.id, label: snapshot.label, parentId: typeof snapshot.parentId === "string" ? snapshot.parentId : null });
+    }
+    const result: Record<string, string> = {};
+    for (const [id, node] of nodes) {
+      const labels = [node.label]; let parentId = node.parentId; const seen = new Set([id]);
+      while (parentId && !seen.has(parentId)) { seen.add(parentId); const parent = nodes.get(parentId); if (!parent) break; labels.unshift(parent.label); parentId = parent.parentId; }
+      result[id] = labels.join(" / ");
+    }
+    return result;
+  }
+
   list(options: ChangeSetListOptions, actor: AdminActor): ChangeSetPage {
     requireActor(actor);
     const page = this.changeSets.list({ ...options, createdBy: actor.actorRole === "OWNER" ? options.createdBy : actor.actorUserId });
@@ -467,11 +572,12 @@ export class ChangeManagementService {
     return changeSet;
   }
 
-  private getDetailsInternal(id: string): ChangeSetDetails {
+  private getDetailsInternal(id: string, page?: { limit: number; offset: number }): ChangeSetDetails {
     const row = this.database.db.select({ changeSet: changeSets, authorId: adminUsers.id, authorName: adminUsers.displayName, authorRole: adminUsers.role })
       .from(changeSets).innerJoin(adminUsers, eq(changeSets.createdBy, adminUsers.id)).where(eq(changeSets.id, id)).get();
     if (!row) throw new ChangeManagementError("CHANGE_NOT_FOUND", "The Change Set was not found.");
-    const items = this.changeSets.listItems(id).map((item) => {
+    const itemCount = this.changeSets.countItems(id);
+    const items = (page ? this.changeSets.listItemsPage(id, page.limit, page.offset) : this.changeSets.listItems(id)).map((item) => {
       const adapter = this.registry.require(item.resourceType);
       let current;
       try { current = adapter.loadCurrent(this.database, item.resourceId); }
@@ -481,7 +587,7 @@ export class ChangeManagementService {
     return {
       changeSet: row.changeSet,
       author: { id: row.authorId, displayName: row.authorName, role: row.authorRole },
-      itemCount: items.length,
+      itemCount,
       areaLabels: [...new Set(items.map((item) => item.presentation.areaLabel))],
       items,
       events: this.events.listWithActors(id),

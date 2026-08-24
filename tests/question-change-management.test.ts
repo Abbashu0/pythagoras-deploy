@@ -77,11 +77,13 @@ function packageContent(overrides: Partial<QuestionPackageContent> = {}): Questi
     title: "حزمة عربية تجريبية",
     subjectKey: "arabic",
     language: "ar-IQ",
+    contentRevision: 1,
     bankBrowseMode: "TREE",
     bankBrowseEntryKey: "m11-bank",
     bankBrowseEntryLabel: "بنك M11",
     bankBrowseEntryOrder: 91,
     sourceAssetId: null,
+    assetBindings: [],
     ...overrides,
   };
 }

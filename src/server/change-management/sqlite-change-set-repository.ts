@@ -175,6 +175,16 @@ export class SQLiteChangeSetRepository implements ChangeSetRepository {
     return this.database.db.select().from(changeSetItems).where(eq(changeSetItems.changeSetId, changeSetId)).orderBy(changeSetItems.createdAt, changeSetItems.id).all().map(toChangeSetItem);
   }
 
+  listItemsPage(changeSetId: string, limit: number, offset: number): ChangeSetItem[] {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100 || !Number.isInteger(offset) || offset < 0) {
+      throw new ChangeManagementError("CHANGE_VALIDATION_FAILED", "Change Set item pagination is invalid.");
+    }
+    return this.database.db.select().from(changeSetItems)
+      .where(eq(changeSetItems.changeSetId, changeSetId))
+      .orderBy(changeSetItems.createdAt, changeSetItems.id)
+      .limit(limit).offset(offset).all().map(toChangeSetItem);
+  }
+
   findItem(changeSetId: string, itemId: string): ChangeSetItem | null {
     const row = this.database.db.select().from(changeSetItems).where(and(eq(changeSetItems.changeSetId, changeSetId), eq(changeSetItems.id, itemId))).get();
     return row ? toChangeSetItem(row) : null;

@@ -9,7 +9,14 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
   try {
     const authentication = requireChangeAdmin(request);
     const { id } = await context.params;
-    return changeJson({ ok: true, changeSet: getChangeManagementService().getDetails(id, getAdminActor(authentication)) });
+    const limitValue = request.nextUrl.searchParams.get("itemsLimit");
+    const offsetValue = request.nextUrl.searchParams.get("itemsOffset");
+    const service = getChangeManagementService();
+    const actor = getAdminActor(authentication);
+    const changeSet = limitValue !== null || offsetValue !== null
+      ? service.getDetailsPage(id, actor, Number(limitValue ?? 25), Number(offsetValue ?? 0))
+      : service.getDetails(id, actor);
+    return changeJson({ ok: true, changeSet, questionTaxonomyLabels: service.getQuestionTaxonomyLabels(id, actor) });
   } catch (error) { return changeApiError(error); }
 }
 

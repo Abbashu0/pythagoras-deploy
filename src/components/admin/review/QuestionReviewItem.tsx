@@ -7,7 +7,7 @@ import type { ChangeDetails } from "./types";
 
 type ReviewItem = ChangeDetails["items"][number];
 
-export function QuestionReviewItem({ item }: { item: ReviewItem }) {
+export function QuestionReviewItem({ item, taxonomyLabels = {} }: { item: ReviewItem; taxonomyLabels?: Record<string, string> }) {
   const before = asQuestionItem(item.beforeSnapshot);
   const after = asQuestionItem(item.proposedSnapshot);
   if (!after) return null;
@@ -75,8 +75,8 @@ export function QuestionReviewItem({ item }: { item: ReviewItem }) {
           <section className="rounded-xl border bg-muted/20 p-3">
             <SectionTitle icon={Tags} title="التصنيف" subtitle="مقارنة روابط السؤال داخل شجرة التصنيف" />
             <div className="mt-3 grid gap-2 sm:grid-cols-2">
-              <AssignmentList label="قبل" assignments={before?.taxonomyAssignments ?? []} />
-              <AssignmentList label="بعد" assignments={after.taxonomyAssignments} />
+              <AssignmentList label="قبل" assignments={before?.taxonomyAssignments ?? []} taxonomyLabels={taxonomyLabels} />
+              <AssignmentList label="بعد" assignments={after.taxonomyAssignments} taxonomyLabels={taxonomyLabels} />
             </div>
           </section>
         )}
@@ -108,8 +108,8 @@ function OccurrenceList({ label, values }: { label: string; values: string[] }) 
   return <div><p className="text-[10px] font-semibold text-muted-foreground">{label} ({values.length})</p>{values.length ? <ul className="mt-1.5 space-y-1 text-[11px]">{values.map((value, index) => <li key={`${index}-${value}`} className="rounded-lg bg-muted/40 px-2 py-1.5" dir="auto">{value}</li>)}</ul> : <p className="mt-1.5 text-[11px] text-muted-foreground">لا توجد مصادر</p>}</div>;
 }
 
-function AssignmentList({ label, assignments }: { label: string; assignments: QuestionItemContent["taxonomyAssignments"] }) {
-  return <div className="rounded-lg bg-background p-2.5"><p className="text-[10px] font-semibold text-muted-foreground">{label} ({assignments.length})</p>{assignments.length ? <ul className="mt-2 space-y-1 text-[11px]">{assignments.map((assignment) => <li key={assignment.taxonomyNodeId} className="flex items-center justify-between gap-2"><span className="truncate font-mono text-[10px]" dir="ltr">{shortId(assignment.taxonomyNodeId)}</span><Badge tone={assignment.role === "PRIMARY" ? "new" : "neutral"}>{assignment.role === "PRIMARY" ? "أساسي" : "مرتبط"}</Badge></li>)}</ul> : <p className="mt-2 text-[11px] text-muted-foreground">لا توجد روابط</p>}</div>;
+function AssignmentList({ label, assignments, taxonomyLabels }: { label: string; assignments: QuestionItemContent["taxonomyAssignments"]; taxonomyLabels: Record<string, string> }) {
+  return <div className="rounded-lg bg-background p-2.5"><p className="text-[10px] font-semibold text-muted-foreground">{label} ({assignments.length})</p>{assignments.length ? <ul className="mt-2 space-y-1 text-[11px]">{assignments.map((assignment) => <li key={assignment.taxonomyNodeId} className="flex items-center justify-between gap-2"><span className="truncate" dir="auto" title={taxonomyLabels[assignment.taxonomyNodeId] ?? assignment.taxonomyNodeId}>{taxonomyLabels[assignment.taxonomyNodeId] ?? shortId(assignment.taxonomyNodeId)}</span><Badge tone={assignment.role === "PRIMARY" ? "new" : "neutral"}>{assignment.role === "PRIMARY" ? "أساسي" : "مرتبط"}</Badge></li>)}</ul> : <p className="mt-2 text-[11px] text-muted-foreground">لا توجد روابط</p>}</div>;
 }
 
 function SummaryMetric({ label, before, after }: { label: string; before?: number; after: number }) {
