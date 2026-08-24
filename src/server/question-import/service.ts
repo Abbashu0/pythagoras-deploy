@@ -4,6 +4,7 @@ import type { AdminActor } from "../admin-auth";
 import { createAssetService, MAX_JSON_INSPECTION_BYTES } from "../assets";
 import { SQLiteAssetRepository } from "../assets/sqlite-asset-repository";
 import { createCanonicalContentRepository } from "../canonical-content";
+import { getChangeSnapshotByteSize, MAX_CHANGE_SNAPSHOT_BYTES } from "../change-management";
 import { createChangeManagementService } from "../change-management/service";
 import { changeSetItems, changeSets, questionPackages } from "../content/schema";
 import type { ContentDatabase } from "../content";
@@ -34,7 +35,7 @@ export class QuestionPackageImportService {
     const validation = await this.loadAndValidate(assetId);
     const source = validation.package;
     const warnings = validation.diagnostics.filter((item) => item.severity === "WARNING");
-    const blockers = validation.diagnostics
+    const blockers: QuestionPackageImportPreflight["blockers"] = validation.diagnostics
       .filter((item) => item.severity === "ERROR")
       .map(compactDiagnostic);
     if (!source) return emptyPreflight(assetId, validation.status, warnings, blockers);
@@ -50,6 +51,27 @@ export class QuestionPackageImportService {
     const alreadyImported = Boolean(this.questionRepository.getPackage(source.package.id));
     const existingChangeSetId = this.findActivePackageChangeSet(source.package.id);
     if (!alreadyImported && !existingChangeSetId) blockers.push(...this.findCanonicalCollisions(source));
+    if (!blockers.some((item) => item.code === "QUESTION_ASSET_UNRESOLVED")) {
+      try {
+        const plan = new QuestionPackageMaterializer(new AssetLibraryQuestionPackageAssetResolver(this.assetRepository))
+          .createPlan(getEligibleQuestionPackage(validation), actor, { sourceAssetId: assetId });
+        for (const item of planToChangeItems(plan)) {
+          const byteSize = getChangeSnapshotByteSize(item.desired);
+          if (byteSize > MAX_CHANGE_SNAPSHOT_BYTES) {
+            blockers.push({
+              code: "SNAPSHOT_TOO_LARGE",
+              message: `Question change snapshot exceeds ${MAX_CHANGE_SNAPSHOT_BYTES} bytes.`,
+              resourceType: item.resourceType,
+              entityId: item.resourceId,
+              byteSize,
+              maximumBytes: MAX_CHANGE_SNAPSHOT_BYTES,
+            });
+          }
+        }
+      } catch (error) {
+        if (!blockers.length) throw error;
+      }
+    }
     const occurrences = source.questions.reduce((total, question) => total + question.variants.reduce((sum, variant) => sum + variant.occurrences.length, 0), 0);
     const variants = source.questions.reduce((total, question) => total + question.variants.length, 0);
     const eligibleStatus = validation.status === "VALID" || validation.status === "VALID_WITH_WARNINGS";
@@ -223,6 +245,6 @@ function emptyPreflight(assetId: string, status: QuestionPackageImportPreflight[
 }
 
 function compactDiagnostic(item: QuestionPackageDiagnostic) { return { code: item.code, message: item.message, ...(item.entityId ? { entityId: item.entityId } : {}) }; }
-function uniqueBlockers(items: QuestionPackageImportPreflight["blockers"]) { const seen = new Set<string>(); return items.filter((item) => { const key = `${item.code}:${item.entityId ?? ""}:${item.message}`; if (seen.has(key)) return false; seen.add(key); return true; }); }
+function uniqueBlockers(items: QuestionPackageImportPreflight["blockers"]) { const seen = new Set<string>(); return items.filter((item) => { const key = `${item.code}:${item.resourceType ?? ""}:${item.entityId ?? ""}:${item.byteSize ?? ""}:${item.message}`; if (seen.has(key)) return false; seen.add(key); return true; }); }
 function chunks<T>(items: T[], size: number): T[][] { const result: T[][] = []; for (let index = 0; index < items.length; index += size) result.push(items.slice(index, index + size)); return result; }
 function assertActor(actor: AdminActor) { if (!actor.actorUserId || !["OWNER", "ADMIN"].includes(actor.actorRole)) throw new QuestionImportError("QUESTION_IMPORT_INVALID", "Authenticated Admin actor is required."); }

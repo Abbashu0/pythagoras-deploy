@@ -169,8 +169,32 @@ test("generated 2000-question package stages atomically with paging and bounded 
     assert.equal(tableCount(f.database, "change_set_items"), 2_002); assert.equal(tableCount(f.database, "questions"), 0);
     const first = f.changes.getDetailsPage(staged.changeSetId!, f.actor, 25, 0); const last = f.changes.getDetailsPage(staged.changeSetId!, f.actor, 25, 2_000);
     assert.equal(first.items.length, 25); assert.equal(first.itemPage.total, 2_002); assert.equal(last.items.length, 2);
-    assert.equal(Math.max(...first.items.map((item) => Buffer.byteLength(JSON.stringify(item.proposedSnapshot)))), Math.max(...first.items.map((item) => Buffer.byteLength(JSON.stringify(item.proposedSnapshot)))));
-    assert.equal(first.items.every((item) => Buffer.byteLength(JSON.stringify(item.proposedSnapshot)) <= 64 * 1024), true);
+    const firstPageSnapshotBytes = first.items.map((item) => Buffer.byteLength(JSON.stringify(item.proposedSnapshot)));
+    assert.equal(firstPageSnapshotBytes.length, 25);
+    assert.equal(Math.max(...firstPageSnapshotBytes) > 100, true);
+    assert.equal(firstPageSnapshotBytes.every((byteSize) => byteSize <= 64 * 1024), true);
+  } finally { f.close(); }
+});
+
+test("preflight blocks an oversized generated question snapshot before creating a Change Set", async () => {
+  const f = createFixture();
+  try {
+    const value = fixture("d-multi-variant-valid.json");
+    const question = value.questions[0];
+    question.variants[0].content.blocks = Array.from({ length: 90 }, () => ({
+      id: uuidv7(),
+      type: "paragraph" as const,
+      spans: [{ text: "س".repeat(900) }],
+    }));
+    const asset = await ingestPackage(f.database, f.actor, value, "oversized-question.json");
+    const preflight = await f.service.preflight(asset.id, f.actor);
+    const blocker = preflight.blockers.find((item) => item.code === "SNAPSHOT_TOO_LARGE");
+    assert.equal(preflight.eligible, false);
+    assert.equal(blocker?.resourceType, "question.item");
+    assert.equal(blocker?.entityId, question.id);
+    assert.equal((blocker?.byteSize ?? 0) > (blocker?.maximumBytes ?? Number.MAX_SAFE_INTEGER), true);
+    assert.equal(blocker?.maximumBytes, 64 * 1024);
+    assert.equal(tableCount(f.database, "change_sets"), 0);
   } finally { f.close(); }
 });
 

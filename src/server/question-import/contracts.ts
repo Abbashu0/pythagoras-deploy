@@ -36,7 +36,14 @@ export interface QuestionPackageImportPreflight {
   };
   counts: QuestionPackageImportCounts;
   warnings: QuestionPackageDiagnostic[];
-  blockers: Array<{ code: string; message: string; entityId?: string }>;
+  blockers: Array<{
+    code: string;
+    message: string;
+    entityId?: string;
+    resourceType?: string;
+    byteSize?: number;
+    maximumBytes?: number;
+  }>;
 }
 
 export interface CompactQuestionPackageStageResult {

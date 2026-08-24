@@ -31,7 +31,7 @@ export {
 } from "./contracts";
 export { ChangeManagementError, isChangeManagementError } from "./errors";
 export { createChangeManagementService, getChangeManagementService } from "./service";
-export { deriveChangedPaths, threeWayMerge, validateChangeSnapshot } from "./snapshot";
+export { deriveChangedPaths, getChangeSnapshotByteSize, MAX_CHANGE_SNAPSHOT_BYTES, threeWayMerge, validateChangeSnapshot } from "./snapshot";
 export { SQLiteChangeEventRepository } from "./sqlite-change-event-repository";
 export { SQLiteChangeSetRepository } from "./sqlite-change-set-repository";
 export { SQLitePublicationRepository } from "./sqlite-publication-repository";

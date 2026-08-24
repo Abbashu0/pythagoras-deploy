@@ -45,7 +45,13 @@ M12 makes Asset Library Question Package import operational. Only `VALID`, or ex
 
 Import is initial-only and creates one atomic DRAFT Change Set; it never writes canonical Question rows before OWNER publication. Existing active import drafts are reused and already-canonical Packages are reported rather than duplicated. Large Question Change Sets use bounded staging responses and paginated 25-item review with one selected rich preview and resolved taxonomy breadcrumbs. `/admin/questions` is now the Package-level workspace, and manual empty Package creation is governed with a server UUIDv7, `contentRevision = 1`, no source Asset, and no bindings.
 
-M12 imports no real corpus and adds no full Question Editor, Tiptap, search, Student Question API, TXT/OCR converter, or Quiz Ready architecture. Re-import/update is not implemented. M13 has not started.
+M12 imports no real corpus and adds no search, Student Question API, TXT/OCR converter, or Quiz Ready architecture. Re-import/update is not implemented. Its staging preflight now measures every generated proposal with the same 64 KiB Change Management snapshot semantics and blocks oversized items before a Change Set is created; Package cards use aggregate counts and human Material labels.
+
+M13 makes `/admin/questions` an operational Package CMS. Package detail provides Overview, separate visual Taxonomy and Bank Browse structure editors, and a server-paginated 50-row Question summary list; a single Question aggregate loads only on demand. A current Admin's one editable DRAFT/NEEDS_CHANGES Change Set is discovered and reused, and the editor overlays its proposals on canonical published rows, including imported or manually created Packages that do not yet exist canonically. Opening a screen never creates an empty Change Set.
+
+Package metadata, structure, Questions, stable Variants, per-Variant Occurrences, taxonomy assignments, and one shared Answer are edited through explicit local buffers and saved only as the existing `question.*` Change Set resources. Rich educational content uses a structured editor-neutral adapter for every canonical Pythagoras RichDocument block, marks, stable block/verse IDs, and Asset Library image IDs; no HTML or editor-native state is persisted. Review remains the OWNER governance and publication surface. Published child omission/deletion remains blocked, while new Draft-only children can be removed before save.
+
+M13 adds no database migration, real corpus, Search/FTS, Student Question API/final bank, TXT/OCR/AI converter, or Quiz/MCQ/grading features. M14 has not started.
 
 The prior Question Bank and all real question data remain intentionally removed. Do not add Quiz Ready, MCQ generation, grading, distractors, timers, or attempts. The future relational Question Bank must build on stable IDs, variants with per-variant provenance, one shared answer, rich structured blocks, and Published-only Student reads.
 

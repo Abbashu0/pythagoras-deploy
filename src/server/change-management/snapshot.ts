@@ -3,6 +3,10 @@ import type { ChangeSnapshot, ChangeSnapshotValue } from "./contracts";
 
 export const MAX_CHANGE_SNAPSHOT_BYTES = 64 * 1024;
 
+export function getChangeSnapshotByteSize(value: unknown): number {
+  return Buffer.byteLength(JSON.stringify(value), "utf8");
+}
+
 function isPlainObject(value: unknown): value is ChangeSnapshot {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const prototype = Object.getPrototypeOf(value);
@@ -33,7 +37,7 @@ export function validateChangeSnapshot(value: unknown): asserts value is ChangeS
     throw new ChangeManagementError("CHANGE_VALIDATION_FAILED", "A change snapshot must be a plain JSON object.");
   }
   assertJsonValue(value, "");
-  const bytes = Buffer.byteLength(JSON.stringify(value), "utf8");
+  const bytes = getChangeSnapshotByteSize(value);
   if (bytes > MAX_CHANGE_SNAPSHOT_BYTES) {
     throw new ChangeManagementError("CHANGE_VALIDATION_FAILED", `A change snapshot exceeds ${MAX_CHANGE_SNAPSHOT_BYTES} bytes.`);
   }
