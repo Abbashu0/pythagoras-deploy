@@ -1,11 +1,28 @@
 import { sql } from "drizzle-orm";
-import { check, index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import {
+  check,
+  foreignKey,
+  index,
+  integer,
+  primaryKey,
+  real,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core";
 import type { AdminRole } from "../admin-auth/contracts";
 import type { AssetMediaKind } from "../assets/contracts";
 import type {
   QuestionPackageDiagnostic,
   QuestionPackageRecognitionStatus,
 } from "../question-packages/contracts";
+import type {
+  CanonicalRichDocument,
+  QuestionBankBrowseMode,
+  QuestionBrowseNodeType,
+  QuestionSourceKind,
+  QuestionTaxonomyRole,
+} from "../questions/contracts";
 import type {
   ChangeConflictState,
   ChangeEventType,
@@ -669,6 +686,359 @@ export const questionPackageInspections = sqliteTable(
   ],
 );
 
+export const questionPackages = sqliteTable(
+  "question_packages",
+  {
+    id: text("id").primaryKey(),
+    packageKey: text("package_key").notNull(),
+    title: text("title").notNull(),
+    subjectKey: text("subject_key")
+      .notNull()
+      .references(() => canonicalMaterials.subjectKey, { onDelete: "restrict" }),
+    language: text("language").notNull(),
+    contentRevision: integer("content_revision").notNull(),
+    bankBrowseMode: text("bank_browse_mode")
+      .$type<QuestionBankBrowseMode>()
+      .notNull(),
+    bankBrowseEntryKey: text("bank_browse_entry_key").notNull(),
+    bankBrowseEntryLabel: text("bank_browse_entry_label").notNull(),
+    bankBrowseEntryOrder: integer("bank_browse_entry_order").notNull(),
+    sourceAssetId: text("source_asset_id").references(() => assets.id, {
+      onDelete: "restrict",
+    }),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    updatedBy: text("updated_by")
+      .notNull()
+      .references(() => adminUsers.id, { onDelete: "restrict" }),
+    revision: integer("revision").notNull().default(1),
+  },
+  (table) => [
+    uniqueIndex("question_packages_key_unique").on(table.packageKey),
+    uniqueIndex("question_packages_subject_entry_key_unique").on(
+      table.subjectKey,
+      table.bankBrowseEntryKey,
+    ),
+    uniqueIndex("question_packages_subject_entry_order_unique").on(
+      table.subjectKey,
+      table.bankBrowseEntryOrder,
+    ),
+    index("question_packages_subject_order_index").on(
+      table.subjectKey,
+      table.bankBrowseEntryOrder,
+    ),
+    index("question_packages_source_asset_index").on(table.sourceAssetId),
+    check("question_packages_key_valid", sql`length(trim(${table.packageKey})) between 1 and 120`),
+    check("question_packages_title_valid", sql`length(trim(${table.title})) between 1 and 1000`),
+    check("question_packages_language_valid", sql`length(trim(${table.language})) between 2 and 35`),
+    check("question_packages_content_revision_positive", sql`${table.contentRevision} >= 1`),
+    check("question_packages_browse_mode_valid", sql`${table.bankBrowseMode} in ('ALL_PACKAGE_QUESTIONS','TREE')`),
+    check("question_packages_entry_key_valid", sql`length(trim(${table.bankBrowseEntryKey})) between 1 and 120`),
+    check("question_packages_entry_label_valid", sql`length(trim(${table.bankBrowseEntryLabel})) between 1 and 1000`),
+    check("question_packages_entry_order_positive", sql`${table.bankBrowseEntryOrder} >= 1`),
+    check("question_packages_revision_positive", sql`${table.revision} >= 1`),
+    check("question_packages_timestamps_ordered", sql`${table.updatedAt} >= ${table.createdAt}`),
+  ],
+);
+
+export const questionTaxonomyNodes = sqliteTable(
+  "question_taxonomy_nodes",
+  {
+    id: text("id").primaryKey(),
+    packageId: text("package_id")
+      .notNull()
+      .references(() => questionPackages.id, { onDelete: "cascade" }),
+    nodeKey: text("node_key").notNull(),
+    label: text("label").notNull(),
+    kind: text("kind").notNull(),
+    parentId: text("parent_id"),
+    displayOrder: integer("display_order").notNull(),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    updatedBy: text("updated_by")
+      .notNull()
+      .references(() => adminUsers.id, { onDelete: "restrict" }),
+    revision: integer("revision").notNull().default(1),
+  },
+  (table) => [
+    uniqueIndex("question_taxonomy_package_id_unique").on(table.packageId, table.id),
+    uniqueIndex("question_taxonomy_package_key_unique").on(table.packageId, table.nodeKey),
+    uniqueIndex("question_taxonomy_root_order_unique")
+      .on(table.packageId, table.displayOrder)
+      .where(sql`${table.parentId} is null`),
+    uniqueIndex("question_taxonomy_sibling_order_unique")
+      .on(table.packageId, table.parentId, table.displayOrder)
+      .where(sql`${table.parentId} is not null`),
+    index("question_taxonomy_parent_order_index").on(table.packageId, table.parentId, table.displayOrder),
+    foreignKey({
+      columns: [table.packageId, table.parentId],
+      foreignColumns: [table.packageId, table.id],
+      name: "question_taxonomy_parent_same_package_fk",
+    }).onDelete("restrict"),
+    check("question_taxonomy_key_valid", sql`length(trim(${table.nodeKey})) between 1 and 120`),
+    check("question_taxonomy_label_valid", sql`length(trim(${table.label})) between 1 and 1000`),
+    check("question_taxonomy_kind_valid", sql`length(trim(${table.kind})) between 1 and 120`),
+    check("question_taxonomy_order_positive", sql`${table.displayOrder} >= 1`),
+    check("question_taxonomy_not_self_parent", sql`${table.parentId} is null or ${table.parentId} <> ${table.id}`),
+    check("question_taxonomy_revision_positive", sql`${table.revision} >= 1`),
+    check("question_taxonomy_timestamps_ordered", sql`${table.updatedAt} >= ${table.createdAt}`),
+  ],
+);
+
+export const questionBankBrowseNodes = sqliteTable(
+  "question_bank_browse_nodes",
+  {
+    id: text("id").primaryKey(),
+    packageId: text("package_id")
+      .notNull()
+      .references(() => questionPackages.id, { onDelete: "cascade" }),
+    nodeKey: text("node_key").notNull(),
+    label: text("label").notNull(),
+    nodeType: text("node_type").$type<QuestionBrowseNodeType>().notNull(),
+    parentId: text("parent_id"),
+    displayOrder: integer("display_order").notNull(),
+    taxonomyNodeId: text("taxonomy_node_id"),
+    includeDescendants: integer("include_descendants", { mode: "boolean" }),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    updatedBy: text("updated_by")
+      .notNull()
+      .references(() => adminUsers.id, { onDelete: "restrict" }),
+    revision: integer("revision").notNull().default(1),
+  },
+  (table) => [
+    uniqueIndex("question_browse_package_id_unique").on(table.packageId, table.id),
+    uniqueIndex("question_browse_package_key_unique").on(table.packageId, table.nodeKey),
+    uniqueIndex("question_browse_root_order_unique")
+      .on(table.packageId, table.displayOrder)
+      .where(sql`${table.parentId} is null`),
+    uniqueIndex("question_browse_sibling_order_unique")
+      .on(table.packageId, table.parentId, table.displayOrder)
+      .where(sql`${table.parentId} is not null`),
+    index("question_browse_parent_order_index").on(table.packageId, table.parentId, table.displayOrder),
+    index("question_browse_taxonomy_index").on(table.packageId, table.taxonomyNodeId),
+    foreignKey({
+      columns: [table.packageId, table.parentId],
+      foreignColumns: [table.packageId, table.id],
+      name: "question_browse_parent_same_package_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [table.packageId, table.taxonomyNodeId],
+      foreignColumns: [questionTaxonomyNodes.packageId, questionTaxonomyNodes.id],
+      name: "question_browse_taxonomy_same_package_fk",
+    }).onDelete("restrict"),
+    check("question_browse_key_valid", sql`length(trim(${table.nodeKey})) between 1 and 120`),
+    check("question_browse_label_valid", sql`length(trim(${table.label})) between 1 and 1000`),
+    check("question_browse_type_valid", sql`${table.nodeType} in ('GROUP','QUESTION_LIST')`),
+    check("question_browse_order_positive", sql`${table.displayOrder} >= 1`),
+    check("question_browse_not_self_parent", sql`${table.parentId} is null or ${table.parentId} <> ${table.id}`),
+    check("question_browse_filter_shape_valid", sql`(${table.nodeType} = 'GROUP' and ${table.taxonomyNodeId} is null and ${table.includeDescendants} is null) or (${table.nodeType} = 'QUESTION_LIST' and ${table.taxonomyNodeId} is not null and ${table.includeDescendants} in (0,1))`),
+    check("question_browse_revision_positive", sql`${table.revision} >= 1`),
+    check("question_browse_timestamps_ordered", sql`${table.updatedAt} >= ${table.createdAt}`),
+  ],
+);
+
+export const questions = sqliteTable(
+  "questions",
+  {
+    id: text("id").primaryKey(),
+    packageId: text("package_id")
+      .notNull()
+      .references(() => questionPackages.id, { onDelete: "cascade" }),
+    displayOrder: integer("display_order").notNull(),
+    sharedAnswer: text("shared_answer", { mode: "json" }).$type<CanonicalRichDocument>(),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    updatedBy: text("updated_by")
+      .notNull()
+      .references(() => adminUsers.id, { onDelete: "restrict" }),
+    revision: integer("revision").notNull().default(1),
+  },
+  (table) => [
+    uniqueIndex("questions_package_id_unique").on(table.packageId, table.id),
+    uniqueIndex("questions_package_order_unique").on(table.packageId, table.displayOrder),
+    index("questions_package_order_index").on(table.packageId, table.displayOrder),
+    check("questions_order_positive", sql`${table.displayOrder} >= 1`),
+    check("questions_shared_answer_valid_json", sql`${table.sharedAnswer} is null or (json_valid(${table.sharedAnswer}) and json_type(${table.sharedAnswer}) = 'object')`),
+    check("questions_revision_positive", sql`${table.revision} >= 1`),
+    check("questions_timestamps_ordered", sql`${table.updatedAt} >= ${table.createdAt}`),
+  ],
+);
+
+export const questionVariants = sqliteTable(
+  "question_variants",
+  {
+    id: text("id").primaryKey(),
+    questionId: text("question_id")
+      .notNull()
+      .references(() => questions.id, { onDelete: "cascade" }),
+    displayOrder: integer("display_order").notNull(),
+    content: text("content", { mode: "json" }).$type<CanonicalRichDocument>().notNull(),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    updatedBy: text("updated_by")
+      .notNull()
+      .references(() => adminUsers.id, { onDelete: "restrict" }),
+    revision: integer("revision").notNull().default(1),
+  },
+  (table) => [
+    uniqueIndex("question_variants_question_id_unique").on(table.questionId, table.id),
+    uniqueIndex("question_variants_question_order_unique").on(table.questionId, table.displayOrder),
+    index("question_variants_question_order_index").on(table.questionId, table.displayOrder),
+    check("question_variants_order_positive", sql`${table.displayOrder} >= 1`),
+    check("question_variants_content_valid_json", sql`json_valid(${table.content}) and json_type(${table.content}) = 'object'`),
+    check("question_variants_revision_positive", sql`${table.revision} >= 1`),
+    check("question_variants_timestamps_ordered", sql`${table.updatedAt} >= ${table.createdAt}`),
+  ],
+);
+
+export const questionPrimaryVariants = sqliteTable(
+  "question_primary_variants",
+  {
+    questionId: text("question_id")
+      .primaryKey()
+      .references(() => questions.id, { onDelete: "cascade" }),
+    variantId: text("variant_id").notNull(),
+  },
+  (table) => [
+    uniqueIndex("question_primary_variants_variant_unique").on(table.variantId),
+    foreignKey({
+      columns: [table.questionId, table.variantId],
+      foreignColumns: [questionVariants.questionId, questionVariants.id],
+      name: "question_primary_variant_same_question_fk",
+    }).onDelete("cascade"),
+  ],
+);
+
+export const questionOccurrences = sqliteTable(
+  "question_occurrences",
+  {
+    id: text("id").primaryKey(),
+    variantId: text("variant_id")
+      .notNull()
+      .references(() => questionVariants.id, { onDelete: "cascade" }),
+    displayOrder: integer("display_order").notNull(),
+    sourceKind: text("source_kind").$type<QuestionSourceKind>().notNull(),
+    year: integer("year"),
+    roundCode: text("round_code"),
+    session: text("session"),
+    sourceName: text("source_name"),
+    notes: text("notes"),
+    rawLabel: text("raw_label").notNull(),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    updatedBy: text("updated_by")
+      .notNull()
+      .references(() => adminUsers.id, { onDelete: "restrict" }),
+    revision: integer("revision").notNull().default(1),
+  },
+  (table) => [
+    uniqueIndex("question_occurrences_variant_order_unique").on(table.variantId, table.displayOrder),
+    index("question_occurrences_variant_order_index").on(table.variantId, table.displayOrder),
+    index("question_occurrences_source_year_index").on(table.sourceKind, table.year),
+    check("question_occurrences_order_positive", sql`${table.displayOrder} >= 1`),
+    check("question_occurrences_source_kind_valid", sql`${table.sourceKind} in ('ministerial','discussion-question','educational-tv','end-of-chapter','book-question','book-exercise','enrichment','other')`),
+    check("question_occurrences_year_valid", sql`${table.year} is null or ${table.year} between 1900 and 2200`),
+    check("question_occurrences_raw_label_valid", sql`length(trim(${table.rawLabel})) between 1 and 1000`),
+    check("question_occurrences_revision_positive", sql`${table.revision} >= 1`),
+    check("question_occurrences_timestamps_ordered", sql`${table.updatedAt} >= ${table.createdAt}`),
+  ],
+);
+
+export const questionOccurrenceBranches = sqliteTable(
+  "question_occurrence_branches",
+  {
+    occurrenceId: text("occurrence_id")
+      .notNull()
+      .references(() => questionOccurrences.id, { onDelete: "cascade" }),
+    position: integer("position").notNull(),
+    value: text("value").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.occurrenceId, table.position] }),
+    index("question_occurrence_branches_value_index").on(table.value),
+    check("question_occurrence_branches_position_nonnegative", sql`${table.position} >= 0`),
+    check("question_occurrence_branches_value_valid", sql`length(trim(${table.value})) between 1 and 160`),
+  ],
+);
+
+export const questionOccurrenceQualifiers = sqliteTable(
+  "question_occurrence_qualifiers",
+  {
+    occurrenceId: text("occurrence_id")
+      .notNull()
+      .references(() => questionOccurrences.id, { onDelete: "cascade" }),
+    position: integer("position").notNull(),
+    value: text("value").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.occurrenceId, table.position] }),
+    index("question_occurrence_qualifiers_value_index").on(table.value),
+    check("question_occurrence_qualifiers_position_nonnegative", sql`${table.position} >= 0`),
+    check("question_occurrence_qualifiers_value_valid", sql`length(trim(${table.value})) between 1 and 160`),
+  ],
+);
+
+export const questionTaxonomyAssignments = sqliteTable(
+  "question_taxonomy_assignments",
+  {
+    packageId: text("package_id").notNull(),
+    questionId: text("question_id").notNull(),
+    taxonomyNodeId: text("taxonomy_node_id").notNull(),
+    role: text("role").$type<QuestionTaxonomyRole>().notNull(),
+    position: integer("position").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.questionId, table.taxonomyNodeId] }),
+    uniqueIndex("question_taxonomy_assignments_question_position_unique").on(table.questionId, table.position),
+    uniqueIndex("question_taxonomy_assignments_one_primary")
+      .on(table.questionId)
+      .where(sql`${table.role} = 'PRIMARY'`),
+    index("question_taxonomy_assignments_taxonomy_index").on(table.taxonomyNodeId, table.questionId),
+    foreignKey({
+      columns: [table.packageId, table.questionId],
+      foreignColumns: [questions.packageId, questions.id],
+      name: "question_assignment_question_same_package_fk",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.packageId, table.taxonomyNodeId],
+      foreignColumns: [questionTaxonomyNodes.packageId, questionTaxonomyNodes.id],
+      name: "question_assignment_taxonomy_same_package_fk",
+    }).onDelete("restrict"),
+    check("question_taxonomy_assignments_role_valid", sql`${table.role} in ('PRIMARY','RELATED')`),
+    check("question_taxonomy_assignments_position_nonnegative", sql`${table.position} >= 0`),
+  ],
+);
+
+export const questionPackageAssetBindings = sqliteTable(
+  "question_package_asset_bindings",
+  {
+    packageId: text("package_id")
+      .notNull()
+      .references(() => questionPackages.id, { onDelete: "cascade" }),
+    assetRef: text("asset_ref").notNull(),
+    expectedSha256: text("expected_sha256").notNull(),
+    assetId: text("asset_id").references(() => assets.id, { onDelete: "restrict" }),
+    filename: text("filename").notNull(),
+    mimeType: text("mime_type").notNull(),
+    byteSize: integer("byte_size").notNull(),
+    metadata: text("metadata", { mode: "json" }).$type<Record<string, string | number | boolean | null>>(),
+    position: integer("position").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.packageId, table.assetRef] }),
+    uniqueIndex("question_package_asset_bindings_position_unique").on(table.packageId, table.position),
+    index("question_package_asset_bindings_asset_index").on(table.assetId),
+    check("question_package_asset_bindings_ref_valid", sql`length(trim(${table.assetRef})) between 1 and 120`),
+    check("question_package_asset_bindings_sha256_valid", sql`length(${table.expectedSha256}) = 64 and ${table.expectedSha256} not glob '*[^0-9a-f]*'`),
+    check("question_package_asset_bindings_filename_valid", sql`length(trim(${table.filename})) between 1 and 1000`),
+    check("question_package_asset_bindings_mime_valid", sql`length(trim(${table.mimeType})) between 1 and 127`),
+    check("question_package_asset_bindings_size_positive", sql`${table.byteSize} > 0`),
+    check("question_package_asset_bindings_metadata_valid", sql`${table.metadata} is null or (json_valid(${table.metadata}) and json_type(${table.metadata}) = 'object')`),
+    check("question_package_asset_bindings_position_nonnegative", sql`${table.position} >= 0`),
+  ],
+);
+
 export type ChangeSetRow = typeof changeSets.$inferSelect;
 export type ChangeSetItemRow = typeof changeSetItems.$inferSelect;
 export type ChangeSetEventRow = typeof changeSetEvents.$inferSelect;
@@ -676,3 +1046,13 @@ export type PublicationRow = typeof publications.$inferSelect;
 export type PublicationItemRow = typeof publicationItems.$inferSelect;
 export type QuestionPackageInspectionRow =
   typeof questionPackageInspections.$inferSelect;
+export type QuestionPackageRow = typeof questionPackages.$inferSelect;
+export type QuestionTaxonomyNodeRow = typeof questionTaxonomyNodes.$inferSelect;
+export type QuestionBankBrowseNodeRow = typeof questionBankBrowseNodes.$inferSelect;
+export type QuestionRow = typeof questions.$inferSelect;
+export type QuestionVariantRow = typeof questionVariants.$inferSelect;
+export type QuestionOccurrenceRow = typeof questionOccurrences.$inferSelect;
+export type QuestionTaxonomyAssignmentRow =
+  typeof questionTaxonomyAssignments.$inferSelect;
+export type QuestionPackageAssetBindingRow =
+  typeof questionPackageAssetBindings.$inferSelect;
