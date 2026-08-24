@@ -132,6 +132,7 @@ export interface ChangePresentation {
 export interface ChangeResourceAdapter {
   readonly resourceType: string;
   readonly areaLabel: string;
+  readonly mergeStrategy?: "THREE_WAY" | "CONSERVATIVE";
   loadCurrent(database: ContentDatabase, resourceId: string): ResourceState;
   captureProposal(database: ContentDatabase, resourceId: string, desired: unknown, operation?: ChangeOperation): {
     current: ResourceState;
@@ -149,6 +150,18 @@ export interface ChangeResourceAdapter {
     operation?: ChangeOperation,
   ): ResourceState;
   validatePublication?(database: ContentDatabase): void;
+}
+
+export type ChangeSetValidationPhase = "SUBMIT" | "APPROVE" | "PUBLISH";
+
+/** Cross-resource invariant and dependency boundary used by one domain family. */
+export interface ChangeSetCoordinator {
+  validate(
+    database: ContentDatabase,
+    items: ChangeSetItem[],
+    phase: ChangeSetValidationPhase,
+  ): void;
+  planPublication(database: ContentDatabase, items: ChangeSetItem[]): ChangeSetItem[];
 }
 
 export interface ChangeSetAuthor {

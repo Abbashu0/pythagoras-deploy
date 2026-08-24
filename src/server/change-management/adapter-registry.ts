@@ -1,12 +1,16 @@
-import type { ChangeResourceAdapter } from "./contracts";
+import type { ChangeResourceAdapter, ChangeSetCoordinator, ChangeSetItem, ChangeSetValidationPhase } from "./contracts";
 import { ChangeManagementError } from "./errors";
 import { AssetMetadataChangeAdapter } from "./asset-metadata-adapter";
 import { createCanonicalChangeAdapters } from "../canonical-content/change-adapters";
+import { createQuestionChangeAdapters, QuestionChangeSetCoordinator } from "../questions/change-adapters";
 
 export class ChangeResourceAdapterRegistry {
   private readonly adapters = new Map<string, ChangeResourceAdapter>();
 
-  constructor(adapters: ChangeResourceAdapter[]) {
+  constructor(
+    adapters: ChangeResourceAdapter[],
+    private readonly coordinators: ChangeSetCoordinator[] = [],
+  ) {
     for (const adapter of adapters) {
       if (this.adapters.has(adapter.resourceType)) throw new Error(`Duplicate change adapter: ${adapter.resourceType}`);
       this.adapters.set(adapter.resourceType, adapter);
@@ -30,8 +34,29 @@ export class ChangeResourceAdapterRegistry {
       this.require(resourceType).validatePublication?.(database);
     }
   }
+
+  validateChangeSet(
+    database: Parameters<ChangeResourceAdapter["loadCurrent"]>[0],
+    items: ChangeSetItem[],
+    phase: ChangeSetValidationPhase,
+  ): void {
+    for (const coordinator of this.coordinators) coordinator.validate(database, items, phase);
+  }
+
+  planPublication(
+    database: Parameters<ChangeResourceAdapter["loadCurrent"]>[0],
+    items: ChangeSetItem[],
+  ): ChangeSetItem[] {
+    return this.coordinators.reduce(
+      (planned, coordinator) => coordinator.planPublication(database, planned),
+      [...items],
+    );
+  }
 }
 
 export function createDefaultChangeResourceRegistry(): ChangeResourceAdapterRegistry {
-  return new ChangeResourceAdapterRegistry([new AssetMetadataChangeAdapter(), ...createCanonicalChangeAdapters()]);
+  return new ChangeResourceAdapterRegistry(
+    [new AssetMetadataChangeAdapter(), ...createCanonicalChangeAdapters(), ...createQuestionChangeAdapters()],
+    [new QuestionChangeSetCoordinator()],
+  );
 }

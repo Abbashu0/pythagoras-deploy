@@ -1,4 +1,5 @@
 import { and, asc, eq, sql } from "drizzle-orm";
+import type { AdminActor } from "../admin-auth/contracts";
 import type { ContentDatabase } from "../content/database";
 import {
   questionBankBrowseNodes,
@@ -24,13 +25,17 @@ import {
 import { assertCanonicalRichDocument } from "./canonical-rich-document";
 import type {
   QuestionAggregate,
+  QuestionBrowseContent,
   QuestionBrowseNodeEntity,
+  QuestionItemContent,
   QuestionMaterializationPlan,
   QuestionOccurrenceEntity,
   QuestionPackageAggregate,
   QuestionPackageAssetBindingEntity,
+  QuestionPackageContent,
   QuestionPackageEntity,
   QuestionRepository,
+  QuestionTaxonomyContent,
   QuestionTaxonomyAssignmentEntity,
   QuestionTaxonomyNodeEntity,
   QuestionVariantEntity,
@@ -316,6 +321,223 @@ export class SQLiteQuestionRepository implements QuestionRepository {
     );
   }
 
+  createPackage(input: { id: string; content: QuestionPackageContent; actor: AdminActor }): QuestionPackageEntity {
+    assertMutationActor(input.actor);
+    const now = this.clock();
+    try {
+      this.database.db.insert(questionPackages).values({
+        id: input.id,
+        ...input.content,
+        contentRevision: 1,
+        createdAt: now,
+        updatedAt: now,
+        updatedBy: input.actor.actorUserId,
+        revision: 1,
+      }).run();
+    } catch (error) {
+      throw mapConstraintError(error);
+    }
+    return this.requirePackage(input.id);
+  }
+
+  updatePackage(input: { id: string; content: QuestionPackageContent; expectedRevision: number; actor: AdminActor }): QuestionPackageEntity {
+    assertMutationActor(input.actor);
+    const current = this.requirePackage(input.id);
+    if (
+      current.packageKey !== input.content.packageKey ||
+      current.subjectKey !== input.content.subjectKey ||
+      current.language !== input.content.language ||
+      current.sourceAssetId !== input.content.sourceAssetId
+    ) {
+      invalid("Question Package identity and source provenance are immutable.");
+    }
+    let updated;
+    try {
+      updated = this.database.db.update(questionPackages).set({
+        title: input.content.title,
+        bankBrowseMode: input.content.bankBrowseMode,
+        bankBrowseEntryKey: input.content.bankBrowseEntryKey,
+        bankBrowseEntryLabel: input.content.bankBrowseEntryLabel,
+        bankBrowseEntryOrder: input.content.bankBrowseEntryOrder,
+        updatedAt: this.clock(),
+        updatedBy: input.actor.actorUserId,
+        revision: sql`${questionPackages.revision} + 1`,
+      }).where(and(eq(questionPackages.id, input.id), eq(questionPackages.revision, input.expectedRevision))).returning().get();
+    } catch (error) {
+      throw mapConstraintError(error);
+    }
+    if (!updated) throw new QuestionDomainConflictError(input.expectedRevision, this.requirePackage(input.id).revision);
+    return toPackage(updated);
+  }
+
+  createTaxonomyNode(input: { id: string; content: QuestionTaxonomyContent; actor: AdminActor }): QuestionTaxonomyNodeEntity {
+    assertMutationActor(input.actor);
+    const now = this.clock();
+    try {
+      this.database.db.insert(questionTaxonomyNodes).values({ id: input.id, ...input.content, createdAt: now, updatedAt: now, updatedBy: input.actor.actorUserId, revision: 1 }).run();
+    } catch (error) { throw mapConstraintError(error); }
+    return this.requireTaxonomyNode(input.id);
+  }
+
+  updateTaxonomyNode(input: { id: string; content: QuestionTaxonomyContent; expectedRevision: number; actor: AdminActor }): QuestionTaxonomyNodeEntity {
+    assertMutationActor(input.actor);
+    const current = this.requireTaxonomyNode(input.id);
+    if (current.packageId !== input.content.packageId) invalid("Taxonomy Package ownership is immutable.");
+    let updated;
+    try {
+      updated = this.database.db.update(questionTaxonomyNodes).set({ ...input.content, updatedAt: this.clock(), updatedBy: input.actor.actorUserId, revision: sql`${questionTaxonomyNodes.revision} + 1` })
+        .where(and(eq(questionTaxonomyNodes.id, input.id), eq(questionTaxonomyNodes.revision, input.expectedRevision))).returning().get();
+    } catch (error) { throw mapConstraintError(error); }
+    if (!updated) throw new QuestionDomainConflictError(input.expectedRevision, this.requireTaxonomyNode(input.id).revision);
+    return toTaxonomyNode(updated);
+  }
+
+  createBrowseNode(input: { id: string; content: QuestionBrowseContent; actor: AdminActor }): QuestionBrowseNodeEntity {
+    assertMutationActor(input.actor);
+    const now = this.clock();
+    try {
+      this.database.db.insert(questionBankBrowseNodes).values({ id: input.id, ...input.content, createdAt: now, updatedAt: now, updatedBy: input.actor.actorUserId, revision: 1 }).run();
+    } catch (error) { throw mapConstraintError(error); }
+    return this.requireBrowseNode(input.id);
+  }
+
+  updateBrowseNode(input: { id: string; content: QuestionBrowseContent; expectedRevision: number; actor: AdminActor }): QuestionBrowseNodeEntity {
+    assertMutationActor(input.actor);
+    const current = this.requireBrowseNode(input.id);
+    if (current.packageId !== input.content.packageId) invalid("Bank Browse Package ownership is immutable.");
+    let updated;
+    try {
+      updated = this.database.db.update(questionBankBrowseNodes).set({ ...input.content, updatedAt: this.clock(), updatedBy: input.actor.actorUserId, revision: sql`${questionBankBrowseNodes.revision} + 1` })
+        .where(and(eq(questionBankBrowseNodes.id, input.id), eq(questionBankBrowseNodes.revision, input.expectedRevision))).returning().get();
+    } catch (error) { throw mapConstraintError(error); }
+    if (!updated) throw new QuestionDomainConflictError(input.expectedRevision, this.requireBrowseNode(input.id).revision);
+    return toBrowseNode(updated);
+  }
+
+  createQuestionAggregate(input: { id: string; content: QuestionItemContent; actor: AdminActor }): QuestionAggregate {
+    assertMutationActor(input.actor);
+    const now = this.clock();
+    try {
+      this.database.db.insert(questions).values({ id: input.id, packageId: input.content.packageId, displayOrder: input.content.displayOrder, sharedAnswer: input.content.sharedAnswer, createdAt: now, updatedAt: now, updatedBy: input.actor.actorUserId, revision: 1 }).run();
+      this.insertQuestionChildren(input.id, input.content, input.actor, now);
+    } catch (error) { throw mapConstraintError(error); }
+    return this.requireQuestion(input.id);
+  }
+
+  updateQuestionAggregate(input: { id: string; content: QuestionItemContent; expectedRevision: number; actor: AdminActor }): QuestionAggregate {
+    assertMutationActor(input.actor);
+    const current = this.requireQuestion(input.id);
+    if (current.revision !== input.expectedRevision) {
+      throw new QuestionDomainConflictError(input.expectedRevision, current.revision);
+    }
+    if (current.packageId !== input.content.packageId) invalid("Question Package ownership is immutable.");
+    assertNoImplicitChildDeletion(current, input.content);
+    const now = this.clock();
+
+    const changedVariantOrders = current.variants.filter((variant) => {
+      const proposed = input.content.variants.find((candidate) => candidate.id === variant.id);
+      return proposed && proposed.displayOrder !== variant.displayOrder;
+    });
+    const temporaryOrderBase = Math.max(10_000, ...current.variants.map((variant) => variant.displayOrder), ...input.content.variants.map((variant) => variant.displayOrder)) + 1;
+    changedVariantOrders.forEach((variant, index) => {
+      this.database.db.update(questionVariants).set({ displayOrder: temporaryOrderBase + index }).where(eq(questionVariants.id, variant.id)).run();
+    });
+
+    for (const proposed of input.content.variants) {
+      const existing = current.variants.find((variant) => variant.id === proposed.id);
+      if (!existing) {
+        this.database.db.insert(questionVariants).values({ id: proposed.id, questionId: input.id, displayOrder: proposed.displayOrder, content: proposed.content, createdAt: now, updatedAt: now, updatedBy: input.actor.actorUserId, revision: 1 }).run();
+      } else if (existing.displayOrder !== proposed.displayOrder || !sameJson(existing.content, proposed.content)) {
+        this.database.db.update(questionVariants).set({ displayOrder: proposed.displayOrder, content: proposed.content, updatedAt: now, updatedBy: input.actor.actorUserId, revision: sql`${questionVariants.revision} + 1` }).where(and(eq(questionVariants.id, proposed.id), eq(questionVariants.questionId, input.id))).run();
+      }
+      this.updateOccurrences(proposed.id, existing?.occurrences ?? [], proposed.occurrences, input.actor, now);
+    }
+
+    this.database.db.delete(questionPrimaryVariants).where(eq(questionPrimaryVariants.questionId, input.id)).run();
+    this.database.db.insert(questionPrimaryVariants).values({ questionId: input.id, variantId: input.content.primaryVariantId }).run();
+    this.database.db.delete(questionTaxonomyAssignments).where(eq(questionTaxonomyAssignments.questionId, input.id)).run();
+    this.insertAssignments(input.id, input.content);
+
+    const updated = this.database.db.update(questions).set({ displayOrder: input.content.displayOrder, sharedAnswer: input.content.sharedAnswer, updatedAt: now, updatedBy: input.actor.actorUserId, revision: sql`${questions.revision} + 1` })
+      .where(and(eq(questions.id, input.id), eq(questions.revision, input.expectedRevision))).returning().get();
+    if (!updated) throw new QuestionDomainConflictError(input.expectedRevision, this.requireQuestion(input.id).revision);
+    return this.requireQuestion(input.id);
+  }
+
+  private insertQuestionChildren(questionId: string, content: QuestionItemContent, actor: AdminActor, now: number): void {
+    for (const variant of content.variants) {
+      this.database.db.insert(questionVariants).values({ id: variant.id, questionId, displayOrder: variant.displayOrder, content: variant.content, createdAt: now, updatedAt: now, updatedBy: actor.actorUserId, revision: 1 }).run();
+      for (const occurrence of variant.occurrences) this.insertOccurrence(variant.id, occurrence, actor, now);
+    }
+    this.database.db.insert(questionPrimaryVariants).values({ questionId, variantId: content.primaryVariantId }).run();
+    this.insertAssignments(questionId, content);
+  }
+
+  private insertAssignments(questionId: string, content: QuestionItemContent): void {
+    if (!content.taxonomyAssignments.length) return;
+    this.database.db.insert(questionTaxonomyAssignments).values(content.taxonomyAssignments.map((assignment) => ({ questionId, packageId: content.packageId, ...assignment }))).run();
+  }
+
+  private insertOccurrence(variantId: string, occurrence: QuestionItemContent["variants"][number]["occurrences"][number], actor: AdminActor, now: number): void {
+    const { branches, qualifiers, ...row } = occurrence;
+    this.database.db.insert(questionOccurrences).values({ ...row, variantId, createdAt: now, updatedAt: now, updatedBy: actor.actorUserId, revision: 1 }).run();
+    this.replaceOccurrenceValues(occurrence.id, branches, qualifiers);
+  }
+
+  private updateOccurrences(variantId: string, current: QuestionOccurrenceEntity[], proposed: QuestionItemContent["variants"][number]["occurrences"], actor: AdminActor, now: number): void {
+    const changedOrders = current.filter((occurrence) => {
+      const next = proposed.find((candidate) => candidate.id === occurrence.id);
+      return next && next.displayOrder !== occurrence.displayOrder;
+    });
+    const temporaryOrderBase = Math.max(10_000, ...current.map((item) => item.displayOrder), ...proposed.map((item) => item.displayOrder)) + 1;
+    changedOrders.forEach((occurrence, index) => {
+      this.database.db.update(questionOccurrences).set({ displayOrder: temporaryOrderBase + index }).where(eq(questionOccurrences.id, occurrence.id)).run();
+    });
+    for (const occurrence of proposed) {
+      const existing = current.find((candidate) => candidate.id === occurrence.id);
+      if (!existing) {
+        this.insertOccurrence(variantId, occurrence, actor, now);
+        continue;
+      }
+      const { branches, qualifiers, ...row } = occurrence;
+      const changed = !sameJson(stripOccurrenceMetadata(existing), occurrence);
+      if (!changed) continue;
+      this.database.db.update(questionOccurrences).set({ ...row, variantId, updatedAt: now, updatedBy: actor.actorUserId, revision: sql`${questionOccurrences.revision} + 1` }).where(and(eq(questionOccurrences.id, occurrence.id), eq(questionOccurrences.variantId, variantId))).run();
+      this.replaceOccurrenceValues(occurrence.id, branches, qualifiers);
+    }
+  }
+
+  private replaceOccurrenceValues(occurrenceId: string, branches: string[], qualifiers: string[]): void {
+    this.database.db.delete(questionOccurrenceBranches).where(eq(questionOccurrenceBranches.occurrenceId, occurrenceId)).run();
+    this.database.db.delete(questionOccurrenceQualifiers).where(eq(questionOccurrenceQualifiers.occurrenceId, occurrenceId)).run();
+    if (branches.length) this.database.db.insert(questionOccurrenceBranches).values(branches.map((value, position) => ({ occurrenceId, position, value }))).run();
+    if (qualifiers.length) this.database.db.insert(questionOccurrenceQualifiers).values(qualifiers.map((value, position) => ({ occurrenceId, position, value }))).run();
+  }
+
+  private requirePackage(id: string): QuestionPackageEntity {
+    const value = this.getPackage(id);
+    if (!value) throw new QuestionDomainError("QUESTION_DOMAIN_NOT_FOUND", "Question Package was not found.");
+    return value;
+  }
+
+  private requireTaxonomyNode(id: string): QuestionTaxonomyNodeEntity {
+    const row = this.database.db.select().from(questionTaxonomyNodes).where(eq(questionTaxonomyNodes.id, id)).get();
+    if (!row) throw new QuestionDomainError("QUESTION_DOMAIN_NOT_FOUND", "Question taxonomy node was not found.");
+    return toTaxonomyNode(row);
+  }
+
+  private requireBrowseNode(id: string): QuestionBrowseNodeEntity {
+    const row = this.database.db.select().from(questionBankBrowseNodes).where(eq(questionBankBrowseNodes.id, id)).get();
+    if (!row) throw new QuestionDomainError("QUESTION_DOMAIN_NOT_FOUND", "Question Bank Browse node was not found.");
+    return toBrowseNode(row);
+  }
+
+  private requireQuestion(id: string): QuestionAggregate {
+    const value = this.getQuestion(id);
+    if (!value) throw new QuestionDomainError("QUESTION_DOMAIN_NOT_FOUND", "Question was not found.");
+    return value;
+  }
+
   private listAssetBindings(packageId: string): QuestionPackageAssetBindingEntity[] {
     return this.database.db
       .select()
@@ -504,4 +726,42 @@ function mapConstraintError(error: unknown): QuestionDomainError {
 
 function invalid(message: string): never {
   throw new QuestionDomainError("QUESTION_DOMAIN_VALIDATION_FAILED", message);
+}
+
+function assertMutationActor(actor: AdminActor): void {
+  if (!actor.actorUserId?.trim() || !["OWNER", "ADMIN"].includes(actor.actorRole)) {
+    invalid("An authenticated Admin actor is required.");
+  }
+}
+
+function assertNoImplicitChildDeletion(current: QuestionAggregate, proposed: QuestionItemContent): void {
+  const proposedVariants = new Map(proposed.variants.map((variant) => [variant.id, variant]));
+  for (const variant of current.variants) {
+    const next = proposedVariants.get(variant.id);
+    if (!next) invalid("Existing Question Variants cannot be removed by omission.");
+    const occurrenceIds = new Set(next.occurrences.map((occurrence) => occurrence.id));
+    if (variant.occurrences.some((occurrence) => !occurrenceIds.has(occurrence.id))) {
+      invalid("Existing Question occurrences cannot be removed by omission.");
+    }
+  }
+}
+
+function stripOccurrenceMetadata(value: QuestionOccurrenceEntity): QuestionItemContent["variants"][number]["occurrences"][number] {
+  return {
+    id: value.id,
+    displayOrder: value.displayOrder,
+    sourceKind: value.sourceKind,
+    year: value.year,
+    roundCode: value.roundCode,
+    session: value.session,
+    sourceName: value.sourceName,
+    notes: value.notes,
+    rawLabel: value.rawLabel,
+    branches: value.branches,
+    qualifiers: value.qualifiers,
+  };
+}
+
+function sameJson(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }

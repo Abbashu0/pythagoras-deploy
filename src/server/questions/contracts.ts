@@ -213,6 +213,76 @@ export interface QuestionPackageAggregate {
   questions: QuestionAggregate[];
 }
 
+/** Human-editable Package fields used by reviewed canonical mutations. */
+export interface QuestionPackageContent {
+  packageKey: string;
+  title: string;
+  subjectKey: string;
+  language: string;
+  bankBrowseMode: QuestionBankBrowseMode;
+  bankBrowseEntryKey: string;
+  bankBrowseEntryLabel: string;
+  bankBrowseEntryOrder: number;
+  sourceAssetId: string | null;
+}
+
+export interface QuestionTaxonomyContent {
+  packageId: string;
+  nodeKey: string;
+  label: string;
+  kind: string;
+  parentId: string | null;
+  displayOrder: number;
+}
+
+export interface QuestionBrowseContent {
+  packageId: string;
+  nodeKey: string;
+  label: string;
+  nodeType: QuestionBrowseNodeType;
+  parentId: string | null;
+  displayOrder: number;
+  taxonomyNodeId: string | null;
+  includeDescendants: boolean | null;
+}
+
+export interface QuestionOccurrenceContent {
+  id: string;
+  displayOrder: number;
+  sourceKind: QuestionSourceKind;
+  year: number | null;
+  roundCode: string | null;
+  session: string | null;
+  sourceName: string | null;
+  notes: string | null;
+  rawLabel: string;
+  branches: string[];
+  qualifiers: string[];
+}
+
+export interface QuestionVariantContent {
+  id: string;
+  displayOrder: number;
+  content: CanonicalRichDocument;
+  occurrences: QuestionOccurrenceContent[];
+}
+
+export interface QuestionAssignmentContent {
+  taxonomyNodeId: string;
+  role: QuestionTaxonomyRole;
+  position: number;
+}
+
+/** Coherent review/publication unit; persistence metadata is deliberately absent. */
+export interface QuestionItemContent {
+  packageId: string;
+  displayOrder: number;
+  primaryVariantId: string;
+  taxonomyAssignments: QuestionAssignmentContent[];
+  variants: QuestionVariantContent[];
+  sharedAnswer: CanonicalRichDocument | null;
+}
+
 export interface QuestionMaterializationPlan extends QuestionPackageAggregate {
   actor: AdminActor;
   warnings: readonly QuestionPackageDiagnostic[];
@@ -236,4 +306,12 @@ export interface QuestionRepository {
   listQuestions(packageId: string): QuestionAggregate[];
   getQuestion(questionId: string): QuestionAggregate | null;
   updatePackageTitle(input: UpdateQuestionPackageTitleInput): QuestionPackageEntity;
+  createPackage(input: { id: string; content: QuestionPackageContent; actor: AdminActor }): QuestionPackageEntity;
+  updatePackage(input: { id: string; content: QuestionPackageContent; expectedRevision: number; actor: AdminActor }): QuestionPackageEntity;
+  createTaxonomyNode(input: { id: string; content: QuestionTaxonomyContent; actor: AdminActor }): QuestionTaxonomyNodeEntity;
+  updateTaxonomyNode(input: { id: string; content: QuestionTaxonomyContent; expectedRevision: number; actor: AdminActor }): QuestionTaxonomyNodeEntity;
+  createBrowseNode(input: { id: string; content: QuestionBrowseContent; actor: AdminActor }): QuestionBrowseNodeEntity;
+  updateBrowseNode(input: { id: string; content: QuestionBrowseContent; expectedRevision: number; actor: AdminActor }): QuestionBrowseNodeEntity;
+  createQuestionAggregate(input: { id: string; content: QuestionItemContent; actor: AdminActor }): QuestionAggregate;
+  updateQuestionAggregate(input: { id: string; content: QuestionItemContent; expectedRevision: number; actor: AdminActor }): QuestionAggregate;
 }

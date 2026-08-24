@@ -7,6 +7,13 @@ export {
   isMeaningfulCanonicalRichDocument,
   toCanonicalRichDocument,
 } from "./canonical-rich-document";
+export {
+  createQuestionChangeAdapters,
+  QUESTION_CHANGE_RESOURCE_TYPES,
+  QuestionChangeAdapter,
+  QuestionChangeSetCoordinator,
+  type QuestionChangeResourceType,
+} from "./change-adapters";
 export * from "./contracts";
 export {
   QuestionDomainConflictError,

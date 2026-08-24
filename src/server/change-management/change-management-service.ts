@@ -202,6 +202,7 @@ export class ChangeManagementService {
     requireExpectedRevision(expectedRevision);
     const current = this.requireStatus(id, ["SUBMITTED"]);
     if (current.revision !== expectedRevision) throw new ChangeManagementError("CHANGE_CONFLICT", "The Change Set changed since review opened.");
+    this.registry.validateChangeSet(this.database, this.changeSets.listItems(id), "APPROVE");
     const conflict = this.findBlockingConflict(current);
     if (conflict) {
       this.persistConflict(current.id, conflict, actor);
@@ -224,9 +225,11 @@ export class ChangeManagementService {
         if (changeSet.revision !== expectedRevision) throw new ChangeManagementError("CHANGE_CONFLICT", "The approved Change Set changed before publication.");
         const items = this.changeSets.listItems(id);
         if (!items.length) throw new ChangeManagementError("CHANGE_VALIDATION_FAILED", "An empty Change Set cannot be published.");
+        this.registry.validateChangeSet(this.database, items, "PUBLISH");
+        const plannedItems = this.registry.planPublication(this.database, items);
         const applied: Array<{ item: ChangeSetItem; before: ChangeSnapshot; after: ChangeSnapshot; revision: number; autoMerged: boolean }> = [];
 
-        for (const item of items) {
+        for (const item of plannedItems) {
           const adapter = this.registry.require(item.resourceType);
           adapter.validateSnapshot(item.proposedSnapshot, item.operation);
           const current = item.operation === "CREATE"
@@ -234,7 +237,9 @@ export class ChangeManagementService {
             : adapter.loadCurrent(this.database, item.resourceId);
           const merge = current.revision === item.baseResourceRevision
             ? { kind: "clean" as const, finalSnapshot: item.proposedSnapshot }
-            : threeWayMerge(item.beforeSnapshot, current.snapshot, item.proposedSnapshot, item.changedPaths);
+            : adapter.mergeStrategy === "CONSERVATIVE"
+              ? { kind: "conflict" as const, finalSnapshot: null }
+              : threeWayMerge(item.beforeSnapshot, current.snapshot, item.proposedSnapshot, item.changedPaths);
           if (merge.kind === "conflict" || !merge.finalSnapshot) {
             throw new PublicationConflict({ item, details: { base: item.beforeSnapshot, current: current.snapshot, proposed: item.proposedSnapshot } });
           }
@@ -242,7 +247,7 @@ export class ChangeManagementService {
           applied.push({ item, before: current.snapshot, after: result.snapshot, revision: result.revision, autoMerged: merge.kind === "auto-merged" });
         }
 
-        this.registry.validatePublication(this.database, items.map((item) => item.resourceType));
+        this.registry.validatePublication(this.database, plannedItems.map((item) => item.resourceType));
         const now = this.clock();
         const revision = this.publications.incrementRevision(now);
         const publication = this.publications.create({
@@ -410,6 +415,7 @@ export class ChangeManagementService {
         if (this.tryLoadCurrent(adapter, item.resourceId)) throw new ChangeManagementError("CHANGE_CONFLICT", "The proposed resource identifier is already in use.");
       } else adapter.loadCurrent(this.database, item.resourceId);
     }
+    this.registry.validateChangeSet(this.database, items, "SUBMIT");
     const resubmission = changeSet.status === "NEEDS_CHANGES";
     const submitted = this.changeSets.transition({ id: changeSet.id, expectedRevision: changeSet.revision, from: [changeSet.status], to: "SUBMITTED", actor });
     this.appendEvent(changeSet.id, resubmission ? "RESUBMITTED" : "SUBMITTED", actor);
@@ -433,6 +439,7 @@ export class ChangeManagementService {
         : adapter.loadCurrent(this.database, item.resourceId);
       if (item.operation === "CREATE" && current.revision !== 0) return { item, details: { base: item.beforeSnapshot, current: current.snapshot, proposed: item.proposedSnapshot } };
       if (current.revision === item.baseResourceRevision) continue;
+      if (adapter.mergeStrategy === "CONSERVATIVE") return { item, details: { base: item.beforeSnapshot, current: current.snapshot, proposed: item.proposedSnapshot } };
       const merge = threeWayMerge(item.beforeSnapshot, current.snapshot, item.proposedSnapshot, item.changedPaths);
       if (merge.kind === "conflict") return { item, details: { base: item.beforeSnapshot, current: current.snapshot, proposed: item.proposedSnapshot } };
     }
