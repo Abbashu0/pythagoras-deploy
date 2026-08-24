@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "../components/admin/rich-content/rich-document.css";
 
 @custom-variant dark (&:is(.dark *));
 

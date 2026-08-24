@@ -1,0 +1,133 @@
+.rich-content {
+  display: grid;
+  min-width: 0;
+  gap: 1rem;
+  color: var(--fg);
+  direction: rtl;
+  font-family: var(--font-ui);
+  font-size: 0.975rem;
+  line-height: 1.95;
+  text-align: start;
+}
+
+.rich-content :where(.rich-content__paragraph, .rich-content__heading, .rich-content__list, .rich-content__quran-text, .rich-content__hemistich, .rich-content__caption) {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.rich-content :where(.rich-content__paragraph, .rich-content__heading, .rich-content__list, .rich-content__quran-text, .rich-content__hemistich, .rich-content__caption, .rich-content__figure, .rich-content__poetry, .rich-content__quran, .rich-content__table-region) {
+  margin: 0;
+}
+
+.rich-content__heading {
+  color: var(--fg);
+  font-weight: 700;
+  line-height: 1.55;
+}
+
+.rich-content__heading--2 { font-size: 1.35rem; }
+.rich-content__heading--3 { font-size: 1.15rem; }
+.rich-content__heading--4 { font-size: 1rem; }
+
+.rich-content__list {
+  display: grid;
+  gap: 0.45rem;
+  padding-inline-start: 1.6rem;
+}
+
+.rich-content__list li { padding-inline-start: 0.25rem; }
+.rich-content__list li::marker { color: var(--accent); font-weight: 700; }
+
+.rich-content__quran {
+  display: grid;
+  gap: 0.8rem;
+  border-inline-start: 3px solid color-mix(in oklab, var(--accent) 55%, var(--border));
+  border-radius: var(--radius-lg);
+  background: color-mix(in oklab, var(--surface-soft) 82%, transparent);
+  padding: 1rem 1.1rem;
+}
+
+.rich-content__quran-verse { display: grid; gap: 0.35rem; }
+.rich-content__quran-text { margin: 0; font-size: 1.075rem; line-height: 2.15; }
+.rich-content__quran-meta { color: var(--muted); font-size: 0.75rem; font-style: normal; }
+
+.rich-content__poetry { display: grid; gap: 0.75rem; padding-block: 0.35rem; }
+.rich-content__poetry-verse {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: start;
+  gap: 0.75rem;
+}
+.rich-content__hemistich { margin: 0; min-width: 0; line-height: 2; }
+.rich-content__poetry-separator { color: var(--muted-soft); line-height: 2; user-select: none; }
+
+.rich-content__table-region {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  scrollbar-width: thin;
+}
+.rich-content__table { width: max-content; min-width: 100%; border-collapse: collapse; background: var(--surface); }
+.rich-content__table caption { padding: 0.8rem 1rem; color: var(--muted); font-weight: 600; text-align: start; }
+.rich-content__table :where(th, td) {
+  min-width: 8rem;
+  border-block-start: 1px solid var(--border);
+  padding: 0.8rem 1rem;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.rich-content__table th { background: var(--surface-strong); color: var(--fg); font-weight: 700; }
+.rich-content__table--compact :where(th, td) { padding: 0.55rem 0.75rem; }
+.rich-content__cell--start { text-align: start; }
+.rich-content__cell--center { text-align: center; }
+.rich-content__cell--end { text-align: end; }
+
+.rich-content__figure { display: grid; justify-items: center; gap: 0.65rem; max-width: 100%; }
+.rich-content__image {
+  display: block;
+  max-width: 100%;
+  width: auto;
+  height: auto;
+  max-height: 65vh;
+  object-fit: contain;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-soft);
+}
+.rich-content__caption { color: var(--muted); font-size: 0.8rem; line-height: 1.7; text-align: center; }
+.rich-content__missing-image {
+  display: grid;
+  width: min(100%, 24rem);
+  min-height: 8rem;
+  place-items: center;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface-soft);
+  color: var(--muted);
+  padding: 1rem;
+}
+.rich-content__divider { width: 100%; margin: 0.35rem 0; border: 0; border-block-start: 1px solid var(--border); }
+.rich-content__fallback {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-soft);
+  color: var(--muted);
+  padding: 1rem;
+  direction: rtl;
+  font-size: 0.875rem;
+  text-align: start;
+}
+
+@media (max-width: 520px) {
+  .rich-content { gap: 0.9rem; font-size: 0.94rem; }
+  .rich-content__quran { padding: 0.9rem; }
+  .rich-content__poetry-verse { grid-template-columns: minmax(0, 1fr); gap: 0.15rem; }
+  .rich-content__poetry-separator { display: none; }
+  .rich-content__hemistich + .rich-content__hemistich {
+    padding-inline-start: 1rem;
+    color: color-mix(in oklab, var(--fg) 82%, var(--muted));
+  }
+}

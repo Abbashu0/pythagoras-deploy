@@ -33,6 +33,10 @@ M9 adds an empty first-class relational Question domain through migration `0007_
 
 M9 imports no real Question data and adds no import UI/API, Question Editor, Student Question API, search/FTS, converter, or Quiz Ready architecture. `/admin/questions` and the subject-scoped Student Question Bank remain placeholders. Future Question mutations must integrate with the existing Change Set review and OWNER publication flow before any Student read surface is added.
 
+M10 adds the Rich Content presentation foundation under `src/lib/rich-content/`, `src/components/admin/rich-content/`, and the Student vanilla-JS components/styles. Portable `assetRef`, canonical `assetId`, and public resolved image URLs remain distinct. The Admin React renderer and Student string renderer support all V1 blocks and bold/italic/underline marks with equivalent semantic, RTL, responsive, light/dark-safe output; Quran, poetry, tables, captions, images, and stable block/verse identity are preserved without raw HTML. The public mapper only accepts validated canonical content and injected safe Asset URLs.
+
+M10 adds no editor or Tiptap dependency, no Question API, search, corpus import, or real Question rows. The Student Question Bank remains a subject-scoped placeholder. A future editor must use an adapter that preserves canonical IDs, marks, Asset IDs, and table semantics rather than storing editor-native state. M11 has not started.
+
 The prior Question Bank and all real question data remain intentionally removed. Do not add Quiz Ready, MCQ generation, grading, distractors, timers, or attempts. The future relational Question Bank must build on stable IDs, variants with per-variant provenance, one shared answer, rich structured blocks, and Published-only Student reads.
 
 Do not add Firebase, Supabase, or Prisma. Supabase/Postgres is only a future adapter behind repository/storage/search boundaries. Preserve the current Student/Admin UI rather than rebuilding it. New Admin server mutations must derive actor identity from the validated session and apply the shared same-origin mutation protection; never trust an actor ID or role sent by the browser.
