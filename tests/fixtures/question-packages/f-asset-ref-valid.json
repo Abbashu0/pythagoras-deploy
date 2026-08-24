@@ -11,7 +11,7 @@
     "id": "01910000-0000-7000-8000-000000000062", "order": 1,
     "primaryVariantId": "01910000-0000-7000-8000-000000000063",
     "taxonomyAssignments": [{ "taxonomyNodeId": "01910000-0000-7000-8000-000000000061", "role": "PRIMARY" }],
-    "variants": [{ "id": "01910000-0000-7000-8000-000000000063", "order": 1, "content": { "type": "doc", "version": 1, "blocks": [{ "type": "image", "assetRef": "diagram-one", "alt": "رسم توضيحي اصطناعي" }] }, "occurrences": [] }],
-    "sharedAnswer": { "type": "doc", "version": 1, "blocks": [{ "type": "paragraph", "spans": [{ "text": "إجابة" }] }] }
+    "variants": [{ "id": "01910000-0000-7000-8000-000000000063", "order": 1, "content": { "type": "doc", "version": 1, "blocks": [{ "id": "01910000-0000-7000-8000-000000000064", "type": "image", "assetRef": "diagram-one", "alt": "رسم توضيحي اصطناعي" }] }, "occurrences": [] }],
+    "sharedAnswer": { "type": "doc", "version": 1, "blocks": [{ "id": "01910000-0000-7000-8000-000000000065", "type": "paragraph", "spans": [{ "text": "إجابة" }] }] }
   }]
 }

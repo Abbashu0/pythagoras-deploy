@@ -8,6 +8,7 @@ import {
   type QuestionPackageV1,
   type QuestionPackageValidationResult,
   type RichDocument,
+  type RichInline,
 } from "./contracts";
 
 const MAX_DIAGNOSTICS = 250;
@@ -101,6 +102,7 @@ function validateSemantics(
 ): QuestionPackageDiagnostic[] {
   const diagnostics: QuestionPackageDiagnostic[] = [];
   const entityIds = new Map<string, string>();
+  const blockIds = new Map<string, string>();
 
   if (
     options.canonicalSubjectKeys &&
@@ -125,6 +127,7 @@ function validateSemantics(
     diagnostics,
     (node) => node.id,
     (node) => node.key,
+    (node) => node.parentId,
   );
   validateParentGraph(
     questionPackage.taxonomy,
@@ -145,6 +148,7 @@ function validateSemantics(
       diagnostics,
       (node) => node.id,
       (node) => node.key,
+      (node) => node.parentId,
     );
     validateParentGraph(
       questionPackage.bankBrowse.nodes,
@@ -298,18 +302,66 @@ function validateSemantics(
     question.variants.forEach((variant, variantIndex) => {
       const variantPointer = `${questionPointer}/variants/${variantIndex}`;
       registerEntityId(entityIds, variant.id, `${variantPointer}/id`, diagnostics);
+      registerRichDocumentIdentity(
+        variant.content,
+        `${variantPointer}/content`,
+        entityIds,
+        blockIds,
+        diagnostics,
+      );
+      if (!isMeaningfulRichDocument(variant.content)) {
+        diagnostics.push(
+          diagnostic(
+            "ERROR",
+            "EMPTY_VARIANT_CONTENT",
+            "A Question Variant must contain meaningful educational content.",
+            `${variantPointer}/content/blocks`,
+            variant.id,
+          ),
+        );
+      }
       collectAssetRefs(variant.content, usedAssetRefs);
-      variant.occurrences.forEach((occurrence, occurrenceIndex) =>
+      variant.occurrences.forEach((occurrence, occurrenceIndex) => {
         registerEntityId(
           entityIds,
           occurrence.id,
           `${variantPointer}/occurrences/${occurrenceIndex}/id`,
           diagnostics,
-        ),
-      );
+        );
+        if (occurrence.rawLabel.trim().length === 0) {
+          diagnostics.push(
+            diagnostic(
+              "ERROR",
+              "EMPTY_OCCURRENCE_RAW_LABEL",
+              "Occurrence rawLabel must preserve a non-empty original source label.",
+              `${variantPointer}/occurrences/${occurrenceIndex}/rawLabel`,
+              occurrence.id,
+            ),
+          );
+        }
+      });
     });
-    if (question.sharedAnswer) collectAssetRefs(question.sharedAnswer, usedAssetRefs);
-    else {
+    if (question.sharedAnswer) {
+      registerRichDocumentIdentity(
+        question.sharedAnswer,
+        `${questionPointer}/sharedAnswer`,
+        entityIds,
+        blockIds,
+        diagnostics,
+      );
+      collectAssetRefs(question.sharedAnswer, usedAssetRefs);
+      if (!isMeaningfulRichDocument(question.sharedAnswer)) {
+        diagnostics.push(
+          diagnostic(
+            "WARNING",
+            "EMPTY_SHARED_ANSWER",
+            "The shared answer is present but has no meaningful content.",
+            `${questionPointer}/sharedAnswer/blocks`,
+            question.id,
+          ),
+        );
+      }
+    } else {
       diagnostics.push(
         diagnostic(
           "WARNING",
@@ -360,10 +412,11 @@ function validateUniqueAndSequential<T extends { order: number }>(
   diagnostics: QuestionPackageDiagnostic[],
   getId: (item: T) => string,
   getKey?: (item: T) => string,
+  getOrderGroup?: (item: T) => string | null,
 ): void {
   const ids = new Set<string>();
   const keys = new Set<string>();
-  const orders = new Set<number>();
+  const orderGroups = new Map<string | null, Map<number, number>>();
   items.forEach((item, index) => {
     if (ids.has(getId(item))) {
       diagnostics.push(
@@ -376,18 +429,43 @@ function validateUniqueAndSequential<T extends { order: number }>(
       if (keys.has(key)) diagnostics.push(diagnostic("ERROR", "DUPLICATE_KEY", "Entity keys must be unique within their collection.", `${pointer}/${index}/key`, getId(item)));
       keys.add(key);
     }
-    if (orders.has(item.order)) diagnostics.push(diagnostic("ERROR", "DUPLICATE_ORDER", "Sibling order values must be unique.", `${pointer}/${index}/order`, getId(item), { order: item.order }));
-    orders.add(item.order);
+    const orderGroup = getOrderGroup ? getOrderGroup(item) : null;
+    const orders = orderGroups.get(orderGroup) ?? new Map<number, number>();
+    const firstIndex = orders.get(item.order);
+    if (firstIndex !== undefined) {
+      diagnostics.push(
+        diagnostic(
+          "ERROR",
+          "DUPLICATE_ORDER",
+          "Sibling order values must be unique within the same parent.",
+          `${pointer}/${index}/order`,
+          getId(item),
+          { order: item.order, parentId: orderGroup, firstIndex },
+        ),
+      );
+    }
+    orders.set(item.order, index);
+    orderGroups.set(orderGroup, orders);
   });
-  if (orders.size > 1) {
-    const sorted = [...orders].sort((a, b) => a - b);
+  orderGroups.forEach((orders, orderGroup) => {
+    if (orders.size <= 1) return;
+    const sorted = [...orders.keys()].sort((a, b) => a - b);
     for (let index = 1; index < sorted.length; index += 1) {
       if (sorted[index] !== sorted[index - 1] + 1) {
-        diagnostics.push(diagnostic("WARNING", "ORDER_GAP", "Order values contain a gap; original values remain preserved.", pointer));
+        diagnostics.push(
+          diagnostic(
+            "WARNING",
+            "ORDER_GAP",
+            "Sibling order values contain a gap; original values remain preserved.",
+            pointer,
+            undefined,
+            { parentId: orderGroup },
+          ),
+        );
         break;
       }
     }
-  }
+  });
 }
 
 function validateParentGraph<T extends { id: string; parentId: string | null }>(
@@ -425,6 +503,92 @@ function registerEntityId(
   const existing = registry.get(id);
   if (existing) diagnostics.push(diagnostic("ERROR", "DUPLICATE_ENTITY_ID", "Stable entity IDs must be unique across the package.", pointer, id, { firstPointer: existing }));
   else registry.set(id, pointer);
+}
+
+function registerRichDocumentIdentity(
+  document: RichDocument,
+  pointer: string,
+  entityIds: Map<string, string>,
+  blockIds: Map<string, string>,
+  diagnostics: QuestionPackageDiagnostic[],
+): void {
+  document.blocks.forEach((block, blockIndex) => {
+    const blockPointer = `${pointer}/blocks/${blockIndex}`;
+    const existingBlock = blockIds.get(block.id);
+    if (existingBlock) {
+      diagnostics.push(
+        diagnostic(
+          "ERROR",
+          "DUPLICATE_BLOCK_ID",
+          "RichDocument block IDs must be unique across the package.",
+          `${blockPointer}/id`,
+          block.id,
+          { firstPointer: existingBlock },
+        ),
+      );
+    } else {
+      blockIds.set(block.id, `${blockPointer}/id`);
+    }
+    registerEntityId(entityIds, block.id, `${blockPointer}/id`, diagnostics);
+
+    if (block.type === "quran" || block.type === "poetry") {
+      block.verses.forEach((verse, verseIndex) =>
+        registerEntityId(
+          entityIds,
+          verse.id,
+          `${blockPointer}/verses/${verseIndex}/id`,
+          diagnostics,
+        ),
+      );
+    }
+
+    if (block.type === "table" && block.headerRowCount > block.rows.length) {
+      diagnostics.push(
+        diagnostic(
+          "ERROR",
+          "TABLE_HEADER_ROW_COUNT_INVALID",
+          "headerRowCount cannot exceed the number of table rows.",
+          `${blockPointer}/headerRowCount`,
+          block.id,
+        ),
+      );
+    }
+  });
+}
+
+function isMeaningfulRichDocument(document: RichDocument): boolean {
+  return document.blocks.some((block) => {
+    switch (block.type) {
+      case "paragraph":
+      case "heading":
+        return isMeaningfulInline(block.spans);
+      case "ordered-list":
+      case "bullet-list":
+        return block.items.some((item) => isMeaningfulInline(item.spans));
+      case "quran":
+        return block.verses.some((verse) => isMeaningfulInline(verse.spans));
+      case "poetry":
+        return block.verses.some(
+          (verse) =>
+            isMeaningfulInline(verse.sadr) || isMeaningfulInline(verse.ajuz),
+        );
+      case "table":
+        return (
+          (block.caption ? isMeaningfulInline(block.caption) : false) ||
+          block.rows.some((row) =>
+            row.cells.some((cell) => isMeaningfulInline(cell.spans)),
+          )
+        );
+      case "image":
+        return true;
+      case "divider":
+        return false;
+    }
+  });
+}
+
+function isMeaningfulInline(inline: RichInline): boolean {
+  return inline.some((span) => span.text.trim().length > 0);
 }
 
 function collectAssetRefs(document: RichDocument, output: Set<string>): void {

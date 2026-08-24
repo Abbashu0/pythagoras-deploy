@@ -12,9 +12,9 @@
     "primaryVariantId": "01910000-0000-7000-8000-000000000043",
     "taxonomyAssignments": [{ "taxonomyNodeId": "01910000-0000-7000-8000-000000000041", "role": "PRIMARY" }],
     "variants": [
-      { "id": "01910000-0000-7000-8000-000000000043", "order": 1, "content": { "type": "doc", "version": 1, "blocks": [{ "type": "paragraph", "spans": [{ "text": "الصيغة الأولى" }] }] }, "occurrences": [{ "id": "01910000-0000-7000-8000-000000000044", "sourceKind": "ministerial", "year": 2025, "round": "الأول" }] },
-      { "id": "01910000-0000-7000-8000-000000000045", "order": 2, "content": { "type": "doc", "version": 1, "blocks": [{ "type": "paragraph", "spans": [{ "text": "الصيغة الثانية" }] }] }, "occurrences": [{ "id": "01910000-0000-7000-8000-000000000046", "sourceKind": "book-question", "sourceName": "مصدر اصطناعي" }] }
+      { "id": "01910000-0000-7000-8000-000000000043", "order": 1, "content": { "type": "doc", "version": 1, "blocks": [{ "id": "01910000-0000-7000-8000-000000000047", "type": "paragraph", "spans": [{ "text": "الصيغة الأولى" }] }] }, "occurrences": [{ "id": "01910000-0000-7000-8000-000000000044", "sourceKind": "ministerial", "year": 2025, "roundCode": "الأول", "branches": ["العلمي", "الأدبي"], "qualifiers": ["داخل القطر", "نازحين"], "rawLabel": "وزاري 2025 الدور الأول العلمي والأدبي (داخل القطر + نازحين)" }] },
+      { "id": "01910000-0000-7000-8000-000000000045", "order": 2, "content": { "type": "doc", "version": 1, "blocks": [{ "id": "01910000-0000-7000-8000-000000000048", "type": "paragraph", "spans": [{ "text": "الصيغة الثانية" }] }] }, "occurrences": [{ "id": "01910000-0000-7000-8000-000000000046", "sourceKind": "book-question", "branches": [], "qualifiers": [], "sourceName": "مصدر اصطناعي", "rawLabel": "سؤال الكتاب — مصدر اصطناعي" }] }
     ],
-    "sharedAnswer": { "type": "doc", "version": 1, "blocks": [{ "type": "paragraph", "spans": [{ "text": "إجابة مشتركة" }] }] }
+    "sharedAnswer": { "type": "doc", "version": 1, "blocks": [{ "id": "01910000-0000-7000-8000-000000000049", "type": "paragraph", "spans": [{ "text": "إجابة مشتركة" }] }] }
   }]
 }

@@ -11,7 +11,7 @@ import type {
 import { inspectQuestionPackageJson } from "./validator";
 import { SQLiteQuestionPackageInspectionRepository } from "./sqlite-inspection-repository";
 
-export const QUESTION_PACKAGE_INSPECTOR_VERSION = 1;
+export const QUESTION_PACKAGE_INSPECTOR_VERSION = 2;
 
 export class QuestionPackageInspectionService {
   private readonly repository: SQLiteQuestionPackageInspectionRepository;

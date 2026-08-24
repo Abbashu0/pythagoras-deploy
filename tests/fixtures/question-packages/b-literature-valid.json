@@ -18,10 +18,10 @@
       "variants": [{
         "id": "01910000-0000-7000-8000-000000000013",
         "order": 1,
-        "content": { "type": "doc", "version": 1, "blocks": [{ "type": "paragraph", "spans": [{ "text": "سؤال أدبي اصطناعي للاختبار فقط." }] }] },
-        "occurrences": [{ "id": "01910000-0000-7000-8000-000000000014", "sourceKind": "other", "rawLabel": "مصدر اصطناعي" }]
+        "content": { "type": "doc", "version": 1, "blocks": [{ "id": "01910000-0000-7000-8000-000000000015", "type": "paragraph", "spans": [{ "text": "سؤال أدبي اصطناعي للاختبار فقط." }] }] },
+        "occurrences": [{ "id": "01910000-0000-7000-8000-000000000014", "sourceKind": "other", "branches": [], "qualifiers": [], "rawLabel": "مصدر اصطناعي" }]
       }],
-      "sharedAnswer": { "type": "doc", "version": 1, "blocks": [{ "type": "paragraph", "spans": [{ "text": "إجابة اصطناعية." }] }] }
+      "sharedAnswer": { "type": "doc", "version": 1, "blocks": [{ "id": "01910000-0000-7000-8000-000000000016", "type": "paragraph", "spans": [{ "text": "إجابة اصطناعية." }] }] }
     }
   ]
 }

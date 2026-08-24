@@ -18,6 +18,7 @@ import {
   createQuestionPackageInspectionService,
   inspectQuestionPackageJson,
   isQuestionPackageEligibleForFutureImport,
+  QUESTION_PACKAGE_INSPECTOR_VERSION,
   SQLiteQuestionPackageInspectionRepository,
   type QuestionPackageV1,
 } from "../src/server/question-packages";
@@ -62,6 +63,7 @@ test("synthetic V1 fixtures cover direct literature, grammar tree, variants, ric
     "d-multi-variant-valid.json",
     "e-rich-content-valid.json",
     "f-asset-ref-valid.json",
+    "n-nested-hierarchy-valid.json",
   ]) {
     const result = inspect(name);
     assert.equal(result.status, "VALID", `${name}: ${JSON.stringify(result.diagnostics)}`);
@@ -156,6 +158,235 @@ test("order checks preserve values, allow non-zero starts, and report only real 
   assert.equal(packageValue.taxonomy[8].order, 12);
 });
 
+test("taxonomy and Bank Browse order values are validated per sibling group", () => {
+  const nested = inspect("n-nested-hierarchy-valid.json");
+  assert.equal(nested.status, "VALID", JSON.stringify(nested.diagnostics));
+
+  const duplicateTaxonomy = structuredClone(
+    fixture("n-nested-hierarchy-valid.json"),
+  ) as QuestionPackageV1;
+  duplicateTaxonomy.taxonomy.push({
+    id: "01910000-0000-7000-8000-000000000129",
+    key: "unit-one-topic-two",
+    label: "موضوع ثانٍ في الوحدة الأولى",
+    kind: "topic",
+    parentId: "01910000-0000-7000-8000-000000000121",
+    order: 1,
+  });
+  const duplicateTaxonomyResult = inspectQuestionPackageJson(duplicateTaxonomy, {
+    canonicalSubjectKeys: canonicalSubjects,
+  });
+  assert.ok(
+    duplicateTaxonomyResult.diagnostics.some(
+      (item) =>
+        item.code === "DUPLICATE_ORDER" &&
+        item.context?.parentId === "01910000-0000-7000-8000-000000000121",
+    ),
+  );
+
+  const differentParents = structuredClone(
+    fixture("n-nested-hierarchy-valid.json"),
+  ) as QuestionPackageV1;
+  assert.equal(
+    inspectQuestionPackageJson(differentParents, {
+      canonicalSubjectKeys: canonicalSubjects,
+    }).status,
+    "VALID",
+  );
+
+  const gap = structuredClone(
+    fixture("n-nested-hierarchy-valid.json"),
+  ) as QuestionPackageV1;
+  gap.taxonomy.push({
+    id: "01910000-0000-7000-8000-000000000130",
+    key: "unit-one-topic-three",
+    label: "موضوع ثالث في الوحدة الأولى",
+    kind: "topic",
+    parentId: "01910000-0000-7000-8000-000000000121",
+    order: 3,
+  });
+  const gapResult = inspectQuestionPackageJson(gap, {
+    canonicalSubjectKeys: canonicalSubjects,
+  });
+  assert.equal(gapResult.status, "VALID_WITH_WARNINGS");
+  assert.ok(
+    gapResult.diagnostics.some(
+      (item) =>
+        item.code === "ORDER_GAP" &&
+        item.context?.parentId === "01910000-0000-7000-8000-000000000121",
+    ),
+  );
+
+  const duplicateBrowse = structuredClone(
+    fixture("n-nested-hierarchy-valid.json"),
+  ) as QuestionPackageV1;
+  if (duplicateBrowse.bankBrowse.mode !== "TREE") {
+    assert.fail("Nested fixture must use TREE browse mode.");
+  }
+  duplicateBrowse.bankBrowse.nodes.push({
+    id: "01910000-0000-7000-8000-000000000131",
+    key: "browse-topic-one-two",
+    label: "قائمة ثانية في الوحدة الأولى",
+    type: "QUESTION_LIST",
+    parentId: "01910000-0000-7000-8000-000000000125",
+    order: 1,
+    filter: {
+      taxonomyNodeId: "01910000-0000-7000-8000-000000000122",
+      includeDescendants: true,
+    },
+  });
+  assert.ok(
+    inspectQuestionPackageJson(duplicateBrowse, {
+      canonicalSubjectKeys: canonicalSubjects,
+    }).diagnostics.some(
+      (item) =>
+        item.code === "DUPLICATE_ORDER" &&
+      item.context?.parentId === "01910000-0000-7000-8000-000000000125",
+    ),
+  );
+
+  const browseGap = structuredClone(
+    fixture("n-nested-hierarchy-valid.json"),
+  ) as QuestionPackageV1;
+  if (browseGap.bankBrowse.mode !== "TREE") {
+    assert.fail("Nested fixture must use TREE browse mode.");
+  }
+  browseGap.bankBrowse.nodes.push({
+    id: "01910000-0000-7000-8000-000000000133",
+    key: "browse-topic-one-three",
+    label: "قائمة ثالثة في الوحدة الأولى",
+    type: "QUESTION_LIST",
+    parentId: "01910000-0000-7000-8000-000000000125",
+    order: 3,
+    filter: {
+      taxonomyNodeId: "01910000-0000-7000-8000-000000000122",
+      includeDescendants: true,
+    },
+  });
+  assert.ok(
+    inspectQuestionPackageJson(browseGap, {
+      canonicalSubjectKeys: canonicalSubjects,
+    }).diagnostics.some(
+      (item) =>
+        item.code === "ORDER_GAP" &&
+        item.context?.parentId === "01910000-0000-7000-8000-000000000125",
+    ),
+  );
+});
+
+test("RichDocument V1 preserves stable IDs, inline marks, table semantics, and provenance", () => {
+  const rich = inspect("e-rich-content-valid.json");
+  assert.equal(rich.status, "VALID", JSON.stringify(rich.diagnostics));
+  const blocks = rich.package!.questions[0].variants[0].content.blocks;
+  assert.ok(blocks.every((block) => typeof block.id === "string"));
+
+  const quran = blocks.find((block) => block.type === "quran");
+  assert.ok(quran && quran.type === "quran");
+  assert.ok(quran.verses[0].spans.some((span) => span.marks?.includes("underline")));
+  assert.equal(quran.verses[0].surah, "اختبار");
+  assert.equal(quran.verses[0].ayah, 1);
+
+  const poetry = blocks.find((block) => block.type === "poetry");
+  assert.ok(poetry && poetry.type === "poetry");
+  assert.ok(poetry.verses[0].sadr.some((span) => span.marks?.includes("underline")));
+  assert.ok(poetry.verses[0].id);
+
+  const table = blocks.find((block) => block.type === "table");
+  assert.ok(table && table.type === "table");
+  assert.equal(table.headerRowCount, 1);
+  assert.deepEqual(table.columnAlignments, ["start", "center"]);
+  assert.equal(table.displayMode, "compact");
+  assert.equal(table.caption?.[0].marks?.includes("bold"), true);
+
+  const occurrence = inspect("d-multi-variant-valid.json").package!.questions[0]
+    .variants[0].occurrences[0];
+  assert.deepEqual(occurrence.branches, ["العلمي", "الأدبي"]);
+  assert.deepEqual(occurrence.qualifiers, ["داخل القطر", "نازحين"]);
+  assert.equal(occurrence.roundCode, "الأول");
+  assert.equal(
+    occurrence.rawLabel,
+    "وزاري 2025 الدور الأول العلمي والأدبي (داخل القطر + نازحين)",
+  );
+
+  const blankRawLabel = structuredClone(
+    fixture("d-multi-variant-valid.json"),
+  ) as QuestionPackageV1;
+  blankRawLabel.questions[0].variants[0].occurrences[0].rawLabel = "   ";
+  assert.ok(
+    inspectQuestionPackageJson(blankRawLabel, {
+      canonicalSubjectKeys: canonicalSubjects,
+    }).diagnostics.some(
+      (item) => item.code === "EMPTY_OCCURRENCE_RAW_LABEL",
+    ),
+  );
+});
+
+test("duplicate block IDs and semantically empty content are diagnosed", () => {
+  const duplicate = structuredClone(
+    fixture("b-literature-valid.json"),
+  ) as QuestionPackageV1;
+  duplicate.questions[0].sharedAnswer!.blocks[0].id =
+    duplicate.questions[0].variants[0].content.blocks[0].id;
+  const duplicateResult = inspectQuestionPackageJson(duplicate, {
+    canonicalSubjectKeys: canonicalSubjects,
+  });
+  assert.equal(duplicateResult.status, "INVALID");
+  assert.ok(
+    duplicateResult.diagnostics.some((item) => item.code === "DUPLICATE_BLOCK_ID"),
+  );
+
+  const zeroBlocks = structuredClone(
+    fixture("b-literature-valid.json"),
+  ) as QuestionPackageV1;
+  zeroBlocks.questions[0].variants[0].content.blocks = [];
+  assert.ok(
+    inspectQuestionPackageJson(zeroBlocks, {
+      canonicalSubjectKeys: canonicalSubjects,
+    }).diagnostics.some((item) => item.code === "EMPTY_VARIANT_CONTENT"),
+  );
+
+  const whitespace = structuredClone(
+    fixture("b-literature-valid.json"),
+  ) as QuestionPackageV1;
+  const whitespaceBlock = whitespace.questions[0].variants[0].content.blocks[0];
+  if (whitespaceBlock.type !== "paragraph") assert.fail("Expected paragraph fixture.");
+  whitespaceBlock.spans = [{ text: "   " }];
+  assert.ok(
+    inspectQuestionPackageJson(whitespace, {
+      canonicalSubjectKeys: canonicalSubjects,
+    }).diagnostics.some((item) => item.code === "EMPTY_VARIANT_CONTENT"),
+  );
+
+  const dividerOnly = structuredClone(
+    fixture("b-literature-valid.json"),
+  ) as QuestionPackageV1;
+  dividerOnly.questions[0].variants[0].content.blocks = [
+    {
+      id: "01910000-0000-7000-8000-000000000132",
+      type: "divider",
+    },
+  ];
+  assert.ok(
+    inspectQuestionPackageJson(dividerOnly, {
+      canonicalSubjectKeys: canonicalSubjects,
+    }).diagnostics.some((item) => item.code === "EMPTY_VARIANT_CONTENT"),
+  );
+
+  const emptyAnswer = structuredClone(
+    fixture("b-literature-valid.json"),
+  ) as QuestionPackageV1;
+  emptyAnswer.questions[0].sharedAnswer!.blocks = [];
+  const emptyAnswerResult = inspectQuestionPackageJson(emptyAnswer, {
+    canonicalSubjectKeys: canonicalSubjects,
+  });
+  assert.equal(emptyAnswerResult.status, "VALID_WITH_WARNINGS");
+  assert.ok(
+    emptyAnswerResult.diagnostics.some((item) => item.code === "EMPTY_SHARED_ANSWER"),
+  );
+
+  assert.equal(inspect("f-asset-ref-valid.json").status, "VALID");
+});
+
 test("manifest refs reject missing entries and path-bearing filenames", () => {
   const packageValue = structuredClone(fixture("f-asset-ref-valid.json")) as QuestionPackageV1;
   packageValue.assetsManifest[0].filename = "../../unsafe.png";
@@ -200,10 +431,26 @@ test("JSON asset inspection is persisted, cached, and keeps original bytes immut
     assert.equal(first?.questionCount, 1);
     const stored = new SQLiteQuestionPackageInspectionRepository(database).findByAssetId(ingested.asset.id);
     assert.equal(stored?.sourceSha256, ingested.asset.sha256);
+    assert.equal(stored?.inspectorVersion, QUESTION_PACKAGE_INSPECTOR_VERSION);
     assert.equal(stored?.title, "الأدب — بيانات اصطناعية");
     assert.deepEqual(
       Buffer.from(await new Response((await assets.openContent(ingested.asset.id)).body).arrayBuffer()),
       bytes,
+    );
+
+    database.client
+      .prepare(
+        "update question_package_inspections set inspector_version = 1, inspected_at = 1 where asset_id = ?",
+      )
+      .run(ingested.asset.id);
+    const refreshed = await service.inspectAsset(ingested.asset.id);
+    assert.equal(refreshed?.status, "VALID");
+    assert.ok((refreshed?.inspectedAt ?? 0) > 1);
+    assert.equal(
+      new SQLiteQuestionPackageInspectionRepository(database).findByAssetId(
+        ingested.asset.id,
+      )?.inspectorVersion,
+      QUESTION_PACKAGE_INSPECTOR_VERSION,
     );
 
     database.close();
@@ -211,7 +458,7 @@ test("JSON asset inspection is persisted, cached, and keeps original bytes immut
     try {
       const afterRestart = await createQuestionPackageInspectionService(reopened).inspectAsset(ingested.asset.id);
       assert.equal(afterRestart?.status, "VALID");
-      assert.equal(afterRestart?.inspectedAt, first?.inspectedAt);
+      assert.equal(afterRestart?.inspectedAt, refreshed?.inspectedAt);
     } finally {
       reopened.close();
     }

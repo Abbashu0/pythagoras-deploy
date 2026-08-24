@@ -14,17 +14,17 @@
     "variants": [{
       "id": "01910000-0000-7000-8000-000000000053", "order": 1,
       "content": { "type": "doc", "version": 1, "blocks": [
-        { "type": "heading", "level": 2, "spans": [{ "text": "عنوان", "marks": ["bold", "underline"] }] },
-        { "type": "paragraph", "spans": [{ "text": "نص " }, { "text": "مميز", "marks": ["italic"] }] },
-        { "type": "ordered-list", "items": [{ "spans": [{ "text": "عنصر" }] }] },
-        { "type": "bullet-list", "items": [{ "spans": [{ "text": "نقطة" }] }] },
-        { "type": "quran", "verses": [{ "text": "نص قرآني اصطناعي للاختبار", "surah": "اختبار", "ayah": 1 }] },
-        { "type": "poetry", "verses": [{ "sadr": "صدر اصطناعي", "ajuz": "عجز اصطناعي" }] },
-        { "type": "table", "rows": [{ "cells": [{ "spans": [{ "text": "خلية 1" }] }, { "spans": [{ "text": "خلية 2" }] }] }] },
-        { "type": "divider" }
+        { "id": "01910000-0000-7000-8000-000000000054", "type": "heading", "level": 2, "spans": [{ "text": "عنوان", "marks": ["bold", "underline"] }] },
+        { "id": "01910000-0000-7000-8000-000000000055", "type": "paragraph", "spans": [{ "text": "نص " }, { "text": "مميز", "marks": ["italic"] }] },
+        { "id": "01910000-0000-7000-8000-000000000056", "type": "ordered-list", "items": [{ "spans": [{ "text": "عنصر" }] }] },
+        { "id": "01910000-0000-7000-8000-000000000057", "type": "bullet-list", "items": [{ "spans": [{ "text": "نقطة" }] }] },
+        { "id": "01910000-0000-7000-8000-000000000058", "type": "quran", "verses": [{ "id": "01910000-0000-7000-8000-000000000059", "spans": [{ "text": "نص قرآني ", "marks": ["bold"] }, { "text": "اصطناعي للاختبار", "marks": ["underline"] }], "surah": "اختبار", "ayah": 1 }] },
+        { "id": "01910000-0000-7000-8000-000000000060", "type": "poetry", "verses": [{ "id": "01910000-0000-7000-8000-000000000061", "sadr": [{ "text": "صدر " }, { "text": "اصطناعي", "marks": ["underline"] }], "ajuz": [{ "text": "عجز اصطناعي", "marks": ["italic"] }] }] },
+        { "id": "01910000-0000-7000-8000-000000000062", "type": "table", "headerRowCount": 1, "caption": [{ "text": "جدول اصطناعي", "marks": ["bold"] }], "columnAlignments": ["start", "center"], "displayMode": "compact", "rows": [{ "cells": [{ "spans": [{ "text": "رأس 1" }] }, { "spans": [{ "text": "رأس 2" }] }] }, { "cells": [{ "spans": [{ "text": "خلية 1" }] }, { "spans": [{ "text": "خلية 2" }] }] }] },
+        { "id": "01910000-0000-7000-8000-000000000063", "type": "divider" }
       ] },
       "occurrences": []
     }],
-    "sharedAnswer": { "type": "doc", "version": 1, "blocks": [{ "type": "paragraph", "spans": [{ "text": "إجابة" }] }] }
+    "sharedAnswer": { "type": "doc", "version": 1, "blocks": [{ "id": "01910000-0000-7000-8000-000000000064", "type": "paragraph", "spans": [{ "text": "إجابة" }] }] }
   }]
 }

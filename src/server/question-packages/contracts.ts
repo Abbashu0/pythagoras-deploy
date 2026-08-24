@@ -31,18 +31,53 @@ export interface RichTextSpan {
   marks?: Array<"bold" | "italic" | "underline">;
 }
 
+export type RichInline = RichTextSpan[];
+
+export type TableColumnAlignment = "start" | "center" | "end";
+
 export interface RichDocument {
   type: "doc";
   version: 1;
   blocks: Array<
-    | { type: "paragraph"; spans: RichTextSpan[] }
-    | { type: "heading"; level: 2 | 3 | 4; spans: RichTextSpan[] }
-    | { type: "ordered-list" | "bullet-list"; items: Array<{ spans: RichTextSpan[] }> }
-    | { type: "quran"; verses: Array<{ text: string; surah?: string; ayah?: number }> }
-    | { type: "poetry"; verses: Array<{ sadr: string; ajuz: string }> }
-    | { type: "table"; rows: Array<{ cells: Array<{ spans: RichTextSpan[] }> }> }
-    | { type: "image"; assetRef: string; alt: string; caption?: string }
-    | { type: "divider" }
+    | { id: string; type: "paragraph"; spans: RichInline }
+    | { id: string; type: "heading"; level: 2 | 3 | 4; spans: RichInline }
+    | {
+        id: string;
+        type: "ordered-list" | "bullet-list";
+        items: Array<{ spans: RichInline }>;
+      }
+    | {
+        id: string;
+        type: "quran";
+        verses: Array<{
+          id: string;
+          spans: RichInline;
+          surah?: string;
+          ayah?: number;
+        }>;
+      }
+    | {
+        id: string;
+        type: "poetry";
+        verses: Array<{ id: string; sadr: RichInline; ajuz: RichInline }>;
+      }
+    | {
+        id: string;
+        type: "table";
+        headerRowCount: number;
+        caption?: RichInline;
+        columnAlignments?: TableColumnAlignment[];
+        displayMode?: "standard" | "compact";
+        rows: Array<{ cells: Array<{ spans: RichInline }> }>;
+      }
+    | {
+        id: string;
+        type: "image";
+        assetRef: string;
+        alt: string;
+        caption?: RichInline;
+      }
+    | { id: string; type: "divider" }
   >;
 }
 
@@ -80,14 +115,13 @@ export interface QuestionOccurrence {
     | "enrichment"
     | "other";
   year?: number;
-  round?: string;
-  branch?: string;
+  roundCode?: string;
+  branches: string[];
+  qualifiers: string[];
   session?: string;
-  locationScope?: string;
-  attemptType?: string;
   sourceName?: string;
   notes?: string;
-  rawLabel?: string;
+  rawLabel: string;
 }
 
 export interface QuestionPackageV1 {

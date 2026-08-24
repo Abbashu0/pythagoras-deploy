@@ -1,0 +1,25 @@
+{
+  "$schema": "https://schemas.pythagoras.local/question-package/1.0.0",
+  "format": "pythagoras.question-package",
+  "schemaVersion": "1.0.0",
+  "contentMode": "question-bank",
+  "package": { "id": "01910000-0000-7000-8000-000000000120", "key": "nested-literature", "title": "تصنيف أدبي هرمي اصطناعي", "subjectKey": "arabic", "language": "ar-IQ", "contentRevision": 1 },
+  "taxonomy": [
+    { "id": "01910000-0000-7000-8000-000000000121", "key": "unit-one", "label": "الوحدة الأولى", "kind": "unit", "parentId": null, "order": 1 },
+    { "id": "01910000-0000-7000-8000-000000000122", "key": "unit-one-topic", "label": "موضوع الوحدة الأولى", "kind": "topic", "parentId": "01910000-0000-7000-8000-000000000121", "order": 1 },
+    { "id": "01910000-0000-7000-8000-000000000123", "key": "unit-two", "label": "الوحدة الثانية", "kind": "unit", "parentId": null, "order": 2 },
+    { "id": "01910000-0000-7000-8000-000000000124", "key": "unit-two-topic", "label": "موضوع الوحدة الثانية", "kind": "topic", "parentId": "01910000-0000-7000-8000-000000000123", "order": 1 }
+  ],
+  "bankBrowse": {
+    "mode": "TREE",
+    "entry": { "key": "literature", "label": "الأدب", "order": 1 },
+    "nodes": [
+      { "id": "01910000-0000-7000-8000-000000000125", "key": "browse-unit-one", "label": "الوحدة الأولى", "type": "GROUP", "parentId": null, "order": 1 },
+      { "id": "01910000-0000-7000-8000-000000000126", "key": "browse-topic-one", "label": "موضوع الوحدة الأولى", "type": "QUESTION_LIST", "parentId": "01910000-0000-7000-8000-000000000125", "order": 1, "filter": { "taxonomyNodeId": "01910000-0000-7000-8000-000000000122", "includeDescendants": true } },
+      { "id": "01910000-0000-7000-8000-000000000127", "key": "browse-unit-two", "label": "الوحدة الثانية", "type": "GROUP", "parentId": null, "order": 2 },
+      { "id": "01910000-0000-7000-8000-000000000128", "key": "browse-topic-two", "label": "موضوع الوحدة الثانية", "type": "QUESTION_LIST", "parentId": "01910000-0000-7000-8000-000000000127", "order": 1, "filter": { "taxonomyNodeId": "01910000-0000-7000-8000-000000000124", "includeDescendants": true } }
+    ]
+  },
+  "assetsManifest": [],
+  "questions": []
+}
