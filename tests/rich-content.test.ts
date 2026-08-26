@@ -224,12 +224,12 @@ test("responsive Quran, poetry, table, and image styling stays scoped to Rich Co
   assert.ok(studentCss.includes(".rich-content__table-region"));
 });
 
-test("M10 adds no migration, Question API, Editor, search, or runtime Question data", () => {
+test("M10 historical boundary remains migration-free and later M14 reads do not add search or runtime seed data", () => {
   assert.equal(
-    readdirSync(migrationsDirectory).filter((name) => /^\d{4}_.+\.sql$/u.test(name)).length,
+    readdirSync(migrationsDirectory).filter((name) => /^000[0-7]_.+\.sql$/u.test(name)).length,
     8,
   );
-  assert.equal(readdirSync(migrationsDirectory).some((name) => name.startsWith("0008")), false);
+  assert.ok(readdirSync(migrationsDirectory).includes("0008_material-question-bank-layout.sql"));
   const apiTree = readTree(path.join(process.cwd(), "src/app/api"));
   assert.equal(/api[\\/]content[\\/]questions|api[\\/]admin[\\/]questions/u.test(apiTree.paths), false);
   const adminQuestionPage = readFileSync(
@@ -241,7 +241,8 @@ test("M10 adds no migration, Question API, Editor, search, or runtime Question d
     path.join(process.cwd(), "public/pythagoras/src/pages/QuestionBankPlaceholderPage.js"),
     "utf8",
   );
-  assert.equal(/fetch\(|renderRichDocument|search/iu.test(questionPlaceholder), false);
+  assert.ok(questionPlaceholder.includes("renderRichDocument"));
+  assert.equal(/search|favorite|quiz|grading/iu.test(questionPlaceholder), false);
 
   const root = mkdtempSync(path.join(os.tmpdir(), "pythagoras-m10-empty-"));
   try {

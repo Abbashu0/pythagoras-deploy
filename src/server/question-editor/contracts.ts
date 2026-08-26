@@ -6,6 +6,7 @@ import type {
   QuestionPackageContent,
   QuestionTaxonomyContent,
 } from "../questions";
+import type { ChangeSetStatus } from "../change-management";
 
 export const QUESTION_EDITOR_PAGE_SIZE = 50;
 export const QUESTION_EDITOR_RESOURCE_TYPES = [
@@ -23,6 +24,16 @@ export interface QuestionEditorDraft {
   revision: number;
   itemCount: number;
   updatedAt: number;
+}
+
+export interface QuestionPackageWorkflow {
+  id: string;
+  title: string;
+  status: ChangeSetStatus;
+  revision: number;
+  itemCount: number;
+  updatedAt: number;
+  editable: boolean;
 }
 
 export interface QuestionPackageCounts {
@@ -48,6 +59,7 @@ export interface QuestionPackageWorkspaceSummary extends QuestionPackageCounts {
   updatedAt: number | null;
   published: boolean;
   activeDraft: QuestionEditorDraft | null;
+  workflow: QuestionPackageWorkflow | null;
 }
 
 export interface EffectiveQuestionPackage {

@@ -51,7 +51,15 @@ M13 makes `/admin/questions` an operational Package CMS. Package detail provides
 
 Package metadata, structure, Questions, stable Variants, per-Variant Occurrences, taxonomy assignments, and one shared Answer are edited through explicit local buffers and saved only as the existing `question.*` Change Set resources. Rich educational content uses a structured editor-neutral adapter for every canonical Pythagoras RichDocument block, marks, stable block/verse IDs, and Asset Library image IDs; no HTML or editor-native state is persisted. Review remains the OWNER governance and publication surface. Published child omission/deletion remains blocked, while new Draft-only children can be removed before save.
 
-M13 adds no database migration, real corpus, Search/FTS, Student Question API/final bank, TXT/OCR/AI converter, or Quiz/MCQ/grading features. M14 has not started.
+M13 adds no database migration, real corpus, Search/FTS, TXT/OCR/AI converter, or Quiz/MCQ/grading features.
+
+M14 adds the Material Question Bank composition domain through migration `0008_material-question-bank-layout` and `src/server/material-question-bank/`. A Material owns one aggregate layout with stable UUIDv7 GROUP/BANK nodes, explicit CARDS/DIRECT root behavior, CARDS/SWITCHER groups, empty future BANK slots, and placements that target either an entire published Question Package or a Taxonomy subtree. The same Package may appear more than once, and intentional cross-subject placement is allowed with an Admin warning rather than blocked.
+
+Material Question Bank layouts are canonical only after their dedicated `material.question-bank-layout` Change Set is submitted, OWNER-approved, and atomically published. Published nodes are disabled rather than silently omitted; drafts use conservative aggregate revision conflicts. `/admin/materials/[subjectKey]/question-bank` provides the composition workspace, package/taxonomy pickers, structural preview, and review links. Unpublished Question Packages in submitted, approved, or conflicted workflows remain visible but read-only with direct Review access.
+
+The Student reads published, available Material layouts only through `/api/content/question-bank/{subjectKey}` and placement-scoped Bank list/detail endpoints. Lists are compact and paginated (50 by default, 100 maximum); visible numbering is the local 1-based ordinal after placement filtering and canonical sorting. Detail returns all Variants, per-Variant provenance, one shared Answer, Taxonomy breadcrumbs, and public RichDocuments. The current vanilla Student app is now the product harness for CARDS, DIRECT, SWITCHER, list pagination, and detail navigation. It includes no search, favorites/history, corpus seed data, or Quiz behavior.
+
+M14 also removes the M13 Question-list N+1 query pattern by aggregating counts and primary Taxonomy in one bounded SQL query. No real Question corpus was imported.
 
 The prior Question Bank and all real question data remain intentionally removed. Do not add Quiz Ready, MCQ generation, grading, distractors, timers, or attempts. The future relational Question Bank must build on stable IDs, variants with per-variant provenance, one shared answer, rich structured blocks, and Published-only Student reads.
 

@@ -149,7 +149,7 @@ test("0007 creates an empty Question domain and upgrades 0006 without touching c
       dataDirectory: freshRoot,
       migrationsDirectory,
     });
-    assert.equal(count(fresh, "__drizzle_migrations"), 8);
+    assert.equal(count(fresh, "__drizzle_migrations"), 9);
     for (const table of [
       "question_packages",
       "question_taxonomy_nodes",
@@ -247,7 +247,7 @@ test("0007 creates an empty Question domain and upgrades 0006 without touching c
       dataDirectory: oldRoot,
       migrationsDirectory,
     });
-    assert.equal(count(upgraded, "__drizzle_migrations"), 8);
+    assert.equal(count(upgraded, "__drizzle_migrations"), 9);
     assert.equal(count(upgraded, "canonical_banners"), bannerCount);
     assert.deepEqual(
       upgraded.db
@@ -716,7 +716,7 @@ test("sibling and cross-aggregate foreign keys reject relational corruption", ()
   }
 });
 
-test("Question foundation still adds no Editor, Student read, search, or corpus data", () => {
+test("Question foundation remains free of search, quiz, and corpus data while later governed reads stay isolated", () => {
   const apiFiles = readFileTree(path.join(process.cwd(), "src/app/api"));
   assert.equal(/api[\\/]admin[\\/]questions|api[\\/]content[\\/]questions/u.test(apiFiles.paths), false);
   assert.equal(/getQuestionDomainService|materializePlan|createMaterializationPlan/u.test(apiFiles.contents), false);
@@ -730,7 +730,8 @@ test("Question foundation still adds no Editor, Student read, search, or corpus 
     path.join(process.cwd(), "public/pythagoras/src/pages/QuestionBankPlaceholderPage.js"),
     "utf8",
   );
-  assert.equal(/fetch\(|search|question data/iu.test(student), false);
+  assert.ok(student.includes("/api/content/question-bank/"));
+  assert.equal(/search|favorite|quiz|grading|question data/iu.test(student), false);
   const questionServer = readFileTree(path.join(process.cwd(), "src/server/questions"));
   assert.equal(/fts5|content_resources|quiz|mcq|istifham/iu.test(questionServer.contents), false);
 });

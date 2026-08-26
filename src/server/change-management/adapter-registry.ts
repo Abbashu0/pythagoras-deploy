@@ -3,6 +3,10 @@ import { ChangeManagementError } from "./errors";
 import { AssetMetadataChangeAdapter } from "./asset-metadata-adapter";
 import { createCanonicalChangeAdapters } from "../canonical-content/change-adapters";
 import { createQuestionChangeAdapters, QuestionChangeSetCoordinator } from "../questions/change-adapters";
+import {
+  MaterialQuestionBankChangeAdapter,
+  MaterialQuestionBankChangeSetCoordinator,
+} from "../material-question-bank";
 
 export class ChangeResourceAdapterRegistry {
   private readonly adapters = new Map<string, ChangeResourceAdapter>();
@@ -56,7 +60,12 @@ export class ChangeResourceAdapterRegistry {
 
 export function createDefaultChangeResourceRegistry(): ChangeResourceAdapterRegistry {
   return new ChangeResourceAdapterRegistry(
-    [new AssetMetadataChangeAdapter(), ...createCanonicalChangeAdapters(), ...createQuestionChangeAdapters()],
-    [new QuestionChangeSetCoordinator()],
+    [
+      new AssetMetadataChangeAdapter(),
+      ...createCanonicalChangeAdapters(),
+      ...createQuestionChangeAdapters(),
+      new MaterialQuestionBankChangeAdapter(),
+    ],
+    [new QuestionChangeSetCoordinator(), new MaterialQuestionBankChangeSetCoordinator()],
   );
 }

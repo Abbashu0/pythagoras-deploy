@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { getAssetService } from "@/server/assets";
 import { getCanonicalContentRepository } from "@/server/canonical-content";
+import { getMaterialQuestionBankService } from "@/server/material-question-bank";
 
 export const runtime = "nodejs";
 const SAFE_INLINE = new Set(["image/avif", "image/gif", "image/jpeg", "image/png", "image/webp"]);
@@ -8,7 +9,9 @@ const SAFE_INLINE = new Set(["image/avif", "image/gif", "image/jpeg", "image/png
 export async function GET(_request: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await context.params;
-    if (!getCanonicalContentRepository().isStudentVisibleAsset(id)) return new Response(null, { status: 404 });
+    const visibleFromAppContent = getCanonicalContentRepository().isStudentVisibleAsset(id);
+    const visibleFromQuestionBank = getMaterialQuestionBankService().isPublicAssetVisible(id);
+    if (!visibleFromAppContent && !visibleFromQuestionBank) return new Response(null, { status: 404 });
     const { asset, body } = await getAssetService().openContent(id);
     if (!SAFE_INLINE.has(asset.mimeType)) return new Response(null, { status: 404 });
     return new Response(body, { status: 200, headers: {

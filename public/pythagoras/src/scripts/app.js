@@ -7,7 +7,7 @@ import { settingsScreen } from "../pages/SettingsPage.js";
 import { subjectTestsScreen } from "../pages/SubjectTestsPage.js";
 import { testsSubjectsScreen } from "../pages/TestsSubjectsPage.js";
 import { toolsScreen } from "../pages/ToolsPage.js";
-import { renderQuestionBankPlaceholder } from "../pages/QuestionBankPlaceholderPage.js";
+import { mountQuestionBank, renderQuestionBankPlaceholder } from "../pages/QuestionBankPlaceholderPage.js";
 import "./image-db.js";
 import {
   ADMIN_BANNERS_KEY,
@@ -67,6 +67,7 @@ function renderView(view = viewFromHash()) {
     pushRoute(target);
     renderView(target);
   });
+  if (questionBankSubject) mountQuestionBank(questionBankSubject);
   document.querySelectorAll("[data-locked]").forEach((button) => button.addEventListener("click", () => showToast(`${button.dataset.toolName} قيد البناء`)));
   document.querySelectorAll("[data-tests-action-message]").forEach((button) => button.addEventListener("click", () => showToast(button.dataset.testsActionMessage)));
   document.querySelectorAll("[data-appearance-toggle]").forEach((button) => button.addEventListener("click", () => {

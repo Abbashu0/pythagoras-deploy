@@ -1039,6 +1039,100 @@ export const questionPackageAssetBindings = sqliteTable(
   ],
 );
 
+export type MaterialQuestionBankRootPresentation = "DIRECT" | "CARDS";
+export type MaterialQuestionBankNodeType = "GROUP" | "BANK";
+export type MaterialQuestionBankGroupPresentation = "CARDS" | "SWITCHER";
+export type MaterialQuestionBankTargetMode = "ALL_PACKAGE_QUESTIONS" | "TAXONOMY_FILTER";
+
+export const materialQuestionBankLayouts = sqliteTable(
+  "material_question_bank_layouts",
+  {
+    materialId: text("material_id")
+      .primaryKey()
+      .references(() => canonicalMaterials.id, { onDelete: "cascade" }),
+    rootPresentation: text("root_presentation")
+      .$type<MaterialQuestionBankRootPresentation>()
+      .notNull(),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    updatedBy: text("updated_by")
+      .notNull()
+      .references(() => adminUsers.id, { onDelete: "restrict" }),
+    revision: integer("revision").notNull().default(1),
+  },
+  (table) => [
+    check("material_question_bank_layouts_root_valid", sql`${table.rootPresentation} in ('DIRECT','CARDS')`),
+    check("material_question_bank_layouts_revision_positive", sql`${table.revision} >= 1`),
+    check("material_question_bank_layouts_timestamps_ordered", sql`${table.updatedAt} >= ${table.createdAt}`),
+  ],
+);
+
+export const materialQuestionBankNodes = sqliteTable(
+  "material_question_bank_nodes",
+  {
+    id: text("id").primaryKey(),
+    materialId: text("material_id")
+      .notNull()
+      .references(() => materialQuestionBankLayouts.materialId, { onDelete: "cascade" }),
+    nodeKey: text("node_key").notNull(),
+    label: text("label").notNull(),
+    nodeType: text("node_type").$type<MaterialQuestionBankNodeType>().notNull(),
+    parentId: text("parent_id"),
+    displayOrder: integer("display_order").notNull(),
+    groupPresentation: text("group_presentation").$type<MaterialQuestionBankGroupPresentation>(),
+    packageId: text("package_id").references(() => questionPackages.id, { onDelete: "restrict" }),
+    targetMode: text("target_mode").$type<MaterialQuestionBankTargetMode>(),
+    taxonomyNodeId: text("taxonomy_node_id"),
+    includeDescendants: integer("include_descendants", { mode: "boolean" }),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+  },
+  (table) => [
+    uniqueIndex("material_question_bank_nodes_material_id_unique").on(table.materialId, table.id),
+    uniqueIndex("material_question_bank_nodes_key_unique").on(table.materialId, table.nodeKey),
+    uniqueIndex("material_question_bank_nodes_root_order_unique")
+      .on(table.materialId, table.displayOrder)
+      .where(sql`${table.parentId} is null`),
+    uniqueIndex("material_question_bank_nodes_sibling_order_unique")
+      .on(table.materialId, table.parentId, table.displayOrder)
+      .where(sql`${table.parentId} is not null`),
+    index("material_question_bank_nodes_parent_order_index").on(table.materialId, table.parentId, table.displayOrder),
+    index("material_question_bank_nodes_package_index").on(table.packageId),
+    index("material_question_bank_nodes_taxonomy_index").on(table.packageId, table.taxonomyNodeId),
+    foreignKey({
+      columns: [table.materialId, table.parentId],
+      foreignColumns: [table.materialId, table.id],
+      name: "material_question_bank_nodes_parent_same_material_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [table.packageId, table.taxonomyNodeId],
+      foreignColumns: [questionTaxonomyNodes.packageId, questionTaxonomyNodes.id],
+      name: "material_question_bank_nodes_taxonomy_same_package_fk",
+    }).onDelete("restrict"),
+    check("material_question_bank_nodes_key_valid", sql`length(trim(${table.nodeKey})) between 1 and 120`),
+    check("material_question_bank_nodes_label_valid", sql`length(trim(${table.label})) between 1 and 500`),
+    check("material_question_bank_nodes_type_valid", sql`${table.nodeType} in ('GROUP','BANK')`),
+    check("material_question_bank_nodes_order_positive", sql`${table.displayOrder} >= 1`),
+    check("material_question_bank_nodes_not_self_parent", sql`${table.parentId} is null or ${table.parentId} <> ${table.id}`),
+    check("material_question_bank_nodes_enabled_boolean", sql`${table.enabled} in (0,1)`),
+    check("material_question_bank_nodes_shape_valid", sql`(
+      ${table.nodeType} = 'GROUP'
+      and ${table.groupPresentation} in ('CARDS','SWITCHER')
+      and ${table.packageId} is null
+      and ${table.targetMode} is null
+      and ${table.taxonomyNodeId} is null
+      and ${table.includeDescendants} is null
+    ) or (
+      ${table.nodeType} = 'BANK'
+      and ${table.groupPresentation} is null
+      and (
+        (${table.targetMode} = 'ALL_PACKAGE_QUESTIONS' and ${table.taxonomyNodeId} is null and ${table.includeDescendants} is null)
+        or
+        (${table.targetMode} = 'TAXONOMY_FILTER' and ${table.packageId} is not null and ${table.taxonomyNodeId} is not null and ${table.includeDescendants} in (0,1))
+      )
+    )`),
+  ],
+);
+
 export type ChangeSetRow = typeof changeSets.$inferSelect;
 export type ChangeSetItemRow = typeof changeSetItems.$inferSelect;
 export type ChangeSetEventRow = typeof changeSetEvents.$inferSelect;
@@ -1056,3 +1150,7 @@ export type QuestionTaxonomyAssignmentRow =
   typeof questionTaxonomyAssignments.$inferSelect;
 export type QuestionPackageAssetBindingRow =
   typeof questionPackageAssetBindings.$inferSelect;
+export type MaterialQuestionBankLayoutRow =
+  typeof materialQuestionBankLayouts.$inferSelect;
+export type MaterialQuestionBankNodeRow =
+  typeof materialQuestionBankNodes.$inferSelect;

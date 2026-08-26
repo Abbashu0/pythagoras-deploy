@@ -25,6 +25,7 @@ import {
   type QuestionEditorProposal,
   type QuestionPackageCounts,
   type QuestionPackageWorkspaceSummary,
+  type QuestionPackageWorkflow,
   type QuestionSummary,
 } from "./contracts";
 import { QuestionEditorError } from "./errors";
@@ -75,23 +76,26 @@ export class QuestionEditorService {
       const effectivePackage = activeDraft ? this.readDraftItem(activeDraft.id, "question.package", String(row.id)) : null;
       const content = effectivePackage ? parseSnapshot<QuestionPackageContent>(effectivePackage.proposed_snapshot) : packageContentFromRow(row);
       const counts = activeDraft ? this.effectiveCounts(String(row.id), activeDraft.id) : countsFromRow(row);
-      return this.packageSummary(String(row.id), content, Number(row.revision), Number(row.updated_at), true, labels, counts, activeDraft);
+      return this.packageSummary(String(row.id), content, Number(row.revision), Number(row.updated_at), true, labels, counts, activeDraft, activeDraft ? workflowFromDraft(activeDraft) : null);
     });
 
+    const workflowVisibility = actor.actorRole === "OWNER" ? "1=1" : "c.created_by = ?";
+    const workflowArgs = actor.actorRole === "OWNER" ? [] : [actor.actorUserId];
     const draftPackages = this.database.client.prepare(`
       select i.resource_id, i.proposed_snapshot, c.id change_set_id, c.title, c.status, c.revision change_set_revision,
              c.updated_at, (select count(*) from change_set_items x where x.change_set_id = c.id) item_count
       from change_set_items i join change_sets c on c.id = i.change_set_id
       where i.resource_type = 'question.package' and i.operation = 'CREATE'
-        and c.created_by = ? and c.status in ('DRAFT','NEEDS_CHANGES')
+        and ${workflowVisibility} and c.status in ('DRAFT','NEEDS_CHANGES','SUBMITTED','APPROVED','CONFLICTED')
         and not exists (select 1 from question_packages p where p.id = i.resource_id)
       order by c.updated_at desc
-    `).all(actor.actorUserId) as Array<Record<string, unknown>>;
+    `).all(...workflowArgs) as Array<Record<string, unknown>>;
     for (const row of draftPackages) {
       if (result.some((item) => item.id === row.resource_id)) continue;
       const content = parseSnapshot<QuestionPackageContent>(String(row.proposed_snapshot));
-      const draft = draftFromJoinedRow(row);
-      result.push(this.packageSummary(String(row.resource_id), content, 0, Number(row.updated_at), false, labels, this.effectiveCounts(String(row.resource_id), draft.id), draft));
+      const workflow = workflowFromJoinedRow(row);
+      const draft = workflow.editable ? draftFromJoinedRow(row) : null;
+      result.push(this.packageSummary(String(row.resource_id), content, 0, Number(row.updated_at), false, labels, this.effectiveCounts(String(row.resource_id), workflow.id), draft, workflow));
     }
     return { packages: result, materials };
   }
@@ -138,15 +142,31 @@ export class QuestionEditorService {
           cast(json_extract(i.proposed_snapshot, '$.displayOrder') as integer) display_order,
           0 revision, 1 draft, case when i.operation = 'CREATE' then 1 else 0 end draft_only,
           i.proposed_snapshot snapshot,
-          null primary_content
+          null primary_content, null variant_count, null occurrence_count,
+          null has_answer, null primary_taxonomy_id
         from change_set_items i
         where i.change_set_id = ? and i.resource_type = 'question.item'
           and json_extract(i.proposed_snapshot, '$.packageId') = ?
       ), canonical_questions as (
-        select q.id, q.display_order, q.revision, 0 draft, 0 draft_only, null snapshot, v.content primary_content
+        select q.id, q.display_order, q.revision, 0 draft, 0 draft_only, null snapshot, v.content primary_content,
+          coalesce(vc.variant_count, 0) variant_count,
+          coalesce(oc.occurrence_count, 0) occurrence_count,
+          case when q.shared_answer is null then 0 else 1 end has_answer,
+          pt.taxonomy_node_id primary_taxonomy_id
         from questions q
         left join question_primary_variants pv on pv.question_id = q.id
         left join question_variants v on v.id = pv.variant_id
+        left join (
+          select question_id, count(*) variant_count
+          from question_variants group by question_id
+        ) vc on vc.question_id = q.id
+        left join (
+          select v.question_id, count(*) occurrence_count
+          from question_occurrences o join question_variants v on v.id = o.variant_id
+          group by v.question_id
+        ) oc on oc.question_id = q.id
+        left join question_taxonomy_assignments pt
+          on pt.question_id = q.id and pt.role = 'PRIMARY'
         where q.package_id = ? and not exists (select 1 from draft_questions d where d.id = q.id)
       )
       select * from (select * from draft_questions union all select * from canonical_questions)
@@ -167,13 +187,7 @@ export class QuestionEditorService {
         };
       }
       const primary = parseMaybeJson<CanonicalRichDocument>(row.primary_content);
-      const counts = this.database.client.prepare(`
-        select (select count(*) from question_variants where question_id = ?) variants,
-          (select count(*) from question_occurrences o join question_variants v on v.id = o.variant_id where v.question_id = ?) occurrences,
-          (select shared_answer is not null from questions where id = ?) has_answer
-      `).get(row.id, row.id, row.id) as Record<string, unknown>;
-      const primaryTaxonomy = this.database.client.prepare("select taxonomy_node_id from question_taxonomy_assignments where question_id = ? and role = 'PRIMARY' limit 1").get(row.id) as { taxonomy_node_id?: string } | undefined;
-      return { id: String(row.id), displayOrder: Number(row.display_order), primaryPreview: documentText(primary), taxonomyBreadcrumb: assignmentBreadcrumb(primaryTaxonomy?.taxonomy_node_id, taxonomy), variantCount: Number(counts.variants), occurrenceCount: Number(counts.occurrences), hasAnswer: Boolean(counts.has_answer), revision: Number(row.revision), draft: false, draftOnly: false };
+      return { id: String(row.id), displayOrder: Number(row.display_order), primaryPreview: documentText(primary), taxonomyBreadcrumb: assignmentBreadcrumb(typeof row.primary_taxonomy_id === "string" ? row.primary_taxonomy_id : undefined, taxonomy), variantCount: Number(row.variant_count), occurrenceCount: Number(row.occurrence_count), hasAnswer: Boolean(row.has_answer), revision: Number(row.revision), draft: false, draftOnly: false };
     });
     return { items, total, limit: boundedLimit, offset: boundedOffset };
   }
@@ -238,8 +252,8 @@ export class QuestionEditorService {
     return this.changes.submit(active.id, expectedRevision, actor).changeSet;
   }
 
-  private packageSummary(id: string, content: QuestionPackageContent, revision: number, updatedAt: number | null, published: boolean, labels: Map<string, string>, counts: QuestionPackageCounts, draft: QuestionEditorDraft | null): QuestionPackageWorkspaceSummary {
-    return { id, ...content, subjectLabel: labels.get(content.subjectKey) ?? content.subjectKey, revision, updatedAt, published, activeDraft: draft, ...counts };
+  private packageSummary(id: string, content: QuestionPackageContent, revision: number, updatedAt: number | null, published: boolean, labels: Map<string, string>, counts: QuestionPackageCounts, draft: QuestionEditorDraft | null, workflow: QuestionPackageWorkflow | null): QuestionPackageWorkspaceSummary {
+    return { id, ...content, subjectLabel: labels.get(content.subjectKey) ?? content.subjectKey, revision, updatedAt, published, activeDraft: draft, workflow, ...counts };
   }
 
   private findEditableDraft(packageId: string, actor: AdminActor): QuestionEditorDraft | null {
@@ -347,6 +361,8 @@ export class QuestionEditorService {
 
 function draftFromRow(row: DraftRow): QuestionEditorDraft { return { id: row.id, title: row.title, status: row.status, revision: Number(row.revision), itemCount: Number(row.item_count), updatedAt: Number(row.updated_at) }; }
 function draftFromJoinedRow(row: Record<string, unknown>): QuestionEditorDraft { return { id: String(row.change_set_id), title: String(row.title), status: row.status as "DRAFT" | "NEEDS_CHANGES", revision: Number(row.change_set_revision), itemCount: Number(row.item_count), updatedAt: Number(row.updated_at) }; }
+function workflowFromJoinedRow(row: Record<string, unknown>): QuestionPackageWorkflow { const status = row.status as QuestionPackageWorkflow["status"]; return { id: String(row.change_set_id), title: String(row.title), status, revision: Number(row.change_set_revision), itemCount: Number(row.item_count), updatedAt: Number(row.updated_at), editable: status === "DRAFT" || status === "NEEDS_CHANGES" }; }
+function workflowFromDraft(draft: QuestionEditorDraft): QuestionPackageWorkflow { return { ...draft, editable: true }; }
 function compactDraft(changeSet: { id: string; title: string; status: string; revision: number; updatedAt: number }, itemCount: number): QuestionEditorDraft { return { id: changeSet.id, title: changeSet.title, status: changeSet.status as "DRAFT" | "NEEDS_CHANGES", revision: changeSet.revision, itemCount, updatedAt: changeSet.updatedAt }; }
 function parseSnapshot<T>(value: string): T { return JSON.parse(value) as T; }
 function parseMaybeJson<T>(value: unknown): T | null { if (!value) return null; return typeof value === "string" ? JSON.parse(value) as T : value as T; }

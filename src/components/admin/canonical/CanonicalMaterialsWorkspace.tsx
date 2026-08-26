@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { BookOpen, ImageIcon, LockKeyhole, X } from "lucide-react";
+import Link from "next/link";
+import { BookOpen, ImageIcon, LockKeyhole, Network, X } from "lucide-react";
 import { AppearanceSettings, type MaterialsSettings } from "@/components/admin/AppearanceSettings";
 import { IconPicker } from "@/components/admin/IconPicker";
 import { ImagePositioner } from "@/components/admin/ImagePositioner";
@@ -90,6 +91,7 @@ function CanonicalMaterialEditor({ material, cardHeight, onChange, onClose }: { 
   return <div className="overflow-hidden rounded-2xl border bg-card">
     <div className="flex items-center justify-between border-b p-4"><div><h2 className="text-sm font-bold">محرر المادة</h2><p className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground"><LockKeyhole className="h-3 w-3"/>{material.subjectKey} · revision {material.revision}</p></div><Button variant="ghost" size="icon" onClick={onClose}><X className="h-4 w-4"/></Button></div>
     <div className="admin-scroll max-h-[720px] space-y-5 overflow-y-auto p-4">
+      <section className="rounded-xl border bg-muted/20 p-3"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><Label>بنك أسئلة المادة</Label><p className="mt-1 text-[10px] leading-5 text-muted-foreground">توزيع حزم الأسئلة وتصفحها له Change Set مستقل عن بيانات بطاقة المادة.</p></div><Button variant="outline" asChild><Link href={`/admin/materials/${encodeURIComponent(material.subjectKey)}/question-bank`}><Network className="ml-2 h-4 w-4"/>إدارة بنك الأسئلة</Link></Button></div></section>
       <section className="space-y-3"><div className="flex items-center justify-between"><Label>صورة المادة</Label>{material.asset ? <span className="max-w-[220px] truncate text-[10px] text-muted-foreground">{material.asset.displayName}</span> : null}</div><div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => setPickerOpen(true)}><ImageIcon className="ml-2 h-4 w-4"/>اختيار من مكتبة الأصول</Button>{material.asset ? <Button variant="ghost" onClick={() => onChange({ assetId: null, asset: null })}><X className="ml-2 h-4 w-4"/>إزالة المرجع</Button> : null}</div>{imageUrl ? <ImagePositioner imageSrc={imageUrl} gradient={material.gradient} value={{ offsetX: material.offsetX, offsetY: material.offsetY, scale: material.scale }} onChange={(value) => onChange(value)} previewWidth={dimensions.cssWidth} aspectRatio={`${dimensions.cssWidth} / ${dimensions.cssHeight}`} fullFrame minScale={0.5} maxScale={3} maxOffset={50}/> : <div className="grid h-36 place-items-center rounded-xl border border-dashed text-xs text-muted-foreground" style={{ background: material.gradient }}>تدرّج احتياطي — اختر Asset لإضافة صورة.</div>}</section>
       <label className="space-y-2"><Label>العنوان العربي</Label><Input value={material.label} onChange={(event) => onChange({ label: event.target.value })} maxLength={40}/></label>
       <label className="space-y-2"><Label>العنوان الإنجليزي</Label><Input dir="ltr" className="font-mono tracking-wider" value={material.englishTitle} onChange={(event) => onChange({ englishTitle: event.target.value.toUpperCase() })} maxLength={24}/></label>
