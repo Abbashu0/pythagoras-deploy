@@ -7,6 +7,7 @@ import type {
   MaterialQuestionBankTargetMode,
 } from "../content/schema";
 import type { QuestionSourceKind, QuestionTaxonomyRole } from "../questions";
+import type { MaterialQuestionBankProductPresetKey } from "./product-presets";
 
 export const MATERIAL_QUESTION_BANK_RESOURCE_TYPE = "material.question-bank-layout" as const;
 export const MATERIAL_QUESTION_BANK_PAGE_SIZE = 50;
@@ -78,6 +79,7 @@ export interface MaterialQuestionBankAdminWorkspace {
   workflow: MaterialQuestionBankWorkflow | null;
   packages: MaterialQuestionBankPackageOption[];
   taxonomy: MaterialQuestionBankTaxonomyOption[];
+  productPreset: MaterialQuestionBankProductPresetKey | null;
   warnings: Array<{ code: "CROSS_SUBJECT_PLACEMENT"; nodeId: string; message: string }>;
 }
 

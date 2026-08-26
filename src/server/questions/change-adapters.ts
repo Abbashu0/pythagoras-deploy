@@ -209,24 +209,20 @@ export class QuestionChangeAdapter implements ChangeResourceAdapter {
     try {
       switch (this.resourceType) {
         case "question.package":
-          operation === "CREATE"
-            ? repository.createPackage({ id: resourceId, content: clean as unknown as QuestionPackageContent, actor })
-            : repository.updatePackage({ id: resourceId, content: clean as unknown as QuestionPackageContent, expectedRevision, actor });
+          if (operation === "CREATE") repository.createPackage({ id: resourceId, content: clean as unknown as QuestionPackageContent, actor });
+          else repository.updatePackage({ id: resourceId, content: clean as unknown as QuestionPackageContent, expectedRevision, actor });
           break;
         case "question.taxonomy":
-          operation === "CREATE"
-            ? repository.createTaxonomyNode({ id: resourceId, content: clean as unknown as QuestionTaxonomyContent, actor })
-            : repository.updateTaxonomyNode({ id: resourceId, content: clean as unknown as QuestionTaxonomyContent, expectedRevision, actor });
+          if (operation === "CREATE") repository.createTaxonomyNode({ id: resourceId, content: clean as unknown as QuestionTaxonomyContent, actor });
+          else repository.updateTaxonomyNode({ id: resourceId, content: clean as unknown as QuestionTaxonomyContent, expectedRevision, actor });
           break;
         case "question.browse":
-          operation === "CREATE"
-            ? repository.createBrowseNode({ id: resourceId, content: clean as unknown as QuestionBrowseContent, actor })
-            : repository.updateBrowseNode({ id: resourceId, content: clean as unknown as QuestionBrowseContent, expectedRevision, actor });
+          if (operation === "CREATE") repository.createBrowseNode({ id: resourceId, content: clean as unknown as QuestionBrowseContent, actor });
+          else repository.updateBrowseNode({ id: resourceId, content: clean as unknown as QuestionBrowseContent, expectedRevision, actor });
           break;
         case "question.item":
-          operation === "CREATE"
-            ? repository.createQuestionAggregate({ id: resourceId, content: clean as unknown as QuestionItemContent, actor })
-            : repository.updateQuestionAggregate({ id: resourceId, content: clean as unknown as QuestionItemContent, expectedRevision, actor });
+          if (operation === "CREATE") repository.createQuestionAggregate({ id: resourceId, content: clean as unknown as QuestionItemContent, actor });
+          else repository.updateQuestionAggregate({ id: resourceId, content: clean as unknown as QuestionItemContent, expectedRevision, actor });
           break;
       }
     } catch (error) {

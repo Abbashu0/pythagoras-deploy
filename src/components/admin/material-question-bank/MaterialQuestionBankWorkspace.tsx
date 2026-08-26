@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { ArabicQuestionBankPresetWorkspace } from "./ArabicQuestionBankPresetWorkspace";
 import type {
   MaterialQuestionBankAdminWorkspace,
   MaterialQuestionBankLayoutContent,
@@ -99,6 +100,7 @@ export function MaterialQuestionBankWorkspace({ subjectKey }: { subjectKey: stri
 
   if (loading) return <main className="grid min-h-[65vh] place-items-center"><Loader2 className="h-7 w-7 animate-spin text-primary" /></main>;
   if (!workspace || !layout) return <main className="p-8" dir="rtl"><p className="rounded-2xl bg-destructive/10 p-4 text-destructive">{message ?? "التخطيط غير متاح."}</p></main>;
+  if (workspace.productPreset === "ARABIC_FIXED") return <ArabicQuestionBankPresetWorkspace workspace={workspace} layout={layout} busy={busy} readOnly={readOnly} dirty={dirty} message={message} onLayoutChange={updateLayout} onSave={() => void save()} onSubmit={() => void submit()} />;
 
   return <main className="mx-auto w-full max-w-[1500px] space-y-5 p-4 sm:p-6 lg:p-8" dir="rtl">
     <header className="rounded-3xl border bg-card p-5 shadow-sm">

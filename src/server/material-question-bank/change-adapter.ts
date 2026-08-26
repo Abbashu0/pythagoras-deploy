@@ -4,6 +4,7 @@ import { ChangeManagementError, deriveChangedPaths, validateChangeSnapshot } fro
 import type { ContentDatabase } from "../content";
 import { MATERIAL_QUESTION_BANK_RESOURCE_TYPE, type MaterialQuestionBankLayoutContent } from "./contracts";
 import { MaterialQuestionBankError } from "./errors";
+import { assertProductPresetStructure } from "./product-presets";
 import { SQLiteMaterialQuestionBankRepository } from "./sqlite-repository";
 import { assertMaterialQuestionBankReferences, assertPublishableMaterialQuestionBankLayout, normalizeMaterialQuestionBankLayout } from "./validation";
 
@@ -22,6 +23,7 @@ export class MaterialQuestionBankChangeAdapter implements ChangeResourceAdapter 
     try {
       const proposed = normalizeMaterialQuestionBankLayout(desired);
       if (proposed.materialId !== resourceId) invalid("Material layout identity is immutable.");
+      assertProductPresetForMaterial(database, proposed);
       const existing = new SQLiteMaterialQuestionBankRepository(database).get(resourceId);
       const current = operation === "CREATE" ? { resourceId, revision: 0, snapshot: {} as ChangeSnapshot } : this.loadCurrent(database, resourceId);
       if (operation === "CREATE" && existing) conflict("Material layout already exists.");
@@ -61,6 +63,7 @@ export class MaterialQuestionBankChangeAdapter implements ChangeResourceAdapter 
     try {
       const clean = normalizeMaterialQuestionBankLayout(value);
       if (clean.materialId !== resourceId) invalid("Material layout identity is immutable.");
+      assertProductPresetForMaterial(database, clean);
       assertPublishableMaterialQuestionBankLayout(clean);
       assertMaterialQuestionBankReferences(database, clean);
       const saved = new SQLiteMaterialQuestionBankRepository(database).save({ content: clean, expectedRevision, actor, operation });
@@ -75,6 +78,7 @@ export class MaterialQuestionBankChangeSetCoordinator implements ChangeSetCoordi
       if (item.resourceType !== MATERIAL_QUESTION_BANK_RESOURCE_TYPE) continue;
       try {
         const value = normalizeMaterialQuestionBankLayout(item.proposedSnapshot);
+        assertProductPresetForMaterial(database, value);
         assertPublishableMaterialQuestionBankLayout(value);
         assertMaterialQuestionBankReferences(database, value);
       } catch (error) { throw mapError(error); }
@@ -103,4 +107,10 @@ function mapError(error: unknown): Error {
     return new ChangeManagementError(error.code === "MATERIAL_BANK_CONFLICT" ? "CHANGE_CONFLICT" : error.code === "MATERIAL_BANK_NOT_FOUND" ? "CHANGE_NOT_FOUND" : "CHANGE_VALIDATION_FAILED", error.message, error);
   }
   return error instanceof Error ? error : new Error("Material Question Bank operation failed.");
+}
+
+function assertProductPresetForMaterial(database: ContentDatabase, value: MaterialQuestionBankLayoutContent): void {
+  const material = database.client.prepare("select subject_key from canonical_materials where id=?").get(value.materialId) as { subject_key: string } | undefined;
+  if (!material) invalid("Material layout references a missing Material.");
+  assertProductPresetStructure(material.subject_key, value);
 }

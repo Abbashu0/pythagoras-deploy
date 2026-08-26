@@ -21,6 +21,7 @@ import {
   type PublicQuestionSearchPage,
 } from "./contracts";
 import { MaterialQuestionBankError } from "./errors";
+import { assertProductPresetStructure, createProductPresetLayout, getMaterialQuestionBankProductPreset, isProductPresetLayout } from "./product-presets";
 import { SQLiteMaterialQuestionBankRepository } from "./sqlite-repository";
 import { normalizeMaterialQuestionBankLayout } from "./validation";
 
@@ -39,6 +40,7 @@ export class MaterialQuestionBankService {
   getAdminWorkspace(subjectKey: string, actor: AdminActor): MaterialQuestionBankAdminWorkspace {
     assertActor(actor);
     const material = this.requireMaterial(subjectKey, false);
+    this.ensureProductPreset(material, actor);
     const canonical = this.repository.get(material.id);
     const workflow = this.findWorkflow(material.id, actor);
     const draftSnapshot = workflow?.editable ? this.readWorkflowSnapshot(workflow.id, material.id) : null;
@@ -50,6 +52,7 @@ export class MaterialQuestionBankService {
       layout: normalizeMaterialQuestionBankLayout(layout),
       canonicalRevision: canonical?.revision ?? 0,
       published: Boolean(canonical), publishedNodeIds: canonical?.nodes.map((node) => node.id) ?? [], workflow, packages, taxonomy,
+      productPreset: isProductPresetLayout(material.subject_key, layout) ? getMaterialQuestionBankProductPreset(material.subject_key)?.key ?? null : null,
       warnings: crossSubjectWarnings(layout, material.subject_key, material.label, packages),
     };
   }
@@ -59,8 +62,10 @@ export class MaterialQuestionBankService {
   save(subjectKey: string, desired: unknown, actor: AdminActor): MaterialQuestionBankWorkflow {
     assertActor(actor);
     const material = this.requireMaterial(subjectKey, false);
+    this.ensureProductPreset(material, actor);
     const value = normalizeMaterialQuestionBankLayout(desired);
     if (value.materialId !== material.id) invalid("Material layout identity is invalid.");
+    assertProductPresetStructure(material.subject_key, value);
     const canonical = this.repository.get(material.id);
     const workflow = this.findWorkflow(material.id, actor);
     if (workflow && !workflow.editable) throw new MaterialQuestionBankError("MATERIAL_BANK_CONFLICT", "The current layout workflow is read-only.");
@@ -187,6 +192,15 @@ export class MaterialQuestionBankService {
       if (found) return true;
     }
     return false;
+  }
+
+  private ensureProductPreset(material: MaterialRow, actor: AdminActor): void {
+    const baseline = createProductPresetLayout(material.id, material.subject_key);
+    if (!baseline || this.repository.get(material.id)) return;
+    this.database.client.transaction(() => {
+      if (this.repository.get(material.id)) return;
+      this.repository.save({ content: baseline, expectedRevision: 0, actor, operation: "CREATE" });
+    })();
   }
 
   private requireMaterial(subjectKey: string, publicOnly: boolean): MaterialRow {

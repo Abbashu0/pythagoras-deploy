@@ -11,11 +11,13 @@ import { createChangeManagementService } from "../src/server/change-management";
 import { openContentDatabase, type ContentDatabase } from "../src/server/content";
 import {
   createMaterialQuestionBankService,
+  ARABIC_QUESTION_BANK_PRESET,
   MaterialQuestionBankError,
   normalizeMaterialQuestionBankLayout,
   type MaterialQuestionBankLayoutContent,
   type MaterialQuestionBankNodeContent,
 } from "../src/server/material-question-bank";
+import { SQLiteMaterialQuestionBankRepository } from "../src/server/material-question-bank/sqlite-repository";
 import { createQuestionEditorService } from "../src/server/question-editor";
 import type { CanonicalRichDocument, QuestionItemContent } from "../src/server/questions";
 import { SQLiteQuestionRepository } from "../src/server/questions";
@@ -50,11 +52,77 @@ function bank(id: string, label: string, order: number, parentId: string | null,
 function group(id: string, label: string, order: number, presentation: "CARDS" | "SWITCHER"): MaterialQuestionBankNodeContent { return { id, nodeKey: `group-${id.slice(-8)}`, label, nodeType: "GROUP", parentId: null, displayOrder: order, groupPresentation: presentation, packageId: null, targetMode: null, taxonomyNodeId: null, includeDescendants: null, enabled: true }; }
 function publishLayout(f: ReturnType<typeof fixture>, subjectKey: string, layout: MaterialQuestionBankLayoutContent) { const draft = f.banks.save(subjectKey, layout, f.admin); let change = f.banks.submit(subjectKey, draft.revision, f.admin); change = f.changes.approve(change.id, change.revision, f.owner).changeSet; return f.changes.publish(change.id, change.revision, f.owner); }
 
-test("M14 validates the exact Arabic CARDS topology, SWITCHER children, empty slots, and cross-subject placement", () => {
+test("Arabic Product preset is seeded with stable fixed slots and public empty-state behavior", () => {
   const f = fixture();
   try {
-    const arabic = f.canonical.getSnapshot().materials.find((item) => item.subjectKey === "arabic")!;
-    const literature = createPackage(f, "arabic", "الأدب العربي");
+    const workspace = f.banks.getAdminWorkspace("arabic", f.owner);
+    assert.equal(workspace.productPreset, "ARABIC_FIXED");
+    assert.equal(workspace.layout.rootPresentation, "CARDS");
+    assert.deepEqual(workspace.layout.nodes.filter((node) => node.parentId === null).sort(orderNodes).map((node) => node.label), ["الأدب", "القواعد"]);
+    const grammar = workspace.layout.nodes.find((node) => node.nodeKey === "arabic-grammar")!;
+    assert.equal(grammar.nodeType, "GROUP"); assert.equal(grammar.groupPresentation, "SWITCHER");
+    assert.deepEqual(workspace.layout.nodes.filter((node) => node.parentId === grammar.id).sort(orderNodes).map((node) => node.label), ["الاستفهام", "النفي", "التقديم والتأخير", "التوكيد", "النداء", "التعجب", "المدح والذم", "التمني والترجي", "العرض والتحضيض"]);
+    assert.deepEqual(workspace.layout.nodes.map((node) => node.id).sort(), ARABIC_QUESTION_BANK_PRESET.nodes.map((node) => node.id).sort());
+    assert.ok(workspace.layout.nodes.filter((node) => node.nodeType === "BANK").every((node) => node.packageId === null && node.targetMode === "ALL_PACKAGE_QUESTIONS"));
+    const publicLayout = f.banks.getPublicLayout("arabic");
+    assert.deepEqual(publicLayout.nodes.filter((node) => node.parentId === null).sort(orderNodes).map((node) => [node.label, node.available]), [["الأدب", false], ["القواعد", false]]);
+  } finally { f.close(); }
+});
+
+test("Arabic preset rejects structural edits while governed assignment changes publish normally", () => {
+  const f = fixture();
+  try {
+    const initial = f.banks.getAdminWorkspace("arabic", f.admin);
+    const english = createPackage(f, "english", "حزمة مشتركة"); createQuestion(f, english.packageId, english.taxonomyId, 1);
+    const istifham = initial.layout.nodes.find((node) => node.nodeKey === "arabic-grammar-istifham")!;
+    const assigned = { ...initial.layout, nodes: initial.layout.nodes.map((node) => node.id === istifham.id ? { ...node, packageId: english.packageId } : node) };
+    const draft = f.banks.save("arabic", assigned, f.admin);
+    assert.equal(f.banks.getPublicLayout("arabic").nodes.find((node) => node.id === istifham.id)?.available, false);
+    let change = f.banks.submit("arabic", draft.revision, f.admin); change = f.changes.approve(change.id, change.revision, f.owner).changeSet; f.changes.publish(change.id, change.revision, f.owner);
+    const published = f.banks.getPublicLayout("arabic");
+    assert.equal(published.nodes.find((node) => node.id === istifham.id)?.available, true);
+    assert.equal(published.nodes.find((node) => node.nodeKey === "arabic-grammar")?.available, true);
+    const unassign = { ...assigned, nodes: assigned.nodes.map((node) => node.id === istifham.id ? { ...node, packageId: null, targetMode: "ALL_PACKAGE_QUESTIONS" as const, taxonomyNodeId: null, includeDescendants: null } : node) };
+    assert.ok(f.banks.save("arabic", unassign, f.admin).id);
+    assert.throws(() => f.banks.save("arabic", { ...assigned, nodes: assigned.nodes.map((node) => node.id === istifham.id ? { ...node, label: "تعديل محظور" } : node) }, f.admin), /immutable/u);
+    assert.throws(() => f.banks.save("arabic", { ...assigned, nodes: assigned.nodes.filter((node) => node.id !== istifham.id) }, f.admin), /immutable/u);
+    assert.throws(() => f.banks.save("arabic", { ...assigned, rootPresentation: "DIRECT" }, f.admin), /immutable/u);
+  } finally { f.close(); }
+});
+
+test("0010 seeds an existing owner database without an Arabic layout and never replaces an existing layout", () => {
+  const oldRoot = mkdtempSync(path.join(os.tmpdir(), "pythagoras-arabic-preset-old-"));
+  const oldMigrations = mkdtempSync(path.join(os.tmpdir(), "pythagoras-arabic-preset-migrations-"));
+  const existingRoot = mkdtempSync(path.join(os.tmpdir(), "pythagoras-arabic-preset-existing-"));
+  try {
+    mkdirSync(path.join(oldMigrations, "meta"), { recursive: true });
+    const journal = JSON.parse(readFileSync(path.join(migrationsDirectory, "meta", "_journal.json"), "utf8"));
+    for (const entry of journal.entries.slice(0, 10)) copyFileSync(path.join(migrationsDirectory, `${entry.tag}.sql`), path.join(oldMigrations, `${entry.tag}.sql`));
+    journal.entries = journal.entries.slice(0, 10); writeFileSync(path.join(oldMigrations, "meta", "_journal.json"), JSON.stringify(journal));
+    const old = openContentDatabase({ dataDirectory: oldRoot, migrationsDirectory: oldMigrations });
+    createCanonicalContentRepository(old).bootstrap(); new SQLiteAdminIdentityRepository(old).createInitialOwner({ id: uuidv7(), email: "preset-upgrade@test.local", displayName: "Preset Upgrade", passwordHash: "$argon2id$test", createdAt: 1 }); old.close();
+    const upgraded = openContentDatabase({ dataDirectory: oldRoot, migrationsDirectory });
+    const arabicId = (upgraded.client.prepare("select id from canonical_materials where subject_key='arabic'").get() as { id: string }).id;
+    assert.equal(new SQLiteMaterialQuestionBankRepository(upgraded).get(arabicId)?.nodes.length, 11); upgraded.close();
+
+    const existing = openContentDatabase({ dataDirectory: existingRoot, migrationsDirectory: oldMigrations }); createCanonicalContentRepository(existing).bootstrap();
+    const owner = new SQLiteAdminIdentityRepository(existing).createInitialOwner({ id: uuidv7(), email: "existing-layout@test.local", displayName: "Existing", passwordHash: "$argon2id$test", createdAt: 1 });
+    const arabicIdExisting = (existing.client.prepare("select id from canonical_materials where subject_key='arabic'").get() as { id: string }).id;
+    const legacy = { materialId: arabicIdExisting, rootPresentation: "CARDS" as const, nodes: [bank(uuidv7(), "Existing layout", 1, null, null)] };
+    new SQLiteMaterialQuestionBankRepository(existing).save({ content: legacy, expectedRevision: 0, actor: actor(owner.id, "OWNER"), operation: "CREATE" });
+    existing.close();
+    const reopened = openContentDatabase({ dataDirectory: existingRoot, migrationsDirectory });
+    assert.deepEqual(new SQLiteMaterialQuestionBankRepository(reopened).get(arabicIdExisting)?.nodes.map((node) => node.label), ["Existing layout"]); reopened.close();
+  } finally { [oldRoot, oldMigrations, existingRoot].forEach((target) => rmSync(target, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })); }
+});
+
+function orderNodes(a: { displayOrder: number; id: string }, b: { displayOrder: number; id: string }) { return a.displayOrder - b.displayOrder || a.id.localeCompare(b.id); }
+
+test("M14 generic materials support CARDS topology, SWITCHER children, empty slots, and cross-subject placement", () => {
+  const f = fixture();
+  try {
+    const arabic = f.canonical.getSnapshot().materials.find((item) => item.subjectKey === "biology")!;
+    const literature = createPackage(f, "biology", "الأدب العربي");
     const grammar = createPackage(f, "english", "قواعد مشتركة");
     const literatureBank = bank(uuidv7(), "الأدب", 1, null, literature.packageId);
     const grammarGroup = group(uuidv7(), "القواعد", 2, "SWITCHER");
@@ -64,12 +132,12 @@ test("M14 validates the exact Arabic CARDS topology, SWITCHER children, empty sl
     const layout = normalizeMaterialQuestionBankLayout({ materialId: arabic.id, rootPresentation: "CARDS", nodes: [literatureBank, grammarGroup, ...topics, emptySlot] });
     assert.deepEqual(topics.map((item) => item.label), labels);
     assert.equal(layout.rootPresentation, "CARDS"); assert.equal(layout.nodes.filter((item) => item.parentId === grammarGroup.id).length, 9);
-    const workspace = f.banks.getAdminWorkspace("arabic", f.owner);
-    const warnings = f.banks.save("arabic", layout, f.admin);
+    const workspace = f.banks.getAdminWorkspace("biology", f.owner);
+    const warnings = f.banks.save("biology", layout, f.admin);
     assert.equal(warnings.editable, true);
-    const repeatedSave = f.banks.save("arabic", { ...layout, nodes: layout.nodes.map((node) => node.id === literatureBank.id ? { ...node, label: "الأدب المحدّث" } : node) }, f.admin);
+    const repeatedSave = f.banks.save("biology", { ...layout, nodes: layout.nodes.map((node) => node.id === literatureBank.id ? { ...node, label: "الأدب المحدّث" } : node) }, f.admin);
     assert.equal(repeatedSave.id, warnings.id);
-    const after = f.banks.getAdminWorkspace("arabic", f.admin);
+    const after = f.banks.getAdminWorkspace("biology", f.admin);
     assert.equal(after.warnings.length, 9); assert.match(after.warnings[0].message, /مسموح|ستظهر|مصنفة/u);
     assert.ok(workspace.packages.some((item) => item.subjectKey === "english"));
   } finally { f.close(); }
@@ -78,35 +146,35 @@ test("M14 validates the exact Arabic CARDS topology, SWITCHER children, empty sl
 test("M14 layout is a conservative aggregate and reaches public Student reads only after atomic OWNER publication", () => {
   const f = fixture();
   try {
-    const material = f.canonical.getSnapshot().materials.find((item) => item.subjectKey === "arabic")!;
+    const material = f.canonical.getSnapshot().materials.find((item) => item.subjectKey === "biology")!;
     const cross = createPackage(f, "english", "حزمة عابرة للمواد");
     const questionIds = Array.from({ length: 55 }, (_, index) => createQuestion(f, cross.packageId, cross.taxonomyId, index + 100));
     const rootBank = bank(uuidv7(), "كل الأسئلة", 1, null, cross.packageId);
     const repeatedBank = bank(uuidv7(), "عرض ثانٍ", 2, null, cross.packageId, cross.taxonomyId);
     const layout = { materialId: material.id, rootPresentation: "CARDS" as const, nodes: [rootBank, repeatedBank] };
-    const draft = f.banks.save("arabic", layout, f.admin);
-    assert.throws(() => f.banks.getPublicLayout("arabic"), (error: unknown) => error instanceof MaterialQuestionBankError && error.code === "MATERIAL_BANK_NOT_FOUND");
-    let change = f.banks.submit("arabic", draft.revision, f.admin);
+    const draft = f.banks.save("biology", layout, f.admin);
+    assert.throws(() => f.banks.getPublicLayout("biology"), (error: unknown) => error instanceof MaterialQuestionBankError && error.code === "MATERIAL_BANK_NOT_FOUND");
+    let change = f.banks.submit("biology", draft.revision, f.admin);
     change = f.changes.approve(change.id, change.revision, f.owner).changeSet;
-    assert.throws(() => f.banks.getPublicLayout("arabic"));
+    assert.throws(() => f.banks.getPublicLayout("biology"));
     f.changes.publish(change.id, change.revision, f.owner);
-    const publicLayout = f.banks.getPublicLayout("arabic");
+    const publicLayout = f.banks.getPublicLayout("biology");
     assert.deepEqual(publicLayout.nodes.map((item) => item.id), [rootBank.id, repeatedBank.id]);
-    const adminWorkspace = f.banks.getAdminWorkspace("arabic", f.owner);
+    const adminWorkspace = f.banks.getAdminWorkspace("biology", f.owner);
     assert.equal(adminWorkspace.published, true);
     assert.deepEqual(adminWorkspace.publishedNodeIds, [rootBank.id, repeatedBank.id]);
-    const first = f.banks.listPublicQuestions("arabic", rootBank.id, 0, 50);
+    const first = f.banks.listPublicQuestions("biology", rootBank.id, 0, 50);
     assert.equal(first.total, 55); assert.equal(first.items.length, 50); assert.equal(first.items[0].ordinal, 1); assert.equal(first.items[49].ordinal, 50);
     assert.equal("content" in first.items[0], false); assert.equal("variants" in first.items[0], false);
-    const second = f.banks.listPublicQuestions("arabic", rootBank.id, 50, 100);
+    const second = f.banks.listPublicQuestions("biology", rootBank.id, 50, 100);
     assert.equal(second.limit, 100); assert.equal(second.items[0].ordinal, 51);
-    const detail = f.banks.getPublicQuestion("arabic", rootBank.id, questionIds[0]);
+    const detail = f.banks.getPublicQuestion("biology", rootBank.id, questionIds[0]);
     assert.equal(detail.variants.length, 1); assert.equal(detail.variants[0].occurrences[0].rawLabel, "وزاري 2024 د1 رقم 100"); assert.equal(detail.sharedAnswer?.type, "doc");
-    assert.throws(() => f.banks.getPublicQuestion("arabic", repeatedBank.id, uuidv7()), (error: unknown) => error instanceof MaterialQuestionBankError && error.code === "MATERIAL_BANK_NOT_FOUND");
-    assert.throws(() => f.banks.save("arabic", { ...layout, nodes: [rootBank] }, f.admin), /disabled instead of removed/u);
-    const metadataDraft = f.banks.save("arabic", { ...layout, nodes: [{ ...rootBank, label: "عنوان مسودة" }, repeatedBank] }, f.admin);
+    assert.throws(() => f.banks.getPublicQuestion("biology", repeatedBank.id, uuidv7()), (error: unknown) => error instanceof MaterialQuestionBankError && error.code === "MATERIAL_BANK_NOT_FOUND");
+    assert.throws(() => f.banks.save("biology", { ...layout, nodes: [rootBank] }, f.admin), /disabled instead of removed/u);
+    const metadataDraft = f.banks.save("biology", { ...layout, nodes: [{ ...rootBank, label: "عنوان مسودة" }, repeatedBank] }, f.admin);
     f.database.client.prepare("update material_question_bank_layouts set root_presentation='DIRECT',revision=revision+1 where material_id=?").run(material.id);
-    const conflicted = f.banks.submit("arabic", metadataDraft.revision, f.admin);
+    const conflicted = f.banks.submit("biology", metadataDraft.revision, f.admin);
     assert.throws(() => f.changes.approve(conflicted.id, conflicted.revision, f.owner), /changed after this proposal/u);
     assert.equal(f.changes.getDetails(conflicted.id, f.owner).changeSet.status, "CONFLICTED");
   } finally { f.close(); }
@@ -140,7 +208,7 @@ test("0008 applies to fresh and existing 0007 DBs and M14 source keeps public co
   const oldMigrations = mkdtempSync(path.join(os.tmpdir(), "pythagoras-m14-migrations-"));
   try {
     const fresh = openContentDatabase({ dataDirectory: freshRoot, migrationsDirectory });
-    assert.equal((fresh.client.prepare("select count(*) count from __drizzle_migrations").get() as { count: number }).count, 10); fresh.close();
+    assert.equal((fresh.client.prepare("select count(*) count from __drizzle_migrations").get() as { count: number }).count, 11); fresh.close();
     mkdirSync(path.join(oldMigrations, "meta"), { recursive: true });
     const journal = JSON.parse(readFileSync(path.join(migrationsDirectory, "meta", "_journal.json"), "utf8"));
     for (const entry of journal.entries.slice(0, 8)) copyFileSync(path.join(migrationsDirectory, `${entry.tag}.sql`), path.join(oldMigrations, `${entry.tag}.sql`));

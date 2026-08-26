@@ -67,6 +67,8 @@ Search projection updates run inside OWNER publication transactions: Question, V
 
 The prior Question Bank and all real question data remain intentionally removed. Do not add Quiz Ready, MCQ generation, grading, distractors, timers, or attempts. The future relational Question Bank must build on stable IDs, variants with per-variant provenance, one shared answer, rich structured blocks, and Published-only Student reads.
 
+Material Question Bank topology can also be Product-defined rather than authored in Admin. For such materials, the Product Owner specifies the stable topology outside Admin and Codex commits a preset; Admin manages only the governed Package assignments inside its BANK slots. Arabic is the first preset: its CARDS root contains الأدب (a direct BANK) and القواعد (a SWITCHER GROUP) with these ordered BANK slots: الاستفهام، النفي، التقديم والتأخير، التوكيد، النداء، التعجب، المدح والذم، التمني والترجي، العرض والتحضيض. No structure for any other Material is inferred from this preset.
+
 Do not add Firebase, Supabase, or Prisma. Supabase/Postgres is only a future adapter behind repository/storage/search boundaries. Preserve the current Student/Admin UI rather than rebuilding it. New Admin server mutations must derive actor identity from the validated session and apply the shared same-origin mutation protection; never trust an actor ID or role sent by the browser.
 
 Graphify, Understand Anything, Obsidian, Pythagoras-Brain, local AI tooling, and local MCP state are local-only developer tools and must never be committed.
