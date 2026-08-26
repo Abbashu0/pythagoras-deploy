@@ -58,10 +58,11 @@ test("M14 validates the exact Arabic CARDS topology, SWITCHER children, empty sl
     const grammar = createPackage(f, "english", "قواعد مشتركة");
     const literatureBank = bank(uuidv7(), "الأدب", 1, null, literature.packageId);
     const grammarGroup = group(uuidv7(), "القواعد", 2, "SWITCHER");
-    const labels = ["الاستفهام", "النفي", "التقديم والتأخير", "النداء", "التعجب", "التمني والترجي", "المدح والذم", "القسم", "الشرط"];
+    const labels = ["الاستفهام", "النفي", "التقديم والتأخير", "التوكيد", "النداء", "التعجب", "المدح والذم", "التمني والترجي", "العرض والتحضيض"];
     const topics = labels.map((label, index) => bank(uuidv7(), label, index + 1, grammarGroup.id, grammar.packageId, grammar.taxonomyId));
     const emptySlot = bank(uuidv7(), "موضوع قادم", 3, null, null);
     const layout = normalizeMaterialQuestionBankLayout({ materialId: arabic.id, rootPresentation: "CARDS", nodes: [literatureBank, grammarGroup, ...topics, emptySlot] });
+    assert.deepEqual(topics.map((item) => item.label), labels);
     assert.equal(layout.rootPresentation, "CARDS"); assert.equal(layout.nodes.filter((item) => item.parentId === grammarGroup.id).length, 9);
     const workspace = f.banks.getAdminWorkspace("arabic", f.owner);
     const warnings = f.banks.save("arabic", layout, f.admin);
@@ -139,7 +140,7 @@ test("0008 applies to fresh and existing 0007 DBs and M14 source keeps public co
   const oldMigrations = mkdtempSync(path.join(os.tmpdir(), "pythagoras-m14-migrations-"));
   try {
     const fresh = openContentDatabase({ dataDirectory: freshRoot, migrationsDirectory });
-    assert.equal((fresh.client.prepare("select count(*) count from __drizzle_migrations").get() as { count: number }).count, 9); fresh.close();
+    assert.equal((fresh.client.prepare("select count(*) count from __drizzle_migrations").get() as { count: number }).count, 10); fresh.close();
     mkdirSync(path.join(oldMigrations, "meta"), { recursive: true });
     const journal = JSON.parse(readFileSync(path.join(migrationsDirectory, "meta", "_journal.json"), "utf8"));
     for (const entry of journal.entries.slice(0, 8)) copyFileSync(path.join(migrationsDirectory, `${entry.tag}.sql`), path.join(oldMigrations, `${entry.tag}.sql`));
@@ -151,7 +152,7 @@ test("0008 applies to fresh and existing 0007 DBs and M14 source keeps public co
     const listMethod = editorSource.slice(editorSource.indexOf("listQuestions("), editorSource.indexOf("getQuestion(", editorSource.indexOf("listQuestions(")));
     assert.equal(/rows\.map[\s\S]*this\.database\.client\.prepare/u.test(listMethod), false);
     const student = readFileSync(path.join(process.cwd(), "public/pythagoras/src/pages/QuestionBankPlaceholderPage.js"), "utf8");
-    assert.ok(student.includes("/api/content/question-bank/")); assert.equal(/search|favorite|quiz|grading/iu.test(student), false);
+    assert.ok(student.includes("/api/content/question-bank/")); assert.equal(/favorite|quiz|grading/iu.test(student), false);
     const publicService = readFileSync(path.join(process.cwd(), "src/server/material-question-bank/service.ts"), "utf8");
     assert.ok(publicService.includes("safeOffset + index + 1")); assert.ok(publicService.includes("MATERIAL_QUESTION_BANK_MAX_PAGE_SIZE"));
     const adminRoute = readFileSync(path.join(process.cwd(), "src/app/api/admin/material-question-bank/[subjectKey]/route.ts"), "utf8");
@@ -160,5 +161,5 @@ test("0008 applies to fresh and existing 0007 DBs and M14 source keeps public co
     assert.ok(adminRoute.includes("requireMaterialBankAdmin")); assert.ok(adminRoute.includes("assertTrustedMutationRequest"));
     assert.ok(submitRoute.includes("requireMaterialBankAdmin")); assert.ok(submitRoute.includes("assertTrustedMutationRequest"));
     assert.equal(/requireAdmin|session|password|tokenHash/u.test(publicRoute), false);
-  } finally { [freshRoot, oldRoot, oldMigrations].forEach((target) => rmSync(target, { recursive: true, force: true })); }
+  } finally { [freshRoot, oldRoot, oldMigrations].forEach((target) => rmSync(target, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })); }
 });

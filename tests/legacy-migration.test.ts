@@ -361,13 +361,13 @@ test("0004 applies to fresh and existing M5 databases", () => {
     for (const file of ["0000_snapshot.json", "0001_snapshot.json", "0002_snapshot.json", "0003_snapshot.json"]) copyFileSync(path.join(migrationsDirectory, "meta", file), path.join(oldMigrations, "meta", file));
     const journal = JSON.parse(readFileSync(path.join(migrationsDirectory, "meta", "_journal.json"), "utf8")) as { version: string; dialect: string; entries: unknown[] };
     writeFileSync(path.join(oldMigrations, "meta", "_journal.json"), JSON.stringify({ ...journal, entries: journal.entries.slice(0, 4) }));
-    const fresh = openContentDatabase({ dataDirectory: freshRoot, migrationsDirectory }); assert.equal(getContentDatabaseStatus(fresh).migrationsApplied, 9); fresh.close();
+    const fresh = openContentDatabase({ dataDirectory: freshRoot, migrationsDirectory }); assert.equal(getContentDatabaseStatus(fresh).migrationsApplied, 10); fresh.close();
     openContentDatabase({ dataDirectory: upgradeRoot, migrationsDirectory: oldMigrations }).close();
     const upgraded = openContentDatabase({ dataDirectory: upgradeRoot, migrationsDirectory });
-    assert.equal(getContentDatabaseStatus(upgraded).migrationsApplied, 9);
+    assert.equal(getContentDatabaseStatus(upgraded).migrationsApplied, 10);
     assert.deepEqual((upgraded.client.prepare("select name from sqlite_master where type='table' and name like 'legacy_migration_%' order by name").all() as Array<{ name: string }>).map((row) => row.name), ["legacy_migration_assets", "legacy_migration_events", "legacy_migration_issues", "legacy_migration_runs"]);
     upgraded.close();
-  } finally { rmSync(freshRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); rmSync(upgradeRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); rmSync(oldMigrations, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
+  } finally { for (const target of [freshRoot, upgradeRoot, oldMigrations]) try { rmSync(target, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }); } catch { /* best-effort test fixture cleanup */ } }
 });
 
 test("legacy APIs deny unauthenticated reads and cross-origin mutations", async () => {

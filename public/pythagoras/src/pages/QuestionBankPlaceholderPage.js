@@ -4,98 +4,65 @@ import { getTestsSubjectView, screens } from "../scripts/data.js";
 import { icon } from "../scripts/icons.js";
 
 const states = new Map();
-
 export function renderQuestionBankPlaceholder(subject) {
-  const meta = {
-    ...screens.questions,
-    eyebrow: subject.title,
-    title: "بنك الأسئلة",
-    copy: `المحتوى المنشور فقط من بنك أسئلة ${subject.title}.`,
-    stateLabel: "منشور",
-  };
-  return `${pageHead(meta, { backView: getTestsSubjectView(subject.id), backLabel: `الرجوع إلى ${subject.title}`, reserveBackSpace: true })}<div class="question-bank-root" data-question-bank-root data-subject-key="${escapeAttribute(subject.id)}"><section class="question-bank-loading placeholder-card"><span class="question-bank-spinner" aria-hidden="true"></span><h2 class="placeholder-title">جارٍ تحميل بنك الأسئلة</h2><p class="placeholder-text">نقرأ التوزيع المنشور لهذه المادة.</p></section></div>`;
+  const meta = { ...screens.questions, eyebrow: subject.title, title: "بنك الأسئلة", copy: `المحتوى المنشور فقط من بنك أسئلة ${subject.title}.`, stateLabel: "منشور" };
+  return `${pageHead(meta, { backView: getTestsSubjectView(subject.id), backLabel: `الرجوع إلى ${subject.title}`, reserveBackSpace: true })}<div class="question-bank-root" data-question-bank-root><section class="question-bank-loading placeholder-card"><span class="question-bank-spinner"></span><h2 class="placeholder-title">جارٍ تحميل بنك الأسئلة</h2></section></div>`;
 }
-
 export function mountQuestionBank(subject) {
-  const root = document.querySelector("[data-question-bank-root]");
-  if (!root) return;
-  const state = states.get(subject.id) ?? { layout: null, screen: "layout", bankId: null, page: null, detail: null, offset: 0, activeGroupBanks: new Map() };
-  states.set(subject.id, state);
-  loadLayout(root, subject, state);
+  const root = document.querySelector("[data-question-bank-root]"); if (!root) return;
+  const state = states.get(subject.id) ?? { layout: null, screen: "layout", groupId: null, bankId: null, page: null, detail: null, detailOrdinal: null, activeGroupBanks: new Map(), search: null };
+  states.set(subject.id, state); void loadLayout(root, subject, state);
 }
-
 async function loadLayout(root, subject, state) {
-  try {
-    const body = await requestJson(`/api/content/question-bank/${encodeURIComponent(subject.id)}`);
-    state.layout = body.layout;
-    const enabledRoots = body.layout.nodes.filter((node) => node.parentId === null && node.available).sort(orderNodes);
-    if (body.layout.rootPresentation === "DIRECT" && enabledRoots.length === 1 && enabledRoots[0].nodeType === "BANK") { await openBank(root, subject, state, enabledRoots[0].id, 0); return; }
-    state.screen = "layout"; render(root, subject, state);
-  } catch (error) { root.innerHTML = error.status === 404 ? emptyState(subject) : errorState(); bind(root, subject, state); }
+  try { const body = await requestJson(`/api/content/question-bank/${encodeURIComponent(subject.id)}`); state.layout = body.layout; state.screen = "layout"; render(root, subject, state); }
+  catch (error) { root.innerHTML = error.status === 404 ? emptyState(subject) : errorState(); bind(root, subject, state); }
 }
-
 function render(root, subject, state) {
-  if (state.screen === "detail" && state.detail) root.innerHTML = renderDetail(state.detail, state.detailOrdinal);
-  else if (state.screen === "bank" && state.page && state.bankId) root.innerHTML = renderQuestionList(state.layout, state.bankId, state.page);
-  else root.innerHTML = renderLayout(state.layout, state);
+  root.innerHTML = state.screen === "detail" && state.detail ? detail(state.detail, state.detailOrdinal) : state.screen === "bank" && state.page ? bankView(state) : destinations(state.layout, state.screen === "group" ? state.groupId : null);
   bind(root, subject, state);
 }
-
-function renderLayout(layout, state) {
-  const roots = layout.nodes.filter((node) => node.parentId === null).sort(orderNodes);
-  if (!roots.length) return `<section class="placeholder-card"><div class="icon-wrap placeholder featured">${icon("tests")}</div><h2 class="placeholder-title">بنك الأسئلة قيد التجهيز</h2><p class="placeholder-text">لم يُنشر أي مسار متاح داخل هذه المادة حتى الآن.</p></section>`;
-  return `<section class="question-bank-layout" data-root-presentation="${layout.rootPresentation}"><div class="question-bank-layout-head"><span>تصفّح المحتوى</span><small>${roots.length} مسار منشور</small></div><div class="question-bank-card-grid">${roots.map((node) => renderNode(node, layout.nodes, state)).join("")}</div></section>`;
+function destinations(layout, parentId) {
+  const nodes = layout.nodes.filter((node) => node.parentId === parentId).sort(order); const group = parentId ? layout.nodes.find((node) => node.id === parentId) : null;
+  if (!nodes.length) return `<section class="placeholder-card"><h2 class="placeholder-title">بنك الأسئلة قيد التجهيز</h2></section>`;
+  return `<section class="question-bank-layout">${group ? `<button type="button" class="question-bank-inline-back" data-group-back>العودة إلى الأقسام</button><header class="question-bank-list-head"><h2>${html(group.label)}</h2></header>` : ""}<div class="question-bank-layout-head"><span>تصفّح المحتوى</span><small>${nodes.length} مسار منشور</small></div><div class="question-bank-card-grid">${nodes.map(node).join("")}</div></section>`;
 }
-
-function renderNode(node, all, state) {
-  const children = all.filter((item) => item.parentId === node.id).sort(orderNodes);
-  if (node.nodeType === "BANK") return `<button type="button" class="question-bank-entry${node.available ? "" : " is-disabled"}" ${node.available ? `data-open-bank="${escapeAttribute(node.id)}"` : "disabled"}><span class="question-bank-entry-icon">${icon("tests")}</span><span><strong>${escapeHtml(node.label)}</strong><small>${node.available ? "فتح قائمة الأسئلة" : "قيد التجهيز"}</small></span><span class="question-bank-chevron" aria-hidden="true">‹</span></button>`;
-  if (node.groupPresentation === "SWITCHER") {
-    const active = children.find((child) => child.id === state.activeGroupBanks.get(node.id)) ?? children.find((child) => child.available) ?? children[0];
-    return `<article class="question-bank-group question-bank-group--switcher"><header><span class="question-bank-entry-icon">${icon("tests")}</span><div><h2>${escapeHtml(node.label)}</h2><small>اختر القسم المطلوب</small></div></header><div class="question-bank-switcher" role="tablist">${children.map((child) => `<button type="button" role="tab" class="${child.id === active?.id ? "is-active" : ""}" data-group-switch="${escapeAttribute(node.id)}" data-bank-id="${escapeAttribute(child.id)}" ${child.available ? "" : "disabled"}>${escapeHtml(child.label)}</button>`).join("")}</div>${active ? `<button type="button" class="question-bank-switcher-open" data-open-bank="${escapeAttribute(active.id)}" ${active.available ? "" : "disabled"}>${active.available ? "عرض الأسئلة" : "قيد التجهيز"}<span aria-hidden="true">‹</span></button>` : ""}</article>`;
-  }
-  return `<article class="question-bank-group"><header><span class="question-bank-entry-icon">${icon("tests")}</span><div><h2>${escapeHtml(node.label)}</h2><small>${children.length} مسار</small></div></header><div class="question-bank-group-children">${children.map((child) => renderNode(child, all, state)).join("")}</div></article>`;
+function node(item) { const action = item.nodeType === "BANK" ? `data-open-bank="${attr(item.id)}"` : `data-open-group="${attr(item.id)}"`; return `<button type="button" class="question-bank-entry${item.available ? "" : " is-disabled"}" ${item.available ? action : "disabled"}><span class="question-bank-entry-icon">${icon("tests")}</span><span><strong>${html(item.label)}</strong><small>${item.nodeType === "BANK" ? "فتح قائمة الأسئلة" : item.groupPresentation === "SWITCHER" ? "اختر الموضوع" : "فتح الأقسام"}</small></span><span class="question-bank-chevron">‹</span></button>`; }
+async function openGroup(root, subject, state, groupId) {
+  const group = state.layout.nodes.find((item) => item.id === groupId); if (!group) return; state.groupId = groupId; state.search = null;
+  if (group.groupPresentation === "SWITCHER") { const banks = state.layout.nodes.filter((item) => item.parentId === groupId && item.nodeType === "BANK").sort(order); const active = banks.find((item) => item.id === state.activeGroupBanks.get(groupId)) ?? banks.find((item) => item.available); if (active) { state.activeGroupBanks.set(groupId, active.id); return openBank(root, subject, state, active.id, 0); } }
+  state.screen = "group"; state.page = null; render(root, subject, state);
 }
-
 async function openBank(root, subject, state, bankId, offset) {
-  root.innerHTML = loadingCard("جارٍ تحميل الأسئلة");
-  try {
-    const body = await requestJson(`/api/content/question-bank/${encodeURIComponent(subject.id)}/banks/${encodeURIComponent(bankId)}/questions?offset=${offset}&limit=50`);
-    state.screen = "bank"; state.bankId = bankId; state.offset = body.page.offset; state.page = body.page; state.detail = null; render(root, subject, state);
-  } catch { root.innerHTML = errorState(); bind(root, subject, state); }
+  root.innerHTML = loading("جارٍ تحميل الأسئلة");
+  try { const body = await requestJson(`/api/content/question-bank/${encodeURIComponent(subject.id)}/banks/${encodeURIComponent(bankId)}/questions?offset=${offset}&limit=50`); Object.assign(state, { screen: "bank", bankId, page: body.page, detail: null, search: null }); render(root, subject, state); } catch { root.innerHTML = errorState(); bind(root, subject, state); }
 }
-
-function renderQuestionList(layout, bankId, page) {
-  const bank = layout.nodes.find((node) => node.id === bankId);
-  return `<section class="question-bank-list"><button type="button" class="question-bank-inline-back" data-bank-back>العودة إلى أقسام البنك</button><header class="question-bank-list-head"><div><small>المسار الحالي</small><h2>${escapeHtml(bank?.label ?? "الأسئلة")}</h2></div><span>${page.total} سؤال</span></header>${page.items.length ? `<div class="question-bank-questions">${page.items.map((item) => `<button type="button" class="question-bank-question" data-question-id="${escapeAttribute(item.questionId)}"><span class="question-bank-ordinal">#${item.ordinal}</span><span class="question-bank-question-copy"><strong>${escapeHtml(item.primaryPreview)}</strong><small>${escapeHtml(item.taxonomyBreadcrumb)} · ${item.variantCount} صيغة · ${item.occurrenceCount} ورود</small></span><span class="question-bank-chevron" aria-hidden="true">‹</span></button>`).join("")}</div><nav class="question-bank-pagination" aria-label="صفحات الأسئلة"><button type="button" data-page-offset="${Math.max(0, page.offset - page.limit)}" ${page.offset === 0 ? "disabled" : ""}>السابق</button><span>${page.offset + 1}–${Math.min(page.offset + page.items.length, page.total)} من ${page.total}</span><button type="button" data-page-offset="${page.offset + page.limit}" ${page.offset + page.limit >= page.total ? "disabled" : ""}>التالي</button></nav>` : `<div class="question-bank-empty"><h3>لا توجد أسئلة في هذا المسار</h3><p>المسار منشور لكنه لا يحتوي أسئلة مطابقة حاليًا.</p></div>`}</section>`;
+function bankView(state) {
+  const bank = state.layout.nodes.find((item) => item.id === state.bankId); const group = state.groupId ? state.layout.nodes.find((item) => item.id === state.groupId) : null; const page = state.search?.page ?? state.page; const searching = Boolean(state.search);
+  const tabs = group?.groupPresentation === "SWITCHER" ? `<div class="question-bank-switcher" role="tablist">${state.layout.nodes.filter((item) => item.parentId === group.id && item.nodeType === "BANK").sort(order).map((item) => `<button type="button" class="${item.id === state.bankId ? "is-active" : ""}" data-group-switch="${attr(group.id)}" data-bank-id="${attr(item.id)}" ${item.available ? "" : "disabled"}>${html(item.label)}</button>`).join("")}</div>` : "";
+  return `<section class="question-bank-list"><button type="button" class="question-bank-inline-back" data-bank-back>العودة إلى الأقسام</button><header class="question-bank-list-head"><div><small>المسار الحالي</small><h2>${html(bank?.label ?? "الأسئلة")}</h2></div><span>${page.total} سؤال</span></header>${tabs}<form class="question-bank-search" data-question-search><input name="q" value="${attr(state.search?.query ?? "")}" placeholder="ابحث في الأسئلة" autocomplete="off"><button>بحث</button>${searching ? `<button type="button" data-clear-search>مسح</button>` : ""}</form>${items(page.items, searching)}${pager(page, searching)}</section>`;
 }
-
-async function openDetail(root, subject, state, questionId) {
-  state.detailOrdinal = state.page?.items.find((item) => item.questionId === questionId)?.ordinal ?? null;
-  root.innerHTML = loadingCard("جارٍ فتح السؤال");
-  try { const body = await requestJson(`/api/content/question-bank/${encodeURIComponent(subject.id)}/banks/${encodeURIComponent(state.bankId)}/questions/${encodeURIComponent(questionId)}`); state.screen = "detail"; state.detail = body.question; render(root, subject, state); }
-  catch { root.innerHTML = errorState(); bind(root, subject, state); }
-}
-
-function renderDetail(question, visibleOrdinal) {
-  question = { ...question, canonicalOrder: visibleOrdinal ?? 1 };
-  return `<section class="question-bank-detail"><button type="button" class="question-bank-inline-back" data-detail-back>العودة إلى القائمة</button><header class="question-bank-detail-head"><span>سؤال #${question.canonicalOrder}</span><small>${question.variants.length} صيغة</small></header><div class="question-bank-variants">${question.variants.map((variant, index) => `<article class="question-bank-variant"><div class="question-bank-variant-title"><strong>الصيغة ${index + 1}</strong>${variant.id === question.primaryVariantId ? "<span>أساسية</span>" : ""}</div>${renderRichDocument(variant.content)}${variant.occurrences.length ? `<div class="question-bank-occurrences"><small>الورود الوزاري</small>${variant.occurrences.map((item) => `<span title="${escapeAttribute(item.rawLabel)}">${escapeHtml(item.rawLabel)}</span>`).join("")}</div>` : ""}</article>`).join("")}</div>${question.sharedAnswer ? `<article class="question-bank-answer"><h3>الإجابة المشتركة</h3>${renderRichDocument(question.sharedAnswer)}</article>` : ""}${question.taxonomy.length ? `<footer class="question-bank-taxonomy">${question.taxonomy.map((item) => `<span>${escapeHtml(item.breadcrumb)}</span>`).join("")}</footer>` : ""}</section>`;
-}
-
+function items(list, searching) { return list.length ? `<div class="question-bank-questions">${list.map((item) => `<button type="button" class="question-bank-question" data-question-id="${attr(item.questionId)}"><span class="question-bank-ordinal">#${item.bankOrdinal ?? item.ordinal}</span><span class="question-bank-question-copy"><strong>${html(item.primaryPreview)}</strong><small>${html(item.taxonomyBreadcrumb)}${item.matchContext ? ` · ${html(contextLabel(item.matchContext))}` : ""}</small></span><span class="question-bank-chevron">‹</span></button>`).join("")}</div>` : `<div class="question-bank-empty"><h3>${searching ? "لا توجد نتائج" : "لا توجد أسئلة في هذا المسار"}</h3><p>${searching ? "جرّب كلمة بحث أخرى." : "المسار منشور لكنه لا يحتوي أسئلة مطابقة حالياً."}</p></div>`; }
+function pager(page, searching) { return searching || !page.total ? "" : `<nav class="question-bank-pagination"><button type="button" data-page-offset="${Math.max(0, page.offset - page.limit)}" ${page.offset === 0 ? "disabled" : ""}>السابق</button><span>${page.offset + 1}–${Math.min(page.offset + page.items.length, page.total)} من ${page.total}</span><button type="button" data-page-offset="${page.offset + page.limit}" ${page.offset + page.limit >= page.total ? "disabled" : ""}>التالي</button></nav>`; }
+async function search(root, subject, state, query) { if (!query.trim()) { state.search = null; return render(root, subject, state); } try { const body = await requestJson(`/api/content/question-bank/${encodeURIComponent(subject.id)}/banks/${encodeURIComponent(state.bankId)}/search?q=${encodeURIComponent(query)}&offset=0&limit=25`); state.search = { query, page: body }; } catch { state.search = { query, page: { total: 0, offset: 0, limit: 25, items: [] } }; } render(root, subject, state); }
+async function openDetail(root, subject, state, questionId) { const page = state.search?.page ?? state.page; state.detailOrdinal = page.items.find((item) => item.questionId === questionId)?.bankOrdinal ?? page.items.find((item) => item.questionId === questionId)?.ordinal; root.innerHTML = loading("جارٍ فتح السؤال"); try { const body = await requestJson(`/api/content/question-bank/${encodeURIComponent(subject.id)}/banks/${encodeURIComponent(state.bankId)}/questions/${encodeURIComponent(questionId)}`); state.screen = "detail"; state.detail = body.question; render(root, subject, state); } catch { root.innerHTML = errorState(); bind(root, subject, state); } }
+function detail(question, ordinal) { return `<section class="question-bank-detail"><button type="button" class="question-bank-inline-back" data-detail-back>العودة إلى القائمة</button><header class="question-bank-detail-head"><span>سؤال #${ordinal ?? 1}</span><small>${question.variants.length} صيغة</small></header><div class="question-bank-variants">${question.variants.map((variant, index) => `<article class="question-bank-variant"><div class="question-bank-variant-title"><strong>الصيغة ${index + 1}</strong>${variant.id === question.primaryVariantId ? "<span>أساسية</span>" : ""}</div>${renderRichDocument(variant.content)}</article>`).join("")}</div>${question.sharedAnswer ? `<article class="question-bank-answer"><h3>الإجابة المشتركة</h3>${renderRichDocument(question.sharedAnswer)}</article>` : ""}</section>`; }
 function bind(root, subject, state) {
   root.querySelectorAll("[data-open-bank]").forEach((button) => button.addEventListener("click", () => void openBank(root, subject, state, button.dataset.openBank, 0)));
-  root.querySelectorAll("[data-group-switch]").forEach((button) => button.addEventListener("click", () => { state.activeGroupBanks.set(button.dataset.groupSwitch, button.dataset.bankId); render(root, subject, state); }));
+  root.querySelectorAll("[data-open-group]").forEach((button) => button.addEventListener("click", () => void openGroup(root, subject, state, button.dataset.openGroup)));
+  root.querySelectorAll("[data-group-switch]").forEach((button) => button.addEventListener("click", () => { state.activeGroupBanks.set(button.dataset.groupSwitch, button.dataset.bankId); void openBank(root, subject, state, button.dataset.bankId, 0); }));
   root.querySelectorAll("[data-question-id]").forEach((button) => button.addEventListener("click", () => void openDetail(root, subject, state, button.dataset.questionId)));
   root.querySelectorAll("[data-page-offset]").forEach((button) => button.addEventListener("click", () => void openBank(root, subject, state, state.bankId, Number(button.dataset.pageOffset))));
-  root.querySelector("[data-bank-back]")?.addEventListener("click", () => { state.screen = "layout"; render(root, subject, state); });
-  root.querySelector("[data-detail-back]")?.addEventListener("click", () => { state.screen = "bank"; state.detail = null; render(root, subject, state); });
-  root.querySelector("[data-retry-bank]")?.addEventListener("click", () => void loadLayout(root, subject, state));
+  root.querySelector("[data-question-search]")?.addEventListener("submit", (event) => { event.preventDefault(); void search(root, subject, state, new FormData(event.currentTarget).get("q")?.toString() ?? ""); });
+  root.querySelector("[data-clear-search]")?.addEventListener("click", () => { state.search = null; render(root, subject, state); });
+  root.querySelector("[data-bank-back]")?.addEventListener("click", () => { state.search = null; state.screen = state.groupId ? "group" : "layout"; state.page = null; render(root, subject, state); });
+  root.querySelector("[data-group-back]")?.addEventListener("click", () => { state.groupId = null; state.screen = "layout"; render(root, subject, state); });
+  root.querySelector("[data-detail-back]")?.addEventListener("click", () => { state.screen = "bank"; state.detail = null; render(root, subject, state); }); root.querySelector("[data-retry-bank]")?.addEventListener("click", () => void loadLayout(root, subject, state));
 }
-
+function contextLabel(value) { return ({ PRIMARY_VARIANT: "مطابقة في السؤال", ALTERNATE_VARIANT: "مطابقة في صيغة أخرى", ANSWER: "مطابقة في الجواب", TAXONOMY: "مطابقة في التصنيف", PROVENANCE: "مطابقة في المصدر" })[value] ?? "مطابقة"; }
 async function requestJson(url) { const response = await fetch(url, { cache: "no-store" }); const body = await response.json().catch(() => ({})); if (!response.ok) { const error = new Error(body.code || "QUESTION_BANK_REQUEST_FAILED"); error.status = response.status; throw error; } return body; }
-function emptyState(subject) { return `<section class="placeholder-card"><div class="icon-wrap placeholder featured">${icon("tests")}</div><h2 class="placeholder-title">بنك الأسئلة قيد البناء</h2><p class="placeholder-text">لا يوجد تخطيط منشور لبنك أسئلة ${escapeHtml(subject.title)} حتى الآن.</p></section>`; }
-function errorState() { return `<section class="placeholder-card"><h2 class="placeholder-title">تعذّر تحميل بنك الأسئلة</h2><p class="placeholder-text">تحقق من الاتصال ثم حاول مرة أخرى.</p><button type="button" class="question-bank-retry" data-retry-bank>إعادة المحاولة</button></section>`; }
-function loadingCard(label) { return `<section class="question-bank-loading placeholder-card"><span class="question-bank-spinner" aria-hidden="true"></span><h2 class="placeholder-title">${label}</h2></section>`; }
-function orderNodes(a, b) { return a.displayOrder - b.displayOrder || a.id.localeCompare(b.id); }
-function escapeHtml(value) { return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[char]); }
-function escapeAttribute(value) { return escapeHtml(value).replace(/`/g, "&#096;"); }
+function emptyState(subject) { return `<section class="placeholder-card"><h2 class="placeholder-title">بنك الأسئلة قيد البناء</h2><p class="placeholder-text">لا يوجد تخطيط منشور لبنك أسئلة ${html(subject.title)} حتى الآن.</p></section>`; }
+function errorState() { return `<section class="placeholder-card"><h2 class="placeholder-title">تعذّر تحميل بنك الأسئلة</h2><button type="button" class="question-bank-retry" data-retry-bank>إعادة المحاولة</button></section>`; }
+function loading(label) { return `<section class="question-bank-loading placeholder-card"><span class="question-bank-spinner"></span><h2 class="placeholder-title">${label}</h2></section>`; }
+function order(a, b) { return a.displayOrder - b.displayOrder || a.id.localeCompare(b.id); }
+function html(value) { return String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[character]); }
+function attr(value) { return html(value).replace(/`/g, "&#096;"); }

@@ -149,7 +149,7 @@ test("0007 creates an empty Question domain and upgrades 0006 without touching c
       dataDirectory: freshRoot,
       migrationsDirectory,
     });
-    assert.equal(count(fresh, "__drizzle_migrations"), 9);
+    assert.equal(count(fresh, "__drizzle_migrations"), 10);
     for (const table of [
       "question_packages",
       "question_taxonomy_nodes",
@@ -247,7 +247,7 @@ test("0007 creates an empty Question domain and upgrades 0006 without touching c
       dataDirectory: oldRoot,
       migrationsDirectory,
     });
-    assert.equal(count(upgraded, "__drizzle_migrations"), 9);
+    assert.equal(count(upgraded, "__drizzle_migrations"), 10);
     assert.equal(count(upgraded, "canonical_banners"), bannerCount);
     assert.deepEqual(
       upgraded.db
@@ -266,12 +266,12 @@ test("0007 creates an empty Question domain and upgrades 0006 without touching c
     upgraded.close();
   } finally {
     for (const target of [freshRoot, oldRoot, oldMigrations]) {
-      rmSync(target, {
+      try { rmSync(target, {
         recursive: true,
         force: true,
-        maxRetries: 5,
-        retryDelay: 50,
-      });
+        maxRetries: 20,
+        retryDelay: 100,
+      }); } catch { /* best-effort test fixture cleanup */ }
     }
   }
 });
@@ -716,7 +716,7 @@ test("sibling and cross-aggregate foreign keys reject relational corruption", ()
   }
 });
 
-test("Question foundation remains free of search, quiz, and corpus data while later governed reads stay isolated", () => {
+test("Question foundation keeps search as a separate derived projection and excludes quiz and corpus data", () => {
   const apiFiles = readFileTree(path.join(process.cwd(), "src/app/api"));
   assert.equal(/api[\\/]admin[\\/]questions|api[\\/]content[\\/]questions/u.test(apiFiles.paths), false);
   assert.equal(/getQuestionDomainService|materializePlan|createMaterializationPlan/u.test(apiFiles.contents), false);
@@ -731,7 +731,7 @@ test("Question foundation remains free of search, quiz, and corpus data while la
     "utf8",
   );
   assert.ok(student.includes("/api/content/question-bank/"));
-  assert.equal(/search|favorite|quiz|grading|question data/iu.test(student), false);
+  assert.equal(/favorite|quiz|grading|question data/iu.test(student), false);
   const questionServer = readFileTree(path.join(process.cwd(), "src/server/questions"));
   assert.equal(/fts5|content_resources|quiz|mcq|istifham/iu.test(questionServer.contents), false);
 });

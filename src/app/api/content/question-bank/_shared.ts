@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { isMaterialQuestionBankError } from "@/server/material-question-bank";
+import { isQuestionSearchError } from "@/server/question-search";
 
 export function publicQuestionBankJson(body: Record<string, unknown>, status = 200) {
   const response = NextResponse.json(body, { status });
@@ -9,6 +10,9 @@ export function publicQuestionBankJson(body: Record<string, unknown>, status = 2
 }
 
 export function publicQuestionBankError(error: unknown) {
+  if (isQuestionSearchError(error)) {
+    return publicQuestionBankJson({ ok: false, code: error.code }, error.code === "QUESTION_SEARCH_EMPTY_QUERY" ? 400 : 503);
+  }
   if (isMaterialQuestionBankError(error)) {
     return publicQuestionBankJson({ ok: false, code: error.code }, error.code === "MATERIAL_BANK_NOT_FOUND" ? 404 : 400);
   }

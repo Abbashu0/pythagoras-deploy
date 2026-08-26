@@ -1,9 +1,10 @@
-import { buildPublicRichContentAssetUrl, toPublicRichDocument } from "@/lib/rich-content";
+import { buildPublicRichContentAssetUrl, extractRichDocumentPlainText, toPublicRichDocument } from "@/lib/rich-content";
 import { v7 as uuidv7 } from "uuid";
 import type { AdminActor } from "../admin-auth";
 import { createChangeManagementService, type ChangeSetStatus } from "../change-management";
 import { getContentDatabase, type ContentDatabase } from "../content";
 import { SQLiteQuestionRepository, type CanonicalRichDocument } from "../questions";
+import { QuestionSearchService } from "../question-search";
 import {
   MATERIAL_QUESTION_BANK_MAX_PAGE_SIZE,
   MATERIAL_QUESTION_BANK_PAGE_SIZE,
@@ -17,6 +18,7 @@ import {
   type PublicMaterialQuestionBankLayout,
   type PublicQuestionDetail,
   type PublicQuestionPage,
+  type PublicQuestionSearchPage,
 } from "./contracts";
 import { MaterialQuestionBankError } from "./errors";
 import { SQLiteMaterialQuestionBankRepository } from "./sqlite-repository";
@@ -135,6 +137,22 @@ export class MaterialQuestionBankService {
     };
   }
 
+  searchPublicQuestions(subjectKey: string, bankNodeId: string, query: string, offset = 0, limit = MATERIAL_QUESTION_BANK_PAGE_SIZE): PublicQuestionSearchPage {
+    const context = this.requirePublicBank(subjectKey, bankNodeId);
+    if (!context.node.packageId) notFound();
+    const taxonomyNodeIds = this.targetTaxonomyIds(context.node.packageId, context.node.taxonomyNodeId, Boolean(context.node.includeDescendants));
+    const result = new QuestionSearchService(this.database).searchPlacement({ packageId: context.node.packageId, targetMode: context.node.targetMode, taxonomyNodeIds }, query, offset, boundedLimit(limit));
+    return {
+      ...result,
+      items: result.items.map((item) => ({
+        questionId: item.questionId, ordinal: item.bankOrdinal, bankOrdinal: item.bankOrdinal,
+        primaryPreview: item.primaryPreview, taxonomyBreadcrumb: item.taxonomyBreadcrumb,
+        variantCount: item.variantCount, occurrenceCount: item.occurrenceCount, hasAnswer: item.hasAnswer,
+        matchContext: item.matchContext, matchPreview: item.matchPreview,
+      })),
+    };
+  }
+
   getPublicQuestion(subjectKey: string, bankNodeId: string, questionId: string): PublicQuestionDetail {
     const context = this.requirePublicBank(subjectKey, bankNodeId);
     if (!context.node.packageId) notFound();
@@ -225,12 +243,12 @@ export class MaterialQuestionBankService {
     const rows = this.database.client.prepare(`select id,package_id,label,parent_id,display_order from question_taxonomy_nodes where package_id in (${placeholders}) order by package_id,coalesce(parent_id,''),display_order`).all(...packageIds) as Array<{ id: string; package_id: string; label: string; parent_id: string | null; display_order: number }>;
     const byPackage = new Map<string, typeof rows>();
     for (const row of rows) byPackage.set(row.package_id, [...(byPackage.get(row.package_id) ?? []), row]);
-    return rows.map((row) => ({ id: row.id, packageId: row.package_id, label: row.label, breadcrumb: breadcrumb(row.id, new Map((byPackage.get(row.package_id) ?? []).map((item) => [item.id, { label: item.label, parentId: item.parent_id }]))) }));
+    return rows.map((row) => ({ id: row.id, packageId: row.package_id, label: row.label, breadcrumb: breadcrumb(row.id, new Map((byPackage.get(row.package_id) ?? []).map((item) => [item.id, { id: item.id, label: item.label, parentId: item.parent_id }]))) }));
   }
 
-  private taxonomyMap(packageId: string): Map<string, { label: string; parentId: string | null }> {
+  private taxonomyMap(packageId: string): Map<string, { id: string; label: string; parentId: string | null }> {
     const rows = this.database.client.prepare("select id,label,parent_id from question_taxonomy_nodes where package_id=?").all(packageId) as Array<{ id: string; label: string; parent_id: string | null }>;
-    return new Map(rows.map((row) => [row.id, { label: row.label, parentId: row.parent_id }]));
+    return new Map(rows.map((row) => [row.id, { id: row.id, label: row.label, parentId: row.parent_id }]));
   }
 
   private targetTaxonomyIds(packageId: string, taxonomyNodeId: string | null, descendants: boolean): string[] {
@@ -259,9 +277,9 @@ function contentOf(entity: MaterialQuestionBankLayoutEntity): MaterialQuestionBa
 function workflowFrom(row: { id: string; status: ChangeSetStatus; revision: number; updatedAt?: number; updated_at?: number }, itemCount: number, editable: boolean): MaterialQuestionBankWorkflow { return { id: row.id, status: row.status, revision: Number(row.revision), itemCount, editable, updatedAt: Number(row.updatedAt ?? row.updated_at ?? 0) }; }
 function crossSubjectWarnings(layout: MaterialQuestionBankLayoutContent, subjectKey: string, materialLabel: string, packages: MaterialQuestionBankPackageOption[]) { const byId = new Map(packages.map((item) => [item.id, item])); return layout.nodes.flatMap((node) => { const pack = node.packageId ? byId.get(node.packageId) : null; return pack && pack.subjectKey !== subjectKey ? [{ code: "CROSS_SUBJECT_PLACEMENT" as const, nodeId: node.id, message: `هذه الحزمة مصنفة ضمن ${pack.subjectLabel}، لكنها ستظهر داخل بنك ${materialLabel} وفق هذا التوزيع.` }] : []; }); }
 function treeSort(left: { parentId: string | null; displayOrder: number; id: string }, right: { parentId: string | null; displayOrder: number; id: string }) { return String(left.parentId).localeCompare(String(right.parentId)) || left.displayOrder - right.displayOrder || left.id.localeCompare(right.id); }
-function breadcrumb(id: string, nodes: Map<string, { label: string; parentId: string | null }>): string { const parts: string[] = []; const seen = new Set<string>(); let current = nodes.get(id); while (current && !seen.has(current.label)) { seen.add(current.label); parts.unshift(current.label); current = current.parentId ? nodes.get(current.parentId) : undefined; } return parts.join(" / ") || "غير مصنّف"; }
+function breadcrumb(id: string, nodes: Map<string, { id: string; label: string; parentId: string | null }>): string { const parts: string[] = []; const seen = new Set<string>(); let currentId: string | null = id; while (currentId && !seen.has(currentId)) { seen.add(currentId); const current = nodes.get(currentId); if (!current) break; parts.unshift(current.label); currentId = current.parentId; } return parts.join(" / ") || "غير مصنّف"; }
 function parseDocument(value: unknown): CanonicalRichDocument | null { if (!value) return null; if (typeof value === "string") try { return JSON.parse(value) as CanonicalRichDocument; } catch { return null; } return value as CanonicalRichDocument; }
-function documentText(document: CanonicalRichDocument | null): string { if (!document) return "لا يوجد نص"; const parts: string[] = []; for (const block of document.blocks) { if ("spans" in block) parts.push(block.spans.map((span) => span.text).join("")); else if (block.type === "quran") parts.push(...block.verses.map((verse) => verse.spans.map((span) => span.text).join(""))); else if (block.type === "poetry") parts.push(...block.verses.map((verse) => `${verse.sadr.map((span) => span.text).join("")} ${verse.ajuz.map((span) => span.text).join("")}`)); else if (block.type === "image") parts.push(block.alt); } return parts.join(" ").trim().slice(0, 220) || "محتوى بصري"; }
+function documentText(document: CanonicalRichDocument | null): string { return extractRichDocumentPlainText(document).slice(0, 220) || (document ? "محتوى بصري" : "لا يوجد نص"); }
 function assertActor(actor: AdminActor): void { if (!actor.actorUserId || !["OWNER", "ADMIN"].includes(actor.actorRole)) invalid("Authenticated Admin is required."); }
 function invalid(message: string): never { throw new MaterialQuestionBankError("MATERIAL_BANK_INVALID", message); }
 function notFound(): never { throw new MaterialQuestionBankError("MATERIAL_BANK_NOT_FOUND", "Material Question Bank resource was not found."); }

@@ -406,7 +406,7 @@ test("the current migration chain upgrades an existing M1 database without losin
       dataDirectory: dataRoot,
       migrationsDirectory,
     });
-    assert.equal(getContentDatabaseStatus(upgraded).migrationsApplied, 9);
+    assert.equal(getContentDatabaseStatus(upgraded).migrationsApplied, 10);
     const tables = upgraded.client
       .prepare(
         "select name from sqlite_master where type = 'table' and name in ('admin_users', 'admin_sessions') order by name",
@@ -418,8 +418,8 @@ test("the current migration chain upgrades an existing M1 database without losin
     );
     upgraded.close();
   } finally {
-    rmSync(dataRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
-    rmSync(m1Migrations, { recursive: true, force: true });
+    try { rmSync(dataRoot, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }); } catch { /* Windows temp scanners may retain an already-closed fixture. */ }
+    try { rmSync(m1Migrations, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }); } catch { /* best-effort test fixture cleanup */ }
   }
 });
 

@@ -224,12 +224,13 @@ test("responsive Quran, poetry, table, and image styling stays scoped to Rich Co
   assert.ok(studentCss.includes(".rich-content__table-region"));
 });
 
-test("M10 historical boundary remains migration-free and later M14 reads do not add search or runtime seed data", () => {
+test("M10 historical boundary remains migration-free while M15 adds only a derived search projection", () => {
   assert.equal(
     readdirSync(migrationsDirectory).filter((name) => /^000[0-7]_.+\.sql$/u.test(name)).length,
     8,
   );
   assert.ok(readdirSync(migrationsDirectory).includes("0008_material-question-bank-layout.sql"));
+  assert.ok(readdirSync(migrationsDirectory).includes("0009_question-search.sql"));
   const apiTree = readTree(path.join(process.cwd(), "src/app/api"));
   assert.equal(/api[\\/]content[\\/]questions|api[\\/]admin[\\/]questions/u.test(apiTree.paths), false);
   const adminQuestionPage = readFileSync(
@@ -242,7 +243,7 @@ test("M10 historical boundary remains migration-free and later M14 reads do not 
     "utf8",
   );
   assert.ok(questionPlaceholder.includes("renderRichDocument"));
-  assert.equal(/search|favorite|quiz|grading/iu.test(questionPlaceholder), false);
+  assert.equal(/favorite|quiz|grading/iu.test(questionPlaceholder), false);
 
   const root = mkdtempSync(path.join(os.tmpdir(), "pythagoras-m10-empty-"));
   try {

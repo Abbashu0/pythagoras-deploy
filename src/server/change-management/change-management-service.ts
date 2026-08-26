@@ -3,6 +3,7 @@ import { v7 as uuidv7 } from "uuid";
 import type { AdminActor } from "../admin-auth/contracts";
 import type { ContentDatabase } from "../content/database";
 import { adminUsers, changeSetItems, changeSets, publicationItems, publications } from "../content/schema";
+import { QuestionSearchService } from "../question-search";
 import { ChangeResourceAdapterRegistry } from "./adapter-registry";
 import type {
   ChangeEventRepository,
@@ -313,6 +314,11 @@ export class ChangeManagementService {
         }
 
         this.registry.validatePublication(this.database, plannedItems.map((item) => item.resourceType));
+        // Derived search data is updated inside the publication transaction.
+        // If indexing fails, canonical publication is rolled back as well.
+        new QuestionSearchService(this.database).rebuildForPublicationInTransaction(
+          plannedItems.map((item) => ({ resourceType: item.resourceType, resourceId: item.resourceId })),
+        );
         const now = this.clock();
         const revision = this.publications.incrementRevision(now);
         const publication = this.publications.create({

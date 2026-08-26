@@ -1043,6 +1043,7 @@ export type MaterialQuestionBankRootPresentation = "DIRECT" | "CARDS";
 export type MaterialQuestionBankNodeType = "GROUP" | "BANK";
 export type MaterialQuestionBankGroupPresentation = "CARDS" | "SWITCHER";
 export type MaterialQuestionBankTargetMode = "ALL_PACKAGE_QUESTIONS" | "TAXONOMY_FILTER";
+export type QuestionSearchSegmentType = "PRIMARY_VARIANT" | "ALTERNATE_VARIANT" | "ANSWER" | "TAXONOMY" | "PROVENANCE";
 
 export const materialQuestionBankLayouts = sqliteTable(
   "material_question_bank_layouts",
@@ -1133,6 +1134,40 @@ export const materialQuestionBankNodes = sqliteTable(
   ],
 );
 
+/**
+ * Rebuildable, non-canonical search projection metadata. The matching text is
+ * deliberately stored separately from educational Question/Variant records.
+ * FTS5 rows are created by migration 0009 and are kept in sync by the search
+ * projection service, never by application startup.
+ */
+export const questionSearchDocuments = sqliteTable(
+  "question_search_documents",
+  {
+    id: text("id").primaryKey(),
+    questionId: text("question_id")
+      .notNull()
+      .references(() => questions.id, { onDelete: "cascade" }),
+    packageId: text("package_id")
+      .notNull()
+      .references(() => questionPackages.id, { onDelete: "cascade" }),
+    segmentType: text("segment_type").$type<QuestionSearchSegmentType>().notNull(),
+    variantId: text("variant_id").references(() => questionVariants.id, { onDelete: "cascade" }),
+    occurrenceId: text("occurrence_id").references(() => questionOccurrences.id, { onDelete: "cascade" }),
+    /** Stable taxonomy-node identity or another internal segment source identity. */
+    sourceRefId: text("source_ref_id"),
+    normalizedText: text("normalized_text").notNull(),
+    displayText: text("display_text").notNull(),
+    indexVersion: integer("index_version").notNull(),
+  },
+  (table) => [
+    index("question_search_documents_question_index").on(table.questionId, table.indexVersion),
+    index("question_search_documents_package_index").on(table.packageId, table.indexVersion),
+    index("question_search_documents_segment_index").on(table.segmentType, table.variantId, table.occurrenceId),
+    check("question_search_documents_segment_valid", sql`${table.segmentType} in ('PRIMARY_VARIANT','ALTERNATE_VARIANT','ANSWER','TAXONOMY','PROVENANCE')`),
+    check("question_search_documents_version_positive", sql`${table.indexVersion} >= 1`),
+  ],
+);
+
 export type ChangeSetRow = typeof changeSets.$inferSelect;
 export type ChangeSetItemRow = typeof changeSetItems.$inferSelect;
 export type ChangeSetEventRow = typeof changeSetEvents.$inferSelect;
@@ -1154,3 +1189,5 @@ export type MaterialQuestionBankLayoutRow =
   typeof materialQuestionBankLayouts.$inferSelect;
 export type MaterialQuestionBankNodeRow =
   typeof materialQuestionBankNodes.$inferSelect;
+export type QuestionSearchDocumentRow =
+  typeof questionSearchDocuments.$inferSelect;

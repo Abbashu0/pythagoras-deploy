@@ -42,6 +42,10 @@
 .question-bank-pagination { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; }
 .question-bank-pagination span { color: var(--muted); font-size: .72rem; text-align: center; }
 .question-bank-pagination button:disabled, .question-bank-switcher button:disabled, .question-bank-switcher-open:disabled { opacity: .45; cursor: default; }
+.question-bank-search { display: grid; grid-template-columns: minmax(0,1fr) auto auto; gap: 8px; }
+.question-bank-search input { min-width: 0; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); color: var(--fg); padding: 10px 12px; font: inherit; }
+.question-bank-search button { min-height: 42px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); color: var(--fg); padding: 9px 13px; font-family: inherit; cursor: pointer; }
+.question-bank-search button[type="submit"] { border-color: var(--accent); color: var(--accent); }
 .question-bank-empty { border: 1px dashed var(--line); border-radius: 20px; padding: 30px 18px; text-align: center; }
 .question-bank-empty h3 { margin: 0; font-size: 1rem; }
 .question-bank-empty p { margin: 8px 0 0; color: var(--muted); font-size: .78rem; }

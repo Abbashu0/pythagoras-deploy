@@ -115,6 +115,16 @@ export interface PublicQuestionPage {
   items: PublicQuestionSummary[];
 }
 
+export interface PublicQuestionSearchPage extends PublicQuestionPage {
+  query: string;
+  normalizedQuery: string;
+  items: Array<PublicQuestionSummary & {
+    bankOrdinal: number;
+    matchContext: "PRIMARY_VARIANT" | "ALTERNATE_VARIANT" | "ANSWER" | "TAXONOMY" | "PROVENANCE";
+    matchPreview: string;
+  }>;
+}
+
 export interface PublicQuestionOccurrence {
   id: string;
   displayOrder: number;
