@@ -1,4 +1,5 @@
 import type { SearchProvider } from "../content";
+import type { PublicQuestionSourceSummary } from "../questions/public-provenance";
 
 export const QUESTION_SEARCH_INDEX_VERSION = 1;
 export const QUESTION_SEARCH_DEFAULT_PAGE_SIZE = 25;
@@ -37,6 +38,7 @@ export interface PublicQuestionSearchResult {
     taxonomyBreadcrumb: string;
     variantCount: number;
     occurrenceCount: number;
+    sourceSummary: PublicQuestionSourceSummary[];
     hasAnswer: boolean;
     matchContext: QuestionSearchMatchContext;
     matchPreview: string;

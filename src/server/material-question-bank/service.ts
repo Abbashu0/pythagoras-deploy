@@ -4,6 +4,7 @@ import type { AdminActor } from "../admin-auth";
 import { createChangeManagementService, type ChangeSetStatus } from "../change-management";
 import { getContentDatabase, type ContentDatabase } from "../content";
 import { SQLiteQuestionRepository, type CanonicalRichDocument } from "../questions";
+import { loadPublicQuestionSourceSummaries } from "../questions/public-provenance";
 import { QuestionSearchService } from "../question-search";
 import {
   MATERIAL_QUESTION_BANK_MAX_PAGE_SIZE,
@@ -131,13 +132,14 @@ export class MaterialQuestionBankService {
       order by q.display_order,q.id limit ? offset ?
     `).all(...filter.params, safeLimit, safeOffset) as Array<Record<string, unknown>>;
     const taxonomy = this.taxonomyMap(context.node.packageId);
+    const sourceSummaries = loadPublicQuestionSourceSummaries(this.database, rows.map((row) => String(row.id)));
     return {
       total, offset: safeOffset, limit: safeLimit,
       items: rows.map((row, index) => ({
         questionId: String(row.id), ordinal: safeOffset + index + 1,
         primaryPreview: documentText(parseDocument(row.primary_content)),
         taxonomyBreadcrumb: breadcrumb(String(row.primary_taxonomy_id ?? ""), taxonomy),
-        variantCount: Number(row.variant_count), occurrenceCount: Number(row.occurrence_count), hasAnswer: row.shared_answer !== null,
+        variantCount: Number(row.variant_count), occurrenceCount: Number(row.occurrence_count), sourceSummary: sourceSummaries.get(String(row.id)) ?? [], hasAnswer: row.shared_answer !== null,
       })),
     };
   }
@@ -152,7 +154,7 @@ export class MaterialQuestionBankService {
       items: result.items.map((item) => ({
         questionId: item.questionId, ordinal: item.bankOrdinal, bankOrdinal: item.bankOrdinal,
         primaryPreview: item.primaryPreview, taxonomyBreadcrumb: item.taxonomyBreadcrumb,
-        variantCount: item.variantCount, occurrenceCount: item.occurrenceCount, hasAnswer: item.hasAnswer,
+        variantCount: item.variantCount, occurrenceCount: item.occurrenceCount, sourceSummary: item.sourceSummary, hasAnswer: item.hasAnswer,
         matchContext: item.matchContext, matchPreview: item.matchPreview,
       })),
     };

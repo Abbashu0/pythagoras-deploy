@@ -1,6 +1,7 @@
 import { extractRichDocumentPlainText } from "@/lib/rich-content";
 import { getContentDatabase, type ContentDatabase } from "../content";
 import type { CanonicalRichDocument } from "../questions";
+import { loadPublicQuestionSourceSummaries } from "../questions/public-provenance";
 import { buildSafeFtsPrefixQuery, normalizeArabicSearchText } from "./arabic-normalization";
 import { QUESTION_SEARCH_INDEX_VERSION, type PublicQuestionSearchResult, type QuestionSearchHealth, type QuestionSearchMatchContext, type QuestionSearchPlacementScope, type QuestionSearchQuery } from "./contracts";
 import { QuestionSearchError } from "./errors";
@@ -144,7 +145,7 @@ export class QuestionSearchService {
   }
 
   private questionDetails(ids: string[], scope: QuestionSearchPlacementScope) {
-    const values = new Map<string, { questionId: string; bankOrdinal: number; primaryPreview: string; taxonomyBreadcrumb: string; variantCount: number; occurrenceCount: number; hasAnswer: boolean }>();
+    const values = new Map<string, { questionId: string; bankOrdinal: number; primaryPreview: string; taxonomyBreadcrumb: string; variantCount: number; occurrenceCount: number; sourceSummary: import("../questions/public-provenance").PublicQuestionSourceSummary[]; hasAnswer: boolean }>();
     if (!ids.length) return values;
     const filter = placementFilter(scope); const params = [...filter.params, ...ids]; const placeholders = ids.map(() => "?").join(",");
     const rows = this.database.client.prepare(`select q.id,q.shared_answer,pvc.content primary_content,coalesce(vc.count,0) variant_count,coalesce(oc.count,0) occurrence_count,pa.taxonomy_node_id primary_taxonomy_id from questions q left join question_primary_variants pv on pv.question_id=q.id left join question_variants pvc on pvc.id=pv.variant_id left join (select question_id,count(*) count from question_variants group by question_id) vc on vc.question_id=q.id left join (select v.question_id,count(o.id) count from question_variants v left join question_occurrences o on o.variant_id=v.id group by v.question_id) oc on oc.question_id=q.id left join question_taxonomy_assignments pa on pa.question_id=q.id and pa.role='PRIMARY' where ${filter.sql} and q.id in (${placeholders}) order by q.display_order,q.id`).all(...params) as Row[];
@@ -152,7 +153,8 @@ export class QuestionSearchService {
     const ordinal = new Map(allRows.map((row, index) => [String(row.id), index + 1]));
     const nodes = this.database.client.prepare("select id,label,parent_id from question_taxonomy_nodes where package_id=?").all(scope.packageId) as Row[];
     const nodeMap = new Map(nodes.map((row) => [String(row.id), { label: String(row.label), parentId: row.parent_id === null ? null : String(row.parent_id) }]));
-    for (const row of rows) values.set(String(row.id), { questionId: String(row.id), bankOrdinal: ordinal.get(String(row.id)) ?? 0, primaryPreview: preview(extractRichDocumentPlainText(parseDocument(row.primary_content))), taxonomyBreadcrumb: breadcrumb(String(row.primary_taxonomy_id ?? ""), nodeMap), variantCount: Number(row.variant_count), occurrenceCount: Number(row.occurrence_count), hasAnswer: row.shared_answer !== null });
+    const sourceSummaries = loadPublicQuestionSourceSummaries(this.database, rows.map((row) => String(row.id)));
+    for (const row of rows) values.set(String(row.id), { questionId: String(row.id), bankOrdinal: ordinal.get(String(row.id)) ?? 0, primaryPreview: preview(extractRichDocumentPlainText(parseDocument(row.primary_content))), taxonomyBreadcrumb: breadcrumb(String(row.primary_taxonomy_id ?? ""), nodeMap), variantCount: Number(row.variant_count), occurrenceCount: Number(row.occurrence_count), sourceSummary: sourceSummaries.get(String(row.id)) ?? [], hasAnswer: row.shared_answer !== null });
     return values;
   }
 }

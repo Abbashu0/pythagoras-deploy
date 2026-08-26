@@ -7,7 +7,7 @@ import { settingsScreen } from "../pages/SettingsPage.js";
 import { subjectTestsScreen } from "../pages/SubjectTestsPage.js";
 import { testsSubjectsScreen } from "../pages/TestsSubjectsPage.js";
 import { toolsScreen } from "../pages/ToolsPage.js";
-import { mountQuestionBank, renderQuestionBankPlaceholder } from "../pages/QuestionBankPlaceholderPage.js";
+import { mountQuestionBank, renderQuestionBankPlaceholder } from "../pages/QuestionBankPlaceholderPage.js?v=20260826b";
 import "./image-db.js";
 import {
   ADMIN_BANNERS_KEY,

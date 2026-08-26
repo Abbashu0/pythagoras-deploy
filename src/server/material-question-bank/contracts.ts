@@ -7,6 +7,7 @@ import type {
   MaterialQuestionBankTargetMode,
 } from "../content/schema";
 import type { QuestionSourceKind, QuestionTaxonomyRole } from "../questions";
+import type { PublicQuestionSourceSummary } from "../questions/public-provenance";
 import type { MaterialQuestionBankProductPresetKey } from "./product-presets";
 
 export const MATERIAL_QUESTION_BANK_RESOURCE_TYPE = "material.question-bank-layout" as const;
@@ -107,6 +108,7 @@ export interface PublicQuestionSummary {
   taxonomyBreadcrumb: string;
   variantCount: number;
   occurrenceCount: number;
+  sourceSummary: PublicQuestionSourceSummary[];
   hasAnswer: boolean;
 }
 

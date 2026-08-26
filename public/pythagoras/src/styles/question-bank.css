@@ -59,4 +59,18 @@
 .question-bank-answer h3 { margin: 0 0 14px; color: var(--accent); font-size: .9rem; }
 .question-bank-taxonomy { display: flex; flex-wrap: wrap; gap: 7px; }
 .question-bank-retry { margin-top: 16px; color: var(--accent); }
-@media (max-width: 520px) { .question-bank-question { gap: 9px; padding: 12px; } .question-bank-ordinal { align-self: start; padding-top: 2px; } .question-bank-variant, .question-bank-answer { padding: 13px; } }
+.question-bank-question { display: block; overflow: hidden; padding: 0; }
+.question-bank-question-main { display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 12px; width: 100%; border: 0; background: transparent; color: inherit; padding: 14px; text-align: start; font: inherit; cursor: pointer; }
+.question-bank-source-badges { display: flex; flex-wrap: wrap; gap: 7px; padding: 0 14px 12px; }
+.question-bank-source-badge { min-height: 32px; border: 1px solid color-mix(in oklab, var(--accent) 45%, var(--line)); border-radius: 999px; background: color-mix(in oklab, var(--accent) 10%, var(--surface)); color: var(--accent); padding: 5px 10px; font: inherit; font-size: .68rem; cursor: pointer; }
+.question-bank-source-badge:hover, .question-bank-source-badge:focus-visible { border-color: var(--accent); outline: 2px solid color-mix(in oklab, var(--accent) 35%, transparent); outline-offset: 1px; }
+.question-bank-provenance { display: grid; gap: 10px; margin: 0 14px 14px; border-top: 1px solid var(--line); padding-top: 10px; }
+.question-bank-provenance > section { display: grid; gap: 7px; }
+.question-bank-provenance > section > small { color: var(--muted); font-size: .68rem; }
+.question-bank-provenance-loading { color: var(--muted); font-size: .72rem; }
+.question-bank-provenance .question-bank-occurrences { margin-top: 0; border-top: 0; padding-top: 0; }
+.question-bank-occurrence { display: grid; gap: 3px; border-radius: 12px; background: var(--surface); padding: 9px 10px; }
+.question-bank-occurrence strong { color: var(--accent); font-size: .72rem; }
+.question-bank-occurrence span { color: var(--fg); font-size: .68rem; line-height: 1.7; }
+.question-bank-occurrence small { color: var(--muted); font-size: .62rem; line-height: 1.6; }
+@media (max-width: 520px) { .question-bank-question { gap: 9px; padding: 0; } .question-bank-question-main { gap: 9px; padding: 12px; } .question-bank-source-badges { padding-inline: 12px; } .question-bank-ordinal { align-self: start; padding-top: 2px; } .question-bank-variant, .question-bank-answer { padding: 13px; } }
