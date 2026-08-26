@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -62,4 +63,20 @@ test("Student question-bank source controls and shared occurrence renderer are p
   assert.match(source, /renderOccurrences/u);
   assert.match(source, /sourceKindLabel/u);
   assert.match(source, /occurrences/u);
+  assert.equal((source.match(/^function items\(/gmu) ?? []).length, 1);
+  assert.equal((source.match(/^function detail\(/gmu) ?? []).length, 1);
+  assert.equal((source.match(/^function bind\(/gmu) ?? []).length, 1);
+  assert.equal((source.match(/currentRenderState/g) ?? []).length, 0);
+  assert.equal((source.match(/supersed(?:es|ing)/giu) ?? []).length, 0);
+  assert.match(source, /items\(page\.items, searching, state\)/u);
+  assert.equal((source.match(/\[data-provenance-toggle\][^\n]*addEventListener/g) ?? []).length, 1);
+  assert.equal((source.match(/\[data-question-id\][^\n]*addEventListener/g) ?? []).length, 1);
+  assert.equal((source.match(/renderOccurrences\(variant\.occurrences\)/g) ?? []).length, 2);
+});
+
+test("Student question-bank page is valid ES module JavaScript", () => {
+  const source = readFileSync(path.join(process.cwd(), "public/pythagoras/src/pages/QuestionBankPlaceholderPage.js"), "utf8");
+  assert.doesNotThrow(() => {
+    execFileSync(process.execPath, ["--check", "--input-type=module"], { input: source, encoding: "utf8" });
+  });
 });
