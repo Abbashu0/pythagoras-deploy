@@ -74,7 +74,7 @@ export function ReviewWorkspace({ initialChangeSetId }: { initialChangeSetId?: s
     try {
       await reviewApi(`/api/admin/change-sets/${selected.changeSet.id}/${operation}?compact=1`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expectedRevision: selected.changeSet.revision, ...body }) });
       setAction(null); setNote(""); await load(true);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "تعذر تنفيذ العملية."); }
+    } catch (cause) { setError(changeActionErrorMessage(operation, selected, cause)); }
     finally { setBusy(false); }
   };
 
@@ -136,6 +136,18 @@ function ReviewItemPage({ details, selectedItemId, taxonomyLabels, onSelect, onP
     return <section className="mt-6 space-y-4"><MaterialQuestionBankReviewItem item={selectedItem} />{selectedItem.conflictDetails && <ConflictPanel details={selectedItem.conflictDetails} />}{page.total > 1 ? <div className="flex justify-end gap-1"><Button size="sm" variant="outline" disabled={page.offset === 0} onClick={() => onPage(Math.max(0, page.offset - page.limit))}>السابق</Button><Button size="sm" variant="outline" disabled={page.offset + page.limit >= page.total} onClick={() => onPage(page.offset + page.limit)}>التالي</Button></div> : null}</section>;
   }
   return <section className="mt-6 space-y-4"><div className="rounded-2xl border bg-muted/20 p-3"><div className="flex items-center justify-between gap-3"><p className="text-xs font-bold">عناصر التغيير {page.offset + 1}–{Math.min(page.offset + details.items.length, page.total)} من {page.total}</p><div className="flex gap-1"><Button size="sm" variant="outline" disabled={page.offset === 0} onClick={() => onPage(Math.max(0, page.offset - page.limit))}>السابق</Button><Button size="sm" variant="outline" disabled={page.offset + page.limit >= page.total} onClick={() => onPage(page.offset + page.limit)}>التالي</Button></div></div><div className="admin-scroll mt-3 flex gap-2 overflow-x-auto pb-1">{details.items.map((item) => <button key={item.id} type="button" onClick={() => onSelect(item.id)} className={cn("min-w-44 rounded-xl border bg-card p-3 text-right", selectedItem?.id === item.id && "border-primary bg-primary/5")}><span className="line-clamp-1 text-xs font-bold">{item.presentation.resourceLabel}</span><span className="mt-1 block text-[9px] text-muted-foreground">{item.presentation.resourceSubtitle}</span></button>)}</div></div>{selectedItem ? selectedItem.resourceType === "question.item" ? <div><QuestionReviewItem item={selectedItem} taxonomyLabels={taxonomyLabels} />{selectedItem.conflictDetails && <ConflictPanel details={selectedItem.conflictDetails} />}</div> : <article className="rounded-2xl border p-4"><div className="flex items-center justify-between gap-3"><div><p className="text-xs font-bold">{selectedItem.presentation.resourceLabel}</p><p className="mt-1 text-[10px] text-muted-foreground" dir="auto">{selectedItem.presentation.resourceSubtitle}</p></div><span className="rounded-full bg-primary/10 px-2 py-1 text-[9px] text-primary">{selectedItem.presentation.areaLabel}</span></div><div className="mt-4 space-y-2">{selectedItem.presentation.fieldDiffs.map((diff) => <div key={diff.path} className="grid gap-2 rounded-xl bg-muted/35 p-3 sm:grid-cols-[110px_1fr_auto_1fr]"><span className="text-[10px] text-muted-foreground">{diff.label}</span><Value value={diff.before} tone="old" /><ArrowLeftRight className="h-3.5 w-3.5 self-center text-muted-foreground" /><Value value={diff.after} tone="new" /></div>)}</div>{selectedItem.conflictDetails && <ConflictPanel details={selectedItem.conflictDetails} />}</article> : null}</section>;
+}
+
+function changeActionErrorMessage(operation: string, changeSet: ChangeDetails, cause: unknown): string {
+  if (
+    operation === "publish" &&
+    cause instanceof Error &&
+    cause.message === "CHANGE_PUBLICATION_FAILED" &&
+    changeSet.items.some((item) => item.resourceType === "material.question-bank-layout")
+  ) {
+    return "تعذر نشر ربط حزمة بنك الأسئلة. لم تُطبّق أي تغييرات. رمز المتابعة: CHANGE_PUBLICATION_FAILED.";
+  }
+  return cause instanceof Error ? cause.message : "تعذر تنفيذ العملية.";
 }
 
 function Metric({ icon: Icon, label, value }: { icon: typeof ShieldCheck; label: string; value: string }) { return <div className="rounded-2xl border bg-card p-4"><Icon className="h-4 w-4 text-primary" /><p className="mt-3 text-[10px] text-muted-foreground">{label}</p><p className="mt-1 text-lg font-black">{value}</p></div>; }

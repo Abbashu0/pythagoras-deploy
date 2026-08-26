@@ -350,6 +350,14 @@ export class ChangeManagementService {
         throw new ChangeManagementError("CHANGE_CONFLICT", "Publication stopped because the resource changed.");
       }
       if (error instanceof ChangeManagementError) throw error;
+      // Keep the original failure on the server for local-owner diagnosis. The
+      // API deliberately returns only the stable code below, never SQLite or
+      // filesystem details.
+      console.error("[change-management] publication failed", {
+        changeSetId: id,
+        actorUserId: actor.actorUserId,
+        cause: error,
+      });
       throw new ChangeManagementError("CHANGE_PUBLICATION_FAILED", "Publication failed; no changes were applied.", error);
     }
   }

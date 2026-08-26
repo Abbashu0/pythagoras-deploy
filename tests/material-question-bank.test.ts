@@ -116,6 +116,111 @@ test("0010 seeds an existing owner database without an Arabic layout and never r
   } finally { [oldRoot, oldMigrations, existingRoot].forEach((target) => rmSync(target, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })); }
 });
 
+function migrationSeededFixture() {
+  const root = mkdtempSync(path.join(os.tmpdir(), "pythagoras-arabic-preset-publication-"));
+  const oldMigrations = mkdtempSync(path.join(os.tmpdir(), "pythagoras-arabic-preset-publication-migrations-"));
+  mkdirSync(path.join(oldMigrations, "meta"), { recursive: true });
+  const journal = JSON.parse(readFileSync(path.join(migrationsDirectory, "meta", "_journal.json"), "utf8"));
+  for (const entry of journal.entries.slice(0, 10)) copyFileSync(path.join(migrationsDirectory, `${entry.tag}.sql`), path.join(oldMigrations, `${entry.tag}.sql`));
+  journal.entries = journal.entries.slice(0, 10);
+  writeFileSync(path.join(oldMigrations, "meta", "_journal.json"), JSON.stringify(journal));
+
+  const old = openContentDatabase({ dataDirectory: root, migrationsDirectory: oldMigrations });
+  createCanonicalContentRepository(old).bootstrap();
+  const identities = new SQLiteAdminIdentityRepository(old);
+  const ownerRow = identities.createInitialOwner({ id: uuidv7(), email: "seeded-owner@m14.test", displayName: "Seeded Owner", passwordHash: "$argon2id$test", createdAt: 1 });
+  const adminRow = identities.createAdmin({ id: uuidv7(), email: "seeded-admin@m14.test", displayName: "Seeded Admin", passwordHash: "$argon2id$test", createdAt: 2 });
+  old.close();
+
+  const database = openContentDatabase({ dataDirectory: root, migrationsDirectory });
+  return {
+    root,
+    database,
+    canonical: createCanonicalContentRepository(database),
+    owner: actor(ownerRow.id, "OWNER"),
+    admin: actor(adminRow.id, "ADMIN"),
+    questions: new SQLiteQuestionRepository(database, () => 100),
+    banks: createMaterialQuestionBankService(database),
+    changes: createChangeManagementService(database),
+    close() {
+      database.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+      rmSync(oldMigrations, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    },
+  };
+}
+
+test("migration-seeded Arabic preset publishes an Istifham assignment through the UPDATE governance path", () => {
+  const f = migrationSeededFixture();
+  try {
+    const initial = f.banks.getAdminWorkspace("arabic", f.admin);
+    assert.equal(initial.canonicalRevision, 1);
+    assert.equal(initial.layout.nodes.length, 11);
+    const packageGraph = createPackage(f, "arabic", "حزمة الاستفهام الاختبارية");
+    createQuestion(f, packageGraph.packageId, packageGraph.taxonomyId, 1);
+    const istifham = initial.layout.nodes.find((node) => node.nodeKey === "arabic-grammar-istifham")!;
+    const desired = {
+      ...initial.layout,
+      nodes: initial.layout.nodes.map((node) => node.id === istifham.id ? { ...node, packageId: packageGraph.packageId } : node),
+    };
+    const draft = f.banks.save("arabic", desired, f.admin);
+    let change = f.banks.submit("arabic", draft.revision, f.admin);
+    change = f.changes.approve(change.id, change.revision, f.owner).changeSet;
+    const result = f.changes.publish(change.id, change.revision, f.owner);
+
+    const published = f.banks.getAdminWorkspace("arabic", f.owner);
+    const publishedIstifham = published.layout.nodes.find((node) => node.id === istifham.id)!;
+    assert.equal(result.changeSet.changeSet.status, "PUBLISHED");
+    assert.equal(published.canonicalRevision, 2);
+    assert.equal(publishedIstifham.packageId, packageGraph.packageId);
+    assert.equal(f.banks.getPublicLayout("arabic").nodes.find((node) => node.id === istifham.id)?.available, true);
+    assert.deepEqual(
+      published.layout.nodes.map(structuralPresetNode).sort((a, b) => a.id.localeCompare(b.id)),
+      initial.layout.nodes.map(structuralPresetNode).sort((a, b) => a.id.localeCompare(b.id)),
+    );
+  } finally { f.close(); }
+});
+
+test("migration-seeded Arabic assignment publication rolls back atomically on a storage failure", () => {
+  const f = migrationSeededFixture();
+  try {
+    const initial = f.banks.getAdminWorkspace("arabic", f.admin);
+    const packageGraph = createPackage(f, "arabic", "حزمة استرجاع الاختبار");
+    createQuestion(f, packageGraph.packageId, packageGraph.taxonomyId, 1);
+    const istifham = initial.layout.nodes.find((node) => node.nodeKey === "arabic-grammar-istifham")!;
+    const desired = { ...initial.layout, nodes: initial.layout.nodes.map((node) => node.id === istifham.id ? { ...node, packageId: packageGraph.packageId } : node) };
+    const draft = f.banks.save("arabic", desired, f.admin);
+    let change = f.banks.submit("arabic", draft.revision, f.admin);
+    change = f.changes.approve(change.id, change.revision, f.owner).changeSet;
+    const publicationRevision = Number((f.database.client.prepare("select current_revision from publication_state where id='global'").get() as { current_revision: number }).current_revision);
+    f.database.client.exec(`create trigger test_block_arabic_istifham_assignment before update on material_question_bank_nodes
+      when new.id = '${istifham.id}' begin select raise(abort, 'test-only Arabic assignment failure'); end;`);
+
+    assert.throws(() => f.changes.publish(change.id, change.revision, f.owner), /Publication failed/u);
+    const canonical = f.banks.getAdminWorkspace("arabic", f.owner);
+    assert.equal(canonical.canonicalRevision, 1);
+    assert.equal(canonical.layout.nodes.find((node) => node.id === istifham.id)?.packageId, null);
+    assert.equal(f.changes.getDetails(change.id, f.owner).changeSet.status, "APPROVED");
+    assert.equal(Number((f.database.client.prepare("select current_revision from publication_state where id='global'").get() as { current_revision: number }).current_revision), publicationRevision);
+    assert.equal(Number((f.database.client.prepare("select count(*) as count from questions where package_id=?").get(packageGraph.packageId) as { count: number }).count), 1);
+    assert.deepEqual(f.database.client.prepare("pragma foreign_key_check").all(), []);
+    assert.deepEqual(f.database.client.prepare("pragma quick_check").all(), [{ quick_check: "ok" }]);
+  } finally { f.close(); }
+});
+
+function structuralPresetNode(node: MaterialQuestionBankNodeContent) {
+  return {
+    id: node.id,
+    nodeKey: node.nodeKey,
+    label: node.label,
+    nodeType: node.nodeType,
+    parentId: node.parentId,
+    displayOrder: node.displayOrder,
+    groupPresentation: node.groupPresentation,
+    enabled: node.enabled,
+  };
+}
+
 function orderNodes(a: { displayOrder: number; id: string }, b: { displayOrder: number; id: string }) { return a.displayOrder - b.displayOrder || a.id.localeCompare(b.id); }
 
 test("M14 generic materials support CARDS topology, SWITCHER children, empty slots, and cross-subject placement", () => {
