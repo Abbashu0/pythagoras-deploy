@@ -132,7 +132,7 @@ test("0005 applies to fresh and existing 0004 databases without altering earlier
   } finally { for (const target of [freshRoot, oldRoot, oldMigrations]) try { rmSync(target, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }); } catch { /* best-effort test fixture cleanup */ } }
 });
 
-test("M7 Admin surfaces no longer import legacy product stores and Student has one canonical endpoint", () => {
+test("M7 Admin surfaces no longer import legacy product stores and remain server-backed", () => {
   for (const area of ["banners", "materials", "tools", "navigation"]) {
     const source = readFileSync(path.join(process.cwd(), "src", "app", "admin", "(protected)", area, "page.tsx"), "utf8");
     assert.equal(/admin-store|content-store|nav-store|image-db|localStorage|indexedDB/u.test(source), false);
@@ -141,10 +141,6 @@ test("M7 Admin surfaces no longer import legacy product stores and Student has o
     const workspace = readFileSync(path.join(process.cwd(), "src/components/admin/canonical", workspaceName), "utf8");
     assert.equal(/localStorage|indexedDB|ImageDB/u.test(workspace), false);
   }
-  const student = readFileSync(path.join(process.cwd(), "public/pythagoras/src/scripts/data.js"), "utf8");
-  assert.ok(student.includes('/api/content/app')); assert.ok(student.includes('runtimeSourceMode === "LEGACY"'));
-  assert.ok(student.includes("bannerType: String(item.bannerType).toLowerCase()"));
-  assert.ok(student.includes("transform: { offsetX: item.offsetX, offsetY: item.offsetY, scale: item.scale }"));
   const picker = readFileSync(path.join(process.cwd(), "src/components/admin/library/AssetPickerDialog.tsx"), "utf8");
   assert.ok(picker.includes("تحميل المزيد"));
   const cutover = readFileSync(path.join(process.cwd(), "src/components/admin/CanonicalCutoverPanel.tsx"), "utf8");

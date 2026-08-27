@@ -500,26 +500,6 @@ test("0006 inspection cache migration applies to fresh and existing 0005 databas
   }
 });
 
-test("Student question-bank placement remains subject-scoped and does not load question data", () => {
-  const dataSource = readFileSync(path.join(process.cwd(), "public/pythagoras/src/scripts/data.js"), "utf8");
-  const subjectSource = readFileSync(path.join(process.cwd(), "public/pythagoras/src/pages/SubjectTestsPage.js"), "utf8");
-  const placeholderSource = readFileSync(path.join(process.cwd(), "public/pythagoras/src/pages/QuestionBankPlaceholderPage.js"), "utf8");
-  const headerSource = readFileSync(path.join(process.cwd(), "public/pythagoras/src/components/PageHeader.js"), "utf8");
-  const appSource = readFileSync(path.join(process.cwd(), "public/pythagoras/src/scripts/app.js"), "utf8");
-  const routerSource = readFileSync(path.join(process.cwd(), "public/pythagoras/src/scripts/router.js"), "utf8");
-  assert.ok(dataSource.includes("questions-${subjectId}"));
-  assert.ok(subjectSource.includes("getQuestionBankView(subject.id)"));
-  assert.equal(subjectSource.includes('navTo: "questions"'), false);
-  assert.ok(placeholderSource.includes("getTestsSubjectView(subject.id)"));
-  assert.ok(placeholderSource.includes("subject.title"));
-  assert.ok(appSource.includes("getQuestionBankSubjectByView(view)"));
-  assert.ok(routerSource.includes("getQuestionBankSubjectByView(view)"));
-  assert.ok(headerSource.includes('data-nav-to="${options.backView}"'));
-  for (const source of [subjectSource, placeholderSource, appSource]) {
-    assert.equal(/fetch\([^)]*question|questionBankLoader|biologyQuestionBank/u.test(source), false);
-  }
-});
-
 test("Asset Library surfaces cached package recognition without adding an import action", () => {
   const browserSource = readFileSync(path.join(process.cwd(), "src/components/admin/library/AssetBrowser.tsx"), "utf8");
   const detailsSource = readFileSync(path.join(process.cwd(), "src/components/admin/library/AssetDetailsDialog.tsx"), "utf8");

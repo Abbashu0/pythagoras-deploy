@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -106,10 +106,4 @@ test("M15 rebuild recovers an empty projection, hardens query safety, preserves 
     const material = f.canonical.getSnapshot().materials.find((item) => item.subjectKey === "biology")!; const nodes = [1, 2, 3].map((displayOrder) => ({ id: uuidv7(), nodeKey: `scale-${displayOrder}`, label: `Scale ${displayOrder}`, nodeType: "BANK" as const, parentId: null, displayOrder, groupPresentation: null, packageId, targetMode: "ALL_PACKAGE_QUESTIONS" as const, taxonomyNodeId: null, includeDescendants: null, enabled: true })); const draft = f.banks.save("biology", { materialId: material.id, rootPresentation: "CARDS", nodes }, actor); const submitted = f.banks.submit("biology", draft.revision, actor); const approved = f.changes.approve(submitted.id, submitted.revision, actor).changeSet; f.changes.publish(approved.id, approved.revision, actor); assert.equal(f.banks.isPublicAssetVisible(uuidv7()), false);
     f.database.client.exec("delete from question_search_fts; delete from question_search_documents;"); assert.equal(search.getHealth().healthy, false); assert.throws(() => search.searchPlacement(scope(packageId), "scale"), (error: unknown) => error instanceof QuestionSearchError && error.code === "QUESTION_SEARCH_UNAVAILABLE"); search.rebuildAll(); assert.equal(search.getHealth().healthy, true); assert.equal(search.searchPlacement(scope(packageId), "SCALE_NEEDLE").total, 1); assert.equal(QUESTION_SEARCH_INDEX_VERSION, 1);
   } finally { f.close(); }
-});
-
-test("M15 Student harness keeps GROUP navigation generic and Arabic fixture order exact", () => {
-  const source = readFileSync(path.join(process.cwd(), "public/pythagoras/src/pages/QuestionBankPlaceholderPage.js"), "utf8"); const rootRenderer = source.slice(source.indexOf("function destinations"), source.indexOf("async function openGroup"));
-  assert.ok(source.includes("data-open-group")); assert.equal(rootRenderer.includes("question-bank-switcher"), false); assert.ok(source.includes("state.search = null"));
-  assert.deepEqual(["الاستفهام", "النفي", "التقديم والتأخير", "التوكيد", "النداء", "التعجب", "المدح والذم", "التمني والترجي", "العرض والتحضيض"], ["الاستفهام", "النفي", "التقديم والتأخير", "التوكيد", "النداء", "التعجب", "المدح والذم", "التمني والترجي", "العرض والتحضيض"]);
 });

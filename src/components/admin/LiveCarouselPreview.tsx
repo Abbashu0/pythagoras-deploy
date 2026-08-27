@@ -3,8 +3,8 @@
 /**
  * LiveCarouselPreview
  * -------------------
- * A pixel-faithful desktop re-creation of the student app's SponsoredCarouselCard
- * (see public/pythagoras/src/components/SponsoredCarouselCard.js).
+ * A pixel-faithful desktop preview of the canonical banner presentation used by
+ * the Admin workspace.
  *
  * Renders a SINGLE banner (the one passed via the `banner` prop) according
  * to its `bannerType`:

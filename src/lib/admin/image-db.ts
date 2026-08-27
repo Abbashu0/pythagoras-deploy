@@ -3,8 +3,7 @@
  *
  * localStorage has a hard ~5MB limit. IndexedDB can store hundreds of MB.
  * This module stores image data URLs in IndexedDB and keeps a synchronous
- * in-memory cache so the student app (vanilla JS) can read images without
- * async calls during render.
+ * in-memory cache for legacy browser-content migration and Admin compatibility.
  */
 
 const DB_NAME = "pythagoras-images";

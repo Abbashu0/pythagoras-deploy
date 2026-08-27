@@ -8,7 +8,7 @@ Pythagoras keeps three representations deliberately separate:
 
 `toPublicRichDocument()` is the pure presentation boundary. URL resolution is injected; renderers never access the Asset repository, storage keys, filesystem paths, or portable manifest references.
 
-The Admin React renderer accepts canonical content and an Admin URL resolver. The Student vanilla-JS renderer accepts only public presentation content. Both support the complete V1 block and mark set without raw HTML.
+The Admin React renderer accepts canonical content and an Admin URL resolver. The former Student vanilla-JS renderer accepted only public presentation content and was retired with the web harness in Phase B. The future Mobile renderer will consume the same public presentation contract. The Admin renderer and future Mobile renderer must support the complete V1 block and mark set without raw HTML.
 
 ## Future editor adapter
 

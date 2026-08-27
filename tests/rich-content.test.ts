@@ -2,13 +2,11 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { RichDocumentRenderer } from "../src/components/admin/rich-content";
 import {
-  RICH_CONTENT_BLOCK_TYPES,
   buildAdminRichContentAssetUrl,
   buildPublicRichContentAssetUrl,
   toPublicRichDocument,
@@ -132,55 +130,36 @@ test("Portable to Canonical remains stable and Canonical to Public strips local 
   assert.equal(buildAdminRichContentAssetUrl(imageAssetId), `/api/admin/assets/${imageAssetId}/content`);
 });
 
-test("Admin and Student render every V1 block with equivalent semantic markup", async () => {
-  const presentation = toPublicRichDocument(
-    canonicalDocument,
-    buildPublicRichContentAssetUrl,
-  );
+test("Admin renders every V1 block with semantic markup", () => {
   const adminMarkup = renderToStaticMarkup(
     createElement(RichDocumentRenderer, {
       document: canonicalDocument,
       resolveAssetUrl: buildAdminRichContentAssetUrl,
     }),
   );
-  const student = await loadStudentRenderer();
-  const studentMarkup = student.renderRichDocument(presentation);
-
-  assert.deepEqual(
-    [...student.STUDENT_RICH_CONTENT_BLOCK_TYPES],
-    [...RICH_CONTENT_BLOCK_TYPES],
-  );
-  for (const markup of [adminMarkup, studentMarkup]) {
-    for (const tag of ["<article", "<h2", "<p", "<ol", "<ul", "<section", "<table", "<thead", "<tbody", "<th", "<td", "<figure", "<img", "<figcaption", "<hr"]) {
-      assert.ok(markup.includes(tag), `${tag} missing`);
-    }
-    assert.ok(markup.includes("<u><em><strong>"));
-    assert.ok(markup.includes("إِنَّا أَعْطَيْنَاكَ الْكَوْثَرَ"));
-    assert.ok(markup.includes("الكوثر — الآية 1"));
-    assert.ok(markup.includes("قِفا نبكِ"));
-    assert.ok(markup.includes("جدول المقارنة"));
-    assert.ok(markup.includes('scope="col"'));
-    assert.ok(markup.includes("وصف الصورة"));
+  for (const tag of ["<article", "<h2", "<p", "<ol", "<ul", "<section", "<table", "<thead", "<tbody", "<th", "<td", "<figure", "<img", "<figcaption", "<hr"]) {
+    assert.ok(adminMarkup.includes(tag), `${tag} missing`);
   }
+  assert.ok(adminMarkup.includes("<u><em><strong>"));
+  assert.ok(adminMarkup.includes("إِنَّا أَعْطَيْنَاكَ الْكَوْثَرَ"));
+  assert.ok(adminMarkup.includes("الكوثر — الآية 1"));
+  assert.ok(adminMarkup.includes("قِفا نبكِ"));
+  assert.ok(adminMarkup.includes("جدول المقارنة"));
+  assert.ok(adminMarkup.includes('scope="col"'));
+  assert.ok(adminMarkup.includes("وصف الصورة"));
   assert.ok(adminMarkup.includes(`/api/admin/assets/${imageAssetId}/content`));
-  assert.ok(studentMarkup.includes(`/api/content/assets/${imageAssetId}`));
 });
 
-test("both renderers escape script-looking educational text and reject raw HTML blocks", async () => {
-  const presentation = toPublicRichDocument(canonicalDocument, buildPublicRichContentAssetUrl);
+test("Admin renderer escapes script-looking educational text and rejects raw HTML blocks", () => {
   const adminMarkup = renderToStaticMarkup(
     createElement(RichDocumentRenderer, {
       document: canonicalDocument,
       resolveAssetUrl: buildAdminRichContentAssetUrl,
     }),
   );
-  const student = await loadStudentRenderer();
-  const studentMarkup = student.renderRichDocument(presentation);
-  for (const markup of [adminMarkup, studentMarkup]) {
-    assert.equal(markup.includes("<script>alert(1)</script>"), false);
-    assert.equal(markup.includes("onerror=alert(1)"), true);
-    assert.ok(markup.includes("&lt;script&gt;alert(1)&lt;/script&gt;"));
-  }
+  assert.equal(adminMarkup.includes("<script>alert(1)</script>"), false);
+  assert.equal(adminMarkup.includes("onerror=alert(1)"), true);
+  assert.ok(adminMarkup.includes("&lt;script&gt;alert(1)&lt;/script&gt;"));
 
   const rawHtml = structuredClone(canonicalDocument) as unknown as {
     blocks: Array<Record<string, unknown>>;
@@ -193,35 +172,26 @@ test("both renderers escape script-looking educational text and reject raw HTML 
       resolveAssetUrl: buildAdminRichContentAssetUrl,
     }),
   );
-  const studentFallback = student.renderRichDocument({ type: "doc", version: 1, blocks: rawHtml.blocks });
   assert.ok(adminFallback.includes('role="alert"'));
-  assert.ok(studentFallback.includes('role="alert"'));
   assert.equal(adminFallback.includes(maliciousText), false);
-  assert.equal(studentFallback.includes(maliciousText), false);
 
   assert.throws(() =>
     toPublicRichDocument(canonicalDocument, () => "javascript:alert(1)"),
   );
 });
 
-test("responsive Quran, poetry, table, and image styling stays scoped to Rich Content", () => {
-  const studentCss = readFileSync(
-    path.join(process.cwd(), "public/pythagoras/src/styles/rich-content.css"),
-    "utf8",
-  );
+test("Admin Rich Content styling stays scoped to Rich Content", () => {
   const adminCss = readFileSync(
     path.join(process.cwd(), "src/components/admin/rich-content/rich-document.css"),
     "utf8",
   );
-  for (const css of [studentCss, adminCss]) {
+  for (const css of [adminCss]) {
     assert.ok(css.includes("overflow-x: auto"));
     assert.ok(css.includes("@media (max-width: 520px)"));
     assert.ok(css.includes("grid-template-columns: minmax(0, 1fr)"));
     assert.ok(css.includes("max-width: 100%"));
     assert.equal(/(?:^|\n)\s*(?:p|table|img|section|article)\s*\{/u.test(css), false);
   }
-  assert.ok(studentCss.includes(".rich-content__poetry-verse"));
-  assert.ok(studentCss.includes(".rich-content__table-region"));
 });
 
 test("M10 historical boundary remains migration-free while M15 adds only a derived search projection", () => {
@@ -238,13 +208,6 @@ test("M10 historical boundary remains migration-free while M15 adds only a deriv
     "utf8",
   );
   assert.equal(/RichDocumentRenderer|QuestionEditor|Tiptap|import package/iu.test(adminQuestionPage), false);
-  const questionPlaceholder = readFileSync(
-    path.join(process.cwd(), "public/pythagoras/src/pages/QuestionBankPlaceholderPage.js"),
-    "utf8",
-  );
-  assert.ok(questionPlaceholder.includes("renderRichDocument"));
-  assert.equal(/favorite|quiz|grading/iu.test(questionPlaceholder), false);
-
   const root = mkdtempSync(path.join(os.tmpdir(), "pythagoras-m10-empty-"));
   try {
     const database = openContentDatabase({ dataDirectory: root, migrationsDirectory });
@@ -258,20 +221,6 @@ test("M10 historical boundary remains migration-free while M15 adds only a deriv
     rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
-
-async function loadStudentRenderer(): Promise<{
-  STUDENT_RICH_CONTENT_BLOCK_TYPES: readonly string[];
-  renderRichDocument(document: unknown): string;
-}> {
-  const url = pathToFileURL(
-    path.join(
-      process.cwd(),
-      "public/pythagoras/src/components/RichDocumentRenderer.js",
-    ),
-  );
-  url.searchParams.set("m10", String(Date.now()));
-  return import(url.href);
-}
 
 function readTree(root: string): { paths: string; contents: string } {
   const files: string[] = [];

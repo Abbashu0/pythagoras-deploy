@@ -324,8 +324,6 @@ test("0008 applies to fresh and existing 0007 DBs and M14 source keeps public co
     const editorSource = readFileSync(path.join(process.cwd(), "src/server/question-editor/service.ts"), "utf8");
     const listMethod = editorSource.slice(editorSource.indexOf("listQuestions("), editorSource.indexOf("getQuestion(", editorSource.indexOf("listQuestions(")));
     assert.equal(/rows\.map[\s\S]*this\.database\.client\.prepare/u.test(listMethod), false);
-    const student = readFileSync(path.join(process.cwd(), "public/pythagoras/src/pages/QuestionBankPlaceholderPage.js"), "utf8");
-    assert.ok(student.includes("/api/content/question-bank/")); assert.equal(/favorite|quiz|grading/iu.test(student), false);
     const publicService = readFileSync(path.join(process.cwd(), "src/server/material-question-bank/service.ts"), "utf8");
     assert.ok(publicService.includes("safeOffset + index + 1")); assert.ok(publicService.includes("MATERIAL_QUESTION_BANK_MAX_PAGE_SIZE"));
     const adminRoute = readFileSync(path.join(process.cwd(), "src/app/api/admin/material-question-bank/[subjectKey]/route.ts"), "utf8");

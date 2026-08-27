@@ -1,9 +1,8 @@
 /**
  * SponsoredBanner model.
  *
- * This is the canonical shape used by BOTH:
- *   - the student app's SponsoredCarouselCard (public/pythagoras/src/...)
- *   - the admin dashboard (src/app/admin/...)
+ * This is the shared banner shape used by Admin editors and previews
+ * (src/app/admin/ and src/components/admin/).
  *
  * When a backend is introduced, this is the exact schema the API will return.
  * For now, all fields are stored locally in localStorage.

@@ -726,12 +726,6 @@ test("Question foundation keeps search as a separate derived projection and excl
   );
   assert.ok(adminQuestions.includes("QuestionPackagesWorkspace"));
   assert.equal(/server\/questions|api\/admin\/questions/u.test(adminQuestions), false);
-  const student = readFileSync(
-    path.join(process.cwd(), "public/pythagoras/src/pages/QuestionBankPlaceholderPage.js"),
-    "utf8",
-  );
-  assert.ok(student.includes("/api/content/question-bank/"));
-  assert.equal(/favorite|quiz|grading|question data/iu.test(student), false);
   const questionServer = readFileTree(path.join(process.cwd(), "src/server/questions"));
   assert.equal(/fts5|content_resources|quiz|mcq|istifham/iu.test(questionServer.contents), false);
 });

@@ -1,10 +1,10 @@
 "use client";
 
 /**
- * AppIcon — React renderer for the student app's icon set.
+ * AppIcon — React renderer for the shared product icon vocabulary.
  *
- * Mirror of public/pythagoras/src/scripts/icons.js. Keep in sync whenever
- * a new icon is added — both files must contain the same path definitions.
+ * Admin surfaces and previews use this vocabulary consistently; future Mobile
+ * components may provide their own native rendering for the same icon keys.
  *
  * 130 icons across 12 categories.
  */

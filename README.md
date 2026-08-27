@@ -1,6 +1,6 @@
 # Pythagoras
 
-واجهة محلية لمنصة فيثاغورس: تطبيق الطالب ولوحة الإدارة.
+Backend وAdmin لمنصة فيثاغورس. تطبيق الطالب الحقيقي موجود في `mobile/`.
 
 ## التشغيل على Windows
 
@@ -11,7 +11,14 @@ npm install
 npm run dev
 ```
 
-افتح `http://localhost:3000` لتطبيق الطالب، أو `http://localhost:3000/admin` للإدارة.
+افتح `http://localhost:3000/admin` للوصول إلى لوحة الإدارة. المسار `/` يعيد التوجيه إليها.
+
+لتشغيل تطبيق الطالب Mobile:
+
+```powershell
+cd mobile
+npx expo start --lan
+```
 
 لتحديد مكان بيانات SQLite المحلية اختياريًا:
 
