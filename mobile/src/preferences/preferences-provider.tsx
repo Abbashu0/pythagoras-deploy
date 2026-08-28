@@ -3,16 +3,32 @@ import { Appearance, useColorScheme } from 'react-native';
 
 export type AppearanceMode = 'system' | 'light' | 'dark';
 export type ResolvedColorScheme = 'light' | 'dark';
+export type ThemeId = 'default';
 
-const MIN_FONT_SCALE = 0.9;
-const MAX_FONT_SCALE = 1.25;
+export const FONT_SCALE_MIN = 0.85;
+export const FONT_SCALE_MAX = 1.15;
+export const FONT_SCALE_STEP = 0.05;
+export const FONT_SCALE_DEFAULT = 1;
+export const FONT_SCALE_POINTS = [0.85, 0.9, 0.95, 1, 1.05, 1.1, 1.15] as const;
+
+export function getFontScalePointIndex(scale: number) {
+  return FONT_SCALE_POINTS.reduce(
+    (closestIndex, point, index) =>
+      Math.abs(point - scale) < Math.abs(FONT_SCALE_POINTS[closestIndex] - scale)
+        ? index
+        : closestIndex,
+    0
+  );
+}
 
 type PreferencesContextValue = {
   appearanceMode: AppearanceMode;
   resolvedColorScheme: ResolvedColorScheme;
+  themeId: ThemeId;
   fontScale: number;
   showDailySummary: boolean;
   setAppearanceMode: (mode: AppearanceMode) => void;
+  setThemeId: (themeId: ThemeId) => void;
   setFontScale: (scale: number) => void;
   setShowDailySummary: (show: boolean) => void;
 };
@@ -20,13 +36,14 @@ type PreferencesContextValue = {
 const PreferencesContext = createContext<PreferencesContextValue | null>(null);
 
 function clampFontScale(scale: number) {
-  return Math.min(MAX_FONT_SCALE, Math.max(MIN_FONT_SCALE, scale));
+  return Math.min(FONT_SCALE_MAX, Math.max(FONT_SCALE_MIN, scale));
 }
 
 export function PreferencesProvider({ children }: { children: React.ReactNode }) {
   const systemColorScheme = useColorScheme();
   const [appearanceMode, setAppearanceModeState] = useState<AppearanceMode>('system');
-  const [fontScale, setFontScaleState] = useState(1);
+  const [themeId, setThemeId] = useState<ThemeId>('default');
+  const [fontScale, setFontScaleState] = useState(FONT_SCALE_DEFAULT);
   const [showDailySummary, setShowDailySummary] = useState(true);
 
   const resolvedColorScheme: ResolvedColorScheme =
@@ -49,18 +66,22 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
     () => ({
       appearanceMode,
       resolvedColorScheme,
+      themeId,
       fontScale,
       showDailySummary,
       setAppearanceMode,
+      setThemeId,
       setFontScale,
       setShowDailySummary,
     }),
     [
       appearanceMode,
       resolvedColorScheme,
+      themeId,
       fontScale,
       showDailySummary,
       setAppearanceMode,
+      setThemeId,
       setFontScale,
     ]
   );

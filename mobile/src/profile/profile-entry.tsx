@@ -9,7 +9,7 @@ import {
 } from 'expo-glass-effect';
 
 import { usePreferences } from '@/preferences/preferences-provider';
-import { scaledFontSize, scaledLineHeight } from '@/theme';
+import { getPalette, scaledFontSize, scaledLineHeight } from '@/theme';
 
 export interface ProfileIdentity {
   displayName: string;
@@ -26,6 +26,7 @@ interface ProfileAvatarProps {
   identity: ProfileIdentity;
   onPress?: () => void;
   size?: number;
+  tintColor?: string;
 }
 
 interface HomeCircularActionProps {
@@ -104,7 +105,15 @@ function useNativeGlassAvailability() {
   return availability.api && availability.liquid && reduceTransparency === false;
 }
 
-function AvatarArtwork({ identity, size }: { identity: ProfileIdentity; size: number }) {
+function AvatarArtwork({
+  identity,
+  size,
+  tintColor = '#F4F4F5',
+}: {
+  identity: ProfileIdentity;
+  size: number;
+  tintColor?: string;
+}) {
   const imageSize = Math.max(1, size - 10);
   const hasAvatar = Boolean(identity.avatarUrl?.trim());
 
@@ -127,7 +136,7 @@ function AvatarArtwork({ identity, size }: { identity: ProfileIdentity; size: nu
         contentFit="contain"
         source="sf:person.crop.circle.fill"
         style={{ height: imageSize, width: imageSize }}
-        tintColor="#F4F4F5"
+        tintColor={tintColor}
       />
     );
   }
@@ -223,8 +232,9 @@ export function ProfileAvatar({
   identity,
   onPress,
   size = 52,
+  tintColor,
 }: ProfileAvatarProps) {
-  const artwork = <AvatarArtwork identity={identity} size={size} />;
+  const artwork = <AvatarArtwork identity={identity} size={size} tintColor={tintColor} />;
 
   if (onPress) {
     return (
@@ -252,7 +262,8 @@ export function ProfileAvatar({
 
 export function ProfileEntry({ identity = demoProfileIdentity }: { identity?: ProfileIdentity }) {
   const router = useRouter();
-  const { fontScale } = usePreferences();
+  const { fontScale, resolvedColorScheme } = usePreferences();
+  const palette = getPalette(resolvedColorScheme);
 
   return (
     <View style={styles.row}>
@@ -266,7 +277,7 @@ export function ProfileEntry({ identity = demoProfileIdentity }: { identity?: Pr
           contentFit="contain"
           source="sf:gearshape.fill"
           style={styles.actionSymbol}
-          tintColor="#F4F4F5"
+          tintColor={palette.text}
         />
       </HomeCircularAction>
       <View style={styles.profileCluster}>
@@ -275,6 +286,7 @@ export function ProfileEntry({ identity = demoProfileIdentity }: { identity?: Pr
           style={[
             styles.greeting,
             {
+              color: palette.text,
               fontSize: scaledFontSize(18, fontScale),
               lineHeight: scaledLineHeight(18, fontScale, 1.35),
             },
@@ -286,6 +298,7 @@ export function ProfileEntry({ identity = demoProfileIdentity }: { identity?: Pr
           accessibilityLabel="فتح الملف الشخصي"
           identity={identity}
           onPress={() => router.push('/profile')}
+          tintColor={palette.text}
         />
       </View>
     </View>
@@ -307,7 +320,6 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   greeting: {
-    color: '#F4F4F5',
     fontWeight: '600',
     textAlign: 'right',
     writingDirection: 'rtl',

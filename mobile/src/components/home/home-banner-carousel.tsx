@@ -20,6 +20,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { fetchAppContent, type AppContentData, type PublicBanner } from '@/api/app-content';
 import { resolveApiUrl } from '@/api/client';
 import { BannerPaginationGlass } from '@/components/home/banner-pagination-glass';
+import { usePreferences } from '@/preferences/preferences-provider';
+import { getPalette } from '@/theme';
 
 const HORIZONTAL_INSET = 18;
 const BANNER_ASPECT_WIDTH = 5;
@@ -92,6 +94,8 @@ export function HomeBannerCarousel() {
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const isFocused = useIsFocused();
+  const { resolvedColorScheme } = usePreferences();
+  const palette = getPalette(resolvedColorScheme);
   const isWeb = process.env.EXPO_OS === 'web' || Platform.OS === 'web';
   const fallbackFrameWidth = Math.max(1, windowWidth - HORIZONTAL_INSET * 2);
   const fallbackFrameHeight = (fallbackFrameWidth * BANNER_ASPECT_HEIGHT) / BANNER_ASPECT_WIDTH;
@@ -221,20 +225,29 @@ export function HomeBannerCarousel() {
   const pagerDirectionStyle = isWeb ? undefined : { direction: 'ltr' as const };
 
   return (
-    <View style={styles.container}>
-      <StatusBar style={isFocused ? 'light' : 'auto'} />
+    <View style={[styles.container, { backgroundColor: palette.background }]}>
+      <StatusBar
+        style={
+          isFocused
+            ? resolvedColorScheme === 'dark'
+              ? 'light'
+              : 'dark'
+            : 'auto'
+        }
+      />
       <ScrollView
         alwaysBounceVertical
         contentContainerStyle={styles.homeScrollContent}
         contentInsetAdjustmentBehavior="never"
         nestedScrollEnabled
         showsVerticalScrollIndicator={false}
-        style={styles.homeScroll}
+        style={[styles.homeScroll, { backgroundColor: palette.background }]}
       >
         <View
           style={[
             styles.cardArea,
             {
+              backgroundColor: palette.background,
               paddingBottom: insets.bottom + 24,
               paddingTop: insets.top + 12,
             },
@@ -246,6 +259,7 @@ export function HomeBannerCarousel() {
               styles.fixedCard,
               {
                 aspectRatio: BANNER_ASPECT_WIDTH / BANNER_ASPECT_HEIGHT,
+                backgroundColor: palette.background,
                 width: fallbackFrameWidth,
               },
             ]}
@@ -268,7 +282,7 @@ export function HomeBannerCarousel() {
               pagingEnabled
               scrollEventThrottle={16}
               showsHorizontalScrollIndicator={false}
-              style={[styles.internalPager, pagerDirectionStyle]}
+              style={[styles.internalPager, pagerDirectionStyle, { backgroundColor: palette.background }]}
             >
               {banners.map((banner) => (
                 <BannerArtworkPage key={banner.id} banner={banner} height={frameHeight} width={frameWidth} />
@@ -284,11 +298,9 @@ export function HomeBannerCarousel() {
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: '#000000',
     flex: 1,
   },
   homeScroll: {
-    backgroundColor: '#000000',
     flex: 1,
   },
   homeScrollContent: {
@@ -296,26 +308,22 @@ const styles = StyleSheet.create({
   },
   cardArea: {
     alignItems: 'center',
-    backgroundColor: '#000000',
     flex: 1,
     width: '100%',
   },
   fixedCard: {
-    backgroundColor: '#000000',
     borderCurve: 'continuous',
     borderRadius: 30,
     overflow: 'hidden',
     position: 'relative',
   },
   internalPager: {
-    backgroundColor: '#000000',
     flex: 1,
   },
   pagerContent: {
     paddingHorizontal: 0,
   },
   page: {
-    backgroundColor: '#000000',
     flexGrow: 0,
     flexShrink: 0,
     overflow: 'hidden',
