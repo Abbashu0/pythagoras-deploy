@@ -1,5 +1,5 @@
-import { PlaceholderScreen } from '@/placeholder-screen';
+import { HomeScreen } from '@/home/home-screen';
 
 export default function HomeTab() {
-  return <PlaceholderScreen title="الرئيسية" />;
+  return <HomeScreen />;
 }
