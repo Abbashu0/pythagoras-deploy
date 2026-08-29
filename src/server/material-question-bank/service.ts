@@ -1,4 +1,4 @@
-import { buildPublicRichContentAssetUrl, extractRichDocumentPlainText, toPublicRichDocument } from "@/lib/rich-content";
+import { buildPublicRichContentAssetUrl, extractRichDocumentPlainText, toPublicRichDocument, toPublicRichPreview, type PublicRichDocument } from "@/lib/rich-content";
 import { v7 as uuidv7 } from "uuid";
 import type { AdminActor } from "../admin-auth";
 import { createChangeManagementService, type ChangeSetStatus } from "../change-management";
@@ -135,10 +135,11 @@ export class MaterialQuestionBankService {
     const sourceSummaries = loadPublicQuestionSourceSummaries(this.database, rows.map((row) => String(row.id)));
     return {
       total, offset: safeOffset, limit: safeLimit,
-      items: rows.map((row, index) => ({
-        questionId: String(row.id), ordinal: safeOffset + index + 1,
-        primaryPreview: documentText(parseDocument(row.primary_content)),
-        taxonomyBreadcrumb: breadcrumb(String(row.primary_taxonomy_id ?? ""), taxonomy),
+        items: rows.map((row, index) => ({
+          questionId: String(row.id), ordinal: safeOffset + index + 1,
+          primaryPreview: documentText(parseDocument(row.primary_content)),
+          primaryPreviewRich: previewDocument(parseDocument(row.primary_content)),
+          taxonomyBreadcrumb: breadcrumb(String(row.primary_taxonomy_id ?? ""), taxonomy),
         variantCount: Number(row.variant_count), occurrenceCount: Number(row.occurrence_count), sourceSummary: sourceSummaries.get(String(row.id)) ?? [], hasAnswer: row.shared_answer !== null,
       })),
     };
@@ -153,7 +154,7 @@ export class MaterialQuestionBankService {
       ...result,
       items: result.items.map((item) => ({
         questionId: item.questionId, ordinal: item.bankOrdinal, bankOrdinal: item.bankOrdinal,
-        primaryPreview: item.primaryPreview, taxonomyBreadcrumb: item.taxonomyBreadcrumb,
+        primaryPreview: item.primaryPreview, primaryPreviewRich: item.primaryPreviewRich, taxonomyBreadcrumb: item.taxonomyBreadcrumb,
         variantCount: item.variantCount, occurrenceCount: item.occurrenceCount, sourceSummary: item.sourceSummary, hasAnswer: item.hasAnswer,
         matchContext: item.matchContext, matchPreview: item.matchPreview,
       })),
@@ -296,6 +297,7 @@ function treeSort(left: { parentId: string | null; displayOrder: number; id: str
 function breadcrumb(id: string, nodes: Map<string, { id: string; label: string; parentId: string | null }>): string { const parts: string[] = []; const seen = new Set<string>(); let currentId: string | null = id; while (currentId && !seen.has(currentId)) { seen.add(currentId); const current = nodes.get(currentId); if (!current) break; parts.unshift(current.label); currentId = current.parentId; } return parts.join(" / ") || "غير مصنّف"; }
 function parseDocument(value: unknown): CanonicalRichDocument | null { if (!value) return null; if (typeof value === "string") try { return JSON.parse(value) as CanonicalRichDocument; } catch { return null; } return value as CanonicalRichDocument; }
 function documentText(document: CanonicalRichDocument | null): string { return extractRichDocumentPlainText(document).slice(0, 220) || (document ? "محتوى بصري" : "لا يوجد نص"); }
+function previewDocument(document: CanonicalRichDocument | null): PublicRichDocument { return document ? toPublicRichPreview(document) : { type: "doc", version: 1, blocks: [] }; }
 function assertActor(actor: AdminActor): void { if (!actor.actorUserId || !["OWNER", "ADMIN"].includes(actor.actorRole)) invalid("Authenticated Admin is required."); }
 function invalid(message: string): never { throw new MaterialQuestionBankError("MATERIAL_BANK_INVALID", message); }
 function notFound(): never { throw new MaterialQuestionBankError("MATERIAL_BANK_NOT_FOUND", "Material Question Bank resource was not found."); }

@@ -1,4 +1,5 @@
 import type { SearchProvider } from "../content";
+import type { PublicRichDocument } from "@/lib/rich-content";
 import type { PublicQuestionSourceSummary } from "../questions/public-provenance";
 
 export const QUESTION_SEARCH_INDEX_VERSION = 1;
@@ -35,6 +36,7 @@ export interface PublicQuestionSearchResult {
     questionId: string;
     bankOrdinal: number;
     primaryPreview: string;
+    primaryPreviewRich: PublicRichDocument;
     taxonomyBreadcrumb: string;
     variantCount: number;
     occurrenceCount: number;

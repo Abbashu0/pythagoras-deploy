@@ -105,6 +105,7 @@ export interface PublicQuestionSummary {
   questionId: string;
   ordinal: number;
   primaryPreview: string;
+  primaryPreviewRich: PublicRichDocument;
   taxonomyBreadcrumb: string;
   variantCount: number;
   occurrenceCount: number;
