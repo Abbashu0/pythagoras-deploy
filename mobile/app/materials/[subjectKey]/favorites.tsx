@@ -1,5 +1,5 @@
-import { MaterialPlaceholderScreen } from '@/materials/material-placeholder-screen';
+import { FavoritesScreen } from '@/question-bank/favorites-screen';
 
 export default function MaterialFavoritesRoute() {
-  return <MaterialPlaceholderScreen title="المفضلة" />;
+  return <FavoritesScreen />;
 }
