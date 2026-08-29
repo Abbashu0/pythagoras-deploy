@@ -1,4 +1,14 @@
 .admin-rich-content {
+  --admin-rich-content-quran-font: "Amiri Quran", "Amiri", serif;
+}
+
+@font-face {
+  font-family: "Amiri Quran";
+  src: url("/fonts/AmiriQuran.ttf") format("truetype");
+  font-display: swap;
+}
+
+.admin-rich-content {
   display: grid;
   min-width: 0;
   gap: 1rem;
@@ -36,7 +46,7 @@
   padding: 1rem 1.1rem;
 }
 .admin-rich-content__quran-verse { display: grid; gap: 0.35rem; }
-.admin-rich-content__quran-text { margin: 0; font-size: 1.075rem; line-height: 2.15; }
+.admin-rich-content__quran-text { margin: 0; font-family: var(--admin-rich-content-quran-font); font-size: 1.075rem; line-height: 2.15; }
 .admin-rich-content__quran-meta { color: var(--muted-foreground); font-size: 0.75rem; font-style: normal; }
 
 .admin-rich-content__poetry { display: grid; gap: 0.75rem; padding-block: 0.35rem; }
