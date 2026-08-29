@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { AccessibilityInfo, Pressable, StyleSheet, Text, View } from 'react-native';
+import { AccessibilityInfo, Pressable, StyleSheet, Text, View, type AccessibilityState } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import {
@@ -32,6 +32,7 @@ interface ProfileAvatarProps {
 interface HomeCircularActionProps {
   accessibilityHint?: string;
   accessibilityLabel: string;
+  accessibilityState?: AccessibilityState;
   children: ReactNode;
   onPress: () => void;
   size?: number;
@@ -41,6 +42,7 @@ interface CircularSurfaceProps {
   accessibilityHint?: string;
   accessibilityLabel?: string;
   accessibilityRole?: 'button' | 'image';
+  accessibilityState?: AccessibilityState;
   children: ReactNode;
   onPress?: () => void;
   size: number;
@@ -157,6 +159,7 @@ function CircularSurface({
   accessibilityHint,
   accessibilityLabel,
   accessibilityRole,
+  accessibilityState,
   children,
   onPress,
   size,
@@ -172,6 +175,7 @@ function CircularSurface({
       accessibilityHint={accessibilityHint}
       accessibilityLabel={accessibilityLabel}
       accessibilityRole={accessibilityRole}
+      accessibilityState={accessibilityState}
       onPress={onPress}
       style={styles.pressable}
     >
@@ -210,6 +214,7 @@ function CircularSurface({
 export function HomeCircularAction({
   accessibilityHint,
   accessibilityLabel,
+  accessibilityState,
   children,
   onPress,
   size = 52,
@@ -219,6 +224,7 @@ export function HomeCircularAction({
       accessibilityHint={accessibilityHint}
       accessibilityLabel={accessibilityLabel}
       accessibilityRole="button"
+      accessibilityState={accessibilityState}
       onPress={onPress}
       size={size}
     >
