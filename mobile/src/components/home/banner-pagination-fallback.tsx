@@ -1,12 +1,6 @@
-import { useEffect, useState } from 'react';
-import { AccessibilityInfo, Animated, StyleSheet, View } from 'react-native';
-import {
-  GlassView,
-  isGlassEffectAPIAvailable,
-  isLiquidGlassAvailable,
-} from 'expo-glass-effect';
+import { Animated, StyleSheet, View } from 'react-native';
 
-interface BannerPaginationGlassProps {
+interface BannerPaginationFallbackProps {
   count: number;
   pageWidth: number;
   scrollX: Animated.Value;
@@ -17,24 +11,6 @@ const DOT_SIZE = 5.5;
 const GAP = 6;
 const HORIZONTAL_PADDING = 9;
 const VERTICAL_PADDING = 5;
-
-type GlassAvailability = {
-  api: boolean;
-  liquid: boolean;
-};
-
-function getNativeGlassAvailability(): GlassAvailability {
-  if (process.env.EXPO_OS !== 'ios') return { api: false, liquid: false };
-
-  try {
-    return {
-      api: isGlassEffectAPIAvailable(),
-      liquid: isLiquidGlassAvailable(),
-    };
-  } catch {
-    return { api: false, liquid: false };
-  }
-}
 
 function indicatorInterpolation(index: number, count: number, pageWidth: number) {
   const width = Math.max(1, pageWidth);
@@ -90,74 +66,28 @@ function PaginationIndicator({
   );
 }
 
-export function BannerPaginationGlass({ count, pageWidth, scrollX }: BannerPaginationGlassProps) {
-  const [glassAvailability] = useState(getNativeGlassAvailability);
-  const [reduceTransparency, setReduceTransparency] = useState<boolean | null>(() =>
-    process.env.EXPO_OS === 'ios' ? null : true
-  );
-
-  useEffect(() => {
-    if (process.env.NODE_ENV !== 'production') {
-      console.info(
-        `[Pythagoras] Glass API: ${glassAvailability.api}; Liquid Glass: ${glassAvailability.liquid}`
-      );
-    }
-  }, [glassAvailability.api, glassAvailability.liquid]);
-
-  useEffect(() => {
-    if (process.env.EXPO_OS !== 'ios') return;
-
-    let mounted = true;
-    AccessibilityInfo.isReduceTransparencyEnabled()
-      .then((enabled) => {
-        if (mounted) setReduceTransparency(enabled);
-      })
-      .catch(() => {
-        if (mounted) setReduceTransparency(true);
-      });
-
-    const subscription = AccessibilityInfo.addEventListener(
-      'reduceTransparencyChanged',
-      setReduceTransparency
-    );
-
-    return () => {
-      mounted = false;
-      subscription.remove();
-    };
-  }, []);
-
+export function BannerPaginationFallback({
+  count,
+  pageWidth,
+  scrollX,
+}: BannerPaginationFallbackProps) {
   if (count < 2) return null;
-
-  const useGlass =
-    reduceTransparency === false && glassAvailability.api && glassAvailability.liquid;
-  const indicators = (
-    <View style={styles.indicators}>
-      {Array.from({ length: count }, (_, index) => (
-        <PaginationIndicator
-          key={index}
-          count={count}
-          index={index}
-          pageWidth={pageWidth}
-          scrollX={scrollX}
-        />
-      ))}
-    </View>
-  );
 
   return (
     <View pointerEvents="none" style={styles.positioner}>
-      {useGlass ? (
-        <GlassView
-          glassEffectStyle="regular"
-          isInteractive={false}
-          style={styles.capsule}
-        >
-          {indicators}
-        </GlassView>
-      ) : (
-        <View style={[styles.capsule, styles.fallbackCapsule]}>{indicators}</View>
-      )}
+      <View style={[styles.capsule, styles.fallbackCapsule]}>
+        <View style={styles.indicators}>
+          {Array.from({ length: count }, (_, index) => (
+            <PaginationIndicator
+              key={index}
+              count={count}
+              index={index}
+              pageWidth={pageWidth}
+              scrollX={scrollX}
+            />
+          ))}
+        </View>
+      </View>
     </View>
   );
 }
