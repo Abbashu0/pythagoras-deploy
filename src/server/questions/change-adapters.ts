@@ -675,7 +675,10 @@ function stripOccurrence(value: QuestionOccurrenceContent): QuestionOccurrenceCo
 
 function assertImmutableOwnership(type: QuestionChangeResourceType, before: ChangeSnapshot, proposed: ChangeSnapshot): void {
   if (type === "question.package") {
-    for (const key of ["packageKey", "subjectKey", "language", "contentRevision", "sourceAssetId", "assetBindings"] as const) if (!sameJson(before[key], proposed[key])) validationError(`Question Package ${key} is immutable after creation.`);
+    for (const key of ["packageKey", "subjectKey", "language"] as const) if (!sameJson(before[key], proposed[key])) validationError(`Question Package ${key} is immutable after creation.`);
+    if (Number(proposed.contentRevision) < Number(before.contentRevision)) validationError("Question Package contentRevision cannot decrease.");
+    const provenanceChanged = !sameJson(before.sourceAssetId, proposed.sourceAssetId) || !sameJson(before.assetBindings, proposed.assetBindings);
+    if (Number(proposed.contentRevision) === Number(before.contentRevision) && provenanceChanged) validationError("Question Package source provenance can change only with a newer contentRevision.");
   }
   if (["question.taxonomy", "question.browse", "question.item"].includes(type) && before.packageId !== proposed.packageId) validationError("Question resource Package ownership is immutable.");
 }

@@ -74,6 +74,52 @@ test("warning acknowledgement, active-draft idempotency, reviewed publication, a
   } finally { f.close(); }
 });
 
+test("newer package revisions stage as governed UPDATEs and preserve stable Question identity", async () => {
+  const f = createFixture();
+  try {
+    const original = fixture("b-literature-valid.json");
+    const firstAsset = await ingestPackage(f.database, f.actor, original, "revision-one.json");
+    const first = await f.service.stage(firstAsset.id, false, f.actor);
+    let firstDetails = f.changes.getDetails(first.changeSetId!, f.actor);
+    firstDetails = f.changes.submit(firstDetails.changeSet.id, firstDetails.changeSet.revision, f.actor);
+    firstDetails = f.changes.approve(firstDetails.changeSet.id, firstDetails.changeSet.revision, f.actor);
+    f.changes.publish(firstDetails.changeSet.id, firstDetails.changeSet.revision, f.actor);
+
+    const updated = structuredClone(original);
+    updated.package.contentRevision = 2;
+    const updatedBlock = updated.questions[0].variants[0].content.blocks[0];
+    if (updatedBlock.type !== "paragraph") throw new Error("Fixture paragraph expected.");
+    updatedBlock.spans[0].text = "سؤال أدبي محدث ضمن revision ثانية.";
+    updated.questions[0].variants[0].occurrences[0].rawLabel = "مصدر اصطناعي محدث";
+    const secondAsset = await ingestPackage(f.database, f.actor, updated, "revision-two.json");
+    const preflight = await f.service.preflight(secondAsset.id, f.actor);
+    assert.equal(preflight.operation, "UPDATE");
+    assert.equal(preflight.eligible, true);
+    assert.equal(preflight.update?.questionsUpdated, 1);
+    assert.equal(preflight.update?.questionsSuperseded, 0);
+    assert.equal(preflight.update?.occurrencesSuperseded, 0);
+
+    const staged = await f.service.stage(secondAsset.id, false, f.actor);
+    assert.equal(staged.operation, "UPDATE");
+    const details = f.changes.getDetails(staged.changeSetId!, f.actor);
+    assert.equal(details.items.every((item) => item.operation === "UPDATE"), true);
+    assert.equal(new SQLiteQuestionRepository(f.database).getPackage(original.package.id)?.contentRevision, 1);
+
+    let state = f.changes.submit(details.changeSet.id, details.changeSet.revision, f.actor);
+    state = f.changes.approve(state.changeSet.id, state.changeSet.revision, f.actor);
+    f.changes.publish(state.changeSet.id, state.changeSet.revision, f.actor);
+    const aggregate = new SQLiteQuestionRepository(f.database).getPackageAggregate(original.package.id)!;
+    assert.equal(aggregate.package.contentRevision, 2);
+    assert.equal(aggregate.package.sourceAssetId, secondAsset.id);
+    assert.equal(aggregate.questions[0].id, original.questions[0].id);
+    assert.equal(aggregate.questions[0].variants[0].id, original.questions[0].variants[0].id);
+    assert.equal(aggregate.questions[0].variants[0].occurrences[0].id, original.questions[0].variants[0].occurrences[0].id);
+    const publishedBlock = aggregate.questions[0].variants[0].content.blocks[0];
+    assert.equal(publishedBlock.type, "paragraph");
+    if (publishedBlock.type === "paragraph") assert.equal(publishedBlock.spans[0].text, "سؤال أدبي محدث ضمن revision ثانية.");
+  } finally { f.close(); }
+});
+
 test("initial import blocks canonical package, bank-entry, and nested entity collisions", async () => {
   const f = createFixture();
   try {
@@ -165,7 +211,7 @@ test("generated 2000-question package stages atomically with paging and bounded 
     });
     const asset = await ingestPackage(f.database, f.actor, value, "generated-2000.json");
     const staged = await f.service.stage(asset.id, false, f.actor);
-    assert.equal(staged.itemCount, 2_002); assert.equal(Object.keys(staged).length <= 5, true);
+    assert.equal(staged.itemCount, 2_002); assert.equal(Object.keys(staged).length <= 6, true);
     assert.equal(tableCount(f.database, "change_set_items"), 2_002); assert.equal(tableCount(f.database, "questions"), 0);
     const first = f.changes.getDetailsPage(staged.changeSetId!, f.actor, 25, 0); const last = f.changes.getDetailsPage(staged.changeSetId!, f.actor, 25, 2_000);
     assert.equal(first.items.length, 25); assert.equal(first.itemPage.total, 2_002); assert.equal(last.items.length, 2);

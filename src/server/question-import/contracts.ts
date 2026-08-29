@@ -16,13 +16,37 @@ export interface QuestionPackageImportCounts {
   estimatedChangeItems: number;
 }
 
+export interface QuestionPackageUpdateDiff {
+  questionsAdded: number;
+  questionsUpdated: number;
+  questionsRetained: number;
+  questionsSuperseded: number;
+  variantsAdded: number;
+  variantsUpdated: number;
+  variantsRetained: number;
+  variantsSuperseded: number;
+  occurrencesAdded: number;
+  occurrencesUpdated: number;
+  occurrencesRetained: number;
+  occurrencesSuperseded: number;
+  taxonomyAdded: number;
+  taxonomyUpdated: number;
+  taxonomyRetained: number;
+  taxonomySuperseded: number;
+  richContentChanged: number;
+  contentRevision: { from: number; to: number };
+  estimatedChangeItems: number;
+}
+
 export interface QuestionPackageImportPreflight {
   assetId: string;
   status: QuestionPackageRecognitionStatus;
+  operation: "CREATE" | "UPDATE";
   eligible: boolean;
   acknowledgementRequired: boolean;
   alreadyImported: boolean;
   existingChangeSetId: string | null;
+  update: QuestionPackageUpdateDiff | null;
   package: null | {
     id: string;
     key: string;
@@ -48,6 +72,7 @@ export interface QuestionPackageImportPreflight {
 
 export interface CompactQuestionPackageStageResult {
   outcome: "STAGED" | "EXISTING_DRAFT" | "ALREADY_IMPORTED";
+  operation: "CREATE" | "UPDATE";
   packageId: string;
   changeSetId: string | null;
   changeSetRevision: number | null;

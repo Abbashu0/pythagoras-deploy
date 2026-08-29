@@ -350,32 +350,44 @@ export class SQLiteQuestionRepository implements QuestionRepository {
   updatePackage(input: { id: string; content: QuestionPackageContent; expectedRevision: number; actor: AdminActor }): QuestionPackageEntity {
     assertMutationActor(input.actor);
     const current = this.requirePackage(input.id);
-    if (
-      current.packageKey !== input.content.packageKey ||
-      current.subjectKey !== input.content.subjectKey ||
-      current.language !== input.content.language ||
-      current.contentRevision !== input.content.contentRevision ||
-      current.sourceAssetId !== input.content.sourceAssetId ||
-      JSON.stringify(this.listAssetBindings(input.id).map(({ packageId: _packageId, ...binding }) => binding)) !== JSON.stringify(input.content.assetBindings)
-    ) {
-      invalid("Question Package identity and source provenance are immutable.");
+    const currentBindings = this.listAssetBindings(input.id).map(({ packageId: _packageId, ...binding }) => binding);
+    if (current.packageKey !== input.content.packageKey || current.subjectKey !== input.content.subjectKey || current.language !== input.content.language) {
+      invalid("Question Package identity is immutable after creation.");
+    }
+    if (input.content.contentRevision < current.contentRevision) {
+      invalid("Question Package contentRevision cannot decrease.");
+    }
+    const provenanceChanged = current.sourceAssetId !== input.content.sourceAssetId || JSON.stringify(currentBindings) !== JSON.stringify(input.content.assetBindings);
+    if (input.content.contentRevision === current.contentRevision && provenanceChanged) {
+      invalid("Question Package source provenance can change only with a newer contentRevision.");
     }
     let updated;
     try {
-      updated = this.database.db.update(questionPackages).set({
-        title: input.content.title,
-        bankBrowseMode: input.content.bankBrowseMode,
-        bankBrowseEntryKey: input.content.bankBrowseEntryKey,
-        bankBrowseEntryLabel: input.content.bankBrowseEntryLabel,
-        bankBrowseEntryOrder: input.content.bankBrowseEntryOrder,
-        updatedAt: this.clock(),
-        updatedBy: input.actor.actorUserId,
-        revision: sql`${questionPackages.revision} + 1`,
-      }).where(and(eq(questionPackages.id, input.id), eq(questionPackages.revision, input.expectedRevision))).returning().get();
+      this.database.client.transaction(() => {
+        updated = this.database.db.update(questionPackages).set({
+          title: input.content.title,
+          contentRevision: input.content.contentRevision,
+          bankBrowseMode: input.content.bankBrowseMode,
+          bankBrowseEntryKey: input.content.bankBrowseEntryKey,
+          bankBrowseEntryLabel: input.content.bankBrowseEntryLabel,
+          bankBrowseEntryOrder: input.content.bankBrowseEntryOrder,
+          sourceAssetId: input.content.sourceAssetId,
+          updatedAt: this.clock(),
+          updatedBy: input.actor.actorUserId,
+          revision: sql`${questionPackages.revision} + 1`,
+        }).where(and(eq(questionPackages.id, input.id), eq(questionPackages.revision, input.expectedRevision))).returning().get();
+        if (!updated) throw new QuestionDomainConflictError(input.expectedRevision, this.requirePackage(input.id).revision);
+        this.database.db.delete(questionPackageAssetBindings).where(eq(questionPackageAssetBindings.packageId, input.id)).run();
+        if (input.content.assetBindings.length) {
+          this.database.db.insert(questionPackageAssetBindings).values(
+            input.content.assetBindings.map((binding) => ({ ...binding, packageId: input.id })),
+          ).run();
+        }
+      })();
     } catch (error) {
+      if (error instanceof QuestionDomainConflictError) throw error;
       throw mapConstraintError(error);
     }
-    if (!updated) throw new QuestionDomainConflictError(input.expectedRevision, this.requirePackage(input.id).revision);
     return toPackage(updated);
   }
 
