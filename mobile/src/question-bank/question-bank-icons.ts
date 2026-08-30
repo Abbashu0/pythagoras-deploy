@@ -13,6 +13,10 @@ export const questionBankIcons = {
     ios: 'xmark',
     android: import('@expo/material-symbols/close.xml'),
   }),
+  search: Icon.select({
+    ios: 'magnifyingglass',
+    android: import('@expo/material-symbols/search.xml'),
+  }),
   chevronDown: Icon.select({
     ios: 'chevron.down',
     android: import('@expo/material-symbols/expand.xml'),

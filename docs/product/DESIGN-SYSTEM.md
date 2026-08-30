@@ -298,7 +298,12 @@ Current rules:
 - ordinal blue is reserved for the meaningful ordinal state;
 - borders remain hairline/subtle;
 - no decorative gradients or strong shadows are introduced;
-- native Search remains a native Stack Search Bar;
+- Search and the Grammar topic switcher share one fixed native control row above the scrolling Question Cards;
+- Search owns the flexible remaining width on the physical left, while the topic selector uses content-driven width on the physical right without overlap or clipping;
+- Product-defined Grammar topics come from the published Public Layout rather than a duplicated Mobile label list;
+- iOS uses a stable native `GlassView` trigger with a native SwiftUI `Popover`, while Android uses native Compose presentation;
+- Search is scoped to the selected Bank, and Favorites remain subject-wide;
+- the Arabic Literature/root selector remains deferred until its Product experience is designed;
 - Question Card geometry, search behavior, favorites, and Reader behavior are Product contracts.
 
 ## Question Reader

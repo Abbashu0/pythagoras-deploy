@@ -7,24 +7,23 @@ import {
   StyleSheet,
   Text,
   View,
+  useWindowDimensions,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
-  type TextInputFocusEventData,
 } from 'react-native';
-import { Stack, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import type { SearchBarCommands } from 'react-native-screens';
-import { Host, Icon } from '@expo/ui';
+import { Host, Icon, type TextInputRef } from '@expo/ui';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   fetchQuestionBankLayout,
   fetchQuestionPage,
   fetchQuestionSearchPage,
-  findAvailableBank,
   QUESTION_PAGE_SIZE,
   QUESTION_SEARCH_PAGE_SIZE,
   type PublicQuestionPage,
+  type PublicMaterialQuestionBankNode,
   type PublicQuestionSearchItem,
   type PublicQuestionSummary,
 } from '@/question-bank/question-bank-api';
@@ -40,12 +39,23 @@ import {
   type QuestionSourceRect,
 } from '@/question-bank/question-reader-overlay';
 import { questionBankIcons } from '@/question-bank/question-bank-icons';
+import {
+  QUESTION_BANK_CONTROL_GAP,
+  QUESTION_BANK_HORIZONTAL_INSET,
+  QUESTION_BANK_SEARCH_MIN_WIDTH,
+} from '@/question-bank/question-bank-control-geometry';
+import { QuestionBankSearchInput } from '@/question-bank/question-bank-search-input';
+import {
+  ARABIC_SUBJECT_KEY,
+  DEFAULT_GRAMMAR_TOPIC_NODE_KEY,
+  getDefaultGrammarTopicNode,
+  getGrammarTopicNodes,
+} from '@/question-bank/question-bank-topics';
+import { QuestionTopicSelector } from '@/question-bank/question-topic-selector';
 import { HomeCircularAction } from '@/profile/profile-entry';
 import { usePreferences } from '@/preferences/preferences-provider';
 import { getPalette, scaledFontSize, scaledLineHeight } from '@/theme';
 
-const ARABIC_SUBJECT_KEY = 'arabic';
-const ISTIFHAM_NODE_KEY = 'arabic-grammar-istifham';
 const SEARCH_DEBOUNCE_MS = 300;
 const SCROLL_TO_TOP_THRESHOLD = 220;
 const SKELETON_ROWS = [
@@ -79,15 +89,20 @@ function isSkeletonRow(row: QuestionListRow): row is SkeletonRow {
 
 export function QuestionBankScreen() {
   const insets = useSafeAreaInsets();
+  const { width: windowWidth } = useWindowDimensions();
   const { subjectKey: rawSubjectKey } = useLocalSearchParams<{
     subjectKey?: string | string[];
   }>();
   const subjectKey = getSubjectKey(rawSubjectKey) ?? '';
   const { fontScale, resolvedColorScheme } = usePreferences();
   const palette = getPalette(resolvedColorScheme);
+  const isArabic = subjectKey === ARABIC_SUBJECT_KEY;
   const [query, setQuery] = useState('');
-  const [bankNodeId, setBankNodeId] = useState<string | null>(null);
-  const [layoutLoading, setLayoutLoading] = useState(subjectKey === ARABIC_SUBJECT_KEY);
+  const [grammarTopics, setGrammarTopics] = useState<PublicMaterialQuestionBankNode[]>([]);
+  const [selectedTopicNodeKey, setSelectedTopicNodeKey] = useState(
+    DEFAULT_GRAMMAR_TOPIC_NODE_KEY
+  );
+  const [layoutLoading, setLayoutLoading] = useState(isArabic);
   const [layoutError, setLayoutError] = useState(false);
   const [layoutRetryKey, setLayoutRetryKey] = useState(0);
   const [normalItems, setNormalItems] = useState<PublicQuestionSummary[]>([]);
@@ -108,29 +123,56 @@ export function QuestionBankScreen() {
   const cardRefs = useRef(new Map<string, RefObject<View | null>>());
   const normalLoadingRef = useRef(false);
   const normalAbortRef = useRef<AbortController | null>(null);
+  const normalRequestIdRef = useRef(0);
   const searchLoadingRef = useRef(false);
   const searchAbortRef = useRef<AbortController | null>(null);
   const searchRequestIdRef = useRef(0);
-  const searchBarRef = useRef<SearchBarCommands | null>(null);
+  const searchBarRef = useRef<TextInputRef | null>(null);
   const searchFocusedRef = useRef(false);
   const listRef = useRef<FlatList<QuestionListRow> | null>(null);
   const scrollToTopVisibleRef = useRef(false);
   const [showScrollToTop, setShowScrollToTop] = useState(false);
 
+  const selectedTopic = useMemo(
+    () => (isArabic ? grammarTopics.find((topic) => topic.nodeKey === selectedTopicNodeKey) ?? null : null),
+    [grammarTopics, isArabic, selectedTopicNodeKey]
+  );
+  const bankNodeId = selectedTopic?.id ?? null;
+  const selectedTopicAvailable = isArabic && selectedTopic?.available === true;
+  const topicMaxWidth = Math.max(
+    0,
+    Math.round(
+      windowWidth -
+        QUESTION_BANK_HORIZONTAL_INSET * 2 -
+        QUESTION_BANK_CONTROL_GAP -
+        QUESTION_BANK_SEARCH_MIN_WIDTH
+    )
+  );
+  const searchQuery = query.trim();
+
   useEffect(() => {
-    if (subjectKey !== ARABIC_SUBJECT_KEY) {
+    if (!isArabic) {
       return;
     }
 
     const controller = new AbortController();
     let mounted = true;
 
+    normalAbortRef.current?.abort();
+    searchAbortRef.current?.abort();
+    normalRequestIdRef.current += 1;
+    searchRequestIdRef.current += 1;
+    normalLoadingRef.current = false;
+    searchLoadingRef.current = false;
+
     fetchQuestionBankLayout(subjectKey, controller.signal)
       .then((layout) => {
         if (!mounted) return;
-        const bank = findAvailableBank(layout, ISTIFHAM_NODE_KEY);
-        if (!bank) throw new Error('The published Istifham bank is unavailable.');
-        setBankNodeId(bank.id);
+        const topics = getGrammarTopicNodes(layout);
+        const defaultTopic = getDefaultGrammarTopicNode(topics);
+        setLayoutError(false);
+        setGrammarTopics(topics);
+        setSelectedTopicNodeKey(defaultTopic.nodeKey);
       })
       .catch((error) => {
         if (!mounted || controller.signal.aborted) return;
@@ -147,41 +189,55 @@ export function QuestionBankScreen() {
       mounted = false;
       controller.abort();
     };
-  }, [layoutRetryKey, subjectKey]);
+  }, [isArabic, layoutRetryKey, subjectKey]);
 
   const requestNormalPage = useCallback(
     async (offset: number): Promise<PublicQuestionPage | null> => {
-      if (!bankNodeId || normalLoadingRef.current) return null;
+      if (!bankNodeId || !selectedTopicAvailable || normalLoadingRef.current) return null;
+      const requestId = normalRequestIdRef.current;
       normalLoadingRef.current = true;
       const controller = new AbortController();
       normalAbortRef.current = controller;
 
       try {
-        return await fetchQuestionPage(
+        const page = await fetchQuestionPage(
           subjectKey,
           bankNodeId,
           offset,
           QUESTION_PAGE_SIZE,
           controller.signal
         );
+        if (controller.signal.aborted || requestId !== normalRequestIdRef.current) return null;
+        return page;
       } catch (error) {
-        if (!controller.signal.aborted && process.env.NODE_ENV !== 'production') {
+        if (
+          !controller.signal.aborted &&
+          requestId === normalRequestIdRef.current &&
+          process.env.NODE_ENV !== 'production'
+        ) {
           console.warn('[Pythagoras] Question Bank page unavailable', error);
         }
         return null;
       } finally {
-        normalLoadingRef.current = false;
+        if (
+          requestId === normalRequestIdRef.current &&
+          normalAbortRef.current === controller
+        ) {
+          normalLoadingRef.current = false;
+          normalAbortRef.current = null;
+        }
       }
     },
-    [bankNodeId, subjectKey]
+    [bankNodeId, selectedTopicAvailable, subjectKey]
   );
 
   useEffect(() => {
-    if (!bankNodeId || subjectKey !== ARABIC_SUBJECT_KEY) return;
+    if (!bankNodeId || !selectedTopicAvailable || !isArabic || searchQuery) return;
 
     let mounted = true;
+    const requestId = normalRequestIdRef.current;
     void requestNormalPage(0).then((page) => {
-      if (!mounted) return;
+      if (!mounted || requestId !== normalRequestIdRef.current) return;
       if (!page) {
         setNormalError(true);
         return;
@@ -191,6 +247,18 @@ export function QuestionBankScreen() {
       setNormalNextOffset(page.offset + page.items.length);
       setNormalLoaded(true);
     });
+
+    return () => {
+      mounted = false;
+      normalAbortRef.current?.abort();
+      normalLoadingRef.current = false;
+    };
+  }, [bankNodeId, isArabic, requestNormalPage, searchQuery, selectedTopicAvailable]);
+
+  useEffect(() => {
+    if (!isArabic) return;
+
+    let mounted = true;
     listFavoriteIds(subjectKey)
       .then((ids) => {
         if (mounted) setFavoriteIds(new Set(ids));
@@ -203,25 +271,20 @@ export function QuestionBankScreen() {
 
     return () => {
       mounted = false;
-      normalAbortRef.current?.abort();
-      normalLoadingRef.current = false;
     };
-  }, [bankNodeId, requestNormalPage, subjectKey]);
-
-  const searchQuery = query.trim();
+  }, [isArabic, subjectKey]);
 
   const handleSearchChange = useCallback(
-    (event: NativeSyntheticEvent<TextInputFocusEventData>) => {
-      const nextQuery = event.nativeEvent.text;
+    (nextQuery: string) => {
       setQuery(nextQuery);
       setSearchItems([]);
       setSearchTotal(0);
       setSearchNextOffset(0);
       setSearchError(false);
-      setSearchLoading(Boolean(nextQuery.trim()));
+      setSearchLoading(Boolean(nextQuery.trim()) && selectedTopicAvailable);
       setSearchLoadingMore(false);
     },
-    []
+    [selectedTopicAvailable]
   );
 
   const handleSearchFocus = useCallback(() => {
@@ -244,12 +307,52 @@ export function QuestionBankScreen() {
     listRef.current?.scrollToOffset({ animated: true, offset: 0 });
   }, []);
 
+  const handleTopicSelect = useCallback(
+    (nodeKey: string) => {
+      if (!isArabic) return;
+      const nextTopic = grammarTopics.find((topic) => topic.nodeKey === nodeKey);
+      if (!nextTopic || nextTopic.nodeKey === selectedTopicNodeKey) return;
+
+      normalAbortRef.current?.abort();
+      searchAbortRef.current?.abort();
+      normalRequestIdRef.current += 1;
+      searchRequestIdRef.current += 1;
+      normalLoadingRef.current = false;
+      searchLoadingRef.current = false;
+
+      setSelectedTopicNodeKey(nextTopic.nodeKey);
+      setNormalItems([]);
+      setNormalTotal(0);
+      setNormalNextOffset(0);
+      setNormalLoaded(false);
+      setNormalLoadingMore(false);
+      setNormalError(false);
+      setPaginationError(false);
+      setSearchItems([]);
+      setSearchTotal(0);
+      setSearchNextOffset(0);
+      setSearchLoading(Boolean(searchQuery) && nextTopic.available);
+      setSearchLoadingMore(false);
+      setSearchError(false);
+      setActiveReader(null);
+      scrollToTopVisibleRef.current = false;
+      setShowScrollToTop(false);
+      listRef.current?.scrollToOffset({ animated: false, offset: 0 });
+    },
+    [
+      grammarTopics,
+      isArabic,
+      searchQuery,
+      selectedTopicNodeKey,
+    ]
+  );
+
   useEffect(() => {
     searchAbortRef.current?.abort();
     searchRequestIdRef.current += 1;
     const requestId = searchRequestIdRef.current;
 
-    if (!bankNodeId || subjectKey !== ARABIC_SUBJECT_KEY || !searchQuery) {
+    if (!bankNodeId || !selectedTopicAvailable || !isArabic || !searchQuery) {
       return;
     }
 
@@ -291,17 +394,25 @@ export function QuestionBankScreen() {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [bankNodeId, searchQuery, subjectKey]);
+  }, [bankNodeId, isArabic, searchQuery, selectedTopicAvailable, subjectKey]);
 
-  const layoutPending = subjectKey === ARABIC_SUBJECT_KEY && layoutLoading;
-  const normalInitialLoading = Boolean(bankNodeId) && !normalLoaded && !normalError;
+  const layoutPending = isArabic && (layoutLoading || (grammarTopics.length === 0 && !layoutError));
+  const normalInitialLoading =
+    Boolean(bankNodeId) && selectedTopicAvailable && !searchQuery && !normalLoaded && !normalError;
   const initialListLoading = layoutPending || normalInitialLoading;
 
   const loadMoreNormal = useCallback(() => {
-    if (normalItems.length >= normalTotal || normalInitialLoading || normalLoadingMore) return;
+    if (
+      !selectedTopicAvailable ||
+      normalItems.length >= normalTotal ||
+      normalInitialLoading ||
+      normalLoadingMore
+    ) return;
+    const requestId = normalRequestIdRef.current;
     setNormalLoadingMore(true);
     setPaginationError(false);
     void requestNormalPage(normalNextOffset).then((page) => {
+      if (requestId !== normalRequestIdRef.current) return;
       if (!page) {
         setPaginationError(true);
         return;
@@ -309,12 +420,23 @@ export function QuestionBankScreen() {
       setNormalItems((current) => mergeByQuestionId(current, page.items));
       setNormalTotal(page.total);
       setNormalNextOffset(page.offset + page.items.length);
-    }).finally(() => setNormalLoadingMore(false));
-  }, [normalInitialLoading, normalItems.length, normalLoadingMore, normalNextOffset, normalTotal, requestNormalPage]);
+    }).finally(() => {
+      if (requestId === normalRequestIdRef.current) setNormalLoadingMore(false);
+    });
+  }, [
+    normalInitialLoading,
+    normalItems.length,
+    normalLoadingMore,
+    normalNextOffset,
+    normalTotal,
+    requestNormalPage,
+    selectedTopicAvailable,
+  ]);
 
   const loadMoreSearch = useCallback(async () => {
     if (
       !bankNodeId ||
+      !selectedTopicAvailable ||
       !searchQuery ||
       searchItems.length >= searchTotal ||
       searchLoading ||
@@ -361,6 +483,7 @@ export function QuestionBankScreen() {
     searchLoading,
     searchLoadingMore,
     searchTotal,
+    selectedTopicAvailable,
     subjectKey,
   ]);
 
@@ -433,7 +556,7 @@ export function QuestionBankScreen() {
     setActiveReader(null);
   }, []);
 
-  const searchMode = Boolean(searchQuery) && subjectKey === ARABIC_SUBJECT_KEY;
+  const searchMode = Boolean(searchQuery) && isArabic && selectedTopicAvailable;
   const listData = useMemo<QuestionListRow[]>(() => {
     if (searchMode) {
       if (searchLoading && searchItems.length === 0) return [...SKELETON_ROWS];
@@ -466,9 +589,12 @@ export function QuestionBankScreen() {
   );
 
   const retryNormal = useCallback(() => {
+    if (!selectedTopicAvailable || !bankNodeId) return;
     setNormalLoaded(false);
     setNormalError(false);
+    const requestId = normalRequestIdRef.current;
     void requestNormalPage(0).then((page) => {
+      if (requestId !== normalRequestIdRef.current) return;
       if (!page) {
         setNormalError(true);
         return;
@@ -478,16 +604,30 @@ export function QuestionBankScreen() {
       setNormalNextOffset(page.offset + page.items.length);
       setNormalLoaded(true);
     });
-  }, [requestNormalPage]);
+  }, [bankNodeId, requestNormalPage, selectedTopicAvailable]);
 
   const retryLayout = useCallback(() => {
-    setBankNodeId(null);
+    normalAbortRef.current?.abort();
+    searchAbortRef.current?.abort();
+    normalRequestIdRef.current += 1;
+    searchRequestIdRef.current += 1;
+    normalLoadingRef.current = false;
+    searchLoadingRef.current = false;
+    setGrammarTopics([]);
+    setSelectedTopicNodeKey(DEFAULT_GRAMMAR_TOPIC_NODE_KEY);
     setNormalItems([]);
     setNormalTotal(0);
     setNormalNextOffset(0);
     setNormalLoaded(false);
     setNormalError(false);
     setPaginationError(false);
+    setSearchItems([]);
+    setSearchTotal(0);
+    setSearchNextOffset(0);
+    setSearchLoading(false);
+    setSearchLoadingMore(false);
+    setSearchError(false);
+    setActiveReader(null);
     setLayoutLoading(true);
     setLayoutError(false);
     setLayoutRetryKey((value) => value + 1);
@@ -503,6 +643,8 @@ export function QuestionBankScreen() {
       message = 'تعذر تحميل بنك الأسئلة';
       actionLabel = 'إعادة المحاولة';
       onAction = retryLayout;
+    } else if (isArabic && selectedTopic && !selectedTopicAvailable) {
+      message = 'لم تُضف أسئلة هذا الموضوع بعد';
     } else if (normalError && !searchMode) {
       message = 'تعذر تحميل الأسئلة';
       actionLabel = 'إعادة المحاولة';
@@ -511,7 +653,7 @@ export function QuestionBankScreen() {
       message = 'تعذر البحث حاليًا';
     } else if (searchMode) {
       message = 'لا توجد نتائج مطابقة';
-    } else if (subjectKey !== ARABIC_SUBJECT_KEY) {
+    } else if (!isArabic) {
       message = 'لا يتوفر بنك أسئلة لهذه المادة حاليًا';
     }
 
@@ -547,7 +689,21 @@ export function QuestionBankScreen() {
         )}
       </View>
     );
-  }, [fontScale, initialListLoading, layoutError, normalError, palette, retryLayout, retryNormal, searchError, searchLoading, searchMode, subjectKey]);
+  }, [
+    fontScale,
+    initialListLoading,
+    isArabic,
+    layoutError,
+    normalError,
+    palette,
+    retryLayout,
+    retryNormal,
+    searchError,
+    searchLoading,
+    searchMode,
+    selectedTopic,
+    selectedTopicAvailable,
+  ]);
 
   const listFooter = useMemo(() => {
     if (searchMode) {
@@ -586,67 +742,86 @@ export function QuestionBankScreen() {
 
   return (
     <>
-      <FlatList
-        contentContainerStyle={[
-          styles.content,
-          { backgroundColor: palette.background },
-        ]}
-        contentInsetAdjustmentBehavior="automatic"
-        data={listData}
-        getItemLayout={(_, index) => ({
-          index,
-          length: QUESTION_CARD_HEIGHT_WITH_GAP,
-          offset: QUESTION_CARD_HEIGHT_WITH_GAP * index,
-        })}
-        initialNumToRender={12}
-        keyExtractor={(item) => (isSkeletonRow(item) ? item.id : item.questionId)}
-        keyboardShouldPersistTaps="handled"
-        ListEmptyComponent={renderEmpty}
-        ListFooterComponent={listFooter}
-        onEndReached={searchMode ? loadMoreSearch : loadMoreNormal}
-        onEndReachedThreshold={0.65}
-        onScroll={handleListScroll}
-        renderItem={renderItem}
-        ref={listRef}
-        scrollEventThrottle={16}
-        showsVerticalScrollIndicator={false}
-        style={[styles.container, { backgroundColor: palette.background }]}
-        windowSize={7}
-      />
-      {showScrollToTop ? (
-        <View
-          pointerEvents="box-none"
-          style={[styles.scrollToTopSlot, { bottom: Math.max(insets.bottom + 16, 24) }]}
-        >
-          <HomeCircularAction
-            accessibilityHint="يعيد قائمة الأسئلة إلى بدايتها"
-            accessibilityLabel="العودة إلى بداية بنك الأسئلة"
-            onPress={scrollToTop}
-          >
-            <Host
-              colorScheme={resolvedColorScheme}
-              layoutDirection="rightToLeft"
-              matchContents
-              style={styles.scrollToTopIconHost}
-            >
-              <Icon color={palette.text} name={questionBankIcons.scrollToTop} size={22} />
-            </Host>
-          </HomeCircularAction>
+      <View style={[styles.screen, { backgroundColor: palette.background }]}>
+        <View style={styles.controlRow}>
+          <View style={styles.searchSlot}>
+            <QuestionBankSearchInput
+              fontScale={fontScale}
+              onBlur={handleSearchBlur}
+              onChangeText={handleSearchChange}
+              onFocus={handleSearchFocus}
+              palette={palette}
+              query={query}
+              ref={searchBarRef}
+              resolvedColorScheme={resolvedColorScheme}
+            />
+          </View>
+          {isArabic && grammarTopics.length > 0 ? (
+            <View style={[styles.topicSlot, { maxWidth: topicMaxWidth }]}>
+              <QuestionTopicSelector
+                colorScheme={resolvedColorScheme}
+                maxWidth={topicMaxWidth}
+                onSelect={handleTopicSelect}
+                secondaryTextColor={palette.textSecondary}
+                selectedTopic={selectedTopic}
+                tintColor={palette.surface}
+                textColor={palette.text}
+                topics={grammarTopics}
+              />
+            </View>
+          ) : null}
         </View>
-      ) : null}
-      <Stack.SearchBar
-        allowToolbarIntegration={false}
-        autoCapitalize="none"
-        hideWhenScrolling={false}
-        onBlur={handleSearchBlur}
-        onChangeText={handleSearchChange}
-        onFocus={handleSearchFocus}
-        placement="stacked"
-        placeholder="ابحث في بنك الأسئلة"
-        ref={searchBarRef}
-      />
+        <FlatList
+          contentContainerStyle={[
+            styles.content,
+            { backgroundColor: palette.background },
+          ]}
+          contentInsetAdjustmentBehavior="automatic"
+          data={listData}
+          getItemLayout={(_, index) => ({
+            index,
+            length: QUESTION_CARD_HEIGHT_WITH_GAP,
+            offset: QUESTION_CARD_HEIGHT_WITH_GAP * index,
+          })}
+          initialNumToRender={12}
+          keyExtractor={(item) => (isSkeletonRow(item) ? item.id : item.questionId)}
+          keyboardShouldPersistTaps="handled"
+          ListEmptyComponent={renderEmpty}
+          ListFooterComponent={listFooter}
+          onEndReached={searchMode ? loadMoreSearch : loadMoreNormal}
+          onEndReachedThreshold={0.65}
+          onScroll={handleListScroll}
+          renderItem={renderItem}
+          ref={listRef}
+          scrollEventThrottle={16}
+          showsVerticalScrollIndicator={false}
+          style={[styles.container, { backgroundColor: palette.background }]}
+          windowSize={7}
+        />
+        {showScrollToTop ? (
+          <View
+            pointerEvents="box-none"
+            style={[styles.scrollToTopSlot, { bottom: Math.max(insets.bottom + 16, 24) }]}
+          >
+            <HomeCircularAction
+              accessibilityHint="يعيد قائمة الأسئلة إلى بدايتها"
+              accessibilityLabel="العودة إلى بداية بنك الأسئلة"
+              onPress={scrollToTop}
+            >
+              <Host
+                colorScheme={resolvedColorScheme}
+                layoutDirection="rightToLeft"
+                matchContents
+                style={styles.scrollToTopIconHost}
+              >
+                <Icon color={palette.text} name={questionBankIcons.scrollToTop} size={22} />
+              </Host>
+            </HomeCircularAction>
+          </View>
+        ) : null}
+      </View>
       <StatusBar style={resolvedColorScheme === 'dark' ? 'light' : 'dark'} />
-      {activeReader && bankNodeId && (
+      {activeReader && bankNodeId && selectedTopicAvailable && (
         <QuestionReaderOverlay
           bankNodeId={bankNodeId}
           initialFavorite={favoriteIds.has(activeReader.question.questionId)}
@@ -664,8 +839,29 @@ export function QuestionBankScreen() {
 const QUESTION_CARD_HEIGHT_WITH_GAP = QUESTION_CARD_HEIGHT + QUESTION_CARD_GAP;
 
 const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    minWidth: 0,
+  },
   container: {
     flex: 1,
+  },
+  controlRow: {
+    alignItems: 'center',
+    direction: 'ltr',
+    flexDirection: 'row',
+    gap: QUESTION_BANK_CONTROL_GAP,
+    paddingBottom: 10,
+    paddingHorizontal: QUESTION_BANK_HORIZONTAL_INSET,
+    paddingTop: 10,
+  },
+  searchSlot: {
+    flex: 1,
+    minWidth: 0,
+  },
+  topicSlot: {
+    flexGrow: 0,
+    flexShrink: 0,
   },
   content: {
     flexGrow: 1,
