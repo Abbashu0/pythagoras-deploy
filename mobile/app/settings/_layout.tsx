@@ -8,7 +8,7 @@ export default function SettingsChildLayout() {
 
   return (
     <Stack screenOptions={getSettingsRouteOptions(resolvedColorScheme)}>
-      <Stack.Screen name="index" options={{ title: 'الإعدادات' }} />
+      <Stack.Screen name="index" options={{ headerShown: false, title: 'الإعدادات' }} />
       <Stack.Screen name="information" options={{ title: 'معلومات' }} />
       <Stack.Screen name="faq" options={{ title: 'الأسئلة الشائعة' }} />
       <Stack.Screen name="support" options={{ title: 'الدعم الفني' }} />

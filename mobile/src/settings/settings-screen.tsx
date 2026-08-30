@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 
 import { settingsIcons } from '@/settings/settings-icons';
 import { SettingsNavigationRow } from '@/settings/settings-navigation-row';
+import { SettingsSheetHeader } from '@/settings/settings-sheet-header';
 import { usePreferences } from '@/preferences/preferences-provider';
 import { getPalette, type Palette } from '@/theme';
 
@@ -41,6 +42,7 @@ export function SettingsScreen() {
       showsVerticalScrollIndicator={false}
       style={[styles.container, { backgroundColor: palette.background }]}
     >
+      <SettingsSheetHeader />
       <SettingsGroup palette={palette}>
           <SettingsNavigationRow
             fontScale={fontScale}
