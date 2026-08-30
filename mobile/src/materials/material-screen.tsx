@@ -98,18 +98,31 @@ export function MaterialScreen() {
               }
               primary
             />
-            <View style={styles.secondaryActions}>
-              {ACTIONS.map((action) => (
-                <MaterialActionCard
-                  key={action.key}
-                  colorScheme={resolvedColorScheme}
-                  fontScale={fontScale}
-                  icon={action.icon}
-                  label={action.label}
-                  onPress={() =>
-                    router.push(`/materials/${material.subjectKey}/${action.key}` as Href)
-                  }
-                />
+            <View
+              style={[
+                styles.secondaryActions,
+                {
+                  backgroundColor: palette.surface,
+                  borderColor: palette.border,
+                },
+              ]}
+            >
+              {ACTIONS.map((action, index) => (
+                <View key={action.key}>
+                  <MaterialActionCard
+                    colorScheme={resolvedColorScheme}
+                    fontScale={fontScale}
+                    grouped
+                    icon={action.icon}
+                    label={action.label}
+                    onPress={() =>
+                      router.push(`/materials/${material.subjectKey}/${action.key}` as Href)
+                    }
+                  />
+                  {index < ACTIONS.length - 1 ? (
+                    <View style={[styles.secondarySeparator, { backgroundColor: palette.separator }]} />
+                  ) : null}
+                </View>
               ))}
             </View>
           </View>
@@ -148,7 +161,15 @@ const styles = StyleSheet.create({
     gap: 20,
   },
   secondaryActions: {
-    gap: 10,
+    borderCurve: 'continuous',
+    borderRadius: 26,
+    borderWidth: StyleSheet.hairlineWidth,
+    gap: 0,
+    paddingVertical: 4,
+  },
+  secondarySeparator: {
+    height: StyleSheet.hairlineWidth,
+    marginHorizontal: 20,
   },
   message: {
     alignSelf: 'center',

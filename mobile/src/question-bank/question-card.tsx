@@ -58,17 +58,20 @@ export function QuestionCard({
         style={({ pressed }) => [
           styles.card,
           {
-            backgroundColor: palette.surface,
+            backgroundColor: pressed ? palette.surfacePressed : palette.surface,
             borderColor: palette.border,
-            opacity: pressed ? 0.82 : 1,
           },
         ]}
       >
         <View pointerEvents="none" style={styles.metaRow}>
           <View style={styles.metaLeading}>
             {ministerialCount > 0 && (
-              <View style={[styles.ministerialBadge, { backgroundColor: palette.surfaceMuted }]}> 
-                <Text style={[styles.ministerialText, { color: palette.textSecondary }]}> 
+              <View
+                style={[styles.ministerialBadge, { backgroundColor: palette.surfaceElevated }]}
+              >
+                <Text
+                  style={[styles.ministerialText, { color: palette.textSecondary }]}
+                >
                   {ministerialCount === 1 ? 'وزاري 1' : `وزاري ${ministerialCount} مرات`}
                 </Text>
               </View>
@@ -83,7 +86,7 @@ export function QuestionCard({
               </Host>
             ) : null}
           </View>
-          <Text selectable style={[styles.ordinal, { color: Platform.OS === 'ios' ? PlatformColor('systemBlue') : '#0A84FF' }]}>#{question.ordinal}</Text>
+          <Text selectable style={[styles.ordinal, { color: Platform.OS === 'ios' ? PlatformColor('systemBlue') : palette.selectionAccent }]}>#{question.ordinal}</Text>
         </View>
         <View style={styles.textRegion}>
           {question.primaryPreviewRich.blocks.length ? (
@@ -112,11 +115,11 @@ export function QuestionCardSkeleton({ palette }: { palette: Palette }) {
         { backgroundColor: palette.surface, borderColor: palette.border },
       ]}
     >
-      <View style={[styles.skeletonOrdinal, { backgroundColor: palette.surfaceMuted }]} />
+       <View style={[styles.skeletonOrdinal, { backgroundColor: palette.surfaceElevated }]} />
       <View style={styles.skeletonTextRegion}>
-        <View style={[styles.skeletonLine, { backgroundColor: palette.surfaceMuted, width: '88%' }]} />
-        <View style={[styles.skeletonLine, { backgroundColor: palette.surfaceMuted, width: '72%' }]} />
-        <View style={[styles.skeletonLine, { backgroundColor: palette.surfaceMuted, width: '54%' }]} />
+        <View style={[styles.skeletonLine, { backgroundColor: palette.surfaceElevated, width: '88%' }]} />
+        <View style={[styles.skeletonLine, { backgroundColor: palette.surfaceElevated, width: '72%' }]} />
+        <View style={[styles.skeletonLine, { backgroundColor: palette.surfaceElevated, width: '54%' }]} />
       </View>
     </View>
   );

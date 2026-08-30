@@ -1,10 +1,33 @@
-import { FieldGroup, Host } from '@expo/ui';
+import { Children, Fragment, type ReactNode } from 'react';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 
 import { settingsIcons } from '@/settings/settings-icons';
 import { SettingsNavigationRow } from '@/settings/settings-navigation-row';
 import { usePreferences } from '@/preferences/preferences-provider';
-import { getPalette } from '@/theme';
+import { getPalette, type Palette } from '@/theme';
+
+function SettingsGroup({ children, palette }: { children: ReactNode; palette: Palette }) {
+  const rows = Children.toArray(children);
+
+  return (
+    <View
+      style={[
+        styles.group,
+        { backgroundColor: palette.surface, borderColor: palette.border },
+      ]}
+    >
+      {rows.map((row, index) => (
+        <Fragment key={index}>
+          {row}
+          {index < rows.length - 1 ? (
+            <View style={[styles.separator, { backgroundColor: palette.separator }]} />
+          ) : null}
+        </Fragment>
+      ))}
+    </View>
+  );
+}
 
 export function SettingsScreen() {
   const router = useRouter();
@@ -12,12 +35,13 @@ export function SettingsScreen() {
   const palette = getPalette(resolvedColorScheme);
 
   return (
-    <Host
-      colorScheme={resolvedColorScheme}
-      layoutDirection="rightToLeft"
-      style={{ backgroundColor: palette.background, flex: 1 }}>
-      <FieldGroup>
-        <FieldGroup.Section>
+    <ScrollView
+      contentContainerStyle={styles.content}
+      contentInsetAdjustmentBehavior="automatic"
+      showsVerticalScrollIndicator={false}
+      style={[styles.container, { backgroundColor: palette.background }]}
+    >
+      <SettingsGroup palette={palette}>
           <SettingsNavigationRow
             fontScale={fontScale}
             icon={settingsIcons.information}
@@ -42,9 +66,9 @@ export function SettingsScreen() {
             palette={palette}
             testID="settings-support"
           />
-        </FieldGroup.Section>
+      </SettingsGroup>
 
-        <FieldGroup.Section>
+      <SettingsGroup palette={palette}>
           <SettingsNavigationRow
             fontScale={fontScale}
             icon={settingsIcons.appearance}
@@ -53,8 +77,30 @@ export function SettingsScreen() {
             palette={palette}
             testID="settings-appearance"
           />
-        </FieldGroup.Section>
-      </FieldGroup>
-    </Host>
+      </SettingsGroup>
+    </ScrollView>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  content: {
+    flexGrow: 1,
+    gap: 24,
+    paddingBottom: 40,
+    paddingHorizontal: 24,
+    paddingTop: 12,
+  },
+  group: {
+    borderCurve: 'continuous',
+    borderRadius: 28,
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: 'hidden',
+  },
+  separator: {
+    height: StyleSheet.hairlineWidth,
+    marginHorizontal: 20,
+  },
+});

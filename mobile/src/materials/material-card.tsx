@@ -8,7 +8,7 @@ import { resolveApiUrl } from '@/api/client';
 import { materialIcons } from '@/materials/material-icons';
 import { MaterialNativeIcon } from '@/materials/material-native-icon';
 import type { ResolvedColorScheme } from '@/preferences/preferences-provider';
-import { scaledFontSize, scaledLineHeight } from '@/theme';
+import { getPalette, scaledFontSize, scaledLineHeight } from '@/theme';
 
 interface MaterialCardProps {
   cardHeight: number;
@@ -25,8 +25,8 @@ type FrameSize = {
   width: number;
 };
 
-function getFallbackColor(gradient: string) {
-  return gradient.match(/#[0-9a-f]{6}/i)?.[0] ?? '#242424';
+function getFallbackColor(gradient: string, fallback: string) {
+  return gradient.match(/#[0-9a-f]{6}/i)?.[0] ?? fallback;
 }
 
 function getImageTransform(material: PublicMaterial, width: number, height: number) {
@@ -72,7 +72,8 @@ export function MaterialCard({
   const frameHeight = frameSize?.height || cardHeight;
   const textBottom = 20 + materialSettings.textVerticalPosition * 0.8;
   const textScale = materialSettings.textScale > 0 ? materialSettings.textScale : 1;
-  const fallbackColor = getFallbackColor(material.gradient);
+  const palette = getPalette(colorScheme);
+  const fallbackColor = getFallbackColor(material.gradient, palette.surfaceInset);
 
   const handleLayout = (event: LayoutChangeEvent) => {
     const { height, width: measuredWidth } = event.nativeEvent.layout;

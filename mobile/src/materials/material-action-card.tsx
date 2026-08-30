@@ -12,6 +12,7 @@ interface MaterialActionCardProps {
   icon: IconName;
   label: string;
   onPress: () => void;
+  grouped?: boolean;
   primary?: boolean;
 }
 
@@ -21,6 +22,7 @@ export function MaterialActionCard({
   icon,
   label,
   onPress,
+  grouped = false,
   primary = false,
 }: MaterialActionCardProps) {
   const palette = getPalette(colorScheme);
@@ -34,10 +36,18 @@ export function MaterialActionCard({
       onPress={onPress}
       style={({ pressed }) => [
         styles.card,
-        primary ? styles.primaryCard : styles.secondaryCard,
+        primary ? styles.primaryCard : grouped ? styles.groupedCard : styles.secondaryCard,
         {
-          backgroundColor: primary ? palette.surfaceMuted : palette.surface,
-          opacity: pressed ? 0.86 : 1,
+          backgroundColor: primary
+            ? palette.strongButton
+            : grouped
+              ? pressed
+                ? palette.surfacePressed
+                : 'transparent'
+            : pressed
+              ? palette.surfacePressed
+              : palette.surface,
+          opacity: primary && pressed ? 0.86 : 1,
         },
       ]}
     >
@@ -45,7 +55,7 @@ export function MaterialActionCard({
         style={[
           styles.actionIcon,
           primary ? styles.primaryIcon : styles.secondaryIcon,
-          { backgroundColor: primary ? palette.surface : palette.surfaceMuted },
+          { backgroundColor: palette.surfaceElevated },
         ]}
       >
         <MaterialNativeIcon
@@ -60,7 +70,7 @@ export function MaterialActionCard({
         style={[
           styles.label,
           {
-            color: palette.text,
+            color: primary ? palette.strongButtonText : palette.text,
             fontSize: scaledFontSize(primary ? 22 : 17, fontScale),
             lineHeight: scaledLineHeight(primary ? 22 : 17, fontScale, 1.35),
           },
@@ -92,10 +102,14 @@ const styles = StyleSheet.create({
   },
   primaryCard: {
     borderRadius: 26,
-    minHeight: 112,
+    height: 80,
+    minHeight: 80,
   },
   secondaryCard: {
     borderRadius: 20,
+    minHeight: 68,
+  },
+  groupedCard: {
     minHeight: 68,
   },
   actionIcon: {
@@ -103,9 +117,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   primaryIcon: {
-    borderRadius: 18,
-    height: 58,
-    width: 58,
+    borderRadius: 14,
+    height: 42,
+    width: 42,
   },
   secondaryIcon: {
     borderRadius: 14,

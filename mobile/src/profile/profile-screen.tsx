@@ -4,10 +4,11 @@ import { StatusBar } from 'expo-status-bar';
 
 import { demoProfileIdentity, ProfileAvatar } from '@/profile/profile-entry';
 import { usePreferences } from '@/preferences/preferences-provider';
-import { scaledFontSize, scaledLineHeight } from '@/theme';
+import { getPalette, scaledFontSize, scaledLineHeight } from '@/theme';
 
 export function ProfileScreen() {
-  const { fontScale } = usePreferences();
+  const { fontScale, resolvedColorScheme } = usePreferences();
+  const palette = getPalette(resolvedColorScheme);
 
   return (
     <>
@@ -15,18 +16,20 @@ export function ProfileScreen() {
         contentContainerStyle={styles.content}
         contentInsetAdjustmentBehavior="automatic"
         showsVerticalScrollIndicator={false}
-        style={styles.container}
+        style={[styles.container, { backgroundColor: palette.background }]}
       >
         <ProfileAvatar
           accessibilityLabel={`الصورة الشخصية لـ ${demoProfileIdentity.displayName}`}
           identity={demoProfileIdentity}
           size={104}
+          tintColor={palette.text}
         />
         <Text
           selectable
           style={[
             styles.name,
             {
+              color: palette.text,
               fontSize: scaledFontSize(24, fontScale),
               lineHeight: scaledLineHeight(24, fontScale, 1.25),
             },
@@ -39,6 +42,7 @@ export function ProfileScreen() {
           style={[
             styles.subtitle,
             {
+              color: palette.textSecondary,
               fontSize: scaledFontSize(16, fontScale),
               lineHeight: scaledLineHeight(16, fontScale, 1.4),
             },
@@ -48,15 +52,15 @@ export function ProfileScreen() {
         </Text>
       </ScrollView>
 
-      <StatusBar style="light" />
+      <StatusBar style={resolvedColorScheme === 'dark' ? 'light' : 'dark'} />
       <Stack.Screen
         options={{
-          contentStyle: { backgroundColor: '#000000' },
+          contentStyle: { backgroundColor: palette.background },
           headerBackButtonDisplayMode: 'minimal',
           headerShadowVisible: false,
           headerShown: true,
-          headerTintColor: '#FFFFFF',
-          headerTitleStyle: { color: '#FFFFFF' },
+          headerTintColor: palette.text,
+          headerTitleStyle: { color: palette.text },
           headerTransparent: true,
           title: 'الملف الشخصي',
         }}
@@ -67,7 +71,6 @@ export function ProfileScreen() {
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: '#000000',
     flex: 1,
   },
   content: {
@@ -78,13 +81,11 @@ const styles = StyleSheet.create({
     paddingTop: 32,
   },
   name: {
-    color: '#F4F4F5',
     fontWeight: '700',
     textAlign: 'center',
     writingDirection: 'rtl',
   },
   subtitle: {
-    color: '#B8B8BE',
     textAlign: 'center',
     writingDirection: 'rtl',
   },

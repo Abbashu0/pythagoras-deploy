@@ -16,7 +16,7 @@ import {
   getFontScalePointIndex,
   usePreferences,
 } from '@/preferences/preferences-provider';
-import { getPalette, scaledFontSize, scaledLineHeight } from '@/theme';
+import { getPalette, palettes, scaledFontSize, scaledLineHeight, type Palette } from '@/theme';
 
 type AppearanceChoice = AppearanceMode;
 
@@ -40,7 +40,7 @@ const themeOptions: readonly ThemeOption[] = [
   {
     id: 'default',
     name: 'الثيم الافتراضي',
-    swatches: ['#1C1C1E', '#8E8E93', '#F2F2F7', '#000000'],
+    swatches: [palettes.dark.background, palettes.dark.surface, palettes.dark.text, palettes.dark.accent],
   },
 ];
 
@@ -89,40 +89,49 @@ function SliderScaleMarkers({ colorScheme }: { colorScheme: ResolvedColorScheme 
   );
 }
 
-function MiniThemePreview({ mode }: { mode: AppearanceChoice }) {
-  const isLight = mode === 'light';
-  const isSystem = mode === 'system';
-  const previewSurface = isSystem ? '#8E8E93' : isLight ? '#F2F2F7' : '#000000';
-  const previewText = isSystem ? '#F2F2F7' : isLight ? '#1C1C1E' : '#F2F2F7';
-  const previewAccent = isSystem ? '#F2F2F7' : isLight ? '#8E8E93' : '#D1D1D6';
-
+function MiniPreviewContent({ palette }: { palette: Palette }) {
   return (
-    <View style={[styles.miniPreview, { backgroundColor: previewSurface }]}>
-      {isSystem ? (
+    <>
+      <View style={styles.previewHeader}>
+        <View style={[styles.previewDot, { backgroundColor: palette.accent }]} />
+        <View style={[styles.previewLineShort, { backgroundColor: palette.textSecondary }]} />
+      </View>
+      <View style={[styles.previewLine, { backgroundColor: palette.text }]} />
+      <View style={[styles.previewLineMedium, { backgroundColor: palette.textSecondary }]} />
+      <View style={styles.previewFooter}>
+        <View style={[styles.previewBlock, { backgroundColor: palette.accentSoft }]} />
+        <View style={[styles.previewBlock, { backgroundColor: palette.surfaceElevated }]} />
+      </View>
+    </>
+  );
+}
+
+function MiniThemePreview({ mode }: { mode: AppearanceChoice }) {
+  const lightPalette = getPalette('light');
+  const darkPalette = getPalette('dark');
+
+  if (mode === 'system') {
+    return (
+      <View style={[styles.miniPreview, { backgroundColor: darkPalette.background }]}>
         <View style={styles.systemPreview}>
-          <View style={[styles.systemPreviewPane, { backgroundColor: '#F2F2F7' }]}>
-            <View style={[styles.systemPreviewDot, { backgroundColor: '#8E8E93' }]} />
-            <View style={[styles.systemPreviewLine, { backgroundColor: '#1C1C1E' }]} />
+          <View style={[styles.systemPreviewPane, { backgroundColor: lightPalette.background }]}>
+            <View style={[styles.systemPreviewDot, { backgroundColor: lightPalette.accent }]} />
+            <View style={[styles.systemPreviewLine, { backgroundColor: lightPalette.text }]} />
           </View>
-          <View style={[styles.systemPreviewPane, { backgroundColor: '#000000' }]}>
-            <View style={[styles.systemPreviewDot, { backgroundColor: '#D1D1D6' }]} />
-            <View style={[styles.systemPreviewLine, { backgroundColor: '#F2F2F7' }]} />
+          <View style={[styles.systemPreviewPane, { backgroundColor: darkPalette.background }]}>
+            <View style={[styles.systemPreviewDot, { backgroundColor: darkPalette.accent }]} />
+            <View style={[styles.systemPreviewLine, { backgroundColor: darkPalette.text }]} />
           </View>
         </View>
-      ) : (
-        <>
-          <View style={styles.previewHeader}>
-            <View style={[styles.previewDot, { backgroundColor: previewAccent }]} />
-            <View style={[styles.previewLineShort, { backgroundColor: previewText }]} />
-          </View>
-          <View style={[styles.previewLine, { backgroundColor: previewText }]} />
-          <View style={[styles.previewLineMedium, { backgroundColor: previewAccent }]} />
-          <View style={styles.previewFooter}>
-            <View style={[styles.previewBlock, { backgroundColor: previewAccent }]} />
-            <View style={[styles.previewBlock, { backgroundColor: `${previewText}33` }]} />
-          </View>
-        </>
-      )}
+      </View>
+    );
+  }
+
+  const palette = mode === 'light' ? lightPalette : darkPalette;
+
+  return (
+    <View style={[styles.miniPreview, { backgroundColor: palette.background }]}>
+      <MiniPreviewContent palette={palette} />
     </View>
   );
 }
@@ -151,8 +160,8 @@ function AppearanceTile({
       style={({ pressed }) => [
         styles.appearanceTile,
         {
-          backgroundColor: palette.surface,
-          borderColor: selected ? palette.textSecondary : palette.border,
+          backgroundColor: palette.surfaceInset,
+          borderColor: selected ? palette.selectionAccent : palette.border,
           borderWidth: APPEARANCE_BORDER_WIDTH,
           opacity: pressed ? 0.86 : 1,
         },
@@ -193,7 +202,12 @@ function ThemePicker({
   const palette = getPalette(colorScheme);
 
   return (
-    <View style={styles.themeOptions}>
+    <View
+      style={[
+        styles.themeOptions,
+        { backgroundColor: palette.surface, borderColor: palette.border },
+      ]}
+    >
       {themeOptions.map((theme) => {
         const selected = theme.id === selectedThemeId;
 
@@ -207,8 +221,8 @@ function ThemePicker({
             style={({ pressed }) => [
               styles.themeCard,
               {
-                backgroundColor: palette.surface,
-                borderColor: selected ? palette.textSecondary : palette.border,
+                backgroundColor: palette.surfaceInset,
+                borderColor: selected ? palette.selectionAccent : palette.border,
                 borderWidth: APPEARANCE_BORDER_WIDTH,
                 opacity: pressed ? 0.86 : 1,
               },
@@ -299,7 +313,12 @@ export function SettingsAppearanceScreen() {
           >
             الوضع
           </Text>
-          <View style={styles.appearanceChoices}>
+          <View
+            style={[
+              styles.appearanceChoices,
+              { backgroundColor: palette.surface, borderColor: palette.border },
+            ]}
+          >
             {appearanceChoices.map((choice) => (
               <View key={choice.id} style={{ width: appearanceTileWidth }}>
                 <AppearanceTile
@@ -350,7 +369,15 @@ export function SettingsAppearanceScreen() {
           >
             حجم الخط
           </Text>
-          <View style={[styles.fontControl, { backgroundColor: palette.surface }]}>
+          <View
+            style={[
+              styles.fontControl,
+              {
+                backgroundColor: palette.surface,
+                borderColor: palette.border,
+              },
+            ]}
+          >
             <View style={styles.fontScaleLabels}>
               <Text selectable style={[styles.scaleLabelSmall, { color: palette.textTertiary }]}>A</Text>
               <Text selectable style={[styles.scaleLabelLarge, { color: palette.textTertiary }]}>A</Text>
@@ -408,11 +435,15 @@ const styles = StyleSheet.create({
     writingDirection: 'rtl',
   },
   appearanceChoices: {
+    borderCurve: 'continuous',
+    borderRadius: 26,
+    borderWidth: StyleSheet.hairlineWidth,
     direction: 'ltr',
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 12,
     justifyContent: 'space-between',
+    padding: 12,
   },
   appearanceTile: {
     borderCurve: 'continuous',
@@ -504,7 +535,11 @@ const styles = StyleSheet.create({
     width: 28,
   },
   themeOptions: {
+    borderCurve: 'continuous',
+    borderRadius: 26,
+    borderWidth: StyleSheet.hairlineWidth,
     gap: 12,
+    padding: 12,
   },
   themeCard: {
     borderCurve: 'continuous',
@@ -538,6 +573,7 @@ const styles = StyleSheet.create({
   },
   fontControl: {
     borderCurve: 'continuous',
+    borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 18,
     gap: 12,
     padding: 14,

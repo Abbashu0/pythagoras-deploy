@@ -107,7 +107,7 @@ export function MaterialsListScreen() {
                 style={[
                   styles.skeletonCard,
                   {
-                    backgroundColor: palette.surfaceMuted,
+                    backgroundColor: palette.surfaceElevated,
                     height: DEFAULT_NATIVE_MATERIAL_CARD_HEIGHT,
                     width: cardWidth,
                   },
@@ -136,7 +136,10 @@ export function MaterialsListScreen() {
               onPress={retryContent}
               style={({ pressed }) => [
                 styles.retryButton,
-                { backgroundColor: palette.surface, opacity: pressed ? 0.72 : 1 },
+                {
+                  backgroundColor: pressed ? palette.surfacePressed : palette.surfaceElevated,
+                  opacity: pressed ? 0.9 : 1,
+                },
               ]}
             >
               <Text

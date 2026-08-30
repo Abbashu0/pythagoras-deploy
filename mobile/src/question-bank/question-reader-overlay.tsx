@@ -242,7 +242,7 @@ export function QuestionReaderOverlay({
           <View style={[styles.readerSurface, { backgroundColor: palette.surface }]}>
             <View style={styles.utilityRow}>
               <ReaderCircleButton accessibilityLabel={favorite ? 'إزالة من المفضلة' : 'إضافة إلى المفضلة'} color={favoriteColor} icon={favorite ? 'heartFill' : 'heart'} onPress={handleFavorite} resolvedColorScheme={resolvedColorScheme} selected={favorite} />
-              <Text pointerEvents="none" selectable style={[styles.readerOrdinal, { color: Platform.OS === 'ios' ? PlatformColor('systemBlue') : '#0A84FF', fontSize: scaledFontSize(16, fontScale) }]}>#{question.ordinal}</Text>
+              <Text pointerEvents="none" selectable style={[styles.readerOrdinal, { color: Platform.OS === 'ios' ? PlatformColor('systemBlue') : palette.selectionAccent, fontSize: scaledFontSize(16, fontScale) }]}>#{question.ordinal}</Text>
               <ReaderCircleButton accessibilityLabel="إغلاق السؤال" color={palette.textSecondary} icon="close" onPress={closeReader} resolvedColorScheme={resolvedColorScheme} />
             </View>
             <ScrollView contentContainerStyle={styles.readerContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator style={styles.readerBody}>
@@ -293,7 +293,16 @@ function ProvenanceBlock({ occurrences, palette, fontScale }: { occurrences: Pub
   }
   return (
     <View style={styles.provenanceBlock}>
-      <Pressable accessibilityLabel={`وزاري ${occurrences.length} مرات`} accessibilityRole="button" accessibilityState={{ expanded }} onPress={() => setExpanded((value) => !value)} style={[styles.provenanceCapsule, { backgroundColor: palette.surfaceMuted, borderColor: palette.border }]}>
+      <Pressable
+        accessibilityLabel={`وزاري ${occurrences.length} مرات`}
+        accessibilityRole="button"
+        accessibilityState={{ expanded }}
+        onPress={() => setExpanded((value) => !value)}
+        style={[
+          styles.provenanceCapsule,
+          { backgroundColor: palette.surfaceElevated, borderColor: palette.border },
+        ]}
+      >
         <Text style={[styles.provenanceCapsuleText, { color: palette.textSecondary, fontSize: scaledFontSize(13, fontScale) }]}>وزاري {occurrences.length} مرات</Text>
         <Host colorScheme={resolvedColorScheme} layoutDirection="rightToLeft" matchContents style={styles.chevronHost}><Icon color={palette.textSecondary} name={questionBankIcons.chevronDown} size={16} /></Host>
       </Pressable>
@@ -314,7 +323,7 @@ function VariantsList({ primaryVariantId, variants }: { primaryVariantId: string
 }
 
 function ReaderSkeleton({ palette }: { palette: ReturnType<typeof getPalette> }) {
-  return <View style={styles.skeleton}>{[0, 1, 2].map((index) => <View key={index} style={[styles.skeletonLine, { backgroundColor: palette.surfaceMuted, width: index === 2 ? '55%' : index === 1 ? '82%' : '94%' }]} />)}</View>;
+  return <View style={styles.skeleton}>{[0, 1, 2].map((index) => <View key={index} style={[styles.skeletonLine, { backgroundColor: palette.surfaceElevated, width: index === 2 ? '55%' : index === 1 ? '82%' : '94%' }]} />)}</View>;
 }
 
 function DetailError({ onRetry, palette }: { onRetry: () => void; palette: ReturnType<typeof getPalette> }) {

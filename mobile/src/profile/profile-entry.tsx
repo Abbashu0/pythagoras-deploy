@@ -110,12 +110,14 @@ function useNativeGlassAvailability() {
 function AvatarArtwork({
   identity,
   size,
-  tintColor = '#F4F4F5',
+  tintColor,
 }: {
   identity: ProfileIdentity;
   size: number;
   tintColor?: string;
 }) {
+  const { resolvedColorScheme } = usePreferences();
+  const palette = getPalette(resolvedColorScheme);
   const imageSize = Math.max(1, size - 10);
   const hasAvatar = Boolean(identity.avatarUrl?.trim());
 
@@ -138,7 +140,7 @@ function AvatarArtwork({
         contentFit="contain"
         source="sf:person.crop.circle.fill"
         style={{ height: imageSize, width: imageSize }}
-        tintColor={tintColor}
+        tintColor={tintColor ?? palette.text}
       />
     );
   }
@@ -147,10 +149,15 @@ function AvatarArtwork({
     <View
       style={[
         styles.initialAvatar,
-        { borderRadius: imageSize / 2, height: imageSize, width: imageSize },
+        {
+          backgroundColor: palette.surfaceElevated,
+          borderRadius: imageSize / 2,
+          height: imageSize,
+          width: imageSize,
+        },
       ]}
     >
-      <Text style={{ fontSize: Math.round(imageSize * 0.42) }}>ع</Text>
+      <Text style={{ color: palette.text, fontSize: Math.round(imageSize * 0.42) }}>ع</Text>
     </View>
   );
 }
@@ -165,6 +172,8 @@ function CircularSurface({
   size,
 }: CircularSurfaceProps) {
   const useGlass = useNativeGlassAvailability();
+  const { resolvedColorScheme } = usePreferences();
+  const palette = getPalette(resolvedColorScheme);
   const dimensions = {
     borderRadius: size / 2,
     height: size,
@@ -204,7 +213,15 @@ function CircularSurface({
       accessible={!onPress}
       accessibilityLabel={!onPress ? accessibilityLabel : undefined}
       accessibilityRole={!onPress ? accessibilityRole : undefined}
-      style={[styles.fallbackShell, dimensions]}
+      style={[
+        styles.fallbackShell,
+        {
+          backgroundColor: palette.surfaceElevated,
+          borderColor: palette.border,
+          borderWidth: StyleSheet.hairlineWidth,
+        },
+        dimensions,
+      ]}
     >
       {content}
     </View>
@@ -337,7 +354,6 @@ const styles = StyleSheet.create({
   },
   fallbackShell: {
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.12)',
     borderCurve: 'continuous',
     justifyContent: 'center',
   },
@@ -353,7 +369,6 @@ const styles = StyleSheet.create({
   },
   initialAvatar: {
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.14)',
     justifyContent: 'center',
   },
 });

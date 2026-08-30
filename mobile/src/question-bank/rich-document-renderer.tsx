@@ -247,7 +247,7 @@ function RichTable({
                 key={`${block.id}-row-${rowIndex}-cell-${cellIndex}`}
                 style={[
                   styles.tableCell,
-                  { backgroundColor: rowIndex < block.headerRowCount ? palette.surfaceMuted : palette.surface },
+                  { backgroundColor: rowIndex < block.headerRowCount ? palette.surfaceElevated : palette.surface },
                   { borderColor: palette.border },
                 ]}
               >

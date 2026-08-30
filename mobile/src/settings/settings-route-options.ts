@@ -6,6 +6,7 @@ export function getSettingsRouteOptions(resolvedColorScheme: ResolvedColorScheme
 
   return {
     headerBackButtonDisplayMode: 'minimal' as const,
+    contentStyle: { backgroundColor: palette.background },
     headerShadowVisible: false,
     headerShown: true,
     headerTintColor: palette.text,
