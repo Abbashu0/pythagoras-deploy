@@ -9,7 +9,9 @@ Pythagoras is an Arabic study product with two product surfaces:
 
 The former `public/pythagoras/` vanilla HTML/CSS/JS Student harness was retired and removed in Phase B after it successfully validated the Backend and public client-neutral APIs. Git history remains its archive; it is not copied into an archive directory.
 
-The production Student client going forward is `mobile/` with Expo SDK 57, React Native 0.86.x, React, TypeScript 6, Expo Router, and `@expo/ui`. It currently contains only the intentionally minimal foundation screen. No Product navigation or Product screens have been designed yet.
+The production Student client is `mobile/` with Expo SDK 57, React Native 0.86.x, React, TypeScript 6, Expo Router, and `@expo/ui`. The current approved client includes the four-item NativeTabs shell, Home with the approved Banner carousel and profile/settings actions, Materials, native Stack destinations, Settings/Appearance, Profile, and the Arabic Question Bank with search, Reader, and local Favorites.
+
+For current visual and Product UI rules, read `docs/product/DESIGN-SYSTEM.md`. That document describes the active Pythagoras design language and is subordinate to newer explicit Product Owner decisions.
 
 The current published Question data includes the Arabic Grammar `الاستفهام` Package (`arabic-grammar-istifham`) with 482 Questions, 482 Variants, and 482 Occurrences assigned to the Arabic Question Bank. Do not re-import, mutate, delete, or re-publish this content as part of the Mobile foundation work.
 

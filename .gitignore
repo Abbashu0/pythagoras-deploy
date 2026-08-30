@@ -39,6 +39,8 @@ runtime-data/
 npm-debug.log*
 
 # Local-only developer tooling (never commit)
+__pycache__/
+*.pyc
 Pythagoras-Brain/
 graphify-out/
 .graphify/
