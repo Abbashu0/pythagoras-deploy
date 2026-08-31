@@ -38,6 +38,53 @@ function createPublishedQuestion(f: ReturnType<typeof fixture>) {
   return { packageId, taxonomyId, questionId, bankId };
 }
 
+function createPublishedMultiVariantQuestion(f: ReturnType<typeof fixture>) {
+  const packageId = uuidv7();
+  const taxonomyId = uuidv7();
+  const questionId = uuidv7();
+  const variantAId = uuidv7();
+  const variantBId = uuidv7();
+  const content: QuestionItemContent = {
+    packageId,
+    displayOrder: 1,
+    primaryVariantId: variantBId,
+    taxonomyAssignments: [{ taxonomyNodeId: taxonomyId, role: "PRIMARY", position: 0 }],
+    variants: [
+      {
+        id: variantAId,
+        displayOrder: 1,
+        content: paragraph("Variant A"),
+        occurrences: [
+          { id: uuidv7(), displayOrder: 1, sourceKind: "discussion-question", year: 2024, roundCode: "تمهيدي", session: null, sourceName: null, notes: null, rawLabel: "سؤال المناقشة 2024", branches: ["علمي"], qualifiers: [] },
+          { id: uuidv7(), displayOrder: 2, sourceKind: "ministerial", year: 2024, roundCode: "د1", session: null, sourceName: null, notes: null, rawLabel: "وزاري 2024", branches: ["علمي"], qualifiers: [] },
+        ],
+      },
+      {
+        id: variantBId,
+        displayOrder: 2,
+        content: paragraph("Variant B"),
+        occurrences: [
+          { id: uuidv7(), displayOrder: 1, sourceKind: "ministerial", year: 2025, roundCode: "د2", session: null, sourceName: null, notes: null, rawLabel: "وزاري 2025", branches: ["علمي"], qualifiers: [] },
+          { id: uuidv7(), displayOrder: 2, sourceKind: "ministerial", year: 2023, roundCode: "د1", session: null, sourceName: null, notes: null, rawLabel: "وزاري 2023", branches: ["علمي"], qualifiers: [] },
+        ],
+      },
+    ],
+    sharedAnswer: paragraph("Shared answer"),
+  };
+
+  f.questions.createPackage({ id: packageId, actor, content: { packageKey: `multi-provenance-${packageId}`, title: "Multi-variant package", subjectKey: "biology", language: "ar-IQ", contentRevision: 1, bankBrowseMode: "TREE", bankBrowseEntryKey: "multi-entry", bankBrowseEntryLabel: "Multi entry", bankBrowseEntryOrder: 1, sourceAssetId: null, assetBindings: [] } });
+  f.questions.createTaxonomyNode({ id: taxonomyId, actor, content: { packageId, nodeKey: "multi-topic", label: "Multi topic", kind: "topic", parentId: null, displayOrder: 1 } });
+  f.questions.createQuestionAggregate({ id: questionId, content, actor });
+
+  const material = createCanonicalContentRepository(f.database).getSnapshot().materials.find((item) => item.subjectKey === "biology")!;
+  const bankId = uuidv7();
+  const draft = f.banks.save("biology", { materialId: material.id, rootPresentation: "DIRECT", nodes: [{ id: bankId, nodeKey: "multi-bank", label: "Multi bank", nodeType: "BANK", parentId: null, displayOrder: 1, groupPresentation: null, packageId, targetMode: "ALL_PACKAGE_QUESTIONS", taxonomyNodeId: null, includeDescendants: null, enabled: true }] }, actor);
+  const submitted = f.banks.submit("biology", draft.revision, actor);
+  const approved = f.changes.approve(submitted.id, submitted.revision, actor).changeSet;
+  f.changes.publish(approved.id, approved.revision, actor);
+  return { questionId, bankId, variantAId, variantBId };
+}
+
 test("public list and search expose compact source-kind summaries without loading detail occurrences", () => {
   const f = fixture();
   try {
@@ -52,5 +99,35 @@ test("public list and search expose compact source-kind summaries without loadin
     assert.equal(detail.variants[0].occurrences[0].rawLabel, "وزاري 2024");
     assert.equal(detail.variants[0].occurrences[0].year, 2024);
     assert.deepEqual(detail.variants[0].occurrences[0].branches, ["علمي"]);
+  } finally { f.close(); }
+});
+
+test("public multi-Variant Question keeps primary content and aggregates only ministerial Card counts", () => {
+  const f = fixture();
+  try {
+    const created = createPublishedMultiVariantQuestion(f);
+    const page = f.banks.listPublicQuestions("biology", created.bankId);
+    const item = page.items[0];
+
+    assert.equal(item.primaryPreview, "Variant B");
+    assert.equal(item.variantCount, 2);
+    assert.equal(item.occurrenceCount, 4);
+    assert.deepEqual(item.sourceSummary, [
+      { sourceKind: "discussion-question", count: 1 },
+      { sourceKind: "ministerial", count: 3 },
+    ]);
+    assert.equal(item.sourceSummary.find((summary) => summary.sourceKind === "ministerial")?.count, 3);
+
+    const search = new QuestionSearchService(f.database);
+    search.rebuildAll();
+    const searched = f.banks.searchPublicQuestions("biology", created.bankId, "Variant B");
+    assert.deepEqual(searched.items[0].sourceSummary, item.sourceSummary);
+
+    const detail = f.banks.getPublicQuestion("biology", created.bankId, created.questionId);
+    assert.equal(detail.primaryVariantId, created.variantBId);
+    assert.deepEqual(detail.variants.map((variant) => variant.id), [created.variantAId, created.variantBId]);
+    assert.equal(detail.variants[0].occurrences.length, 2);
+    assert.equal(detail.variants[1].occurrences.length, 2);
+    assert.equal(detail.sharedAnswer?.blocks.length, 1);
   } finally { f.close(); }
 });

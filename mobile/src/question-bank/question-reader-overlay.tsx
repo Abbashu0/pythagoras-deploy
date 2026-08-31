@@ -36,6 +36,15 @@ import {
 import { questionBankIcons } from '@/question-bank/question-bank-icons';
 import { QUESTION_CARD_RADIUS } from '@/question-bank/question-card';
 import { RichDocumentRenderer } from '@/question-bank/rich-document-renderer';
+import {
+  countMinisterialOccurrences,
+  getAggregateQuestionOccurrences,
+  getOrderedQuestionVariants,
+  getPrimaryQuestionVariant,
+  getQuestionVariantLabel,
+  QUESTION_VARIANTS_SECTION_TITLE,
+  shouldRenderQuestionVariants,
+} from '@/question-bank/question-reader-model';
 import { HomeCircularAction } from '@/profile/profile-entry';
 import { usePreferences } from '@/preferences/preferences-provider';
 import { getPalette, scaledFontSize, scaledLineHeight } from '@/theme';
@@ -219,17 +228,9 @@ export function QuestionReaderOverlay({
     setRetryKey((value) => value + 1);
   }, []);
 
-  const primaryVariant = detail?.variants.find((variant) => variant.id === detail.primaryVariantId);
-  const sortedVariants = detail?.variants ? [...detail.variants].sort((left, right) => left.displayOrder - right.displayOrder) : [];
-  const occurrences = useMemo(() => {
-    const candidates = detail ? detail.variants.flatMap((variant) => variant.occurrences) : primaryVariant?.occurrences ?? [];
-    const seen = new Set<string>();
-    return candidates.filter((occurrence) => {
-      if (seen.has(occurrence.id)) return false;
-      seen.add(occurrence.id);
-      return true;
-    });
-  }, [detail, primaryVariant]);
+  const primaryVariant = getPrimaryQuestionVariant(detail);
+  const sortedVariants = getOrderedQuestionVariants(detail);
+  const occurrences = useMemo(() => getAggregateQuestionOccurrences(detail), [detail]);
   const favoriteColor = favorite ? Platform.OS === 'ios' ? PlatformColor('systemRed') : '#BA1A1A' : palette.textSecondary;
 
   return (
@@ -256,7 +257,7 @@ export function QuestionReaderOverlay({
                     <View style={[styles.sectionDivider, { backgroundColor: palette.border }]} />
                     <Text selectable style={[styles.sectionLabel, { color: palette.textSecondary, fontSize: scaledFontSize(14, fontScale) }]}>الجواب</Text>
                     {detail.sharedAnswer ? <RichDocumentRenderer document={detail.sharedAnswer} tone="answer" /> : <Text selectable style={[styles.missingAnswer, { color: palette.textTertiary, fontSize: scaledFontSize(16, fontScale), lineHeight: scaledLineHeight(16, fontScale, 1.45) }]}>لا يوجد جواب مضاف لهذا السؤال</Text>}
-                    {sortedVariants.length > 1 ? <VariantsList primaryVariantId={detail.primaryVariantId} variants={sortedVariants} /> : null}
+                    {shouldRenderQuestionVariants(sortedVariants) ? <VariantsList fontScale={fontScale} palette={palette} variants={sortedVariants} /> : null}
                   </>
                 ) : null}
                 {!detail && !detailError ? <ReaderSkeleton palette={palette} /> : null}
@@ -284,42 +285,87 @@ function ReaderCircleButton({ accessibilityLabel, color, icon, onPress, resolved
   );
 }
 
-function ProvenanceBlock({ occurrences, palette, fontScale }: { occurrences: PublicQuestionOccurrence[]; palette: ReturnType<typeof getPalette>; fontScale: number }) {
+function ReaderDisclosure({ accessibilityLabel, expanded, fontScale, label, onPress, palette }: { accessibilityLabel?: string; expanded: boolean; fontScale: number; label: string; onPress: () => void; palette: ReturnType<typeof getPalette> }) {
   const { resolvedColorScheme } = usePreferences();
+  return (
+    <Pressable
+      accessibilityLabel={accessibilityLabel ?? label}
+      accessibilityRole="button"
+      accessibilityState={{ expanded }}
+      onPress={onPress}
+      style={({ pressed }) => [styles.disclosure, pressed && styles.disclosurePressed]}
+    >
+      <Text style={[styles.disclosureText, { color: palette.textSecondary, fontSize: scaledFontSize(13, fontScale) }]}>{label}</Text>
+      <Host
+        colorScheme={resolvedColorScheme}
+        layoutDirection="rightToLeft"
+        matchContents
+        style={[styles.chevronHost, expanded && styles.chevronExpanded]}
+      >
+        <Icon color={palette.textSecondary} name={questionBankIcons.chevronDown} size={16} />
+      </Host>
+    </Pressable>
+  );
+}
+
+function ProvenanceBlock({ occurrences, palette, fontScale }: { occurrences: PublicQuestionOccurrence[]; palette: ReturnType<typeof getPalette>; fontScale: number }) {
   const [expanded, setExpanded] = useState(false);
   if (!occurrences.length) return null;
   if (occurrences.length === 1) {
     return <View style={styles.provenanceSingle}><Text selectable style={[styles.occurrenceText, { color: palette.textSecondary, fontSize: scaledFontSize(13, fontScale), lineHeight: scaledLineHeight(13, fontScale, 1.4) }]}>{formatOccurrence(occurrences[0])}</Text></View>;
   }
+  const ministerialCount = countMinisterialOccurrences(occurrences);
+  const summaryLabel = ministerialCount > 0
+    ? `وزاري ${ministerialCount}${ministerialCount === 1 ? '' : ' مرات'}`
+    : `المصادر ${occurrences.length}`;
   return (
     <View style={styles.provenanceBlock}>
-      <Pressable
-        accessibilityLabel={`وزاري ${occurrences.length} مرات`}
-        accessibilityRole="button"
-        accessibilityState={{ expanded }}
+      <ReaderDisclosure
+        accessibilityLabel={summaryLabel}
+        expanded={expanded}
+        label={summaryLabel}
         onPress={() => setExpanded((value) => !value)}
-        style={[
-          styles.provenanceCapsule,
-          { backgroundColor: palette.surfaceElevated, borderColor: palette.border },
-        ]}
-      >
-        <Text style={[styles.provenanceCapsuleText, { color: palette.textSecondary, fontSize: scaledFontSize(13, fontScale) }]}>وزاري {occurrences.length} مرات</Text>
-        <Host colorScheme={resolvedColorScheme} layoutDirection="rightToLeft" matchContents style={styles.chevronHost}><Icon color={palette.textSecondary} name={questionBankIcons.chevronDown} size={16} /></Host>
-      </Pressable>
+        palette={palette}
+        fontScale={fontScale}
+      />
       {expanded && occurrences.map((occurrence) => <Text key={occurrence.id} selectable style={[styles.occurrenceText, { color: palette.textSecondary, fontSize: scaledFontSize(13, fontScale), lineHeight: scaledLineHeight(13, fontScale, 1.4) }]}>{formatOccurrence(occurrence)}</Text>)}
     </View>
   );
 }
 
-function VariantsList({ primaryVariantId, variants }: { primaryVariantId: string; variants: PublicQuestionDetail['variants'] }) {
-  const { fontScale, resolvedColorScheme } = usePreferences();
-  const palette = getPalette(resolvedColorScheme);
+function VariantsList({ fontScale, palette, variants }: { fontScale: number; palette: ReturnType<typeof getPalette>; variants: PublicQuestionDetail['variants'] }) {
+  const [expanded, setExpanded] = useState(false);
   return (
     <View style={styles.variantsSection}>
-      <Text selectable style={[styles.sectionLabel, { color: palette.textSecondary, fontSize: scaledFontSize(14, fontScale) }]}>جميع الصيغ</Text>
-      <View style={styles.variantsList}>{variants.map((variant, index) => <View key={variant.id} style={[styles.variantBlock, { borderColor: palette.border }]}><Text selectable style={[styles.variantLabel, { color: palette.textTertiary, fontSize: scaledFontSize(13, fontScale) }]}>{primaryVariantId === variant.id ? 'الصيغة الأساسية' : `الصيغة ${index + 1}`}</Text><RichDocumentRenderer document={variant.content} tone="variant" /></View>)}</View>
+      <ReaderDisclosure
+        accessibilityLabel={QUESTION_VARIANTS_SECTION_TITLE}
+        expanded={expanded}
+        fontScale={fontScale}
+        label={QUESTION_VARIANTS_SECTION_TITLE}
+        onPress={() => setExpanded((value) => !value)}
+        palette={palette}
+      />
+      {expanded ? (
+        <View style={styles.variantsList}>
+          {variants.map((variant, index) => (
+            <View
+              key={variant.id}
+              style={[styles.variantBlock, { borderColor: palette.border }]}
+            >
+              <Text selectable style={[styles.variantLabel, { color: palette.textTertiary, fontSize: scaledFontSize(13, fontScale) }]}>{getQuestionVariantLabel(index)}</Text>
+              <RichDocumentRenderer document={variant.content} tone="variant" />
+              <VariantProvenance fontScale={fontScale} occurrences={variant.occurrences} palette={palette} />
+            </View>
+          ))}
+        </View>
+      ) : null}
     </View>
   );
+}
+
+function VariantProvenance({ occurrences, palette, fontScale }: { occurrences: PublicQuestionOccurrence[]; palette: ReturnType<typeof getPalette>; fontScale: number }) {
+  if (!occurrences.length) return null;
+  return <View style={styles.variantProvenance}>{occurrences.map((occurrence) => <Text key={occurrence.id} selectable style={[styles.occurrenceText, { color: palette.textSecondary, fontSize: scaledFontSize(13, fontScale), lineHeight: scaledLineHeight(13, fontScale, 1.4) }]}>{formatOccurrence(occurrence)}</Text>)}</View>;
 }
 
 function ReaderSkeleton({ palette }: { palette: ReturnType<typeof getPalette> }) {
@@ -363,13 +409,16 @@ const styles = StyleSheet.create({
   missingAnswer: { textAlign: 'right', writingDirection: 'rtl' },
   provenanceSingle: { alignItems: 'center', paddingTop: 2 },
   provenanceBlock: { alignItems: 'stretch', gap: 8 },
-  provenanceCapsule: { alignItems: 'center', alignSelf: 'center', borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, flexDirection: 'row', gap: 4, minHeight: 32, paddingHorizontal: 11 },
-  provenanceCapsuleText: { fontWeight: '600', writingDirection: 'rtl' },
+  disclosure: { alignItems: 'center', alignSelf: 'center', flexDirection: 'row', gap: 4, minHeight: 44, paddingHorizontal: 12, paddingVertical: 5 },
+  disclosurePressed: { opacity: 0.65 },
+  disclosureText: { fontWeight: '600', writingDirection: 'rtl' },
   chevronHost: { height: 18, width: 18 },
+  chevronExpanded: { transform: [{ rotate: '180deg' }] },
   occurrenceText: { textAlign: 'center', writingDirection: 'rtl' },
   variantsSection: { gap: 13, marginTop: 6 },
   variantsList: { gap: 13 },
   variantBlock: { borderTopWidth: StyleSheet.hairlineWidth, gap: 10, paddingTop: 13 },
+  variantProvenance: { gap: 5, paddingTop: 1 },
   variantLabel: { fontWeight: '600', textAlign: 'right', writingDirection: 'rtl' },
   skeleton: { gap: 11, paddingVertical: 7 },
   skeletonLine: { borderRadius: 5, height: 11 },
