@@ -3,6 +3,7 @@ import {
   DropdownMenuItem,
   ExposedDropdownMenu,
   ExposedDropdownMenuBox,
+  HorizontalDivider,
   Host,
   Icon,
   Row,
@@ -21,12 +22,21 @@ import {
   getTopicQuestionCount,
 } from '@/question-bank/question-bank-counts';
 import { QUESTION_BANK_CONTROL_HEIGHT } from '@/question-bank/question-bank-control-geometry';
+import { ARABIC_QUESTION_BANK_SECTION_ORDER } from '@/question-bank/question-bank-topics';
 import type { QuestionTopicSelectorProps } from '@/question-bank/question-topic-selector.types';
 
+const TOPIC_CHECKMARK_SIZE = 20;
+const TOPIC_LABEL_CLUSTER_WIDTH =
+  QUESTION_BANK_TOPIC_LABEL_COLUMN_WIDTH + TOPIC_CHECKMARK_SIZE;
+
 export function QuestionTopicSelector({
+  activeSection,
   colorScheme,
+  grammarGroup,
+  literatureBank,
   maxWidth,
   onSelect,
+  onSectionSelect,
   questionCounts,
   selectedTopic,
   secondaryTextColor,
@@ -35,7 +45,10 @@ export function QuestionTopicSelector({
 }: QuestionTopicSelectorProps) {
   const [expanded, setExpanded] = useState(false);
   const fieldRef = useRef<TextFieldRef>(null);
-  const selectedLabel = selectedTopic?.label ?? 'الموضوع';
+  const selectedLabel =
+    activeSection === 'literature'
+      ? literatureBank.label
+      : selectedTopic?.label ?? grammarGroup.label;
   const labelState = useNativeState(selectedLabel);
 
   useEffect(() => {
@@ -70,7 +83,41 @@ export function QuestionTopicSelector({
           modifiers={[menuAnchor()]}
         />
         <ExposedDropdownMenu expanded={expanded} onDismissRequest={() => setExpanded(false)}>
-          {topics.map((topic) => (
+          {ARABIC_QUESTION_BANK_SECTION_ORDER.map((key) => {
+            const label = key === 'grammar' ? grammarGroup.label : literatureBank.label;
+            const isSelected = key === activeSection;
+            return (
+              <DropdownMenuItem
+                key={key}
+                onClick={() => {
+                  onSectionSelect(key);
+                  setExpanded(false);
+                }}
+              >
+                <DropdownMenuItem.Text>
+                  <Row horizontalArrangement="start" verticalAlignment="center">
+                    <Text
+                      color={textColor}
+                      maxLines={1}
+                      softWrap={false}
+                      style={{ textAlign: 'right' }}
+                    >
+                      {label}
+                    </Text>
+                    <Icon
+                      contentDescription={isSelected ? 'محدد' : undefined}
+                      size={20}
+                      source={checkIcon}
+                      tint={secondaryTextColor}
+                      modifiers={[alpha(isSelected ? 1 : 0)]}
+                    />
+                  </Row>
+                </DropdownMenuItem.Text>
+              </DropdownMenuItem>
+            );
+          })}
+          {activeSection === 'grammar' ? <HorizontalDivider thickness={0.5} /> : null}
+          {activeSection === 'grammar' ? topics.map((topic) => (
             (() => {
               const isSelected = topic.nodeKey === selectedTopic?.nodeKey;
               const questionCount = getTopicQuestionCount(questionCounts, topic.nodeKey);
@@ -95,7 +142,11 @@ export function QuestionTopicSelector({
                           ? ''
                           : formatQuestionCountForDisplay(questionCount)}
                       </Text>
-                      <Row horizontalArrangement="start" verticalAlignment="center">
+                      <Row
+                        horizontalArrangement="start"
+                        verticalAlignment="center"
+                        modifiers={[width(TOPIC_LABEL_CLUSTER_WIDTH)]}
+                      >
                         <Text
                           color={textColor}
                           maxLines={1}
@@ -107,7 +158,7 @@ export function QuestionTopicSelector({
                         </Text>
                         <Icon
                           contentDescription={isSelected ? 'محدد' : undefined}
-                          size={20}
+                          size={TOPIC_CHECKMARK_SIZE}
                           source={checkIcon}
                           tint={secondaryTextColor}
                           modifiers={[alpha(isSelected ? 1 : 0)]}
@@ -118,7 +169,7 @@ export function QuestionTopicSelector({
                 </DropdownMenuItem>
               );
             })()
-          ))}
+          )) : null}
         </ExposedDropdownMenu>
       </ExposedDropdownMenuBox>
     </Host>

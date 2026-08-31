@@ -53,8 +53,12 @@ import { QuestionBankSearchInput } from '@/question-bank/question-bank-search-in
 import {
   ARABIC_SUBJECT_KEY,
   DEFAULT_GRAMMAR_TOPIC_NODE_KEY,
+  getArabicQuestionBankStructure,
+  getActiveArabicQuestionBank,
   getDefaultGrammarTopicNode,
-  getGrammarTopicNodes,
+  selectArabicQuestionBankSection,
+  type ArabicQuestionBankStructure,
+  type ArabicQuestionBankSection,
 } from '@/question-bank/question-bank-topics';
 import { QuestionTopicSelector } from '@/question-bank/question-topic-selector';
 import { HomeCircularAction } from '@/profile/profile-entry';
@@ -104,8 +108,11 @@ export function QuestionBankScreen() {
   const isArabic = subjectKey === ARABIC_SUBJECT_KEY;
   const [query, setQuery] = useState('');
   const [grammarTopics, setGrammarTopics] = useState<PublicMaterialQuestionBankNode[]>([]);
+  const [grammarGroup, setGrammarGroup] = useState<PublicMaterialQuestionBankNode | null>(null);
+  const [literatureBank, setLiteratureBank] = useState<PublicMaterialQuestionBankNode | null>(null);
   const [questionCounts, setQuestionCounts] = useState<Map<string, number>>(() => new Map());
-  const [selectedTopicNodeKey, setSelectedTopicNodeKey] = useState(
+  const [activeSection, setActiveSection] = useState<ArabicQuestionBankSection>('grammar');
+  const [selectedGrammarTopicNodeKey, setSelectedGrammarTopicNodeKey] = useState(
     DEFAULT_GRAMMAR_TOPIC_NODE_KEY
   );
   const [layoutLoading, setLayoutLoading] = useState(isArabic);
@@ -146,12 +153,35 @@ export function QuestionBankScreen() {
     questionCountsRef.current = questionCounts;
   }, [questionCounts]);
 
-  const selectedTopic = useMemo(
-    () => (isArabic ? grammarTopics.find((topic) => topic.nodeKey === selectedTopicNodeKey) ?? null : null),
-    [grammarTopics, isArabic, selectedTopicNodeKey]
+  const selectedGrammarTopic = useMemo(
+    () =>
+      isArabic
+        ? grammarTopics.find((topic) => topic.nodeKey === selectedGrammarTopicNodeKey) ?? null
+        : null,
+    [grammarTopics, isArabic, selectedGrammarTopicNodeKey]
   );
-  const bankNodeId = selectedTopic?.id ?? null;
-  const selectedTopicAvailable = isArabic && selectedTopic?.available === true;
+  const arabicQuestionBankStructure = useMemo<ArabicQuestionBankStructure | null>(
+    () =>
+      grammarGroup && literatureBank
+        ? { grammarGroup, literatureBank, grammarTopics }
+        : null,
+    [grammarGroup, grammarTopics, literatureBank]
+  );
+  const activeGrammarTopic = arabicQuestionBankStructure
+    ? arabicQuestionBankStructure.grammarTopics.find(
+        (topic) => topic.nodeKey === selectedGrammarTopicNodeKey
+      ) ?? getDefaultGrammarTopicNode(arabicQuestionBankStructure.grammarTopics)
+    : selectedGrammarTopic;
+  const activeBank =
+    isArabic && arabicQuestionBankStructure
+      ? getActiveArabicQuestionBank(
+          arabicQuestionBankStructure,
+          activeSection,
+          selectedGrammarTopicNodeKey
+        )
+      : null;
+  const bankNodeId = activeBank?.id || null;
+  const activeBankAvailable = isArabic && activeBank?.available === true;
   const topicMaxWidth = Math.max(
     0,
     Math.round(
@@ -183,9 +213,12 @@ export function QuestionBankScreen() {
     fetchQuestionBankLayout(subjectKey, controller.signal)
       .then((layout) => {
         if (!mounted) return;
-        const topics = getGrammarTopicNodes(layout);
+        const structure = getArabicQuestionBankStructure(layout);
+        const topics = structure.grammarTopics;
         const defaultTopic = getDefaultGrammarTopicNode(topics);
         setLayoutError(false);
+        setGrammarGroup(structure.grammarGroup);
+        setLiteratureBank(structure.literatureBank);
         setGrammarTopics(topics);
         setQuestionCounts((current) => {
           const topicKeys = new Set(topics.map((topic) => topic.nodeKey));
@@ -196,7 +229,8 @@ export function QuestionBankScreen() {
             next.size === current.size && [...next.keys()].every((nodeKey) => current.has(nodeKey));
           return hasSameKeys ? current : next;
         });
-        setSelectedTopicNodeKey(defaultTopic.nodeKey);
+        setActiveSection('grammar');
+        setSelectedGrammarTopicNodeKey(defaultTopic.nodeKey);
       })
       .catch((error) => {
         if (!mounted || controller.signal.aborted) return;
@@ -277,7 +311,7 @@ export function QuestionBankScreen() {
 
   const requestNormalPage = useCallback(
     async (offset: number): Promise<PublicQuestionPage | null> => {
-      if (!bankNodeId || !selectedTopicAvailable || normalLoadingRef.current) return null;
+      if (!bankNodeId || !activeBankAvailable || normalLoadingRef.current) return null;
       const requestId = normalRequestIdRef.current;
       normalLoadingRef.current = true;
       const controller = new AbortController();
@@ -312,11 +346,11 @@ export function QuestionBankScreen() {
         }
       }
     },
-    [bankNodeId, selectedTopicAvailable, subjectKey]
+    [activeBankAvailable, bankNodeId, subjectKey]
   );
 
   useEffect(() => {
-    if (!bankNodeId || !selectedTopicAvailable || !isArabic || searchQuery) return;
+    if (!bankNodeId || !activeBankAvailable || !isArabic || searchQuery) return;
 
     let mounted = true;
     const requestId = normalRequestIdRef.current;
@@ -330,7 +364,9 @@ export function QuestionBankScreen() {
       setNormalTotal(page.total);
       setNormalNextOffset(page.offset + page.items.length);
       setNormalLoaded(true);
-      storeQuestionCount(selectedTopicNodeKey, page.total);
+      if (activeSection === 'grammar' && activeGrammarTopic) {
+        storeQuestionCount(activeGrammarTopic.nodeKey, page.total);
+      }
     });
 
     return () => {
@@ -339,12 +375,14 @@ export function QuestionBankScreen() {
       normalLoadingRef.current = false;
     };
   }, [
+    activeBankAvailable,
+    activeGrammarTopic,
+    activeSection,
     bankNodeId,
     isArabic,
     requestNormalPage,
     searchQuery,
-    selectedTopicAvailable,
-    selectedTopicNodeKey,
+    selectedGrammarTopicNodeKey,
     storeQuestionCount,
   ]);
 
@@ -374,10 +412,10 @@ export function QuestionBankScreen() {
       setSearchTotal(0);
       setSearchNextOffset(0);
       setSearchError(false);
-      setSearchLoading(Boolean(nextQuery.trim()) && selectedTopicAvailable);
+      setSearchLoading(Boolean(nextQuery.trim()) && activeBankAvailable);
       setSearchLoadingMore(false);
     },
-    [selectedTopicAvailable]
+    [activeBankAvailable]
   );
 
   const handleSearchFocus = useCallback(() => {
@@ -400,12 +438,8 @@ export function QuestionBankScreen() {
     listRef.current?.scrollToOffset({ animated: true, offset: 0 });
   }, []);
 
-  const handleTopicSelect = useCallback(
-    (nodeKey: string) => {
-      if (!isArabic) return;
-      const nextTopic = grammarTopics.find((topic) => topic.nodeKey === nodeKey);
-      if (!nextTopic || nextTopic.nodeKey === selectedTopicNodeKey) return;
-
+  const resetQuestionBankState = useCallback(
+    (nextBankAvailable: boolean) => {
       normalAbortRef.current?.abort();
       searchAbortRef.current?.abort();
       normalRequestIdRef.current += 1;
@@ -413,7 +447,6 @@ export function QuestionBankScreen() {
       normalLoadingRef.current = false;
       searchLoadingRef.current = false;
 
-      setSelectedTopicNodeKey(nextTopic.nodeKey);
       setNormalItems([]);
       setNormalTotal(0);
       setNormalNextOffset(0);
@@ -424,7 +457,7 @@ export function QuestionBankScreen() {
       setSearchItems([]);
       setSearchTotal(0);
       setSearchNextOffset(0);
-      setSearchLoading(Boolean(searchQuery) && nextTopic.available);
+      setSearchLoading(Boolean(searchQuery) && nextBankAvailable);
       setSearchLoadingMore(false);
       setSearchError(false);
       setActiveReader(null);
@@ -432,11 +465,59 @@ export function QuestionBankScreen() {
       setShowScrollToTop(false);
       listRef.current?.scrollToOffset({ animated: false, offset: 0 });
     },
+    [searchQuery]
+  );
+
+  const handleTopicSelect = useCallback(
+    (nodeKey: string) => {
+      if (!isArabic || activeSection !== 'grammar') return;
+      const nextTopic = grammarTopics.find((topic) => topic.nodeKey === nodeKey);
+      if (!nextTopic || nextTopic.nodeKey === selectedGrammarTopicNodeKey) return;
+
+      resetQuestionBankState(nextTopic.available);
+      setSelectedGrammarTopicNodeKey(nextTopic.nodeKey);
+    },
     [
+      activeSection,
       grammarTopics,
       isArabic,
-      searchQuery,
-      selectedTopicNodeKey,
+      resetQuestionBankState,
+      selectedGrammarTopicNodeKey,
+    ]
+  );
+
+  const handleSectionSelect = useCallback(
+    (nextSection: ArabicQuestionBankSection) => {
+      if (!isArabic || nextSection === activeSection) return;
+
+      const nextGrammarTopic =
+        selectedGrammarTopic ??
+        (grammarTopics.length > 0 ? getDefaultGrammarTopicNode(grammarTopics) : null);
+      const nextSelection = arabicQuestionBankStructure
+        ? selectArabicQuestionBankSection(
+            arabicQuestionBankStructure,
+            { activeSection, selectedGrammarTopicNodeKey },
+            nextSection
+          )
+        : null;
+      const nextBank = nextSection === 'literature' ? literatureBank : nextGrammarTopic;
+      if (!nextBank) return;
+
+      resetQuestionBankState(nextBank.available);
+      if (nextSelection?.activeSection === 'grammar') {
+        setSelectedGrammarTopicNodeKey(nextSelection.selectedGrammarTopicNodeKey);
+      }
+      setActiveSection(nextSelection?.activeSection ?? nextSection);
+    },
+    [
+      activeSection,
+      arabicQuestionBankStructure,
+      grammarTopics,
+      isArabic,
+      literatureBank,
+      resetQuestionBankState,
+      selectedGrammarTopic,
+      selectedGrammarTopicNodeKey,
     ]
   );
 
@@ -445,7 +526,7 @@ export function QuestionBankScreen() {
     searchRequestIdRef.current += 1;
     const requestId = searchRequestIdRef.current;
 
-    if (!bankNodeId || !selectedTopicAvailable || !isArabic || !searchQuery) {
+    if (!bankNodeId || !activeBankAvailable || !isArabic || !searchQuery) {
       return;
     }
 
@@ -487,16 +568,16 @@ export function QuestionBankScreen() {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [bankNodeId, isArabic, searchQuery, selectedTopicAvailable, subjectKey]);
+  }, [activeBankAvailable, bankNodeId, isArabic, searchQuery, subjectKey]);
 
   const layoutPending = isArabic && (layoutLoading || (grammarTopics.length === 0 && !layoutError));
   const normalInitialLoading =
-    Boolean(bankNodeId) && selectedTopicAvailable && !searchQuery && !normalLoaded && !normalError;
+    Boolean(bankNodeId) && activeBankAvailable && !searchQuery && !normalLoaded && !normalError;
   const initialListLoading = layoutPending || normalInitialLoading;
 
   const loadMoreNormal = useCallback(() => {
     if (
-      !selectedTopicAvailable ||
+      !activeBankAvailable ||
       normalItems.length >= normalTotal ||
       normalInitialLoading ||
       normalLoadingMore
@@ -523,13 +604,13 @@ export function QuestionBankScreen() {
     normalNextOffset,
     normalTotal,
     requestNormalPage,
-    selectedTopicAvailable,
+    activeBankAvailable,
   ]);
 
   const loadMoreSearch = useCallback(async () => {
     if (
       !bankNodeId ||
-      !selectedTopicAvailable ||
+      !activeBankAvailable ||
       !searchQuery ||
       searchItems.length >= searchTotal ||
       searchLoading ||
@@ -576,7 +657,7 @@ export function QuestionBankScreen() {
     searchLoading,
     searchLoadingMore,
     searchTotal,
-    selectedTopicAvailable,
+    activeBankAvailable,
     subjectKey,
   ]);
 
@@ -649,7 +730,7 @@ export function QuestionBankScreen() {
     setActiveReader(null);
   }, []);
 
-  const searchMode = Boolean(searchQuery) && isArabic && selectedTopicAvailable;
+  const searchMode = Boolean(searchQuery) && isArabic && activeBankAvailable;
   const listData = useMemo<QuestionListRow[]>(() => {
     if (searchMode) {
       if (searchLoading && searchItems.length === 0) return [...SKELETON_ROWS];
@@ -682,7 +763,7 @@ export function QuestionBankScreen() {
   );
 
   const retryNormal = useCallback(() => {
-    if (!selectedTopicAvailable || !bankNodeId) return;
+    if (!activeBankAvailable || !bankNodeId) return;
     setNormalLoaded(false);
     setNormalError(false);
     const requestId = normalRequestIdRef.current;
@@ -696,13 +777,16 @@ export function QuestionBankScreen() {
       setNormalTotal(page.total);
       setNormalNextOffset(page.offset + page.items.length);
       setNormalLoaded(true);
-      storeQuestionCount(selectedTopicNodeKey, page.total);
+      if (activeSection === 'grammar' && activeGrammarTopic) {
+        storeQuestionCount(activeGrammarTopic.nodeKey, page.total);
+      }
     });
   }, [
+    activeBankAvailable,
+    activeGrammarTopic,
+    activeSection,
     bankNodeId,
     requestNormalPage,
-    selectedTopicAvailable,
-    selectedTopicNodeKey,
     storeQuestionCount,
   ]);
 
@@ -715,8 +799,11 @@ export function QuestionBankScreen() {
     countGenerationRef.current += 1;
     normalLoadingRef.current = false;
     searchLoadingRef.current = false;
+    setActiveSection('grammar');
+    setGrammarGroup(null);
+    setLiteratureBank(null);
     setGrammarTopics([]);
-    setSelectedTopicNodeKey(DEFAULT_GRAMMAR_TOPIC_NODE_KEY);
+    setSelectedGrammarTopicNodeKey(DEFAULT_GRAMMAR_TOPIC_NODE_KEY);
     setNormalItems([]);
     setNormalTotal(0);
     setNormalNextOffset(0);
@@ -745,8 +832,11 @@ export function QuestionBankScreen() {
       message = 'تعذر تحميل بنك الأسئلة';
       actionLabel = 'إعادة المحاولة';
       onAction = retryLayout;
-    } else if (isArabic && selectedTopic && !selectedTopicAvailable) {
-      message = 'لم تُضف أسئلة هذا الموضوع بعد';
+    } else if (isArabic && activeBank && !activeBankAvailable) {
+      message =
+        activeSection === 'literature'
+          ? 'لم تُضف أسئلة الأدب بعد'
+          : 'لم تُضف أسئلة هذا الموضوع بعد';
     } else if (normalError && !searchMode) {
       message = 'تعذر تحميل الأسئلة';
       actionLabel = 'إعادة المحاولة';
@@ -792,6 +882,9 @@ export function QuestionBankScreen() {
       </View>
     );
   }, [
+    activeBank,
+    activeBankAvailable,
+    activeSection,
     fontScale,
     initialListLoading,
     isArabic,
@@ -803,8 +896,6 @@ export function QuestionBankScreen() {
     searchError,
     searchLoading,
     searchMode,
-    selectedTopic,
-    selectedTopicAvailable,
   ]);
 
   const listFooter = useMemo(() => {
@@ -858,15 +949,19 @@ export function QuestionBankScreen() {
               resolvedColorScheme={resolvedColorScheme}
             />
           </View>
-          {isArabic && grammarTopics.length > 0 ? (
+          {isArabic && grammarGroup && literatureBank && grammarTopics.length > 0 ? (
             <View style={[styles.topicSlot, { maxWidth: topicMaxWidth }]}>
               <QuestionTopicSelector
+                activeSection={activeSection}
                 colorScheme={resolvedColorScheme}
+                grammarGroup={grammarGroup}
+                literatureBank={literatureBank}
                 maxWidth={topicMaxWidth}
                 onSelect={handleTopicSelect}
+                onSectionSelect={handleSectionSelect}
                 questionCounts={questionCounts}
+                selectedTopic={activeGrammarTopic}
                 secondaryTextColor={palette.textSecondary}
-                selectedTopic={selectedTopic}
                 tintColor={palette.surface}
                 textColor={palette.text}
                 topics={grammarTopics}
@@ -924,7 +1019,7 @@ export function QuestionBankScreen() {
         ) : null}
       </View>
       <StatusBar style={resolvedColorScheme === 'dark' ? 'light' : 'dark'} />
-      {activeReader && bankNodeId && selectedTopicAvailable && (
+      {activeReader && bankNodeId && activeBankAvailable && (
         <QuestionReaderOverlay
           bankNodeId={bankNodeId}
           initialFavorite={favoriteIds.has(activeReader.question.questionId)}

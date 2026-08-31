@@ -4,9 +4,13 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  ARABIC_QUESTION_BANK_SECTION_ORDER,
   DEFAULT_GRAMMAR_TOPIC_NODE_KEY,
+  getActiveArabicQuestionBank,
+  getArabicQuestionBankStructure,
   getDefaultGrammarTopicNode,
   getGrammarTopicNodes,
+  selectArabicQuestionBankSection,
 } from '@/question-bank/question-bank-topics';
 import {
   getTopicQuestionCount,
@@ -23,6 +27,16 @@ function layoutFixture(
   overrides: Partial<PublicMaterialQuestionBankNode>[] = []
 ): PublicMaterialQuestionBankLayout {
   const grammarGroupId = 'grammar-group';
+  const literatureBank = {
+    id: 'literature-bank',
+    nodeKey: 'arabic-literature',
+    label: 'Literature',
+    nodeType: 'BANK' as const,
+    parentId: null,
+    displayOrder: 1,
+    groupPresentation: null,
+    available: false,
+  };
   const topics = Array.from({ length: 9 }, (_, index) => ({
     id: `topic-${index + 1}`,
     nodeKey: index === 0 ? DEFAULT_GRAMMAR_TOPIC_NODE_KEY : `topic-${index + 1}`,
@@ -38,6 +52,7 @@ function layoutFixture(
     material: { id: 'arabic', subjectKey: 'arabic', label: 'Arabic' },
     rootPresentation: 'DIRECT',
     nodes: [
+      literatureBank,
       {
         id: grammarGroupId,
         nodeKey: 'arabic-grammar',
@@ -103,6 +118,57 @@ test('Question count cache plans only unknown available banks and preserves zero
     ),
     false
   );
+});
+
+test('Arabic Question Bank derives its root sections and preserves Product section order', () => {
+  const structure = getArabicQuestionBankStructure(layoutFixture());
+
+  assert.equal(structure.grammarGroup.nodeKey, 'arabic-grammar');
+  assert.equal(structure.grammarGroup.nodeType, 'GROUP');
+  assert.equal(structure.literatureBank.nodeKey, 'arabic-literature');
+  assert.equal(structure.literatureBank.nodeType, 'BANK');
+  assert.deepEqual(ARABIC_QUESTION_BANK_SECTION_ORDER, ['grammar', 'literature']);
+});
+
+test('Arabic section switching changes the active bank and restores the last Grammar topic', () => {
+  const structure = getArabicQuestionBankStructure(layoutFixture());
+  const rememberedTopic = structure.grammarTopics[1];
+  const initialSelection = {
+    activeSection: 'grammar' as const,
+    selectedGrammarTopicNodeKey: rememberedTopic.nodeKey,
+  };
+
+  assert.equal(
+    getActiveArabicQuestionBank(structure, 'grammar', rememberedTopic.nodeKey).nodeKey,
+    rememberedTopic.nodeKey
+  );
+  const literatureSelection = selectArabicQuestionBankSection(
+    structure,
+    initialSelection,
+    'literature'
+  );
+  assert.equal(literatureSelection.activeSection, 'literature');
+  assert.equal(literatureSelection.selectedGrammarTopicNodeKey, rememberedTopic.nodeKey);
+  assert.equal(
+    getActiveArabicQuestionBank(structure, 'literature', rememberedTopic.nodeKey).nodeKey,
+    'arabic-literature'
+  );
+  const grammarSelection = selectArabicQuestionBankSection(
+    structure,
+    literatureSelection,
+    'grammar'
+  );
+  assert.equal(grammarSelection.activeSection, 'grammar');
+  assert.equal(grammarSelection.selectedGrammarTopicNodeKey, rememberedTopic.nodeKey);
+  assert.equal(
+    getActiveArabicQuestionBank(structure, 'grammar', rememberedTopic.nodeKey).nodeKey,
+    'topic-2'
+  );
+  assert.equal(
+    getActiveArabicQuestionBank(structure, 'grammar', 'missing-topic').nodeKey,
+    DEFAULT_GRAMMAR_TOPIC_NODE_KEY
+  );
+  assert.equal(structure.literatureBank.available, false);
 });
 
 test('Question count cache keeps valid values and rejects stale generations', () => {

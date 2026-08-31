@@ -5,7 +5,7 @@ import {
   isGlassEffectAPIAvailable,
   isLiquidGlassAvailable,
 } from 'expo-glass-effect';
-import { Button, HStack, Host, Image, Popover, Text, VStack } from '@expo/ui/swift-ui';
+import { Button, Divider, HStack, Host, Image, Popover, Text, VStack } from '@expo/ui/swift-ui';
 import {
   accessibilityHidden,
   accessibilityHint,
@@ -29,7 +29,13 @@ import {
   formatQuestionCountForDisplay,
   getTopicQuestionCount,
 } from '@/question-bank/question-bank-counts';
+import { ARABIC_QUESTION_BANK_SECTION_ORDER } from '@/question-bank/question-bank-topics';
 import type { QuestionTopicSelectorProps } from '@/question-bank/question-topic-selector.types';
+
+const TOPIC_LABEL_CHECK_GAP = 6;
+const TOPIC_CHECKMARK_SIZE = 16;
+const TOPIC_LABEL_CLUSTER_WIDTH =
+  QUESTION_BANK_TOPIC_LABEL_COLUMN_WIDTH + TOPIC_LABEL_CHECK_GAP + TOPIC_CHECKMARK_SIZE;
 
 function getGlassAvailability() {
   try {
@@ -40,9 +46,13 @@ function getGlassAvailability() {
 }
 
 export function QuestionTopicSelector({
+  activeSection,
   colorScheme,
+  grammarGroup,
+  literatureBank,
   maxWidth,
   onSelect,
+  onSectionSelect,
   questionCounts,
   selectedTopic,
   secondaryTextColor,
@@ -52,8 +62,12 @@ export function QuestionTopicSelector({
 }: QuestionTopicSelectorProps) {
   const [isPresented, setIsPresented] = useState(false);
   const [glassAvailable] = useState(getGlassAvailability);
-  const selectedLabel = selectedTopic?.label ?? 'الموضوع';
-  const accessibilityText = `موضوع القواعد: ${selectedLabel}`;
+  const selectedLabel =
+    activeSection === 'literature'
+      ? literatureBank.label
+      : selectedTopic?.label ?? grammarGroup.label;
+  const sectionLabel = activeSection === 'literature' ? literatureBank.label : grammarGroup.label;
+  const accessibilityText = `موضوع ${sectionLabel}: ${selectedLabel}`;
 
   return (
     <View style={[styles.shell, { maxWidth }]}>
@@ -91,7 +105,7 @@ export function QuestionTopicSelector({
                 controlSize('regular'),
                 frame({ height: QUESTION_BANK_CONTROL_HEIGHT, maxWidth }),
                 accessibilityLabel(accessibilityText),
-                accessibilityHint('يفتح قائمة موضوعات القواعد'),
+                accessibilityHint('يفتح قائمة أقسام وبنوك الأسئلة'),
               ]}
               onPress={() => setIsPresented(true)}
             >
@@ -115,7 +129,46 @@ export function QuestionTopicSelector({
               spacing={4}
               modifiers={[padding({ horizontal: 8, vertical: 8 })]}
             >
-              {topics.map((topic) => {
+              {ARABIC_QUESTION_BANK_SECTION_ORDER.map((key) => {
+                const label = key === 'grammar' ? grammarGroup.label : literatureBank.label;
+                const isSelected = key === activeSection;
+                return (
+                  <Button
+                    key={key}
+                    modifiers={[
+                      buttonStyle('plain'),
+                      controlSize('regular'),
+                      accessibilityLabel(`${label}${isSelected ? '، محدد' : ''}`),
+                    ]}
+                    onPress={() => {
+                      onSectionSelect(key);
+                      setIsPresented(false);
+                    }}
+                  >
+                    <HStack
+                      alignment="center"
+                      spacing={6}
+                      modifiers={[
+                        frame({ height: QUESTION_BANK_CONTROL_HEIGHT }),
+                        padding({ horizontal: 12 }),
+                        foregroundStyle(textColor),
+                      ]}
+                    >
+                      <Text modifiers={[lineLimit(1), truncationMode('tail')]}>{label}</Text>
+                      <Image
+                        systemName="checkmark"
+                        size={16}
+                        color={secondaryTextColor}
+                        modifiers={[accessibilityHidden(), opacity(isSelected ? 1 : 0)]}
+                      />
+                    </HStack>
+                  </Button>
+                );
+              })}
+              {activeSection === 'grammar' ? (
+                <Divider modifiers={[padding({ horizontal: 12 })]} />
+              ) : null}
+              {activeSection === 'grammar' ? topics.map((topic) => {
                 const isSelected = topic.nodeKey === selectedTopic?.nodeKey;
                 const questionCount = getTopicQuestionCount(questionCounts, topic.nodeKey);
                 const topicAccessibilityLabel = questionCount === undefined
@@ -160,19 +213,22 @@ export function QuestionTopicSelector({
                       </Text>
                       <HStack
                         alignment="center"
-                        spacing={6}
+                        spacing={TOPIC_LABEL_CHECK_GAP}
                         modifiers={[
-                          frame({ minWidth: QUESTION_BANK_TOPIC_LABEL_COLUMN_WIDTH }),
+                          frame({
+                            width: TOPIC_LABEL_CLUSTER_WIDTH,
+                            alignment: 'leading',
+                          }),
                         ]}
                       >
                         <Text
                           modifiers={[
                             frame({
-                              minWidth: QUESTION_BANK_TOPIC_LABEL_COLUMN_WIDTH,
-                              alignment: 'leading',
+                              width: QUESTION_BANK_TOPIC_LABEL_COLUMN_WIDTH,
+                              alignment: 'trailing',
                             }),
                             lineLimit(1),
-                            multilineTextAlignment('leading'),
+                            multilineTextAlignment('trailing'),
                             truncationMode('tail'),
                           ]}
                         >
@@ -180,7 +236,7 @@ export function QuestionTopicSelector({
                         </Text>
                         <Image
                           systemName="checkmark"
-                          size={16}
+                          size={TOPIC_CHECKMARK_SIZE}
                           color={secondaryTextColor}
                           modifiers={[
                             accessibilityHidden(),
@@ -191,7 +247,7 @@ export function QuestionTopicSelector({
                     </HStack>
                   </Button>
                 );
-              })}
+              }) : null}
             </VStack>
           </Popover.Content>
         </Popover>
