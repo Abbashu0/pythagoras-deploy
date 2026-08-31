@@ -1,10 +1,10 @@
 import { useState } from 'react';
-import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Pressable, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
 
 import type { PublicMaterial, PublicMaterialSettings } from '@/api/app-content';
 import { resolveApiUrl } from '@/api/client';
+import { RemoteArtworkImage } from '@/components/remote-artwork-image';
 import { materialIcons } from '@/materials/material-icons';
 import { MaterialNativeIcon } from '@/materials/material-native-icon';
 import type { ResolvedColorScheme } from '@/preferences/preferences-provider';
@@ -74,6 +74,7 @@ export function MaterialCard({
   const textScale = materialSettings.textScale > 0 ? materialSettings.textScale : 1;
   const palette = getPalette(colorScheme);
   const fallbackColor = getFallbackColor(material.gradient, palette.surfaceInset);
+  const imageUri = material.imageUrl ? resolveApiUrl(material.imageUrl) : null;
 
   const handleLayout = (event: LayoutChangeEvent) => {
     const { height, width: measuredWidth } = event.nativeEvent.layout;
@@ -104,14 +105,22 @@ export function MaterialCard({
       ]}
     >
       <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-        {material.imageUrl ? (
-          <Image
+        {imageUri ? (
+          <RemoteArtworkImage
             accessible={false}
-            cachePolicy="memory-disk"
-            contentFit="contain"
-            contentPosition="center"
-            source={{ uri: resolveApiUrl(material.imageUrl) }}
-            style={[StyleSheet.absoluteFill, getImageTransform(material, frameWidth, frameHeight)]}
+            imageStyle={getImageTransform(material, frameWidth, frameHeight)}
+            palette={palette}
+            renderErrorFallback={() => (
+              <View style={styles.fallbackArtwork}>
+                <MaterialNativeIcon
+                  color="rgba(255,255,255,0.7)"
+                  colorScheme={colorScheme}
+                  name={materialIcons.questionBank}
+                  size={64}
+                />
+              </View>
+            )}
+            sourceUri={imageUri}
           />
         ) : (
           <View style={styles.fallbackArtwork}>

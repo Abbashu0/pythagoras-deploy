@@ -13,6 +13,7 @@ import {
   selectArabicQuestionBankSection,
 } from '@/question-bank/question-bank-topics';
 import {
+  getCompleteQuestionCount,
   getTopicQuestionCount,
   getTopicsNeedingCount,
   isCurrentQuestionCountGeneration,
@@ -191,4 +192,97 @@ test('Question count remains independent from a search result total', () => {
 
   assert.equal(getTopicQuestionCount(counts, 'topic-2'), 34);
   assert.notEqual(searchTotal, getTopicQuestionCount(counts, 'topic-2'));
+});
+
+test('Grammar section total sums all known available Grammar bank counts', () => {
+  const topics = getGrammarTopicNodes(
+    layoutFixture(Array.from({ length: 9 }, () => ({ available: true })))
+  );
+  const counts = mergeQuestionCountCache(
+    new Map(),
+    topics.map((topic, index) => ({ nodeKey: topic.nodeKey, total: index + 1 }))
+  );
+
+  assert.equal(getCompleteQuestionCount(topics, counts), 45);
+});
+
+test('Grammar section total stays unknown until every available bank is counted', () => {
+  const topics = getGrammarTopicNodes(
+    layoutFixture(Array.from({ length: 9 }, () => ({ available: true })))
+  );
+  const counts = mergeQuestionCountCache(
+    new Map(),
+    topics.slice(0, -1).map((topic) => ({ nodeKey: topic.nodeKey, total: 1 }))
+  );
+
+  assert.equal(getCompleteQuestionCount(topics, counts), undefined);
+});
+
+test('Grammar section total preserves a real zero and reacts to one bank update', () => {
+  const topics = getGrammarTopicNodes(
+    layoutFixture(Array.from({ length: 9 }, () => ({ available: true })))
+  );
+  const zeroCounts = mergeQuestionCountCache(
+    new Map(),
+    topics.map((topic) => ({ nodeKey: topic.nodeKey, total: 0 }))
+  );
+
+  assert.equal(getCompleteQuestionCount(topics, zeroCounts), 0);
+
+  const initialCounts = mergeQuestionCountCache(
+    new Map(),
+    topics.map((topic) => ({ nodeKey: topic.nodeKey, total: 10 }))
+  );
+  const updatedCounts = mergeQuestionCountCache(initialCounts, [
+    { nodeKey: topics[3].nodeKey, total: 24 },
+  ]);
+
+  assert.equal(getCompleteQuestionCount(topics, initialCounts), 90);
+  assert.equal(getCompleteQuestionCount(topics, updatedCounts), 104);
+});
+
+test('Literature section count uses the same bank count cache as Grammar topics', () => {
+  const layout = layoutFixture();
+  const availableLiteratureLayout = {
+    ...layout,
+    nodes: layout.nodes.map((node) =>
+      node.nodeKey === 'arabic-literature' || node.parentId === 'grammar-group'
+        ? { ...node, available: true }
+        : node
+    ),
+  };
+  const structure = getArabicQuestionBankStructure(availableLiteratureLayout);
+  const counts = mergeQuestionCountCache(new Map(), [
+    { nodeKey: structure.literatureBank.nodeKey, total: 383 },
+  ]);
+
+  assert.equal(
+    getTopicQuestionCount(counts, structure.literatureBank.nodeKey),
+    383
+  );
+  const refreshedCounts = mergeQuestionCountCache(counts, [
+    { nodeKey: structure.literatureBank.nodeKey, total: 390 },
+  ]);
+  assert.equal(
+    getTopicQuestionCount(refreshedCounts, structure.literatureBank.nodeKey),
+    390
+  );
+  assert.deepEqual(
+    getTopicsNeedingCount(
+      [...structure.grammarTopics, structure.literatureBank],
+      new Map()
+    ).map((bank) => bank.nodeKey),
+    [
+      DEFAULT_GRAMMAR_TOPIC_NODE_KEY,
+      'topic-2',
+      'topic-3',
+      'topic-4',
+      'topic-5',
+      'topic-6',
+      'topic-7',
+      'topic-8',
+      'topic-9',
+      'arabic-literature',
+    ]
+  );
 });

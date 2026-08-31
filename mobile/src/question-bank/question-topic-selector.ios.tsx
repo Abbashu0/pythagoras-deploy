@@ -27,6 +27,7 @@ import {
   QUESTION_BANK_COUNT_COLUMN_WIDTH,
   QUESTION_BANK_TOPIC_LABEL_COLUMN_WIDTH,
   formatQuestionCountForDisplay,
+  getCompleteQuestionCount,
   getTopicQuestionCount,
 } from '@/question-bank/question-bank-counts';
 import { ARABIC_QUESTION_BANK_SECTION_ORDER } from '@/question-bank/question-bank-topics';
@@ -68,6 +69,10 @@ export function QuestionTopicSelector({
       : selectedTopic?.label ?? grammarGroup.label;
   const sectionLabel = activeSection === 'literature' ? literatureBank.label : grammarGroup.label;
   const accessibilityText = `موضوع ${sectionLabel}: ${selectedLabel}`;
+  const grammarQuestionCount = getCompleteQuestionCount(topics, questionCounts);
+  const literatureQuestionCount = literatureBank.available
+    ? getTopicQuestionCount(questionCounts, literatureBank.nodeKey)
+    : undefined;
 
   return (
     <View style={[styles.shell, { maxWidth }]}>
@@ -132,13 +137,18 @@ export function QuestionTopicSelector({
               {ARABIC_QUESTION_BANK_SECTION_ORDER.map((key) => {
                 const label = key === 'grammar' ? grammarGroup.label : literatureBank.label;
                 const isSelected = key === activeSection;
+                const questionCount =
+                  key === 'grammar' ? grammarQuestionCount : literatureQuestionCount;
+                const sectionAccessibilityLabel = questionCount === undefined
+                  ? `${label}${isSelected ? '، محدد' : ''}`
+                  : `${label}، ${questionCount} سؤال${isSelected ? '، محدد' : ''}`;
                 return (
                   <Button
                     key={key}
                     modifiers={[
                       buttonStyle('plain'),
                       controlSize('regular'),
-                      accessibilityLabel(`${label}${isSelected ? '، محدد' : ''}`),
+                      accessibilityLabel(sectionAccessibilityLabel),
                     ]}
                     onPress={() => {
                       onSectionSelect(key);
@@ -147,20 +157,56 @@ export function QuestionTopicSelector({
                   >
                     <HStack
                       alignment="center"
-                      spacing={6}
+                      spacing={10}
                       modifiers={[
                         frame({ height: QUESTION_BANK_CONTROL_HEIGHT }),
                         padding({ horizontal: 12 }),
                         foregroundStyle(textColor),
                       ]}
                     >
-                      <Text modifiers={[lineLimit(1), truncationMode('tail')]}>{label}</Text>
-                      <Image
-                        systemName="checkmark"
-                        size={16}
-                        color={secondaryTextColor}
-                        modifiers={[accessibilityHidden(), opacity(isSelected ? 1 : 0)]}
-                      />
+                      <Text
+                        modifiers={[
+                          frame({ width: QUESTION_BANK_COUNT_COLUMN_WIDTH }),
+                          font({ textStyle: 'subheadline' }),
+                          foregroundStyle(secondaryTextColor),
+                          lineLimit(1),
+                          multilineTextAlignment('center'),
+                        ]}
+                      >
+                        {questionCount === undefined
+                          ? ''
+                          : formatQuestionCountForDisplay(questionCount)}
+                      </Text>
+                      <HStack
+                        alignment="center"
+                        spacing={TOPIC_LABEL_CHECK_GAP}
+                        modifiers={[
+                          frame({
+                            width: TOPIC_LABEL_CLUSTER_WIDTH,
+                            alignment: 'leading',
+                          }),
+                        ]}
+                      >
+                        <Text
+                          modifiers={[
+                            frame({
+                              width: QUESTION_BANK_TOPIC_LABEL_COLUMN_WIDTH,
+                              alignment: 'trailing',
+                            }),
+                            lineLimit(1),
+                            multilineTextAlignment('trailing'),
+                            truncationMode('tail'),
+                          ]}
+                        >
+                          {label}
+                        </Text>
+                        <Image
+                          systemName="checkmark"
+                          size={TOPIC_CHECKMARK_SIZE}
+                          color={secondaryTextColor}
+                          modifiers={[accessibilityHidden(), opacity(isSelected ? 1 : 0)]}
+                        />
+                      </HStack>
                     </HStack>
                   </Button>
                 );
@@ -170,7 +216,9 @@ export function QuestionTopicSelector({
               ) : null}
               {activeSection === 'grammar' ? topics.map((topic) => {
                 const isSelected = topic.nodeKey === selectedTopic?.nodeKey;
-                const questionCount = getTopicQuestionCount(questionCounts, topic.nodeKey);
+                const questionCount = topic.available
+                  ? getTopicQuestionCount(questionCounts, topic.nodeKey)
+                  : undefined;
                 const topicAccessibilityLabel = questionCount === undefined
                   ? `${topic.label}${isSelected ? '، محدد' : ''}`
                   : `${topic.label}، ${questionCount} سؤال${isSelected ? '، محدد' : ''}`;

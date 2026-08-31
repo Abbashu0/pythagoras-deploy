@@ -19,6 +19,7 @@ import {
   QUESTION_BANK_COUNT_COLUMN_WIDTH,
   QUESTION_BANK_TOPIC_LABEL_COLUMN_WIDTH,
   formatQuestionCountForDisplay,
+  getCompleteQuestionCount,
   getTopicQuestionCount,
 } from '@/question-bank/question-bank-counts';
 import { QUESTION_BANK_CONTROL_HEIGHT } from '@/question-bank/question-bank-control-geometry';
@@ -50,6 +51,10 @@ export function QuestionTopicSelector({
       ? literatureBank.label
       : selectedTopic?.label ?? grammarGroup.label;
   const labelState = useNativeState(selectedLabel);
+  const grammarQuestionCount = getCompleteQuestionCount(topics, questionCounts);
+  const literatureQuestionCount = literatureBank.available
+    ? getTopicQuestionCount(questionCounts, literatureBank.nodeKey)
+    : undefined;
 
   useEffect(() => {
     labelState.set(selectedLabel);
@@ -86,6 +91,8 @@ export function QuestionTopicSelector({
           {ARABIC_QUESTION_BANK_SECTION_ORDER.map((key) => {
             const label = key === 'grammar' ? grammarGroup.label : literatureBank.label;
             const isSelected = key === activeSection;
+            const questionCount =
+              key === 'grammar' ? grammarQuestionCount : literatureQuestionCount;
             return (
               <DropdownMenuItem
                 key={key}
@@ -97,20 +104,38 @@ export function QuestionTopicSelector({
                 <DropdownMenuItem.Text>
                   <Row horizontalArrangement="start" verticalAlignment="center">
                     <Text
-                      color={textColor}
+                      color={secondaryTextColor}
                       maxLines={1}
                       softWrap={false}
-                      style={{ textAlign: 'right' }}
+                      style={{ textAlign: 'center', fontSize: 14 }}
+                      modifiers={[width(QUESTION_BANK_COUNT_COLUMN_WIDTH)]}
                     >
-                      {label}
+                      {questionCount === undefined
+                        ? ''
+                        : formatQuestionCountForDisplay(questionCount)}
                     </Text>
-                    <Icon
-                      contentDescription={isSelected ? 'محدد' : undefined}
-                      size={20}
-                      source={checkIcon}
-                      tint={secondaryTextColor}
-                      modifiers={[alpha(isSelected ? 1 : 0)]}
-                    />
+                    <Row
+                      horizontalArrangement="start"
+                      verticalAlignment="center"
+                      modifiers={[width(TOPIC_LABEL_CLUSTER_WIDTH)]}
+                    >
+                      <Text
+                        color={textColor}
+                        maxLines={1}
+                        softWrap={false}
+                        style={{ textAlign: 'right' }}
+                        modifiers={[width(QUESTION_BANK_TOPIC_LABEL_COLUMN_WIDTH)]}
+                      >
+                        {label}
+                      </Text>
+                      <Icon
+                        contentDescription={isSelected ? 'محدد' : undefined}
+                        size={TOPIC_CHECKMARK_SIZE}
+                        source={checkIcon}
+                        tint={secondaryTextColor}
+                        modifiers={[alpha(isSelected ? 1 : 0)]}
+                      />
+                    </Row>
                   </Row>
                 </DropdownMenuItem.Text>
               </DropdownMenuItem>
@@ -120,7 +145,9 @@ export function QuestionTopicSelector({
           {activeSection === 'grammar' ? topics.map((topic) => (
             (() => {
               const isSelected = topic.nodeKey === selectedTopic?.nodeKey;
-              const questionCount = getTopicQuestionCount(questionCounts, topic.nodeKey);
+              const questionCount = topic.available
+                ? getTopicQuestionCount(questionCounts, topic.nodeKey)
+                : undefined;
               return (
                 <DropdownMenuItem
                   key={topic.nodeKey}

@@ -6,12 +6,16 @@ import { Host, Icon } from '@expo/ui';
 import type { PublicQuestionSummary } from '@/question-bank/question-bank-api';
 import { questionBankIcons } from '@/question-bank/question-bank-icons';
 import { RichDocumentPreviewText } from '@/question-bank/rich-document-renderer';
+import { getQuestionSourceBadges } from '@/question-bank/question-source-badges';
 import type { Palette } from '@/theme';
 import { scaledFontSize, scaledLineHeight } from '@/theme';
 
 export const QUESTION_CARD_HEIGHT = 116;
 export const QUESTION_CARD_RADIUS = 22;
 export const QUESTION_CARD_GAP = 11;
+
+const FAVORITE_SLOT_SIZE = 16;
+const FAVORITE_ORDINAL_GAP = 6;
 
 interface QuestionCardProps {
   cardRef: RefObject<View | null>;
@@ -33,7 +37,15 @@ export function QuestionCard({
   question,
 }: QuestionCardProps) {
   const questionFontSize = scaledFontSize(17, fontScale);
-  const ministerialCount = question.sourceSummary.find((item) => item.sourceKind === 'ministerial')?.count ?? 0;
+  const sourceBadges = getQuestionSourceBadges(question.sourceSummary);
+  const sourceAccessibilityText = sourceBadges.map((badge) => badge.label).join('. ');
+  const accessibilityLabel = [
+    `السؤال رقم ${question.ordinal}. ${question.primaryPreview}`,
+    sourceAccessibilityText,
+    isFavorite ? 'مضاف إلى المفضلة' : '',
+  ]
+    .filter(Boolean)
+    .join('. ');
 
   return (
     <View
@@ -49,7 +61,7 @@ export function QuestionCard({
     >
       <Pressable
         accessibilityHint="يفتح قارئ السؤال"
-        accessibilityLabel={`السؤال رقم ${question.ordinal}. ${question.primaryPreview}`}
+        accessibilityLabel={accessibilityLabel}
         accessibilityRole="button"
         onPress={() => {
           void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined);
@@ -65,28 +77,31 @@ export function QuestionCard({
       >
         <View pointerEvents="none" style={styles.metaRow}>
           <View style={styles.metaLeading}>
-            {ministerialCount > 0 && (
+            {sourceBadges.map((badge) => (
               <View
-                style={[styles.ministerialBadge, { backgroundColor: palette.surfaceElevated }]}
+                key={badge.sourceKind}
+                style={[styles.sourceBadge, { backgroundColor: palette.surfaceElevated }]}
               >
-                <Text
-                  style={[styles.ministerialText, { color: palette.textSecondary }]}
-                >
-                  {ministerialCount === 1 ? 'وزاري 1' : `وزاري ${ministerialCount} مرات`}
+                <Text style={[styles.sourceBadgeText, { color: palette.textSecondary }]}>
+                  {badge.label}
                 </Text>
               </View>
-            )}
-            {isFavorite ? (
-              <Host matchContents style={styles.favoriteIconHost}>
-                <Icon
-                  color={Platform.OS === 'ios' ? PlatformColor('systemRed') : '#BA1A1A'}
-                  name={questionBankIcons.heartFill}
-                  size={15}
-                />
-              </Host>
-            ) : null}
+            ))}
           </View>
-          <Text selectable style={[styles.ordinal, { color: Platform.OS === 'ios' ? PlatformColor('systemBlue') : palette.selectionAccent }]}>#{question.ordinal}</Text>
+          <View style={styles.metaTrailing}>
+            <View style={styles.favoriteSlot}>
+              {isFavorite ? (
+                <Host matchContents style={styles.favoriteIconHost}>
+                  <Icon
+                    color={Platform.OS === 'ios' ? PlatformColor('systemRed') : '#BA1A1A'}
+                    name={questionBankIcons.heartFill}
+                    size={15}
+                  />
+                </Host>
+              ) : null}
+            </View>
+            <Text selectable style={[styles.ordinal, { color: Platform.OS === 'ios' ? PlatformColor('systemBlue') : palette.selectionAccent }]}>#{question.ordinal}</Text>
+          </View>
         </View>
         <View style={styles.textRegion}>
           {question.primaryPreviewRich.blocks.length ? (
@@ -156,6 +171,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 6,
   },
+  metaTrailing: {
+    alignItems: 'center',
+    direction: 'ltr',
+    flexDirection: 'row',
+    gap: FAVORITE_ORDINAL_GAP,
+  },
   ordinal: {
     fontSize: 18,
     fontVariant: ['tabular-nums'],
@@ -164,20 +185,26 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     writingDirection: 'ltr',
   },
-  ministerialBadge: {
+  sourceBadge: {
     borderRadius: 9,
     paddingHorizontal: 8,
     paddingVertical: 3,
   },
-  ministerialText: {
+  sourceBadgeText: {
     fontSize: 12,
     fontWeight: '600',
     lineHeight: 16,
     writingDirection: 'rtl',
   },
   favoriteIconHost: {
-    height: 16,
-    width: 16,
+    height: FAVORITE_SLOT_SIZE,
+    width: FAVORITE_SLOT_SIZE,
+  },
+  favoriteSlot: {
+    alignItems: 'center',
+    height: FAVORITE_SLOT_SIZE,
+    justifyContent: 'center',
+    width: FAVORITE_SLOT_SIZE,
   },
   textRegion: {
     flex: 1,

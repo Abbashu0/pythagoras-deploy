@@ -23,6 +23,23 @@ export function getTopicQuestionCount(
   return typeof count === 'number' && Number.isInteger(count) && count >= 0 ? count : undefined;
 }
 
+export function getCompleteQuestionCount(
+  topics: readonly PublicMaterialQuestionBankNode[],
+  counts: ReadonlyMap<string, number>
+): number | undefined {
+  const availableTopics = topics.filter((topic) => topic.available);
+  if (availableTopics.length === 0) return undefined;
+
+  let total = 0;
+  for (const topic of availableTopics) {
+    const count = getTopicQuestionCount(counts, topic.nodeKey);
+    if (count === undefined) return undefined;
+    total += count;
+  }
+
+  return total;
+}
+
 export function mergeQuestionCountCache(
   current: ReadonlyMap<string, number>,
   updates: readonly QuestionCountUpdate[]

@@ -221,9 +221,13 @@ export function QuestionBankScreen() {
         setLiteratureBank(structure.literatureBank);
         setGrammarTopics(topics);
         setQuestionCounts((current) => {
-          const topicKeys = new Set(topics.map((topic) => topic.nodeKey));
+          const countableBankKeys = new Set(
+            [...topics, structure.literatureBank]
+              .filter((bank) => bank.available)
+              .map((bank) => bank.nodeKey)
+          );
           const next = new Map(
-            [...current].filter(([nodeKey]) => topicKeys.has(nodeKey))
+            [...current].filter(([nodeKey]) => countableBankKeys.has(nodeKey))
           );
           const hasSameKeys =
             next.size === current.size && [...next.keys()].every((nodeKey) => current.has(nodeKey));
@@ -266,7 +270,10 @@ export function QuestionBankScreen() {
     countAbortRef.current = controller;
     let mounted = true;
 
-    const topicsToFetch = getTopicsNeedingCount(grammarTopics, questionCountsRef.current);
+    const countableBanks = literatureBank
+      ? [...grammarTopics, literatureBank]
+      : grammarTopics;
+    const topicsToFetch = getTopicsNeedingCount(countableBanks, questionCountsRef.current);
 
     if (topicsToFetch.length > 0) {
       void Promise.allSettled(
@@ -307,7 +314,7 @@ export function QuestionBankScreen() {
       controller.abort();
       if (countAbortRef.current === controller) countAbortRef.current = null;
     };
-  }, [grammarTopics, isArabic, subjectKey]);
+  }, [grammarTopics, isArabic, literatureBank, subjectKey]);
 
   const requestNormalPage = useCallback(
     async (offset: number): Promise<PublicQuestionPage | null> => {
@@ -364,8 +371,8 @@ export function QuestionBankScreen() {
       setNormalTotal(page.total);
       setNormalNextOffset(page.offset + page.items.length);
       setNormalLoaded(true);
-      if (activeSection === 'grammar' && activeGrammarTopic) {
-        storeQuestionCount(activeGrammarTopic.nodeKey, page.total);
+      if (activeBank) {
+        storeQuestionCount(activeBank.nodeKey, page.total);
       }
     });
 
@@ -376,8 +383,7 @@ export function QuestionBankScreen() {
     };
   }, [
     activeBankAvailable,
-    activeGrammarTopic,
-    activeSection,
+    activeBank,
     bankNodeId,
     isArabic,
     requestNormalPage,
@@ -777,14 +783,13 @@ export function QuestionBankScreen() {
       setNormalTotal(page.total);
       setNormalNextOffset(page.offset + page.items.length);
       setNormalLoaded(true);
-      if (activeSection === 'grammar' && activeGrammarTopic) {
-        storeQuestionCount(activeGrammarTopic.nodeKey, page.total);
+      if (activeBank) {
+        storeQuestionCount(activeBank.nodeKey, page.total);
       }
     });
   }, [
     activeBankAvailable,
-    activeGrammarTopic,
-    activeSection,
+    activeBank,
     bankNodeId,
     requestNormalPage,
     storeQuestionCount,
