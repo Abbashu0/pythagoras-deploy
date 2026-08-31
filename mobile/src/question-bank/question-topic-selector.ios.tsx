@@ -12,15 +12,23 @@ import {
   accessibilityLabel,
   buttonStyle,
   controlSize,
+  font,
   foregroundStyle,
   frame,
   lineLimit,
+  multilineTextAlignment,
   opacity,
   padding,
   truncationMode,
 } from '@expo/ui/swift-ui/modifiers';
 
 import { QUESTION_BANK_CONTROL_HEIGHT } from '@/question-bank/question-bank-control-geometry';
+import {
+  QUESTION_BANK_COUNT_COLUMN_WIDTH,
+  QUESTION_BANK_TOPIC_LABEL_COLUMN_WIDTH,
+  formatQuestionCountForDisplay,
+  getTopicQuestionCount,
+} from '@/question-bank/question-bank-counts';
 import type { QuestionTopicSelectorProps } from '@/question-bank/question-topic-selector.types';
 
 function getGlassAvailability() {
@@ -35,6 +43,7 @@ export function QuestionTopicSelector({
   colorScheme,
   maxWidth,
   onSelect,
+  questionCounts,
   selectedTopic,
   secondaryTextColor,
   textColor,
@@ -108,10 +117,18 @@ export function QuestionTopicSelector({
             >
               {topics.map((topic) => {
                 const isSelected = topic.nodeKey === selectedTopic?.nodeKey;
+                const questionCount = getTopicQuestionCount(questionCounts, topic.nodeKey);
+                const topicAccessibilityLabel = questionCount === undefined
+                  ? `${topic.label}${isSelected ? '، محدد' : ''}`
+                  : `${topic.label}، ${questionCount} سؤال${isSelected ? '، محدد' : ''}`;
                 return (
                   <Button
                     key={topic.nodeKey}
-                    modifiers={[buttonStyle('plain'), controlSize('regular')]}
+                    modifiers={[
+                      buttonStyle('plain'),
+                      controlSize('regular'),
+                      accessibilityLabel(topicAccessibilityLabel),
+                    ]}
                     onPress={() => {
                       onSelect(topic.nodeKey);
                       setIsPresented(false);
@@ -121,23 +138,56 @@ export function QuestionTopicSelector({
                       alignment="center"
                       spacing={10}
                       modifiers={[
-                        frame({ height: QUESTION_BANK_CONTROL_HEIGHT }),
+                        frame({
+                          height: QUESTION_BANK_CONTROL_HEIGHT,
+                        }),
                         padding({ horizontal: 12 }),
                         foregroundStyle(textColor),
                       ]}
                     >
-                      <Image
-                        systemName="checkmark"
-                        size={16}
-                        color={secondaryTextColor}
+                      <Text
                         modifiers={[
-                          accessibilityHidden(),
-                          opacity(isSelected ? 1 : 0),
+                          frame({ width: QUESTION_BANK_COUNT_COLUMN_WIDTH }),
+                          font({ textStyle: 'subheadline' }),
+                          foregroundStyle(secondaryTextColor),
+                          lineLimit(1),
+                          multilineTextAlignment('center'),
                         ]}
-                      />
-                      <Text modifiers={[lineLimit(1), truncationMode('tail')]}>
-                        {topic.label}
+                      >
+                        {questionCount === undefined
+                          ? ''
+                          : formatQuestionCountForDisplay(questionCount)}
                       </Text>
+                      <HStack
+                        alignment="center"
+                        spacing={6}
+                        modifiers={[
+                          frame({ minWidth: QUESTION_BANK_TOPIC_LABEL_COLUMN_WIDTH }),
+                        ]}
+                      >
+                        <Text
+                          modifiers={[
+                            frame({
+                              minWidth: QUESTION_BANK_TOPIC_LABEL_COLUMN_WIDTH,
+                              alignment: 'leading',
+                            }),
+                            lineLimit(1),
+                            multilineTextAlignment('leading'),
+                            truncationMode('tail'),
+                          ]}
+                        >
+                          {topic.label}
+                        </Text>
+                        <Image
+                          systemName="checkmark"
+                          size={16}
+                          color={secondaryTextColor}
+                          modifiers={[
+                            accessibilityHidden(),
+                            opacity(isSelected ? 1 : 0),
+                          ]}
+                        />
+                      </HStack>
                     </HStack>
                   </Button>
                 );

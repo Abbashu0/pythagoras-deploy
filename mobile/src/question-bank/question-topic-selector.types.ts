@@ -5,6 +5,7 @@ export interface QuestionTopicSelectorProps {
   colorScheme: ResolvedColorScheme;
   maxWidth: number;
   onSelect: (nodeKey: string) => void;
+  questionCounts: ReadonlyMap<string, number>;
   selectedTopic: PublicMaterialQuestionBankNode | null;
   secondaryTextColor: string;
   tintColor: string;

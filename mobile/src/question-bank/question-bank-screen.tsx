@@ -40,6 +40,11 @@ import {
 } from '@/question-bank/question-reader-overlay';
 import { questionBankIcons } from '@/question-bank/question-bank-icons';
 import {
+  getTopicsNeedingCount,
+  isCurrentQuestionCountGeneration,
+  mergeQuestionCountCache,
+} from '@/question-bank/question-bank-counts';
+import {
   QUESTION_BANK_CONTROL_GAP,
   QUESTION_BANK_HORIZONTAL_INSET,
   QUESTION_BANK_SEARCH_MIN_WIDTH,
@@ -99,6 +104,7 @@ export function QuestionBankScreen() {
   const isArabic = subjectKey === ARABIC_SUBJECT_KEY;
   const [query, setQuery] = useState('');
   const [grammarTopics, setGrammarTopics] = useState<PublicMaterialQuestionBankNode[]>([]);
+  const [questionCounts, setQuestionCounts] = useState<Map<string, number>>(() => new Map());
   const [selectedTopicNodeKey, setSelectedTopicNodeKey] = useState(
     DEFAULT_GRAMMAR_TOPIC_NODE_KEY
   );
@@ -124,6 +130,9 @@ export function QuestionBankScreen() {
   const normalLoadingRef = useRef(false);
   const normalAbortRef = useRef<AbortController | null>(null);
   const normalRequestIdRef = useRef(0);
+  const countAbortRef = useRef<AbortController | null>(null);
+  const countGenerationRef = useRef(0);
+  const questionCountsRef = useRef<ReadonlyMap<string, number>>(new Map());
   const searchLoadingRef = useRef(false);
   const searchAbortRef = useRef<AbortController | null>(null);
   const searchRequestIdRef = useRef(0);
@@ -132,6 +141,10 @@ export function QuestionBankScreen() {
   const listRef = useRef<FlatList<QuestionListRow> | null>(null);
   const scrollToTopVisibleRef = useRef(false);
   const [showScrollToTop, setShowScrollToTop] = useState(false);
+
+  useEffect(() => {
+    questionCountsRef.current = questionCounts;
+  }, [questionCounts]);
 
   const selectedTopic = useMemo(
     () => (isArabic ? grammarTopics.find((topic) => topic.nodeKey === selectedTopicNodeKey) ?? null : null),
@@ -160,8 +173,10 @@ export function QuestionBankScreen() {
 
     normalAbortRef.current?.abort();
     searchAbortRef.current?.abort();
+    countAbortRef.current?.abort();
     normalRequestIdRef.current += 1;
     searchRequestIdRef.current += 1;
+    countGenerationRef.current += 1;
     normalLoadingRef.current = false;
     searchLoadingRef.current = false;
 
@@ -172,6 +187,15 @@ export function QuestionBankScreen() {
         const defaultTopic = getDefaultGrammarTopicNode(topics);
         setLayoutError(false);
         setGrammarTopics(topics);
+        setQuestionCounts((current) => {
+          const topicKeys = new Set(topics.map((topic) => topic.nodeKey));
+          const next = new Map(
+            [...current].filter(([nodeKey]) => topicKeys.has(nodeKey))
+          );
+          const hasSameKeys =
+            next.size === current.size && [...next.keys()].every((nodeKey) => current.has(nodeKey));
+          return hasSameKeys ? current : next;
+        });
         setSelectedTopicNodeKey(defaultTopic.nodeKey);
       })
       .catch((error) => {
@@ -190,6 +214,66 @@ export function QuestionBankScreen() {
       controller.abort();
     };
   }, [isArabic, layoutRetryKey, subjectKey]);
+
+  const storeQuestionCount = useCallback((nodeKey: string, total: number) => {
+    if (!Number.isInteger(total) || total < 0) return;
+    setQuestionCounts((current) => {
+      if (current.get(nodeKey) === total) return current;
+      return mergeQuestionCountCache(current, [{ nodeKey, total }]);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!isArabic || grammarTopics.length === 0) return;
+
+    const controller = new AbortController();
+    const generation = countGenerationRef.current + 1;
+    countGenerationRef.current = generation;
+    countAbortRef.current = controller;
+    let mounted = true;
+
+    const topicsToFetch = getTopicsNeedingCount(grammarTopics, questionCountsRef.current);
+
+    if (topicsToFetch.length > 0) {
+      void Promise.allSettled(
+        topicsToFetch.map(async (topic) => {
+          const page = await fetchQuestionPage(
+            subjectKey,
+            topic.id,
+            0,
+            1,
+            controller.signal
+          );
+          return { nodeKey: topic.nodeKey, total: page.total };
+        })
+      )
+        .then((results) => {
+          if (
+            !mounted ||
+            controller.signal.aborted ||
+            !isCurrentQuestionCountGeneration(countGenerationRef.current, generation)
+          ) {
+            return;
+          }
+
+          const updates = results.flatMap((result) =>
+            result.status === 'fulfilled' ? [result.value] : []
+          );
+          if (updates.length > 0) {
+            setQuestionCounts((current) => mergeQuestionCountCache(current, updates));
+          }
+        })
+        .finally(() => {
+          if (countAbortRef.current === controller) countAbortRef.current = null;
+        });
+    }
+
+    return () => {
+      mounted = false;
+      controller.abort();
+      if (countAbortRef.current === controller) countAbortRef.current = null;
+    };
+  }, [grammarTopics, isArabic, subjectKey]);
 
   const requestNormalPage = useCallback(
     async (offset: number): Promise<PublicQuestionPage | null> => {
@@ -246,6 +330,7 @@ export function QuestionBankScreen() {
       setNormalTotal(page.total);
       setNormalNextOffset(page.offset + page.items.length);
       setNormalLoaded(true);
+      storeQuestionCount(selectedTopicNodeKey, page.total);
     });
 
     return () => {
@@ -253,7 +338,15 @@ export function QuestionBankScreen() {
       normalAbortRef.current?.abort();
       normalLoadingRef.current = false;
     };
-  }, [bankNodeId, isArabic, requestNormalPage, searchQuery, selectedTopicAvailable]);
+  }, [
+    bankNodeId,
+    isArabic,
+    requestNormalPage,
+    searchQuery,
+    selectedTopicAvailable,
+    selectedTopicNodeKey,
+    storeQuestionCount,
+  ]);
 
   useEffect(() => {
     if (!isArabic) return;
@@ -603,14 +696,23 @@ export function QuestionBankScreen() {
       setNormalTotal(page.total);
       setNormalNextOffset(page.offset + page.items.length);
       setNormalLoaded(true);
+      storeQuestionCount(selectedTopicNodeKey, page.total);
     });
-  }, [bankNodeId, requestNormalPage, selectedTopicAvailable]);
+  }, [
+    bankNodeId,
+    requestNormalPage,
+    selectedTopicAvailable,
+    selectedTopicNodeKey,
+    storeQuestionCount,
+  ]);
 
   const retryLayout = useCallback(() => {
     normalAbortRef.current?.abort();
     searchAbortRef.current?.abort();
+    countAbortRef.current?.abort();
     normalRequestIdRef.current += 1;
     searchRequestIdRef.current += 1;
+    countGenerationRef.current += 1;
     normalLoadingRef.current = false;
     searchLoadingRef.current = false;
     setGrammarTopics([]);
@@ -762,6 +864,7 @@ export function QuestionBankScreen() {
                 colorScheme={resolvedColorScheme}
                 maxWidth={topicMaxWidth}
                 onSelect={handleTopicSelect}
+                questionCounts={questionCounts}
                 secondaryTextColor={palette.textSecondary}
                 selectedTopic={selectedTopic}
                 tintColor={palette.surface}

@@ -5,14 +5,21 @@ import {
   ExposedDropdownMenuBox,
   Host,
   Icon,
+  Row,
   Text,
   TextField,
   type TextFieldRef,
   useNativeState,
 } from '@expo/ui/jetpack-compose';
-import { menuAnchor } from '@expo/ui/jetpack-compose/modifiers';
+import { alpha, menuAnchor, width } from '@expo/ui/jetpack-compose/modifiers';
 import checkIcon from '@expo/material-symbols/check.xml';
 
+import {
+  QUESTION_BANK_COUNT_COLUMN_WIDTH,
+  QUESTION_BANK_TOPIC_LABEL_COLUMN_WIDTH,
+  formatQuestionCountForDisplay,
+  getTopicQuestionCount,
+} from '@/question-bank/question-bank-counts';
 import { QUESTION_BANK_CONTROL_HEIGHT } from '@/question-bank/question-bank-control-geometry';
 import type { QuestionTopicSelectorProps } from '@/question-bank/question-topic-selector.types';
 
@@ -20,6 +27,7 @@ export function QuestionTopicSelector({
   colorScheme,
   maxWidth,
   onSelect,
+  questionCounts,
   selectedTopic,
   secondaryTextColor,
   textColor,
@@ -63,27 +71,53 @@ export function QuestionTopicSelector({
         />
         <ExposedDropdownMenu expanded={expanded} onDismissRequest={() => setExpanded(false)}>
           {topics.map((topic) => (
-            <DropdownMenuItem
-              key={topic.nodeKey}
-              onClick={() => {
-                onSelect(topic.nodeKey);
-                setExpanded(false);
-              }}
-            >
-              <DropdownMenuItem.Text>
-                <Text color={textColor}>{topic.label}</Text>
-              </DropdownMenuItem.Text>
-              {topic.nodeKey === selectedTopic?.nodeKey ? (
-                <DropdownMenuItem.TrailingIcon>
-                  <Icon
-                    contentDescription="محدد"
-                    size={20}
-                    source={checkIcon}
-                    tint={secondaryTextColor}
-                  />
-                </DropdownMenuItem.TrailingIcon>
-              ) : null}
-            </DropdownMenuItem>
+            (() => {
+              const isSelected = topic.nodeKey === selectedTopic?.nodeKey;
+              const questionCount = getTopicQuestionCount(questionCounts, topic.nodeKey);
+              return (
+                <DropdownMenuItem
+                  key={topic.nodeKey}
+                  onClick={() => {
+                    onSelect(topic.nodeKey);
+                    setExpanded(false);
+                  }}
+                >
+                  <DropdownMenuItem.Text>
+                    <Row horizontalArrangement="start" verticalAlignment="center">
+                      <Text
+                        color={secondaryTextColor}
+                        maxLines={1}
+                        softWrap={false}
+                        style={{ textAlign: 'center', fontSize: 14 }}
+                        modifiers={[width(QUESTION_BANK_COUNT_COLUMN_WIDTH)]}
+                      >
+                        {questionCount === undefined
+                          ? ''
+                          : formatQuestionCountForDisplay(questionCount)}
+                      </Text>
+                      <Row horizontalArrangement="start" verticalAlignment="center">
+                        <Text
+                          color={textColor}
+                          maxLines={1}
+                          softWrap={false}
+                          style={{ textAlign: 'right' }}
+                          modifiers={[width(QUESTION_BANK_TOPIC_LABEL_COLUMN_WIDTH)]}
+                        >
+                          {topic.label}
+                        </Text>
+                        <Icon
+                          contentDescription={isSelected ? 'محدد' : undefined}
+                          size={20}
+                          source={checkIcon}
+                          tint={secondaryTextColor}
+                          modifiers={[alpha(isSelected ? 1 : 0)]}
+                        />
+                      </Row>
+                    </Row>
+                  </DropdownMenuItem.Text>
+                </DropdownMenuItem>
+              );
+            })()
           ))}
         </ExposedDropdownMenu>
       </ExposedDropdownMenuBox>

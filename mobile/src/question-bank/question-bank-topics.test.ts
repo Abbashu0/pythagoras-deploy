@@ -8,6 +8,12 @@ import {
   getDefaultGrammarTopicNode,
   getGrammarTopicNodes,
 } from '@/question-bank/question-bank-topics';
+import {
+  getTopicQuestionCount,
+  getTopicsNeedingCount,
+  isCurrentQuestionCountGeneration,
+  mergeQuestionCountCache,
+} from '@/question-bank/question-bank-counts';
 import type {
   PublicMaterialQuestionBankLayout,
   PublicMaterialQuestionBankNode,
@@ -77,4 +83,46 @@ test('Mobile rejects a layout without the grammar group or Istifham default', ()
 
   const withoutDefault = layoutFixture([{ nodeKey: 'different-default' }]);
   assert.throws(() => getGrammarTopicNodes(withoutDefault), /Istifham Question Bank is missing/);
+});
+
+test('Question count cache plans only unknown available banks and preserves zero', () => {
+  const topics = getGrammarTopicNodes(layoutFixture());
+  const counts = mergeQuestionCountCache(new Map(), [
+    { nodeKey: DEFAULT_GRAMMAR_TOPIC_NODE_KEY, total: 0 },
+  ]);
+
+  assert.equal(getTopicQuestionCount(counts, DEFAULT_GRAMMAR_TOPIC_NODE_KEY), 0);
+  assert.equal(getTopicQuestionCount(counts, 'topic-2'), undefined);
+  assert.equal(
+    getTopicsNeedingCount(topics, counts).every((topic) => topic.available),
+    true
+  );
+  assert.equal(
+    getTopicsNeedingCount(topics, counts).some(
+      (topic) => topic.nodeKey === DEFAULT_GRAMMAR_TOPIC_NODE_KEY
+    ),
+    false
+  );
+});
+
+test('Question count cache keeps valid values and rejects stale generations', () => {
+  const current = new Map([
+    [DEFAULT_GRAMMAR_TOPIC_NODE_KEY, 12],
+    ['topic-2', 34],
+  ]);
+  const merged = mergeQuestionCountCache(current, [{ nodeKey: 'topic-3', total: 0 }]);
+
+  assert.equal(merged.get(DEFAULT_GRAMMAR_TOPIC_NODE_KEY), 12);
+  assert.equal(merged.get('topic-2'), 34);
+  assert.equal(merged.get('topic-3'), 0);
+  assert.equal(isCurrentQuestionCountGeneration(4, 4), true);
+  assert.equal(isCurrentQuestionCountGeneration(4, 3), false);
+});
+
+test('Question count remains independent from a search result total', () => {
+  const counts = mergeQuestionCountCache(new Map(), [{ nodeKey: 'topic-2', total: 34 }]);
+  const searchTotal = 3;
+
+  assert.equal(getTopicQuestionCount(counts, 'topic-2'), 34);
+  assert.notEqual(searchTotal, getTopicQuestionCount(counts, 'topic-2'));
 });
