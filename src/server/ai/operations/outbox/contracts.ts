@@ -41,6 +41,11 @@ export interface AIOutboxEventSpec {
   scheduledAt?: number;
 }
 
+export interface AIOutboxRoute {
+  eventType: string;
+  payloadVersion: number;
+}
+
 export interface AIOutboxRouterDefinition {
   eventType: string;
   payloadVersion: number;

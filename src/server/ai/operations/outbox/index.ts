@@ -4,6 +4,7 @@ export {
   type AIOutboxEventSpec,
   type AIOutboxOperationalSummary,
   type AIOutboxOperationalView,
+  type AIOutboxRoute,
   type AIOutboxRouterDefinition,
   type AIOutboxStatus,
 } from "./contracts";

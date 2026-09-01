@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 
-import { and, asc, desc, eq, inArray, isNull, lte, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, lte, or, sql } from "drizzle-orm";
 
 import type { ContentDatabase } from "../../../content/database";
 import {
@@ -84,12 +84,16 @@ export class SQLiteAIJobRepository {
   claimNextInTransaction(input: {
     now: number;
     workerId: string;
-    supportedKinds: readonly string[];
     supportedJobs: ReadonlyArray<{ kind: string; payloadVersion: number }>;
   }): AIClaimedJob | null {
-    if (!input.supportedKinds.length || !input.supportedJobs.length) return null;
-    const candidates = this.database.db.select().from(aiJobs).where(and(
-      inArray(aiJobs.kind, [...input.supportedKinds]),
+    if (!input.supportedJobs.length) return null;
+    const supportedPairs = input.supportedJobs.map((supported) => and(
+      eq(aiJobs.kind, supported.kind),
+      eq(aiJobs.payloadVersion, supported.payloadVersion),
+    ));
+    const exactSupport = supportedPairs.length === 1 ? supportedPairs[0] : or(...supportedPairs);
+    const candidate = this.database.db.select().from(aiJobs).where(and(
+      exactSupport,
       or(eq(aiJobs.status, "PENDING"), eq(aiJobs.status, "RETRY_WAIT")),
       lte(aiJobs.scheduledAt, input.now),
       sql`${aiJobs.attemptCount} < ${aiJobs.maxAttempts}`,
@@ -99,9 +103,7 @@ export class SQLiteAIJobRepository {
       asc(aiJobs.scheduledAt),
       asc(aiJobs.createdAt),
       asc(aiJobs.id),
-    ).limit(100).all();
-    const candidate = candidates.find((row) => input.supportedJobs.some((supported) =>
-      supported.kind === row.kind && supported.payloadVersion === row.payloadVersion));
+    ).limit(1).get();
     if (!candidate) return null;
     const leaseGeneration = candidate.leaseGeneration + 1;
     const leaseToken = randomBytes(32).toString("base64url");
@@ -321,12 +323,16 @@ export class SQLiteAIJobRepository {
 
   oldestEligibleInTransaction(input: {
     now: number;
-    supportedKinds: readonly string[];
     supportedJobs: ReadonlyArray<{ kind: string; payloadVersion: number }>;
   }): AIJobOperationalView | null {
-    if (!input.supportedKinds.length || !input.supportedJobs.length) return null;
-    const candidates = this.database.db.select().from(aiJobs).where(and(
-      inArray(aiJobs.kind, [...input.supportedKinds]),
+    if (!input.supportedJobs.length) return null;
+    const supportedPairs = input.supportedJobs.map((supported) => and(
+      eq(aiJobs.kind, supported.kind),
+      eq(aiJobs.payloadVersion, supported.payloadVersion),
+    ));
+    const exactSupport = supportedPairs.length === 1 ? supportedPairs[0] : or(...supportedPairs);
+    const candidate = this.database.db.select().from(aiJobs).where(and(
+      exactSupport,
       or(eq(aiJobs.status, "PENDING"), eq(aiJobs.status, "RETRY_WAIT")),
       lte(aiJobs.scheduledAt, input.now),
       sql`${aiJobs.attemptCount} < ${aiJobs.maxAttempts}`,
@@ -336,9 +342,7 @@ export class SQLiteAIJobRepository {
       asc(aiJobs.scheduledAt),
       asc(aiJobs.createdAt),
       asc(aiJobs.id),
-    ).limit(100).all();
-    const candidate = candidates.find((row) => input.supportedJobs.some((supported) =>
-      supported.kind === row.kind && supported.payloadVersion === row.payloadVersion));
+    ).limit(1).get();
     return candidate ? operationalViewFromJob(jobFromRow(candidate)) : null;
   }
 

@@ -47,7 +47,6 @@ export function createAIOperationsRuntime(options: {
     jobs,
     handlers,
     outbox,
-    outboxRouters,
     recovery,
     pollIntervalMs: options.pollIntervalMs,
     workerId: options.workerId,

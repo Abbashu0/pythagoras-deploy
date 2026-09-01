@@ -47,11 +47,13 @@ export class AIOutboxService {
     return this.enqueuePreparedInTransaction(this.prepare(spec, now), now);
   }
 
-  dispatchOne(input: { now?: number; supportedEventTypes: readonly string[] }): AIOutboxEvent | null {
+  dispatchOne(input: { now?: number; supportedEventTypes?: readonly string[] } = {}): AIOutboxEvent | null {
     const now = input.now ?? this.safeNow();
     this.assertTimestamp(now);
+    const supportedRoutes = this.routers.supportedRoutes().filter((route) =>
+      !input.supportedEventTypes || input.supportedEventTypes.includes(route.eventType));
     return this.database.client.transaction(() => {
-      const events = this.repository.listDispatchableInTransaction({ now, supportedEventTypes: input.supportedEventTypes });
+      const events = this.repository.listDispatchableInTransaction({ now, supportedRoutes });
       const event = events[0];
       if (!event) return null;
       const router = this.routers.get(event.eventType, event.payloadVersion);

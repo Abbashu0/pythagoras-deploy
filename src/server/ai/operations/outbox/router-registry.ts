@@ -1,5 +1,5 @@
 import { AIOutboxError } from "./errors";
-import type { AIOutboxRouterDefinition } from "./contracts";
+import type { AIOutboxRoute, AIOutboxRouterDefinition } from "./contracts";
 
 const EVENT_TYPE_PATTERN = /^[a-z][a-z0-9.-]{0,119}$/u;
 
@@ -25,6 +25,12 @@ export class AIOutboxRouterRegistry {
 
   supportedEventTypes(): string[] {
     return [...new Set([...this.definitions.values()].map((definition) => definition.eventType))].sort();
+  }
+
+  supportedRoutes(): AIOutboxRoute[] {
+    return [...this.definitions.values()]
+      .map((definition) => ({ eventType: definition.eventType, payloadVersion: definition.payloadVersion }))
+      .sort((left, right) => left.eventType.localeCompare(right.eventType) || left.payloadVersion - right.payloadVersion);
   }
 
   private key(eventType: string, payloadVersion: number): string {

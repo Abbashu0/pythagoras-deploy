@@ -80,10 +80,11 @@ function registerValueHandler(
   fixture: Pick<Fixture, "handlers">,
   kind: string,
   execute: (value: string, context: AIJobExecutionContext) => void | Promise<void> = () => undefined,
+  payloadVersion = 1,
 ): void {
   fixture.handlers.register({
     kind,
-    payloadVersion: 1,
+    payloadVersion,
     validatePayload(value: unknown): Record<string, unknown> {
       if (typeof value !== "object" || value === null || Array.isArray(value)) throw new AIJobError("AI_JOB_PAYLOAD_INVALID", "Synthetic payload is invalid.");
       const record = value as Record<string, unknown>;
@@ -236,6 +237,53 @@ test("A rolling-deployment worker leaves an unknown Job payload version pending"
   }
 });
 
+test("Job selection filters exact handler versions before LIMIT and preserves rolling-deployment liveness", () => {
+  const fixture = createFixture();
+  try {
+    registerValueHandler(fixture, "synthetic.work", undefined, 1);
+    const repository = new SQLiteAIJobRepository(fixture.database);
+    const unsupported: ReturnType<typeof repository.insertInTransaction>[] = [];
+    for (let index = 0; index < 101; index += 1) {
+      const normalized = normalizeAIJobSpec(spec({
+        id: uuidv7(),
+        kind: "synthetic.work",
+        payloadVersion: 2,
+        payload: { value: `future-${index}` },
+        dedupeKey: `future-${index}`,
+        priority: "CRITICAL",
+      }));
+      unsupported.push(repository.insertInTransaction({ id: normalized.id ?? uuidv7(), spec: normalized, now: BASE_TIME + 100 }));
+    }
+    const supported = fixture.jobs.enqueue(spec({
+      kind: "synthetic.work",
+      payloadVersion: 1,
+      payload: { value: "supported-behind-future" },
+      dedupeKey: "supported-behind-future",
+      priority: "LOW",
+    }));
+
+    assert.equal(fixture.jobs.oldestEligible({ supportedKinds: ["synthetic.work"], now: BASE_TIME + 100 })?.id, supported.id);
+    const claimed = fixture.jobs.claimNext({ workerId: "old-worker", supportedKinds: ["synthetic.work"], now: BASE_TIME + 100 });
+    assert.equal(claimed?.job.id, supported.id);
+    assert.equal(claimed?.attempt.attemptNumber, 1);
+    assert.equal(unsupported.every((job) => fixture.jobs.getJob(job.id)?.status === "PENDING"), true);
+    assert.equal(unsupported.every((job) => fixture.jobs.listAttempts(job.id).length === 0), true);
+    assert.equal(unsupported.every((job) => fixture.jobs.getJob(job.id)?.leaseOwner === null), true);
+
+    const newHandlers = new AIJobHandlerRegistry();
+    registerValueHandler({ handlers: newHandlers }, "synthetic.work", undefined, 1);
+    registerValueHandler({ handlers: newHandlers }, "synthetic.work", undefined, 2);
+    const newWorkerJobs = new AIJobQueueService(fixture.database, newHandlers, { clock: () => BASE_TIME + 100 });
+    const futureClaim = newWorkerJobs.claimNext({ workerId: "new-worker", supportedKinds: ["synthetic.work"], now: BASE_TIME + 100 });
+    assert.ok(futureClaim);
+    assert.equal(futureClaim.job.payloadVersion, 2);
+    fixture.jobs.complete(claimed!.lease, BASE_TIME + 110);
+    newWorkerJobs.complete(futureClaim.lease, BASE_TIME + 110);
+  } finally {
+    fixture.close();
+  }
+});
+
 test("Two independent SQLite worker connections cannot claim the same Job", () => {
   const fixture = createFixture();
   let secondDatabase: ContentDatabase | null = null;
@@ -361,10 +409,10 @@ test("A retried handler can safely repeat an idempotent domain action after comp
   }
 });
 
-function registerOutboxRouter(fixture: Fixture): void {
+function registerOutboxRouterVersion(fixture: Fixture, payloadVersion: number): void {
   fixture.routers.register({
     eventType: "synthetic.event",
-    payloadVersion: 1,
+    payloadVersion,
     validatePayload(value: unknown): Record<string, unknown> {
       if (typeof value !== "object" || value === null || Array.isArray(value)) throw new AIOutboxError("AI_OUTBOX_INVALID", "Synthetic event payload is invalid.");
       const record = value as Record<string, unknown>;
@@ -374,13 +422,18 @@ function registerOutboxRouter(fixture: Fixture): void {
     toJob(payload) {
       return spec({
         kind: "synthetic.outbox",
+        payloadVersion,
         payload: { value: payload.ref },
-        dedupeKey: `outbox-job:${payload.ref}`,
+        dedupeKey: `outbox-job:${payload.ref}:v${payloadVersion}`,
         scheduledAt: BASE_TIME + 100,
       });
     },
   });
-  registerValueHandler(fixture, "synthetic.outbox");
+  registerValueHandler(fixture, "synthetic.outbox", undefined, payloadVersion);
+}
+
+function registerOutboxRouter(fixture: Fixture): void {
+  registerOutboxRouterVersion(fixture, 1);
 }
 
 function insertRawOutbox(
@@ -455,6 +508,62 @@ test("Outbox enqueue is deduplicated, dispatch is atomic with Job creation, and 
   } finally {
     fixture.close();
   }
+});
+
+test("Outbox selection filters exact routes before LIMIT and keeps future versions pending", () => {
+  const fixture = createFixture();
+  try {
+    registerOutboxRouter(fixture);
+    insertRawOutbox(fixture, {
+      eventType: "synthetic.event",
+      payloadVersion: 2,
+      dedupeKey: "future-route",
+    });
+    const supported = fixture.outbox.enqueue({
+      eventType: "synthetic.event",
+      payloadVersion: 1,
+      payload: { ref: "supported-route" },
+      dedupeKey: "supported-route",
+      scheduledAt: BASE_TIME + 200,
+    });
+    const firstDispatch = fixture.outbox.dispatchOne({ now: BASE_TIME + 300 });
+    assert.equal(firstDispatch?.id, supported.id);
+    assert.equal(firstDispatch?.status, "DISPATCHED");
+    const future = fixture.database.client.prepare("select status, safe_error_code, dispatched_job_id from ai_outbox_events where dedupe_key = 'future-route'").get() as { status: string; safe_error_code: string | null; dispatched_job_id: string | null };
+    assert.deepEqual(future, { status: "PENDING", safe_error_code: null, dispatched_job_id: null });
+
+    registerOutboxRouterVersion(fixture, 2);
+    assert.deepEqual(fixture.routers.supportedRoutes(), [
+      { eventType: "synthetic.event", payloadVersion: 1 },
+      { eventType: "synthetic.event", payloadVersion: 2 },
+    ]);
+    const secondDispatch = fixture.outbox.dispatchOne({ now: BASE_TIME + 300 });
+    assert.equal(secondDispatch?.status, "DISPATCHED");
+    assert.equal(secondDispatch?.dedupeKey, "future-route");
+    assert.equal((fixture.database.client.prepare("select count(*) as count from ai_jobs where kind = 'synthetic.outbox'").get() as { count: number }).count, 2);
+  } finally {
+    fixture.close();
+  }
+});
+
+test("Outbox route registry exposes deterministic exact event/version pairs", () => {
+  const registry = new AIOutboxRouterRegistry();
+  for (const route of [
+    { eventType: "event.b", payloadVersion: 2 },
+    { eventType: "event.a", payloadVersion: 3 },
+    { eventType: "event.a", payloadVersion: 1 },
+  ]) {
+    registry.register({
+      ...route,
+      validatePayload: () => ({ ref: "route" }),
+      toJob: () => spec(),
+    });
+  }
+  assert.deepEqual(registry.supportedRoutes(), [
+    { eventType: "event.a", payloadVersion: 1 },
+    { eventType: "event.a", payloadVersion: 3 },
+    { eventType: "event.b", payloadVersion: 2 },
+  ]);
 });
 
 test("Outbox producer participates in caller transaction atomicity", () => {

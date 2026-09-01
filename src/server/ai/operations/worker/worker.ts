@@ -9,7 +9,7 @@ import {
   classifyAIJobFailure,
 } from "../jobs";
 import type { AIOutboxEvent } from "../outbox";
-import { AIOutboxRouterRegistry, AIOutboxService } from "../outbox";
+import { AIOutboxService } from "../outbox";
 import type { AIOperationalRecoveryPolicy, AIRecoveryRunResult } from "../recovery";
 import { AIOperationalRecoveryService } from "../recovery";
 
@@ -25,7 +25,6 @@ export interface AIWorkerDependencies {
   jobs: AIJobQueueService;
   handlers: AIJobHandlerRegistry;
   outbox?: AIOutboxService;
-  outboxRouters?: AIOutboxRouterRegistry;
   recovery?: AIOperationalRecoveryService;
   recoveryPolicy?: AIOperationalRecoveryPolicy;
   pollIntervalMs?: number;
@@ -61,11 +60,8 @@ export class AIWorker {
     if (!Number.isSafeInteger(now) || now < 0) throw new AIJobError("AI_JOB_INVALID", "Worker timestamp is invalid.");
     const recoveredJobs = this.dependencies.jobs.recoverExpiredLeases(now);
     const recovery = this.dependencies.recovery?.runOnce(now);
-    const dispatchedOutbox = !this.stopping && this.dependencies.outbox && this.dependencies.outboxRouters
-      ? this.dependencies.outbox.dispatchOne({
-          now,
-          supportedEventTypes: this.dependencies.outboxRouters.supportedEventTypes(),
-        })
+    const dispatchedOutbox = !this.stopping && this.dependencies.outbox
+      ? this.dependencies.outbox.dispatchOne({ now })
       : null;
     if (this.stopping) {
       return { recoveredJobs: recoveredJobs.length, recovery, dispatchedOutbox, claimedJobId: null, completedJobId: null };

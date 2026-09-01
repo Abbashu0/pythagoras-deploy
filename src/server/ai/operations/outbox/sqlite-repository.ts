@@ -1,4 +1,4 @@
-import { asc, desc, and, eq, inArray, lte, or } from "drizzle-orm";
+import { asc, desc, and, eq, lte, or } from "drizzle-orm";
 
 import type { ContentDatabase } from "../../../content/database";
 import {
@@ -9,6 +9,7 @@ import type {
   AIOutboxEvent,
   AIOutboxOperationalSummary,
   AIOutboxOperationalView,
+  AIOutboxRoute,
 } from "./contracts";
 import { AIOutboxError } from "./errors";
 import type { NormalizedAIOutboxEventSpec } from "./validation";
@@ -57,13 +58,18 @@ export class SQLiteAIOutboxRepository {
 
   listDispatchableInTransaction(input: {
     now: number;
-    supportedEventTypes: readonly string[];
+    supportedRoutes: readonly AIOutboxRoute[];
   }): AIOutboxEvent[] {
-    if (!input.supportedEventTypes.length) return [];
+    if (!input.supportedRoutes.length) return [];
+    const supportedPairs = input.supportedRoutes.map((supported) => and(
+      eq(aiOutboxEvents.eventType, supported.eventType),
+      eq(aiOutboxEvents.payloadVersion, supported.payloadVersion),
+    ));
+    const exactSupport = supportedPairs.length === 1 ? supportedPairs[0] : or(...supportedPairs);
     return this.database.db.select().from(aiOutboxEvents).where(and(
       eq(aiOutboxEvents.status, "PENDING"),
       lte(aiOutboxEvents.scheduledAt, input.now),
-      inArray(aiOutboxEvents.eventType, [...input.supportedEventTypes]),
+      exactSupport,
     )).orderBy(asc(aiOutboxEvents.scheduledAt), asc(aiOutboxEvents.createdAt), asc(aiOutboxEvents.id)).limit(1).all().map(eventFromRow);
   }
 

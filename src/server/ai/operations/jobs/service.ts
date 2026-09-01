@@ -84,8 +84,7 @@ export class AIJobQueueService {
     this.assertTimestamp(now);
     return this.database.client.transaction(() => this.repository.oldestEligibleInTransaction({
       now,
-      supportedKinds: input.supportedKinds,
-      supportedJobs: this.handlers.supportedJobs().filter((supported) => input.supportedKinds.includes(supported.kind)),
+      supportedJobs: this.supportedJobsForKinds(input.supportedKinds),
     }))();
   }
 
@@ -109,8 +108,7 @@ export class AIJobQueueService {
     return this.database.client.transaction(() => this.repository.claimNextInTransaction({
       now,
       workerId,
-      supportedKinds: input.supportedKinds,
-      supportedJobs: this.handlers.supportedJobs().filter((supported) => input.supportedKinds.includes(supported.kind)),
+      supportedJobs: this.supportedJobsForKinds(input.supportedKinds),
     })).immediate();
   }
 
@@ -207,6 +205,12 @@ export class AIJobQueueService {
   private queryLimit(value: number): number {
     if (!Number.isSafeInteger(value) || value < 1 || value > 500) throw new AIJobError("AI_JOB_INVALID", "Job query limit is invalid.");
     return value;
+  }
+
+  private supportedJobsForKinds(supportedKinds: readonly string[]): Array<{ kind: string; payloadVersion: number }> {
+    if (!supportedKinds.length) return [];
+    const requestedKinds = new Set(supportedKinds);
+    return this.handlers.supportedJobs().filter((supported) => requestedKinds.has(supported.kind));
   }
 }
 
