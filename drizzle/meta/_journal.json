@@ -85,6 +85,13 @@
       "when": 1788289806635,
       "tag": "0011_ai-provider-configuration-and-secrets",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1788291684727,
+      "tag": "0012_ai-model-registry",
+      "breakpoints": true
     }
   ]
 }

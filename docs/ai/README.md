@@ -12,6 +12,10 @@ Pythagoras AI is an educational intelligence platform, not a chatbot integration
 
 The current repository remains the root Next.js Backend/Admin application plus the Expo Student application under `mobile/`. The current persistence boundary is SQLite + Drizzle with runtime data under `PYTHAGORAS_DATA_DIR`; the current governance boundary is Change Sets, review, OWNER approval, and atomic publication. AI-M0 places future AI services behind those existing boundaries rather than replacing them.
 
+## Current runtime boundary
+
+AI-M1 provides governed Provider configuration and the encrypted local Secret Store. AI-M2 adds the governed Model Registry, normalized Generation/Embedding/Reranker contracts, server-registered adapters, and a provider-neutral Gateway with timeout, cancellation, fallback, and safe attempt tracing. No production vendor is selected and no external provider call, Student AI route, budget ledger, RAG, or AI UI exists yet.
+
 ## Document map
 
 | Document | Responsibility |

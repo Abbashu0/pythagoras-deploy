@@ -8,6 +8,7 @@ import {
   MaterialQuestionBankChangeSetCoordinator,
 } from "../material-question-bank";
 import { AIProviderConfigChangeAdapter } from "../ai/configuration";
+import { AIModelConfigChangeAdapter } from "../ai/model-registry";
 
 export class ChangeResourceAdapterRegistry {
   private readonly adapters = new Map<string, ChangeResourceAdapter>();
@@ -67,6 +68,7 @@ export function createDefaultChangeResourceRegistry(): ChangeResourceAdapterRegi
       ...createQuestionChangeAdapters(),
       new MaterialQuestionBankChangeAdapter(),
       new AIProviderConfigChangeAdapter(),
+      new AIModelConfigChangeAdapter(),
     ],
     [new QuestionChangeSetCoordinator(), new MaterialQuestionBankChangeSetCoordinator()],
   );

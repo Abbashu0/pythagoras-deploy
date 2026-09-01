@@ -13,11 +13,16 @@ AI milestones are future delivery boundaries. Each milestone is one coherent com
 **Delivered boundary:** Governed safe Provider configuration, opaque credential references, a replaceable `AISecretStoreAdapter`, local AES-256-GCM secret storage under `PYTHAGORAS_DATA_DIR`, secret lifecycle audit metadata, redacted DTOs, and migration `0011_ai-provider-configuration-and-secrets`.
 **Explicit boundary:** No Provider Gateway, inference, health/test-connection call, Student/Admin AI UI, or external provider SDK was added.
 
+## AI-M2 — Provider Gateway & Model Registry
+
+**Status:** Implemented as the second runtime AI milestone.
+**Delivered boundary:** Governed `ai.model-config` records through Change Sets and OWNER publication; separate Generation, Embedding, and Reranker adapter contracts; a server-registered adapter registry; a provider-neutral Gateway with capability checks, request-scoped credential resolution, timeout/cancellation, normalized errors/usage, explicit fallback, and safe per-attempt traces; and a validated outbound target/transport boundary. Migration `0012_ai-model-registry` adds only safe model metadata.
+**Explicit boundary:** No production provider or vendor was selected, no external provider call or SDK was added, and no Student AI, conversation, RAG, budget/cost ledger, or Admin/Mobile AI UI was implemented. Deterministic fakes are test-only.
+
 ## Remaining future milestones
 
 | Milestone | Coherent boundary | Independent exit gate |
 | --- | --- | --- |
-| **AI-M2 Provider Gateway** | Separate Generation, Embedding, and Reranker adapters; model registry; capability routing; normalized errors/usage | Contract tests pass against replaceable fakes; cancellation, timeout, capability mismatch, and provider fallback are traceable |
 | **AI-M3 Operations Core** | Rate cards, usage/cost records, Budget Ledger, atomic reservation/settlement, rate limits, circuit breakers, and job/outbox foundation | Concurrent reservations, idempotent settlement, partial streams, retries, and provider outage are tested without overspend |
 | **AI-M4 Conversation Core** | Server-resolved StudentPrincipal boundary, subject-immutable conversations, messages, streaming generations, and deletion lifecycle | Client identity substitution fails; subject scope cannot change; stream lifecycle and private access isolation pass |
 | **AI-M5 Policy & Context Engine** | Global/subject policy revisions, ContextBudgetManager, bounded summaries/recent turns, output constraints, and context audit | Budget plan is deterministic/revisioned; hard/soft limits and policy precedence pass representative tests |

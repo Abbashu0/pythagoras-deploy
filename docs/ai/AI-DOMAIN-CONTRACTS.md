@@ -1,6 +1,6 @@
 # AI domain boundaries and conceptual contracts
 
-This document defines ownership and contracts only. The names below are design boundaries for later milestones, not modules to implement in AI-M0.
+This document defines ownership and contracts. AI-M0 established the boundaries; AI-M1 and AI-M2 now materialize the configuration, secrets, Model Registry, adapter, transport, and Gateway portions described below without selecting a production provider.
 
 ## 1. Configuration, secrets, and provider boundaries
 
@@ -32,6 +32,10 @@ RerankerProviderAdapter.rerank(request)
 Each adapter reports the resolved provider/model, request identity, status, latency, and trustworthy usage fields. Provider-specific SDK types stop at the adapter boundary.
 
 The AI-M1 local Secret Store reads the master key from `PYTHAGORAS_AI_MASTER_KEY` as a 32-byte base64 or 64-character hexadecimal value and stores only versioned encrypted envelopes under `<PYTHAGORAS_DATA_DIR>/ai-secrets/<credentialRef>/`. No key value or ciphertext is part of the repository or any Product configuration snapshot.
+
+AI-M2 materializes the Model Registry and Gateway boundaries in `src/server/ai/`. Model configurations are governed `ai.model-config` resources with one declared capability per record. The Gateway accepts only an internal ordered `ModelSelectionPlan` of server-owned model configuration IDs, resolves an active Provider and credential through `AISecretStoreAdapter`, then invokes a matching server-registered adapter. Generation streams use `STARTED`, `TEXT_DELTA`, `USAGE`, and `COMPLETED` events; embedding and reranking return bounded normalized results. Usage remains token metadata with unknown dimensions represented as `null`; durable cost and budget accounting remain AI-M3 work.
+
+Gateway failures use a closed normalized taxonomy with explicit retry/fallback flags. Each invocation returns safe attempt metadata with model/provider revisions and no prompt, credential, raw provider body, or permanent usage record. The M2 transport boundary requires an HTTPS target whose resolved addresses pass the denylist for private, loopback, link-local, multicast, metadata, unspecified, and reserved networks; a future transport must pin/use that validated resolution to reduce DNS rebinding risk. No production HTTP adapter or vendor protocol adapter is shipped in M2.
 
 ## 2. Policy, subject, conversation, and student boundaries
 

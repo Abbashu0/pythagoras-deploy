@@ -23,7 +23,7 @@ For appropriate system controls, prefer `@expo/ui` or other Expo/native platform
 
 ## Current AI phase
 
-The Pythagoras AI Intelligence System has completed AI-M0 and now has AI-M1 — Configuration & Secrets implemented under `src/server/ai/`, with migration `0011_ai-provider-configuration-and-secrets`. AI-M1 provides governed safe Provider configuration, opaque `credentialRef` bindings, and a local encrypted Secret Store, but no Provider Gateway, inference, external provider SDK/API calls, Student/Admin AI UI, or Student AI identity/entitlement system. The locked boundaries and future milestone plan are in [docs/ai/README.md](docs/ai/README.md).
+The Pythagoras AI Intelligence System has completed approved AI-M0 and implemented AI-M1 — Configuration & Secrets plus AI-M2 — Provider Gateway & Model Registry under `src/server/ai/`. M1 uses migration `0011_ai-provider-configuration-and-secrets`; M2 uses migration `0012_ai-model-registry` and provides governed Model Registry records, normalized provider-capability contracts, server-registered adapters, and a provider-neutral Gateway tested only with deterministic fakes. No production vendor, external provider call, Student AI, conversation/identity/entitlement runtime, budget ledger, RAG, or Admin/Mobile AI UI exists yet. The locked boundaries and milestone plan are in [docs/ai/README.md](docs/ai/README.md).
 
 The content-platform master plan supersedes the earlier no-backend restriction. M1 provides a local Next.js server foundation backed by SQLite + Drizzle under `src/server/content/`, with committed migrations in `drizzle/`. Runtime data is configured by `PYTHAGORAS_DATA_DIR`; its safe Windows fallback is `%LOCALAPPDATA%\Pythagoras\data`. Runtime databases and assets must never be committed.
 

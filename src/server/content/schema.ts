@@ -34,6 +34,7 @@ import type {
   AIProviderRetentionPolicy,
   AIProviderTrainingPolicy,
 } from "../ai/configuration/contracts";
+import type { AIModelCapability } from "../ai/model-registry/contracts";
 import type {
   AISecretAuditActorType,
   AISecretAuditEventType,
@@ -1281,6 +1282,108 @@ export const aiProviderConfigs = sqliteTable(
   ],
 );
 
+/** Safe, governed AI Model registry entry; provider credentials remain elsewhere. */
+export const aiModelConfigs = sqliteTable(
+  "ai_model_configs",
+  {
+    id: text("id").primaryKey(),
+    key: text("model_key").notNull(),
+    displayName: text("display_name").notNull(),
+    providerConfigId: text("provider_config_id")
+      .notNull()
+      .references(() => aiProviderConfigs.id, { onDelete: "restrict" }),
+    providerModelId: text("provider_model_id").notNull(),
+    capability: text("capability").$type<AIModelCapability>().notNull(),
+    adapterKey: text("adapter_key").notNull(),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(false),
+    contextWindowTokens: integer("context_window_tokens"),
+    maxOutputTokens: integer("max_output_tokens"),
+    embeddingDimensions: integer("embedding_dimensions"),
+    supportsStreaming: integer("supports_streaming", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    supportsReasoning: integer("supports_reasoning", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    supportsStructuredOutput: integer("supports_structured_output", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => adminUsers.id, { onDelete: "restrict" }),
+    updatedBy: text("updated_by")
+      .notNull()
+      .references(() => adminUsers.id, { onDelete: "restrict" }),
+    revision: integer("revision").notNull().default(1),
+  },
+  (table) => [
+    uniqueIndex("ai_model_configs_key_unique").on(table.key),
+    index("ai_model_configs_provider_index").on(table.providerConfigId),
+    index("ai_model_configs_capability_index").on(table.capability),
+    index("ai_model_configs_enabled_index").on(table.enabled),
+    index("ai_model_configs_adapter_index").on(table.adapterKey),
+    check(
+      "ai_model_configs_key_valid",
+      sql`length(trim(${table.key})) between 1 and 120 and ${table.key} not glob '*[^a-z0-9-]*'`,
+    ),
+    check(
+      "ai_model_configs_display_name_valid",
+      sql`length(trim(${table.displayName})) between 1 and 200`,
+    ),
+    check(
+      "ai_model_configs_provider_model_id_valid",
+      sql`length(trim(${table.providerModelId})) between 1 and 200`,
+    ),
+    check(
+      "ai_model_configs_capability_valid",
+      sql`${table.capability} in ('GENERATION','EMBEDDING','RERANK')`,
+    ),
+    check(
+      "ai_model_configs_adapter_key_valid",
+      sql`length(trim(${table.adapterKey})) between 1 and 120 and ${table.adapterKey} not glob '*[^a-z0-9.-]*'`,
+    ),
+    check("ai_model_configs_enabled_boolean", sql`${table.enabled} in (0,1)`),
+    check(
+      "ai_model_configs_context_window_positive",
+      sql`${table.contextWindowTokens} is null or ${table.contextWindowTokens} >= 1`,
+    ),
+    check(
+      "ai_model_configs_max_output_positive",
+      sql`${table.maxOutputTokens} is null or ${table.maxOutputTokens} >= 1`,
+    ),
+    check(
+      "ai_model_configs_embedding_dimensions_positive",
+      sql`${table.embeddingDimensions} is null or ${table.embeddingDimensions} >= 1`,
+    ),
+    check(
+      "ai_model_configs_generation_limits_ordered",
+      sql`${table.contextWindowTokens} is null or ${table.maxOutputTokens} is null or ${table.maxOutputTokens} <= ${table.contextWindowTokens}`,
+    ),
+    check(
+      "ai_model_configs_capability_fields_valid",
+      sql`(
+        (${table.capability} = 'GENERATION') or
+        (${table.contextWindowTokens} is null and ${table.maxOutputTokens} is null and ${table.supportsStreaming} = 0 and ${table.supportsReasoning} = 0 and ${table.supportsStructuredOutput} = 0)
+      ) and (
+        (${table.capability} = 'EMBEDDING') or ${table.embeddingDimensions} is null
+      )`,
+    ),
+    check("ai_model_configs_streaming_boolean", sql`${table.supportsStreaming} in (0,1)`),
+    check("ai_model_configs_reasoning_boolean", sql`${table.supportsReasoning} in (0,1)`),
+    check(
+      "ai_model_configs_structured_output_boolean",
+      sql`${table.supportsStructuredOutput} in (0,1)`,
+    ),
+    check("ai_model_configs_revision_positive", sql`${table.revision} >= 1`),
+    check(
+      "ai_model_configs_timestamps_ordered",
+      sql`${table.updatedAt} >= ${table.createdAt}`,
+    ),
+  ],
+);
+
 /** Append-only safe audit metadata; no ciphertext or secret payload is stored. */
 export const aiSecretAuditEvents = sqliteTable(
   "ai_secret_audit_events",
@@ -1352,5 +1455,6 @@ export type MaterialQuestionBankNodeRow =
 export type QuestionSearchDocumentRow =
   typeof questionSearchDocuments.$inferSelect;
 export type AIProviderConfigRow = typeof aiProviderConfigs.$inferSelect;
+export type AIModelConfigRow = typeof aiModelConfigs.$inferSelect;
 export type AISecretRefRow = typeof aiSecretRefs.$inferSelect;
 export type AISecretAuditEventRow = typeof aiSecretAuditEvents.$inferSelect;

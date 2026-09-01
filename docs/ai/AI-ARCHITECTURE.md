@@ -1,7 +1,7 @@
 # AI architecture lock
 
 **Milestone:** AI-M0 — Architecture Lock & Backend Readiness Specification
-**Status:** Locked for review; no AI runtime is implemented.
+**Status:** AI-M0 is locked; the current implementation has completed AI-M1 and AI-M2 without selecting a production provider.
 
 ## 1. Architectural position
 
@@ -82,7 +82,7 @@ The audit was performed against `HEAD == origin/main == b528f198d25e0c7b4b64a41c
 | Question domain | Relational Packages, Taxonomy, Banks, Questions, Variants, Occurrences, shared Answers | Question content remains a separate canonical domain and gets its own knowledge projector |
 | Search | Published placement-scoped SQLite FTS5 projection | This is lexical Question Search, not semantic AI retrieval or a vector index |
 | Student identity | No production Student authentication or entitlement boundary | Student AI launch is blocked until a server-resolved principal and entitlement service exist |
-| AI | AI-M1 now adds `src/server/ai` configuration/secrets boundaries and migration `0011`, with no Provider Gateway, inference, UI, or durable AI jobs | AI-M2 begins provider capability runtime |
+| AI | AI-M1 adds configuration/secrets and migration `0011`; AI-M2 adds the governed Model Registry, provider-neutral Gateway contracts/runtime boundary, and migration `0012`; no production provider, external call, UI, or durable AI jobs exists | AI-M3 begins operations/cost/runtime accounting |
 
 The public Student content routes currently expose published content without a Student principal. That is acceptable for the current read-only content surface but is not an acceptable trust boundary for a metered Student AI API.
 
