@@ -78,6 +78,13 @@
       "when": 1787760000000,
       "tag": "0010_arabic-question-bank-preset",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1788289806635,
+      "tag": "0011_ai-provider-configuration-and-secrets",
+      "breakpoints": true
     }
   ]
 }

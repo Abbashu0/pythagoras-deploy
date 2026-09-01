@@ -31,6 +31,8 @@ RerankerProviderAdapter.rerank(request)
 
 Each adapter reports the resolved provider/model, request identity, status, latency, and trustworthy usage fields. Provider-specific SDK types stop at the adapter boundary.
 
+The AI-M1 local Secret Store reads the master key from `PYTHAGORAS_AI_MASTER_KEY` as a 32-byte base64 or 64-character hexadecimal value and stores only versioned encrypted envelopes under `<PYTHAGORAS_DATA_DIR>/ai-secrets/<credentialRef>/`. No key value or ciphertext is part of the repository or any Product configuration snapshot.
+
 ## 2. Policy, subject, conversation, and student boundaries
 
 | Boundary | Contract |

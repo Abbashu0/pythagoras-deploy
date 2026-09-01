@@ -82,7 +82,7 @@ The audit was performed against `HEAD == origin/main == b528f198d25e0c7b4b64a41c
 | Question domain | Relational Packages, Taxonomy, Banks, Questions, Variants, Occurrences, shared Answers | Question content remains a separate canonical domain and gets its own knowledge projector |
 | Search | Published placement-scoped SQLite FTS5 projection | This is lexical Question Search, not semantic AI retrieval or a vector index |
 | Student identity | No production Student authentication or entitlement boundary | Student AI launch is blocked until a server-resolved principal and entitlement service exist |
-| AI | No `src/server/ai`, AI tables, provider SDKs, AI APIs, UI, or durable AI jobs | AI-M0 defines contracts only |
+| AI | AI-M1 now adds `src/server/ai` configuration/secrets boundaries and migration `0011`, with no Provider Gateway, inference, UI, or durable AI jobs | AI-M2 begins provider capability runtime |
 
 The public Student content routes currently expose published content without a Student principal. That is acceptable for the current read-only content surface but is not an acceptable trust boundary for a metered Student AI API.
 

@@ -30,6 +30,16 @@ import type {
   ChangeSetStatus,
   ChangeSnapshot,
 } from "../change-management/contracts";
+import type {
+  AIProviderRetentionPolicy,
+  AIProviderTrainingPolicy,
+} from "../ai/configuration/contracts";
+import type {
+  AISecretAuditActorType,
+  AISecretAuditEventType,
+  AISecretAuditOutcome,
+  AISecretStatus,
+} from "../ai/secrets/contracts";
 
 export type ContentPayload = Record<string, unknown>;
 
@@ -1168,6 +1178,156 @@ export const questionSearchDocuments = sqliteTable(
   ],
 );
 
+/** Safe operational pointer to encrypted material stored outside SQLite. */
+export const aiSecretRefs = sqliteTable(
+  "ai_secret_refs",
+  {
+    credentialRef: text("credential_ref").primaryKey(),
+    status: text("status").$type<AISecretStatus>().notNull().default("ACTIVE"),
+    secretVersion: integer("secret_version").notNull().default(1),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    rotatedAt: integer("rotated_at"),
+    revokedAt: integer("revoked_at"),
+    revision: integer("revision").notNull().default(1),
+  },
+  (table) => [
+    index("ai_secret_refs_status_index").on(table.status),
+    check(
+      "ai_secret_refs_credential_ref_valid",
+      sql`length(${table.credentialRef}) = 36 and ${table.credentialRef} not glob '*[^0-9a-f-]*'`,
+    ),
+    check("ai_secret_refs_status_valid", sql`${table.status} in ('ACTIVE','REVOKED')`),
+    check("ai_secret_refs_version_positive", sql`${table.secretVersion} >= 1`),
+    check("ai_secret_refs_revision_positive", sql`${table.revision} >= 1`),
+    check(
+      "ai_secret_refs_rotated_at_valid",
+      sql`${table.rotatedAt} is null or ${table.rotatedAt} >= ${table.createdAt}`,
+    ),
+    check(
+      "ai_secret_refs_revoked_at_valid",
+      sql`${table.revokedAt} is null or ${table.revokedAt} >= ${table.createdAt}`,
+    ),
+    check("ai_secret_refs_timestamps_ordered", sql`${table.updatedAt} >= ${table.createdAt}`),
+  ],
+);
+
+/** Safe, governed AI Provider configuration. Secret material is never stored here. */
+export const aiProviderConfigs = sqliteTable(
+  "ai_provider_configs",
+  {
+    id: text("id").primaryKey(),
+    key: text("provider_key").notNull(),
+    displayName: text("display_name").notNull(),
+    baseUrl: text("base_url").notNull(),
+    credentialRef: text("credential_ref").references(() => aiSecretRefs.credentialRef, {
+      onDelete: "restrict",
+    }),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(false),
+    retentionPolicy: text("retention_policy")
+      .$type<AIProviderRetentionPolicy>()
+      .notNull(),
+    trainingPolicy: text("training_policy")
+      .$type<AIProviderTrainingPolicy>()
+      .notNull(),
+    zdrSupported: integer("zdr_supported", { mode: "boolean" }).notNull().default(false),
+    zdrRequired: integer("zdr_required", { mode: "boolean" }).notNull().default(false),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => adminUsers.id, { onDelete: "restrict" }),
+    updatedBy: text("updated_by")
+      .notNull()
+      .references(() => adminUsers.id, { onDelete: "restrict" }),
+    revision: integer("revision").notNull().default(1),
+  },
+  (table) => [
+    uniqueIndex("ai_provider_configs_key_unique").on(table.key),
+    index("ai_provider_configs_enabled_index").on(table.enabled),
+    index("ai_provider_configs_credential_ref_index").on(table.credentialRef),
+    check(
+      "ai_provider_configs_key_valid",
+      sql`length(trim(${table.key})) between 1 and 120 and ${table.key} not glob '*[^a-z0-9-]*'`,
+    ),
+    check(
+      "ai_provider_configs_display_name_valid",
+      sql`length(trim(${table.displayName})) between 1 and 200`,
+    ),
+    check(
+      "ai_provider_configs_base_url_valid",
+      sql`length(trim(${table.baseUrl})) between 1 and 2048`,
+    ),
+    check(
+      "ai_provider_configs_credential_ref_valid",
+      sql`${table.credentialRef} is null or (length(${table.credentialRef}) = 36 and ${table.credentialRef} not glob '*[^0-9a-f-]*')`,
+    ),
+    check("ai_provider_configs_enabled_boolean", sql`${table.enabled} in (0,1)`),
+    check(
+      "ai_provider_configs_retention_policy_valid",
+      sql`${table.retentionPolicy} in ('UNKNOWN','ZERO_RETENTION','BOUNDED_RETENTION','PROVIDER_DEFINED')`,
+    ),
+    check(
+      "ai_provider_configs_training_policy_valid",
+      sql`${table.trainingPolicy} in ('UNKNOWN','NOT_USED_FOR_TRAINING','MAY_BE_USED','PROVIDER_DEFINED')`,
+    ),
+    check("ai_provider_configs_zdr_supported_boolean", sql`${table.zdrSupported} in (0,1)`),
+    check("ai_provider_configs_zdr_required_boolean", sql`${table.zdrRequired} in (0,1)`),
+    check("ai_provider_configs_revision_positive", sql`${table.revision} >= 1`),
+    check(
+      "ai_provider_configs_timestamps_ordered",
+      sql`${table.updatedAt} >= ${table.createdAt}`,
+    ),
+  ],
+);
+
+/** Append-only safe audit metadata; no ciphertext or secret payload is stored. */
+export const aiSecretAuditEvents = sqliteTable(
+  "ai_secret_audit_events",
+  {
+    id: text("id").primaryKey(),
+    credentialRef: text("credential_ref")
+      .notNull()
+      .references(() => aiSecretRefs.credentialRef, { onDelete: "restrict" }),
+    eventType: text("event_type").$type<AISecretAuditEventType>().notNull(),
+    secretVersion: integer("secret_version"),
+    actorType: text("actor_type").$type<AISecretAuditActorType>().notNull(),
+    actorUserId: text("actor_user_id").references(() => adminUsers.id, {
+      onDelete: "restrict",
+    }),
+    outcome: text("outcome").$type<AISecretAuditOutcome>().notNull(),
+    errorCode: text("error_code"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    index("ai_secret_audit_events_credential_time_index").on(
+      table.credentialRef,
+      table.createdAt,
+    ),
+    index("ai_secret_audit_events_actor_index").on(table.actorUserId),
+    check(
+      "ai_secret_audit_events_type_valid",
+      sql`${table.eventType} in ('CREATED','RESOLVED','ROTATED','REVOKED','RESOLVE_FAILED')`,
+    ),
+    check(
+      "ai_secret_audit_events_version_valid",
+      sql`${table.secretVersion} is null or ${table.secretVersion} >= 1`,
+    ),
+    check(
+      "ai_secret_audit_events_actor_type_valid",
+      sql`${table.actorType} in ('ADMIN','SYSTEM')`,
+    ),
+    check(
+      "ai_secret_audit_events_outcome_valid",
+      sql`${table.outcome} in ('SUCCESS','FAILURE')`,
+    ),
+    check(
+      "ai_secret_audit_events_error_code_valid",
+      sql`${table.errorCode} is null or length(trim(${table.errorCode})) between 1 and 120`,
+    ),
+  ],
+);
+
 export type ChangeSetRow = typeof changeSets.$inferSelect;
 export type ChangeSetItemRow = typeof changeSetItems.$inferSelect;
 export type ChangeSetEventRow = typeof changeSetEvents.$inferSelect;
@@ -1191,3 +1351,6 @@ export type MaterialQuestionBankNodeRow =
   typeof materialQuestionBankNodes.$inferSelect;
 export type QuestionSearchDocumentRow =
   typeof questionSearchDocuments.$inferSelect;
+export type AIProviderConfigRow = typeof aiProviderConfigs.$inferSelect;
+export type AISecretRefRow = typeof aiSecretRefs.$inferSelect;
+export type AISecretAuditEventRow = typeof aiSecretAuditEvents.$inferSelect;

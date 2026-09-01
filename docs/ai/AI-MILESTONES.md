@@ -7,11 +7,16 @@ AI milestones are future delivery boundaries. Each milestone is one coherent com
 **Status:** Documentation and repository audit completed by this document set.
 **Exit gate:** Domain boundaries, invariants, trust model, economics, RAG contract, privacy rules, Eval/improvement rules, current discrepancies, and launch dependencies are independently reviewable. No runtime code or schema is added.
 
-## Future milestones
+## AI-M1 — Configuration & Secrets
+
+**Status:** Implemented as the first runtime AI milestone.
+**Delivered boundary:** Governed safe Provider configuration, opaque credential references, a replaceable `AISecretStoreAdapter`, local AES-256-GCM secret storage under `PYTHAGORAS_DATA_DIR`, secret lifecycle audit metadata, redacted DTOs, and migration `0011_ai-provider-configuration-and-secrets`.
+**Explicit boundary:** No Provider Gateway, inference, health/test-connection call, Student/Admin AI UI, or external provider SDK was added.
+
+## Remaining future milestones
 
 | Milestone | Coherent boundary | Independent exit gate |
 | --- | --- | --- |
-| **AI-M1 Configuration & Secrets** | Versioned AI configuration, `credentialRef` records, `AISecretStoreAdapter`, rotation/audit boundary, and secret redaction | Config snapshots contain no secret values; secret access/rotation tests pass; no secret reaches APIs/logs/Mobile |
 | **AI-M2 Provider Gateway** | Separate Generation, Embedding, and Reranker adapters; model registry; capability routing; normalized errors/usage | Contract tests pass against replaceable fakes; cancellation, timeout, capability mismatch, and provider fallback are traceable |
 | **AI-M3 Operations Core** | Rate cards, usage/cost records, Budget Ledger, atomic reservation/settlement, rate limits, circuit breakers, and job/outbox foundation | Concurrent reservations, idempotent settlement, partial streams, retries, and provider outage are tested without overspend |
 | **AI-M4 Conversation Core** | Server-resolved StudentPrincipal boundary, subject-immutable conversations, messages, streaming generations, and deletion lifecycle | Client identity substitution fails; subject scope cannot change; stream lifecycle and private access isolation pass |
