@@ -1,5 +1,6 @@
 import type {
   AIRateCardRepository,
+  AIRateCardRevision,
   ResolvedAIRateCard,
 } from "./contracts";
 import { AIAccountingError } from "./errors";
@@ -28,7 +29,19 @@ export class AIRateCardResolver {
         "The requested Model configuration revision is not published.",
       );
     }
-    const candidates = this.rateCards.listEligibleRevisions(input);
+    const publishedRevisions = this.rateCards.listResolutionRevisions(input);
+    const latestByRateCard = new Map<string, AIRateCardRevision>();
+    for (const revision of publishedRevisions) {
+      if (revision.createdAt > input.at || revision.effectiveFrom > input.at) continue;
+      const current = latestByRateCard.get(revision.rateCardId);
+      if (!current || revision.revision > current.revision) {
+        latestByRateCard.set(revision.rateCardId, revision);
+      }
+    }
+    const candidates = [...latestByRateCard.values()].filter((revision) => {
+      if (!revision.enabled) return false;
+      return revision.effectiveTo === null || input.at < revision.effectiveTo;
+    });
     if (!candidates.length) {
       throw new AIAccountingError("AI_RATE_CARD_NOT_FOUND", "No applicable published Rate Card was found.");
     }

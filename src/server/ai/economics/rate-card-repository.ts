@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, isNull, lte, or } from "drizzle-orm";
+import { and, asc, eq, lte } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
 
 import type { AdminActor } from "../../admin-auth/contracts";
@@ -73,7 +73,7 @@ export class SQLiteAIRateCardRepository implements AIRateCardRepository {
       .map((row) => this.revisionFromRow(row));
   }
 
-  listEligibleRevisions(input: {
+  listResolutionRevisions(input: {
     modelConfigId: string;
     modelConfigRevision: number;
     at: number;
@@ -85,12 +85,11 @@ export class SQLiteAIRateCardRepository implements AIRateCardRepository {
         and(
           eq(aiRateCardRevisions.modelConfigId, input.modelConfigId),
           eq(aiRateCardRevisions.modelConfigRevision, input.modelConfigRevision),
-          eq(aiRateCardRevisions.enabled, true),
+          lte(aiRateCardRevisions.createdAt, input.at),
           lte(aiRateCardRevisions.effectiveFrom, input.at),
-          or(isNull(aiRateCardRevisions.effectiveTo), gt(aiRateCardRevisions.effectiveTo, input.at)),
         ),
       )
-      .orderBy(desc(aiRateCardRevisions.revision))
+      .orderBy(asc(aiRateCardRevisions.rateCardId), asc(aiRateCardRevisions.revision))
       .all()
       .map((row) => this.revisionFromRow(row));
   }

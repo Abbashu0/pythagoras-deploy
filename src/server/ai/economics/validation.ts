@@ -535,28 +535,57 @@ export function isRateCardKey(value: unknown): value is string {
 export function assertNoRateCardEffectiveOverlaps(
   revisions: readonly AIRateCardRevision[],
 ): void {
-  for (let leftIndex = 0; leftIndex < revisions.length; leftIndex += 1) {
-    for (let rightIndex = leftIndex + 1; rightIndex < revisions.length; rightIndex += 1) {
-      const left = revisions[leftIndex];
-      const right = revisions[rightIndex];
-      if (!left.enabled || !right.enabled) continue;
+  const byRateCard = new Map<string, AIRateCardRevision[]>();
+  for (const revision of revisions) {
+    const group = byRateCard.get(revision.rateCardId) ?? [];
+    group.push(revision);
+    byRateCard.set(revision.rateCardId, group);
+  }
+  const segments: Array<{
+    rateCardId: string;
+    modelConfigId: string;
+    modelConfigRevision: number;
+    currency: string;
+    start: number;
+    end: number;
+  }> = [];
+  for (const group of byRateCard.values()) {
+    group.sort((left, right) => left.revision - right.revision);
+    for (let index = 0; index < group.length; index += 1) {
+      const revision = group[index];
+      const start = Math.max(revision.createdAt, revision.effectiveFrom);
+      const next = group[index + 1];
+      const nextStart = next
+        ? Math.max(next.createdAt, next.effectiveFrom)
+        : Number.MAX_SAFE_INTEGER;
+      const end = Math.min(
+        revision.effectiveTo ?? Number.MAX_SAFE_INTEGER,
+        nextStart,
+      );
+      if (!revision.enabled || start >= end) continue;
+      segments.push({
+        rateCardId: revision.rateCardId,
+        modelConfigId: revision.modelConfigId,
+        modelConfigRevision: revision.modelConfigRevision,
+        currency: revision.currency,
+        start,
+        end,
+      });
+    }
+  }
+  for (let leftIndex = 0; leftIndex < segments.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < segments.length; rightIndex += 1) {
+      const left = segments[leftIndex];
+      const right = segments[rightIndex];
       if (
+        left.rateCardId === right.rateCardId ||
         left.modelConfigId !== right.modelConfigId ||
         left.modelConfigRevision !== right.modelConfigRevision ||
         left.currency !== right.currency
       ) continue;
-      if (windowsOverlap(left, right)) {
+      if (left.start < right.end && right.start < left.end) {
         invalidRate("Published Rate Card effective windows overlap for one pricing target.");
       }
     }
   }
-}
-
-function windowsOverlap(
-  left: Pick<AIRateCardContent, "effectiveFrom" | "effectiveTo">,
-  right: Pick<AIRateCardContent, "effectiveFrom" | "effectiveTo">,
-): boolean {
-  const leftEnd = left.effectiveTo ?? Number.MAX_SAFE_INTEGER;
-  const rightEnd = right.effectiveTo ?? Number.MAX_SAFE_INTEGER;
-  return left.effectiveFrom < rightEnd && right.effectiveFrom < leftEnd;
 }

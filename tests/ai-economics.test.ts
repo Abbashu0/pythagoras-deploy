@@ -477,6 +477,147 @@ test("Rate Cards are governed, target exact published Model revisions, and prese
   }
 });
 
+test("An open-ended Rate Card revision can be superseded without mutating the prior revision", async () => {
+  const fixture = createFixture();
+  try {
+    const provider = await createProvider(fixture);
+    const modelId = await publishModel(fixture, provider.id);
+    const firstEffectiveFrom = Date.now() - 10_000;
+    const firstContent = rateCardContent(modelId, {
+      key: "open-ended-rate-card",
+      effectiveFrom: firstEffectiveFrom,
+      effectiveTo: null,
+      priceLines: [priceLine("OUTPUT", 10_000_000)],
+    });
+    const id = publishRateCard(fixture, firstContent);
+    const firstRevision = fixture.rates.getRevision(id, 1);
+    assert.ok(firstRevision);
+    const secondEffectiveFrom = firstEffectiveFrom + 1_000;
+    updateRateCard(fixture, id, {
+      ...firstContent,
+      effectiveFrom: secondEffectiveFrom,
+      effectiveTo: null,
+      priceLines: [priceLine("OUTPUT", 20_000_000)],
+    }, 1);
+    const secondRevision = fixture.rates.getRevision(id, 2);
+    assert.ok(secondRevision);
+    assert.equal(secondRevision.createdAt > secondEffectiveFrom, true);
+    assert.equal(firstRevision.effectiveTo, null);
+    assert.equal(firstRevision.priceLines[0].amountNano, 10_000_000);
+    assert.equal(secondRevision.priceLines[0].amountNano, 20_000_000);
+    const resolver = new AIRateCardResolver(fixture.rates, new SQLiteAIRateCardModelRevisionRepository(fixture.database));
+    assert.equal(resolver.resolve({ modelConfigId: modelId, modelConfigRevision: 1, at: secondRevision.createdAt - 1 }).rateCardRevision, 1);
+    assert.equal(resolver.resolve({ modelConfigId: modelId, modelConfigRevision: 1, at: secondRevision.createdAt + 1 }).rateCardRevision, 2);
+    assert.throws(
+      () => fixture.changes.createChangeSet({
+        title: "Backward Rate Card effective start",
+        initialItem: {
+          resourceType: AI_RATE_CARD_RESOURCE_TYPE,
+          resourceId: id,
+          operation: "UPDATE",
+          expectedRevision: 2,
+          desired: {
+            ...firstContent,
+            effectiveFrom: firstEffectiveFrom - 1,
+            effectiveTo: null,
+            priceLines: [priceLine("OUTPUT", 20_000_000)],
+          },
+        },
+      }, fixture.owner),
+      /effective start backward/i,
+    );
+    for (const override of [
+      { key: "different-rate-card-key" },
+      { modelConfigId: uuidv7() },
+      { modelConfigRevision: 2 },
+      { currency: "EUR" },
+    ]) {
+      assert.throws(
+        () => fixture.changes.createChangeSet({
+          title: "Immutable Rate Card identity",
+          initialItem: {
+            resourceType: AI_RATE_CARD_RESOURCE_TYPE,
+            resourceId: id,
+            operation: "UPDATE",
+            expectedRevision: 2,
+            desired: { ...firstContent, effectiveFrom: secondEffectiveFrom, effectiveTo: null, priceLines: [priceLine("OUTPUT", 20_000_000)], ...override },
+          },
+        }, fixture.owner),
+        /immutable/i,
+      );
+    }
+  } finally {
+    fixture.close();
+  }
+});
+
+test("Rate Card resolution honors publication time, expiry supersession, and no older-revision resurrection", async () => {
+  const fixture = createFixture();
+  try {
+    const provider = await createProvider(fixture);
+    const modelId = await publishModel(fixture, provider.id);
+    const controlledId = uuidv7();
+    fixture.rates.create({
+      id: controlledId,
+      actor: fixture.owner,
+      now: 100,
+      content: rateCardContent(modelId, {
+        key: "controlled-publication-rate-card",
+        effectiveFrom: 0,
+        effectiveTo: null,
+        priceLines: [priceLine("OUTPUT", 10_000_000)],
+      }),
+    });
+    fixture.rates.appendRevision({
+      id: controlledId,
+      expectedRevision: 1,
+      actor: fixture.owner,
+      now: 1_000,
+      content: rateCardContent(modelId, {
+        key: "controlled-publication-rate-card",
+        effectiveFrom: 500,
+        effectiveTo: null,
+        priceLines: [priceLine("OUTPUT", 20_000_000)],
+      }),
+    });
+    const resolver = new AIRateCardResolver(fixture.rates, new SQLiteAIRateCardModelRevisionRepository(fixture.database));
+    assert.equal(resolver.resolve({ modelConfigId: modelId, modelConfigRevision: 1, at: 750 }).rateCardRevision, 1);
+    assert.equal(resolver.resolve({ modelConfigId: modelId, modelConfigRevision: 1, at: 1_200 }).rateCardRevision, 2);
+
+    const expiringModelId = await publishModel(fixture, provider.id);
+    const expiringId = uuidv7();
+    fixture.rates.create({
+      id: expiringId,
+      actor: fixture.owner,
+      now: 100,
+      content: rateCardContent(expiringModelId, {
+        key: "expiring-newer-rate-card",
+        effectiveFrom: 0,
+        effectiveTo: null,
+        priceLines: [priceLine("OUTPUT", 30_000_000)],
+      }),
+    });
+    fixture.rates.appendRevision({
+      id: expiringId,
+      expectedRevision: 1,
+      actor: fixture.owner,
+      now: 200,
+      content: rateCardContent(expiringModelId, {
+        key: "expiring-newer-rate-card",
+        effectiveFrom: 500,
+        effectiveTo: 1_000,
+        priceLines: [priceLine("OUTPUT", 40_000_000)],
+      }),
+    });
+    assert.throws(
+      () => resolver.resolve({ modelConfigId: expiringModelId, modelConfigRevision: 1, at: 1_500 }),
+      (error) => error instanceof AIAccountingError && error.code === "AI_RATE_CARD_NOT_FOUND",
+    );
+  } finally {
+    fixture.close();
+  }
+});
+
 test("Rate Card publication rejects overlapping windows and invalid recurring bands", async () => {
   const fixture = createFixture();
   try {
@@ -550,7 +691,12 @@ test("Rate Card resolution uses one exact effective revision and configured time
   try {
     const provider = await createProvider(fixture);
     const modelId = await publishModel(fixture, provider.id);
-    const id = publishRateCard(fixture, rateCardContent(modelId, {
+    const id = uuidv7();
+    fixture.rates.create({
+      id,
+      actor: fixture.owner,
+      now: 0,
+      content: rateCardContent(modelId, {
       key: "timezone-rate-card",
       effectiveFrom: 0,
       priceLines: [priceLine("OUTPUT", 11_000_000)],
@@ -561,7 +707,8 @@ test("Rate Card resolution uses one exact effective revision and configured time
         endMinute: 11 * 60,
         priceLines: [priceLine("OUTPUT", 22_000_000)],
       }],
-    }));
+      }),
+    });
     const resolver = new AIRateCardResolver(fixture.rates, new SQLiteAIRateCardModelRevisionRepository(fixture.database));
     const mondayTenAmNewYork = Date.UTC(2024, 0, 1, 15, 0);
     const mondayNoonNewYork = Date.UTC(2024, 0, 1, 17, 0);
@@ -572,11 +719,16 @@ test("Rate Card resolution uses one exact effective revision and configured time
     assert.equal(inBand.priceLines[0].amountNano, 22_000_000);
     assert.equal(resolver.resolve({ modelConfigId: modelId, modelConfigRevision: 1, at: mondayNoonNewYork }).pricingRuleKind, "DEFAULT");
     assert.equal(resolver.resolve({ modelConfigId: modelId, modelConfigRevision: 1, at: tuesdayTenAmNewYork }).pricingRuleKind, "DEFAULT");
-    publishRateCard(fixture, rateCardContent(modelId, {
-      key: "ambiguous-eur-rate-card",
-      currency: "EUR",
-      effectiveFrom: 0,
-    }));
+    fixture.rates.create({
+      id: uuidv7(),
+      actor: fixture.owner,
+      now: 0,
+      content: rateCardContent(modelId, {
+        key: "ambiguous-eur-rate-card",
+        currency: "EUR",
+        effectiveFrom: 0,
+      }),
+    });
     assert.throws(
       () => resolver.resolve({ modelConfigId: modelId, modelConfigRevision: 1, at: mondayNoonNewYork }),
       (error) => error instanceof AIAccountingError && error.code === "AI_RATE_CARD_AMBIGUOUS",

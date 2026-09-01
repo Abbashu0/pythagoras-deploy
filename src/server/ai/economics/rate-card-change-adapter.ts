@@ -71,8 +71,15 @@ export class AIRateCardChangeAdapter implements ChangeResourceAdapter {
       : this.loadCurrent(database, resourceId);
     try {
       const content = normalizeAIRateCardContent(desired);
-      if (operation === "UPDATE" && current.snapshot.key !== content.key) {
-        throw new AIAccountingError("AI_RATE_CARD_INVALID", "Rate Card key is immutable after creation.");
+      if (operation === "UPDATE") {
+        const previous = normalizeAIRateCardContent(current.snapshot);
+        assertStableRateCardIdentity(previous, content);
+        if (content.effectiveFrom < previous.effectiveFrom) {
+          throw new AIAccountingError(
+            "AI_RATE_CARD_INVALID",
+            "A Rate Card revision cannot move its effective start backward.",
+          );
+        }
       }
       const proposedSnapshot = snapshotFromContent(content);
       validateChangeSnapshot(proposedSnapshot);
@@ -145,6 +152,21 @@ export class AIRateCardChangeAdapter implements ChangeResourceAdapter {
     assertUuid(resourceId, "resourceId");
     const content = normalizeAIRateCardContent(value);
     const repository = new SQLiteAIRateCardRepository(database);
+    const current = operation === "UPDATE"
+      ? repository.getCurrentRevision(resourceId)
+      : null;
+    if (operation === "UPDATE") {
+      if (!current) {
+        throw new ChangeManagementError("CHANGE_NOT_FOUND", "The Rate Card was not found.");
+      }
+      assertStableRateCardIdentity(current, content);
+      if (content.effectiveFrom < current.effectiveFrom) {
+        throw new ChangeManagementError(
+          "CHANGE_VALIDATION_FAILED",
+          "A Rate Card revision cannot move its effective start backward.",
+        );
+      }
+    }
     const modelRevision = new SQLiteAIRateCardModelRevisionRepository(database).get(
       content.modelConfigId,
       content.modelConfigRevision,
@@ -156,18 +178,24 @@ export class AIRateCardChangeAdapter implements ChangeResourceAdapter {
       );
     }
     try {
+      const now = Date.now();
       assertNoRateCardEffectiveOverlaps([
         ...repository.listRevisions(),
-        pendingRevision(resourceId, expectedRevision || 1, content),
+        pendingRevision(
+          resourceId,
+          operation === "CREATE" ? 1 : expectedRevision + 1,
+          content,
+          now,
+        ),
       ]);
       const revision = operation === "CREATE"
-        ? repository.create({ id: resourceId, content, actor, now: Date.now() })
+        ? repository.create({ id: resourceId, content, actor, now })
         : repository.appendRevision({
             id: resourceId,
             expectedRevision,
             content,
             actor,
-            now: Date.now(),
+            now,
           });
       return {
         resourceId,
@@ -209,19 +237,37 @@ function pendingRevision(
   rateCardId: string,
   revision: number,
   content: AIRateCardContent,
+  createdAt: number,
 ): AIRateCardRevision {
   return {
     ...content,
     rateCardId,
     revision,
     revisionId: `pending-${rateCardId}-${revision}`,
-    createdAt: content.effectiveFrom,
+    createdAt,
     createdBy: "SYSTEM",
     timeBands: content.timeBands.map((band, index) => ({
       ...band,
       id: `pending-band-${index}`,
     })),
   };
+}
+
+function assertStableRateCardIdentity(
+  current: Pick<AIRateCardContent, "key" | "modelConfigId" | "modelConfigRevision" | "currency">,
+  next: AIRateCardContent,
+): void {
+  if (
+    current.key !== next.key ||
+    current.modelConfigId !== next.modelConfigId ||
+    current.modelConfigRevision !== next.modelConfigRevision ||
+    current.currency !== next.currency
+  ) {
+    throw new AIAccountingError(
+      "AI_RATE_CARD_INVALID",
+      "Rate Card key, Model target, Model revision, and currency are immutable after creation.",
+    );
+  }
 }
 
 function snapshotFromContent(

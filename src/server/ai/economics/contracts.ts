@@ -113,7 +113,7 @@ export interface AIRateCardRepository {
   getCurrentRevision(id: string): AIRateCardRevision | null;
   getRevision(id: string, revision: number): AIRateCardRevision | null;
   listRevisions(): AIRateCardRevision[];
-  listEligibleRevisions(input: {
+  listResolutionRevisions(input: {
     modelConfigId: string;
     modelConfigRevision: number;
     at: number;

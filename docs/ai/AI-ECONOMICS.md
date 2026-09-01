@@ -48,6 +48,8 @@ Each Rate Card revision supports, at minimum:
 
 Historical requests point to the Rate Card revision used at execution. If a provider reports trustworthy actual usage/cost, that report wins. Otherwise the platform calculates from the attached Rate Card and records the estimate basis.
 
+Rate Card revisions are immutable superseding revisions within one stable Rate Card identity, not competing cards. `key`, `modelConfigId`, `modelConfigRevision`, and `currency` are immutable identity fields; `billingUsageNormalizerKey` may change by revision when its billing semantics change. Resolution first considers only revisions already published by the operation timestamp, selects the highest applicable revision per identity, then checks `enabled` and `effectiveTo`; an expired newer revision never resurrects an older one. Distinct Rate Card identities for the same model revision and currency must still have non-ambiguous effective segments.
+
 The initial Product default of a `$2` Premium-subscriber hard cap per billing period is a future configurable policy example, not a business-logic constant and not a value to implement in AI-M0.
 
 ## 4. Reservation and settlement
