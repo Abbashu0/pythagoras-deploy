@@ -3,3 +3,6 @@ export * from "./gateway";
 export * from "./economics";
 export * from "./model-registry";
 export * from "./secrets";
+export * from "./budget";
+export * from "./rate-limits";
+export * from "./admission";

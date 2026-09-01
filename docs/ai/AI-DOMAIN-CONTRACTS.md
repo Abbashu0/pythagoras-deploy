@@ -1,6 +1,6 @@
 # AI domain boundaries and conceptual contracts
 
-This document defines ownership and contracts. AI-M0 established the boundaries; AI-M1 and AI-M2 now materialize the configuration, secrets, Model Registry, adapter, transport, and Gateway portions described below without selecting a production provider.
+This document defines ownership and contracts. AI-M0 established the boundaries; AI-M1, AI-M2, AI-M3A, and AI-M3B now materialize the configuration, secrets, Model Registry, adapter, transport, Gateway, economics, and admission portions described below without selecting a production provider.
 
 ## 1. Configuration, secrets, and provider boundaries
 
@@ -39,7 +39,7 @@ The adapter-facing `ProviderGenerationStreamEvent` may carry a provider request 
 
 Gateway failures use a closed normalized taxonomy with explicit retry/fallback flags. Each invocation returns safe attempt metadata with model/provider revisions and no prompt, credential, raw provider body, or permanent usage record. The M2 transport boundary requires an HTTPS target whose resolved addresses pass the denylist for private, loopback, link-local, multicast, metadata, unspecified, and reserved networks; a future transport must pin/use that validated resolution to reduce DNS rebinding risk. No production HTTP adapter or vendor protocol adapter is shipped in M2.
 
-AI-M3A materializes only the economics side of the Operations Core. Rate Card revisions and relational price lines/time bands are governed data; `AIBillingUsageNormalizer` is an explicit server-registered boundary because M2 telemetry is not automatically billable; `AICostCalculator` uses integer nano-currency arithmetic; and accounting observations/corrections are append-only. AI-M3A does not reserve or settle budgets, enforce entitlements/rate limits, or run durable jobs.
+AI-M3A materializes the economics side of the Operations Core. Rate Card revisions and relational price lines/time bands are governed data; `AIBillingUsageNormalizer` is an explicit server-registered boundary because M2 telemetry is not automatically billable; `AICostCalculator` uses integer nano-currency arithmetic; and accounting observations/corrections are append-only. AI-M3B adds governed Budget/Rate Limit Policy revisions, pinned Budget Accounts, atomic reservations, idempotent admission, M3A-backed exposure/settlement, and persisted frequency/concurrency controls. Student entitlement/auth, Provider execution, circuit breakers, and durable jobs remain outside these checkpoints.
 
 ## 2. Policy, subject, conversation, and student boundaries
 

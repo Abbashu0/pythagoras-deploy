@@ -4,7 +4,7 @@ AI cost is a Product and safety boundary. Every expensive operation is attribute
 
 ## Current implementation boundary
 
-AI-M3A is implemented as the economics-only checkpoint of Operations Core. The runtime has governed, revisioned Rate Cards; billing-safe normalizer and exact nano-unit calculator contracts; cost-operation identities with immutable attempt usage/cost and correction repositories; historical Model/Rate Card revision resolution; and maximum/best-known Generation usage aggregation. No real Provider prices are seeded, and no budget admission, reservation/settlement, rate-limit, circuit-breaker, or durable-job runtime exists until AI-M3B/M3C.
+AI-M3A and AI-M3B are implemented as reviewed checkpoints of Operations Core. M3A owns governed Rate Cards and immutable usage/cost accounting. M3B owns governed Budget/Rate Limit Policies, pinned Budget Accounts, atomic admission reservations, M3A-backed exposure/settlement, and persisted request-frequency/concurrency controls. No real Provider prices are seeded; Student auth/entitlement, Provider execution, circuit breakers, and durable jobs remain outside these checkpoints.
 
 ## 1. Cost centers
 
@@ -82,6 +82,31 @@ Budgets and rate limits are related but separate:
 - **Context budgets** limit input composition and output reserve per generation.
 
 The Budget Ledger must support platform, principal, subject, capability, and cost-center views without allowing one view to bypass another. The Rate Limits boundary must return safe retry information without exposing internal wallet details.
+
+### AI-M3B admission contract
+
+M3B executes a server-created `AIAdmissionPlan`; it does not resolve Student identity, subscription entitlement, or the eventual billing window. The plan pins `principalRef`, exact Budget and Rate Limit Policy revisions, an explicit `[startAt, endAt)` period, an existing M3A `costOperationId`, a conservative `maxCostNano` estimate, an idempotency key, and a SHA-256 request fingerprint. Mobile and other clients are not authorities for any of these values.
+
+Budget Policy revisions are immutable. A Budget Account pins one policy revision and snapshots its currency, cost center, and hard cap for the whole period; later policy revisions do not rewrite an open account. Admission uses a SQLite `BEGIN IMMEDIATE` transaction to read exposure and insert at most one reservation. Exact idempotent replays return the existing reservation; a different fingerprint or operation is a conflict. A valid new request that passes idempotency and rate-limit checks records a rate event even when the later budget or concurrency check rejects it. Rate-limited requests themselves do not create another event, so retry metadata remains meaningful.
+
+For an account, the authoritative exposure is:
+
+```text
+effectiveSpentNano
+  = sum(max(effective M3A cost per operation in account currency, 0))
+    for operations whose original startedAt is inside the account period
+
+additionalReservedExposure
+  = sum(max(reservedNano - max(current effective operation cost, 0), 0))
+    for RESERVED, EXECUTING, and RECONCILIATION_REQUIRED reservations
+
+totalExposureNano = effectiveSpentNano + additionalReservedExposure
+remainingNano = max(hardCapNano - totalExposureNano, 0)
+```
+
+M3A corrections are attributed through the original operation start time, not correction-entry time. A multi-currency or incomplete/unknown operation remains `RECONCILIATION_REQUIRED`; no currency conversion or zero-cost assumption is made. A trustworthy actual cost may exceed both its reservation and hard cap: M3B settles the real M3A cost, records overage metadata, reports `overCap`, and denies new exposure until the snapshot permits it.
+
+Rate limits use persisted top-level request events in the half-open active window `occurredAt > now - windowMs` and `occurredAt <= now`, with server time only. Events and active reservations are scoped to the stable Rate Limit Policy identity while their exact revision remains recorded for audit. The oldest active event determines `retryAfterMs`; active reservations in `RESERVED`, `EXECUTING`, and `RECONCILIATION_REQUIRED` consume concurrency. M3B has no background expiry or cleanup path.
 
 ## 6. Expensive background work
 

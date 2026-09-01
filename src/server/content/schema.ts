@@ -44,7 +44,12 @@ import type {
   AIRateCardPriceComponent,
   AIRateCardPriceUnit,
 } from "../ai/economics/contracts";
+import type {
+  AIBudgetLedgerEventType,
+  AIBudgetReservationStatus,
+} from "../ai/budget/contracts";
 import type { AIProviderAttemptStatus } from "../ai/gateway/contracts";
+import type { AIRateLimitEventOutcome } from "../ai/rate-limits/contracts";
 import type {
   AISecretAuditActorType,
   AISecretAuditEventType,
@@ -1743,6 +1748,238 @@ export const aiCostCorrections = sqliteTable(
   ],
 );
 
+/** Governed monetary allowance identity; its values live in immutable revisions. */
+export const aiBudgetPolicies = sqliteTable(
+  "ai_budget_policies",
+  {
+    id: text("id").primaryKey(),
+    key: text("budget_policy_key").notNull(),
+    currentRevision: integer("current_revision").notNull().default(1),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    createdBy: text("created_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+    updatedBy: text("updated_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+  },
+  (table) => [
+    uniqueIndex("ai_budget_policies_key_unique").on(table.key),
+    index("ai_budget_policies_updated_at_index").on(table.updatedAt),
+    check("ai_budget_policies_key_valid", sql`length(trim(${table.key})) between 1 and 120 and ${table.key} not glob '*[^a-z0-9.-]*'`),
+    check("ai_budget_policies_revision_positive", sql`${table.currentRevision} >= 1`),
+    check("ai_budget_policies_timestamps_ordered", sql`${table.updatedAt} >= ${table.createdAt}`),
+  ],
+);
+
+/** Immutable budget allowance revision; accounts pin one exact revision. */
+export const aiBudgetPolicyRevisions = sqliteTable(
+  "ai_budget_policy_revisions",
+  {
+    id: text("id").primaryKey(),
+    budgetPolicyId: text("budget_policy_id").notNull().references(() => aiBudgetPolicies.id, { onDelete: "restrict" }),
+    revision: integer("revision").notNull(),
+    displayName: text("display_name").notNull(),
+    currency: text("currency").notNull(),
+    costCenter: text("cost_center").$type<AICostCenter>().notNull(),
+    hardCapNano: integer("hard_cap_nano").notNull(),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(false),
+    createdAt: integer("created_at").notNull(),
+    createdBy: text("created_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+  },
+  (table) => [
+    uniqueIndex("ai_budget_policy_revisions_identity_unique").on(table.budgetPolicyId, table.revision),
+    index("ai_budget_policy_revisions_enabled_index").on(table.enabled),
+    check("ai_budget_policy_revisions_revision_positive", sql`${table.revision} >= 1`),
+    check("ai_budget_policy_revisions_currency_valid", sql`length(${table.currency}) = 3 and ${table.currency} not glob '*[^A-Z]*'`),
+    check("ai_budget_policy_revisions_cost_center_valid", sql`${table.costCenter} in ('STUDENT_GENERATION','KNOWLEDGE_INDEXING','AGENT_2','EVALS','EXPERIMENTS')`),
+    check("ai_budget_policy_revisions_hard_cap_valid", sql`${table.hardCapNano} between 0 and 9007199254740991`),
+    check("ai_budget_policy_revisions_enabled_boolean", sql`${table.enabled} in (0,1)`),
+    check("ai_budget_policy_revisions_display_name_valid", sql`length(trim(${table.displayName})) between 1 and 200`),
+    check("ai_budget_policy_revisions_created_nonnegative", sql`${table.createdAt} >= 0`),
+  ],
+);
+
+/** Governed request-frequency policy identity; values live in immutable revisions. */
+export const aiRateLimitPolicies = sqliteTable(
+  "ai_rate_limit_policies",
+  {
+    id: text("id").primaryKey(),
+    key: text("rate_limit_policy_key").notNull(),
+    currentRevision: integer("current_revision").notNull().default(1),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    createdBy: text("created_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+    updatedBy: text("updated_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+  },
+  (table) => [
+    uniqueIndex("ai_rate_limit_policies_key_unique").on(table.key),
+    index("ai_rate_limit_policies_updated_at_index").on(table.updatedAt),
+    check("ai_rate_limit_policies_key_valid", sql`length(trim(${table.key})) between 1 and 120 and ${table.key} not glob '*[^a-z0-9.-]*'`),
+    check("ai_rate_limit_policies_revision_positive", sql`${table.currentRevision} >= 1`),
+    check("ai_rate_limit_policies_timestamps_ordered", sql`${table.updatedAt} >= ${table.createdAt}`),
+  ],
+);
+
+/** Immutable request-frequency policy revision. */
+export const aiRateLimitPolicyRevisions = sqliteTable(
+  "ai_rate_limit_policy_revisions",
+  {
+    id: text("id").primaryKey(),
+    rateLimitPolicyId: text("rate_limit_policy_id").notNull().references(() => aiRateLimitPolicies.id, { onDelete: "restrict" }),
+    revision: integer("revision").notNull(),
+    displayName: text("display_name").notNull(),
+    windowMs: integer("window_ms").notNull(),
+    maxRequests: integer("max_requests").notNull(),
+    maxConcurrentRequests: integer("max_concurrent_requests").notNull(),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(false),
+    createdAt: integer("created_at").notNull(),
+    createdBy: text("created_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+  },
+  (table) => [
+    uniqueIndex("ai_rate_limit_policy_revisions_identity_unique").on(table.rateLimitPolicyId, table.revision),
+    index("ai_rate_limit_policy_revisions_enabled_index").on(table.enabled),
+    check("ai_rate_limit_policy_revisions_revision_positive", sql`${table.revision} >= 1`),
+    check("ai_rate_limit_policy_revisions_window_positive", sql`${table.windowMs} >= 1`),
+    check("ai_rate_limit_policy_revisions_requests_nonnegative", sql`${table.maxRequests} >= 0 and ${table.maxConcurrentRequests} >= 0`),
+    check("ai_rate_limit_policy_revisions_enabled_boolean", sql`${table.enabled} in (0,1)`),
+    check("ai_rate_limit_policy_revisions_display_name_valid", sql`length(trim(${table.displayName})) between 1 and 200`),
+    check("ai_rate_limit_policy_revisions_created_nonnegative", sql`${table.createdAt} >= 0`),
+  ],
+);
+
+/** Principal/period account with an immutable policy and hard-cap snapshot. */
+export const aiBudgetAccounts = sqliteTable(
+  "ai_budget_accounts",
+  {
+    id: text("id").primaryKey(),
+    principalRef: text("principal_ref").notNull(),
+    budgetPolicyId: text("budget_policy_id").notNull().references(() => aiBudgetPolicies.id, { onDelete: "restrict" }),
+    budgetPolicyRevision: integer("budget_policy_revision").notNull(),
+    currency: text("currency").notNull(),
+    costCenter: text("cost_center").$type<AICostCenter>().notNull(),
+    periodStart: integer("period_start").notNull(),
+    periodEnd: integer("period_end").notNull(),
+    hardCapNano: integer("hard_cap_nano").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("ai_budget_accounts_identity_unique").on(table.principalRef, table.budgetPolicyId, table.budgetPolicyRevision, table.periodStart, table.periodEnd),
+    index("ai_budget_accounts_principal_period_index").on(table.principalRef, table.periodStart, table.periodEnd),
+    index("ai_budget_accounts_policy_index").on(table.budgetPolicyId, table.budgetPolicyRevision),
+    foreignKey({
+      columns: [table.budgetPolicyId, table.budgetPolicyRevision],
+      foreignColumns: [aiBudgetPolicyRevisions.budgetPolicyId, aiBudgetPolicyRevisions.revision],
+      name: "ai_budget_accounts_policy_revision_fk",
+    }),
+    check("ai_budget_accounts_principal_valid", sql`length(trim(${table.principalRef})) between 1 and 200`),
+    check("ai_budget_accounts_revision_positive", sql`${table.budgetPolicyRevision} >= 1`),
+    check("ai_budget_accounts_currency_valid", sql`length(${table.currency}) = 3 and ${table.currency} not glob '*[^A-Z]*'`),
+    check("ai_budget_accounts_cost_center_valid", sql`${table.costCenter} in ('STUDENT_GENERATION','KNOWLEDGE_INDEXING','AGENT_2','EVALS','EXPERIMENTS')`),
+    check("ai_budget_accounts_period_valid", sql`${table.periodStart} >= 0 and ${table.periodEnd} > ${table.periodStart}`),
+    check("ai_budget_accounts_hard_cap_valid", sql`${table.hardCapNano} between 0 and 9007199254740991`),
+    check("ai_budget_accounts_created_nonnegative", sql`${table.createdAt} >= 0`),
+  ],
+);
+
+/** One pre-execution financial reservation for one M3A cost operation. */
+export const aiBudgetReservations = sqliteTable(
+  "ai_budget_reservations",
+  {
+    id: text("id").primaryKey(),
+    budgetAccountId: text("budget_account_id").notNull().references(() => aiBudgetAccounts.id, { onDelete: "restrict" }),
+    operationId: text("operation_id").notNull().references(() => aiCostOperations.id, { onDelete: "restrict" }),
+    principalRef: text("principal_ref").notNull(),
+    rateLimitPolicyId: text("rate_limit_policy_id").notNull().references(() => aiRateLimitPolicies.id, { onDelete: "restrict" }),
+    rateLimitPolicyRevision: integer("rate_limit_policy_revision").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    requestFingerprint: text("request_fingerprint").notNull(),
+    reservedNano: integer("reserved_nano").notNull(),
+    status: text("status").$type<AIBudgetReservationStatus>().notNull(),
+    createdAt: integer("created_at").notNull(),
+    executionStartedAt: integer("execution_started_at"),
+    finalizedAt: integer("finalized_at"),
+    overageNano: integer("overage_nano"),
+  },
+  (table) => [
+    uniqueIndex("ai_budget_reservations_operation_unique").on(table.operationId),
+    uniqueIndex("ai_budget_reservations_principal_idempotency_unique").on(table.principalRef, table.idempotencyKey),
+    index("ai_budget_reservations_account_status_index").on(table.budgetAccountId, table.status),
+    index("ai_budget_reservations_concurrency_index").on(table.principalRef, table.rateLimitPolicyId, table.rateLimitPolicyRevision, table.status),
+    foreignKey({
+      columns: [table.rateLimitPolicyId, table.rateLimitPolicyRevision],
+      foreignColumns: [aiRateLimitPolicyRevisions.rateLimitPolicyId, aiRateLimitPolicyRevisions.revision],
+      name: "ai_budget_reservations_rate_limit_policy_revision_fk",
+    }),
+    check("ai_budget_reservations_principal_valid", sql`length(trim(${table.principalRef})) between 1 and 200`),
+    check("ai_budget_reservations_policy_revision_positive", sql`${table.rateLimitPolicyRevision} >= 1`),
+    check("ai_budget_reservations_idempotency_valid", sql`length(trim(${table.idempotencyKey})) between 1 and 200`),
+    check("ai_budget_reservations_fingerprint_valid", sql`length(${table.requestFingerprint}) = 64 and ${table.requestFingerprint} not glob '*[^0-9a-f]*'`),
+    check("ai_budget_reservations_amount_valid", sql`${table.reservedNano} between 0 and 9007199254740991`),
+    check("ai_budget_reservations_status_valid", sql`${table.status} in ('RESERVED','EXECUTING','SETTLED','RELEASED','RECONCILIATION_REQUIRED')`),
+    check("ai_budget_reservations_created_nonnegative", sql`${table.createdAt} >= 0`),
+    check("ai_budget_reservations_execution_started_valid", sql`${table.executionStartedAt} is null or ${table.executionStartedAt} >= ${table.createdAt}`),
+    check("ai_budget_reservations_finalized_valid", sql`${table.finalizedAt} is null or ${table.finalizedAt} >= ${table.createdAt}`),
+    check("ai_budget_reservations_overage_valid", sql`${table.overageNano} is null or ${table.overageNano} between 0 and 9007199254740991`),
+  ],
+);
+
+/** Durable top-level admission/rate-limit events, including budget denials. */
+export const aiRateLimitEvents = sqliteTable(
+  "ai_rate_limit_events",
+  {
+    id: text("id").primaryKey(),
+    principalRef: text("principal_ref").notNull(),
+    rateLimitPolicyId: text("rate_limit_policy_id").notNull().references(() => aiRateLimitPolicies.id, { onDelete: "restrict" }),
+    rateLimitPolicyRevision: integer("rate_limit_policy_revision").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    requestFingerprint: text("request_fingerprint").notNull(),
+    operationId: text("operation_id").notNull().references(() => aiCostOperations.id, { onDelete: "restrict" }),
+    reservationId: text("reservation_id").references(() => aiBudgetReservations.id, { onDelete: "restrict" }),
+    outcome: text("outcome").$type<AIRateLimitEventOutcome>().notNull(),
+    occurredAt: integer("occurred_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("ai_rate_limit_events_principal_idempotency_unique").on(table.principalRef, table.idempotencyKey),
+    index("ai_rate_limit_events_window_index").on(table.principalRef, table.rateLimitPolicyId, table.rateLimitPolicyRevision, table.occurredAt),
+    index("ai_rate_limit_events_operation_index").on(table.operationId),
+    foreignKey({
+      columns: [table.rateLimitPolicyId, table.rateLimitPolicyRevision],
+      foreignColumns: [aiRateLimitPolicyRevisions.rateLimitPolicyId, aiRateLimitPolicyRevisions.revision],
+      name: "ai_rate_limit_events_policy_revision_fk",
+    }),
+    check("ai_rate_limit_events_principal_valid", sql`length(trim(${table.principalRef})) between 1 and 200`),
+    check("ai_rate_limit_events_policy_revision_positive", sql`${table.rateLimitPolicyRevision} >= 1`),
+    check("ai_rate_limit_events_idempotency_valid", sql`length(trim(${table.idempotencyKey})) between 1 and 200`),
+    check("ai_rate_limit_events_fingerprint_valid", sql`length(${table.requestFingerprint}) = 64 and ${table.requestFingerprint} not glob '*[^0-9a-f]*'`),
+    check("ai_rate_limit_events_outcome_valid", sql`${table.outcome} in ('ADMITTED','BUDGET_EXCEEDED','CONCURRENCY_LIMITED')`),
+    check("ai_rate_limit_events_occurred_nonnegative", sql`${table.occurredAt} >= 0`),
+  ],
+);
+
+/** Append-only lifecycle ledger; current spend remains derived from M3A plus active reservations. */
+export const aiBudgetLedgerEntries = sqliteTable(
+  "ai_budget_ledger_entries",
+  {
+    id: text("id").primaryKey(),
+    budgetAccountId: text("budget_account_id").notNull().references(() => aiBudgetAccounts.id, { onDelete: "restrict" }),
+    reservationId: text("reservation_id").notNull().references(() => aiBudgetReservations.id, { onDelete: "restrict" }),
+    operationId: text("operation_id").notNull().references(() => aiCostOperations.id, { onDelete: "restrict" }),
+    eventType: text("event_type").$type<AIBudgetLedgerEventType>().notNull(),
+    amountNano: integer("amount_nano"),
+    currency: text("currency").notNull(),
+    reasonCode: text("reason_code"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("ai_budget_ledger_reservation_event_unique").on(table.reservationId, table.eventType),
+    index("ai_budget_ledger_account_time_index").on(table.budgetAccountId, table.createdAt),
+    index("ai_budget_ledger_operation_index").on(table.operationId, table.createdAt),
+    check("ai_budget_ledger_event_type_valid", sql`${table.eventType} in ('RESERVED','EXECUTION_STARTED','RELEASED','SETTLED','RECONCILIATION_REQUIRED')`),
+    check("ai_budget_ledger_amount_valid", sql`${table.amountNano} is null or ${table.amountNano} between 0 and 9007199254740991`),
+    check("ai_budget_ledger_currency_valid", sql`length(${table.currency}) = 3 and ${table.currency} not glob '*[^A-Z]*'`),
+    check("ai_budget_ledger_reason_valid", sql`${table.reasonCode} is null or (length(trim(${table.reasonCode})) between 1 and 120 and ${table.reasonCode} not glob '*[^A-Z0-9_.-]*')`),
+    check("ai_budget_ledger_created_nonnegative", sql`${table.createdAt} >= 0`),
+  ],
+);
+
 export type ChangeSetRow = typeof changeSets.$inferSelect;
 export type ChangeSetItemRow = typeof changeSetItems.$inferSelect;
 export type ChangeSetEventRow = typeof changeSetEvents.$inferSelect;
@@ -1777,3 +2014,11 @@ export type AIRateCardPriceLineRow = typeof aiRateCardPriceLines.$inferSelect;
 export type AICostOperationRow = typeof aiCostOperations.$inferSelect;
 export type AIUsageCostRecordRow = typeof aiUsageCostRecords.$inferSelect;
 export type AICostCorrectionRow = typeof aiCostCorrections.$inferSelect;
+export type AIBudgetPolicyRow = typeof aiBudgetPolicies.$inferSelect;
+export type AIBudgetPolicyRevisionRow = typeof aiBudgetPolicyRevisions.$inferSelect;
+export type AIRateLimitPolicyRow = typeof aiRateLimitPolicies.$inferSelect;
+export type AIRateLimitPolicyRevisionRow = typeof aiRateLimitPolicyRevisions.$inferSelect;
+export type AIBudgetAccountRow = typeof aiBudgetAccounts.$inferSelect;
+export type AIBudgetReservationRow = typeof aiBudgetReservations.$inferSelect;
+export type AIRateLimitEventRow = typeof aiRateLimitEvents.$inferSelect;
+export type AIBudgetLedgerEntryRow = typeof aiBudgetLedgerEntries.$inferSelect;

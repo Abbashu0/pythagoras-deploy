@@ -338,7 +338,7 @@ function expectGatewayCode(code: string) {
 test("AI M2 migration creates a safe Model Registry table without credential material", () => {
   const fixture = createFixture();
   try {
-    assert.equal(getContentDatabaseStatus(fixture.database).migrationsApplied, 14);
+    assert.equal(getContentDatabaseStatus(fixture.database).migrationsApplied, 15);
     const columns = fixture.database.client
       .prepare("pragma table_info(ai_model_configs)")
       .all() as Array<{ name: string }>;

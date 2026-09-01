@@ -27,12 +27,13 @@ AI milestones are future delivery boundaries. Each milestone is one coherent com
 
 **Status:** Implemented.
 **Delivered boundary:** Governed immutable Rate Card revisions, exact nano-currency calculation, recurring IANA-timezone pricing bands, billing-safe usage normalization, immutable cost-operation/usage observations, append-only corrections, historical model/rate reconstruction, and cumulative Generation usage aggregation. Migration `0013_ai-economics-and-accounting` adds only canonical accounting and pricing rows.
-**Explicit boundary:** No budget enforcement, reservation/settlement, rate limits, circuit breakers, durable jobs, real Provider pricing, external Provider call, or Student/Admin AI UI was added.
+**Explicit boundary:** No budget enforcement, reservation/settlement, rate limits, circuit breakers, durable jobs, real Provider pricing, external Provider call, or Student/Admin AI UI was added in M3A; those controls are the separately reviewed M3B boundary.
 
 ### AI-M3B — Budget & Admission Control
 
-**Status:** Not started.
-**Boundary:** Future configurable budgets, admission preflight, reservation/settlement, entitlement integration, and rate limits.
+**Status:** Implemented; AI-M3B is complete pending independent review.
+**Delivered boundary:** Governed revisioned `ai.budget-policy` and `ai.rate-limit-policy` resources; principal/period Budget Accounts pinned to policy revisions; atomic pre-execution reservations; idempotent server-owned admission plans and safe request fingerprints; M3A-backed exposure snapshots and settlement; reconciliation handling for unknown/partial/multi-currency cost; immutable lifecycle ledger entries; persisted sliding-window request events with retry metadata; and principal/policy concurrency limits. Migration `0014_cynical_bloodscream` adds only policy and admission-control tables.
+**Explicit boundary:** No Student authentication or entitlement service was invented, no `$2` allowance was seeded or hard-coded, no Provider call or Student/Admin AI UI was added, and no Circuit Breaker or Durable Job runtime was started.
 
 ### AI-M3C — Durable Jobs & Operations
 
