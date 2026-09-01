@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, lte, or } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
 
 import type { ContentDatabase } from "../../content/database";
@@ -80,6 +80,27 @@ export class SQLiteAIBudgetRuntimeRepository {
       eq(aiBudgetReservations.budgetAccountId, accountId),
       inArray(aiBudgetReservations.status, ["RESERVED", "EXECUTING", "RECONCILIATION_REQUIRED"]),
     )).orderBy(asc(aiBudgetReservations.createdAt), asc(aiBudgetReservations.id)).all().map(reservationFromRow);
+  }
+
+  listReservationsForRecovery(input: {
+    now: number;
+    reservedStaleAfterMs: number;
+    executingStaleAfterMs: number;
+    limit: number;
+  }): AIBudgetReservation[] {
+    const reservedBefore = input.now - input.reservedStaleAfterMs;
+    const executingBefore = input.now - input.executingStaleAfterMs;
+    return this.database.db.select().from(aiBudgetReservations).where(or(
+      and(
+        eq(aiBudgetReservations.status, "RESERVED"),
+        lte(aiBudgetReservations.createdAt, reservedBefore),
+      ),
+      and(
+        eq(aiBudgetReservations.status, "EXECUTING"),
+        lte(aiBudgetReservations.executionStartedAt, executingBefore),
+      ),
+      eq(aiBudgetReservations.status, "RECONCILIATION_REQUIRED"),
+    )).orderBy(asc(aiBudgetReservations.createdAt), asc(aiBudgetReservations.id)).limit(input.limit).all().map(reservationFromRow);
   }
 
   countActiveReservationsForRateScope(input: {

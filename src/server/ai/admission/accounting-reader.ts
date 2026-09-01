@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { and, asc, eq, gte, lt } from "drizzle-orm";
 
 import type { ContentDatabase } from "../../content/database";
@@ -28,6 +30,7 @@ export class SQLiteAIBudgetAccountingReader implements AIBudgetAccountingReader 
     const effectiveCosts = new Map<string, bigint>();
     let complete = records.length > 0;
     const currencies = new Set<string>();
+    const correctionIds: string[] = [];
     for (const record of records) {
       currencies.add(record.currency);
       effectiveCosts.set(record.currency, (effectiveCosts.get(record.currency) ?? BigInt(0)) + BigInt(record.knownCostNano));
@@ -36,16 +39,34 @@ export class SQLiteAIBudgetAccountingReader implements AIBudgetAccountingReader 
         .where(eq(aiCostCorrections.originalRecordId, record.id))
         .orderBy(asc(aiCostCorrections.createdAt), asc(aiCostCorrections.id)).all();
       for (const correction of corrections) {
+        correctionIds.push(correction.id);
         currencies.add(correction.currency);
         effectiveCosts.set(correction.currency, (effectiveCosts.get(correction.currency) ?? BigInt(0)) + BigInt(correction.deltaCostNano));
       }
     }
+    const usageRecordIds = records.map((record) => record.id);
+    const sortedCurrencies = [...currencies].sort();
+    const accountingFingerprint = createHash("sha256").update(JSON.stringify({
+      version: 1,
+      operationId,
+      observed: records.length > 0,
+      complete,
+      currencies: sortedCurrencies,
+      effectiveCosts: [...effectiveCosts.entries()]
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([currency, amount]) => [currency, amount.toString()]),
+      usageRecordIds,
+      correctionIds,
+    })).digest("hex");
     return {
       operationId,
       observed: records.length > 0,
       complete,
-      currencies: [...currencies].sort(),
+      currencies: sortedCurrencies,
       effectiveCosts,
+      usageRecordIds,
+      correctionIds,
+      accountingFingerprint,
     };
   }
 

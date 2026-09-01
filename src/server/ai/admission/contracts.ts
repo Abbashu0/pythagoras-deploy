@@ -57,6 +57,9 @@ export interface AIOperationCostObservation {
   complete: boolean;
   currencies: readonly string[];
   effectiveCosts: ReadonlyMap<string, bigint>;
+  usageRecordIds: readonly string[];
+  correctionIds: readonly string[];
+  accountingFingerprint: string;
 }
 
 export interface AIBudgetAccountingReader {

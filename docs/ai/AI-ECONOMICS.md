@@ -4,7 +4,7 @@ AI cost is a Product and safety boundary. Every expensive operation is attribute
 
 ## Current implementation boundary
 
-AI-M3A and AI-M3B are implemented as reviewed checkpoints of Operations Core. M3A owns governed Rate Cards and immutable usage/cost accounting. M3B owns governed Budget/Rate Limit Policies, pinned Budget Accounts, atomic admission reservations, M3A-backed exposure/settlement, and persisted request-frequency/concurrency controls. No real Provider prices are seeded; Student auth/entitlement, Provider execution, circuit breakers, and durable jobs remain outside these checkpoints.
+AI-M3A, AI-M3B, and AI-M3C1 are implemented as reviewed checkpoints of Operations Core. M3A owns governed Rate Cards and immutable usage/cost accounting. M3B owns governed Budget/Rate Limit Policies, pinned Budget Accounts, atomic admission reservations, M3A-backed exposure/settlement, and persisted request-frequency/concurrency controls. M3C1 owns durable reference-only Jobs, transactional Outbox dispatch, fenced leases/attempts, and bounded recovery; it uses migration `0016_left_queen_noir`. No real Provider prices are seeded; Student auth/entitlement, Provider execution, circuit breakers, and AI-M3C2 remain outside these checkpoints.
 
 ## 1. Cost centers
 
@@ -107,6 +107,12 @@ remainingNano = max(hardCapNano - totalExposureNano, 0)
 M3A corrections are attributed through the original operation start time, not correction-entry time. A multi-currency or incomplete/unknown operation remains `RECONCILIATION_REQUIRED`; no currency conversion or zero-cost assumption is made. A trustworthy actual cost may exceed both its reservation and hard cap: M3B settles the real M3A cost, records overage metadata, reports `overCap`, and denies new exposure until the snapshot permits it.
 
 Rate limits use persisted top-level request events in the half-open active window `occurredAt > now - windowMs` and `occurredAt <= now`, with server time only. Events and active reservations are scoped to the stable Rate Limit Policy identity while their exact revision remains recorded for audit. The oldest active event determines `retryAfterMs`; active reservations in `RESERVED`, `EXECUTING`, and `RECONCILIATION_REQUIRED` consume concurrency. M3B has no background expiry or cleanup path.
+
+### AI-M3C1 recovery boundary
+
+M3C1 provides durable at-least-once execution, never an exactly-once guarantee. Job claims, completion, heartbeat, failure, and expired-lease recovery are fenced by owner, token, and generation; handlers must be idempotent because a crash after a domain side effect and before completion can cause a retry. Job and Outbox payloads are bounded canonical JSON references with SHA-256 integrity hashes and no raw student content, secrets, prompts, answers, or provider bodies. A standalone worker claims only registered kind/version pairs and is not a Next.js request handler.
+
+M3B uncertain reservations are recovered without duplicating settlement arithmetic: stale `RESERVED` reservations use the existing pre-execution release transition; stale `EXECUTING` reservations use the existing settlement path; `RECONCILIATION_REQUIRED` reservations retain exposure and receive a deduplicated `admission.reconcile-reservation` Job keyed by the reservation and current safe accounting fingerprint. Incomplete reconciliation retries with bounded backoff and may dead-letter, but it never automatically releases the reservation. Circuit breakers, provider health, and automatic stale-reservation cleanup beyond this bounded recovery scan remain AI-M3C2/future work.
 
 ## 6. Expensive background work
 

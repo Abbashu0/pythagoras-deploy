@@ -37,8 +37,18 @@ AI milestones are future delivery boundaries. Each milestone is one coherent com
 
 ### AI-M3C — Durable Jobs & Operations
 
+**Status:** Refined into independently reviewed checkpoints; overall M3C remains incomplete until both checkpoints are accepted.
+
+#### AI-M3C1 — Durable Jobs, Outbox & Recovery
+
+**Status:** Implemented; AI-M3C1 is complete pending independent review.
+**Delivered boundary:** SQLite-backed at-least-once Jobs with versioned reference-only payloads, closed handler registry, dedupe, priority scheduling, fenced leases/generations, heartbeats, attempts, timeout/cancellation behavior, deterministic retry/backoff, dead letters, expired-lease recovery, transactional Outbox and closed router registry, atomic Outbox-to-Job dispatch, standalone `ai:worker -- --once` runtime, and M3B stale-reservation/reconciliation recovery.
+**Explicit boundary:** No provider execution, Student auth/entitlement, Admin/Mobile UI, Circuit Breaker, health probe, RAG, or AI-M4 conversation runtime was added.
+
+#### AI-M3C2 — Circuit Breakers & Operational Health
+
 **Status:** Not started.
-**Boundary:** Future durable jobs/outbox, leases, retries, circuit breakers, and operational recovery.
+**Boundary:** Future provider health, circuit breakers, outage policy, and operational health state.
 
 ## Remaining future milestones
 

@@ -112,7 +112,11 @@ export class AIBudgetAdmissionService {
     }).immediate();
   }
 
-  releaseBeforeExecution(reservationId: string, at = this.safeNow()): AIBudgetReservation {
+  releaseBeforeExecution(
+    reservationId: string,
+    at = this.safeNow(),
+    reasonCode: "PRE_EXECUTION_RELEASE" | "STALE_PRE_EXECUTION_RECOVERY" = "PRE_EXECUTION_RELEASE",
+  ): AIBudgetReservation {
     this.assertTimestamp(at);
     return this.database.client.transaction(() => {
       const reservation = this.requireReservation(reservationId);
@@ -126,7 +130,7 @@ export class AIBudgetAdmissionService {
         status: "RELEASED",
         finalizedAt: at,
       });
-      this.appendLifecycleLedger(updated, "RELEASED", updated.reservedNano, "PRE_EXECUTION_RELEASE", at);
+      this.appendLifecycleLedger(updated, "RELEASED", updated.reservedNano, reasonCode, at);
       return updated;
     }).immediate();
   }

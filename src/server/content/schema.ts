@@ -48,6 +48,12 @@ import type {
   AIBudgetLedgerEventType,
   AIBudgetReservationStatus,
 } from "../ai/budget/contracts";
+import type {
+  AIJobAttemptOutcome,
+  AIJobPriority,
+  AIJobStatus,
+} from "../ai/operations/jobs/contracts";
+import type { AIOutboxStatus } from "../ai/operations/outbox/contracts";
 import type { AIProviderAttemptStatus } from "../ai/gateway/contracts";
 import type { AIRateLimitEventOutcome } from "../ai/rate-limits/contracts";
 import type {
@@ -1981,6 +1987,132 @@ export const aiBudgetLedgerEntries = sqliteTable(
   ],
 );
 
+/** Durable, reference-only AI work item. Handler code is never selected from database data. */
+export const aiJobs = sqliteTable(
+  "ai_jobs",
+  {
+    id: text("id").primaryKey(),
+    kind: text("kind").notNull(),
+    payloadVersion: integer("payload_version").notNull(),
+    payloadJson: text("payload_json").notNull(),
+    payloadHash: text("payload_hash").notNull(),
+    dedupeKey: text("dedupe_key").notNull(),
+    costCenter: text("cost_center").$type<AICostCenter>().notNull(),
+    costOperationId: text("cost_operation_id").references(() => aiCostOperations.id, { onDelete: "restrict" }),
+    priority: text("priority").$type<AIJobPriority>().notNull(),
+    status: text("status").$type<AIJobStatus>().notNull(),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    maxAttempts: integer("max_attempts").notNull(),
+    timeoutMs: integer("timeout_ms").notNull(),
+    leaseDurationMs: integer("lease_duration_ms").notNull(),
+    backoffBaseMs: integer("backoff_base_ms").notNull(),
+    backoffMaxMs: integer("backoff_max_ms").notNull(),
+    scheduledAt: integer("scheduled_at").notNull(),
+    leaseOwner: text("lease_owner"),
+    leaseToken: text("lease_token"),
+    leaseGeneration: integer("lease_generation").notNull().default(0),
+    leaseExpiresAt: integer("lease_expires_at"),
+    lastHeartbeatAt: integer("last_heartbeat_at"),
+    lastErrorCode: text("last_error_code"),
+    cancellationRequestedAt: integer("cancellation_requested_at"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    completedAt: integer("completed_at"),
+  },
+  (table) => [
+    uniqueIndex("ai_jobs_kind_dedupe_unique").on(table.kind, table.dedupeKey),
+    index("ai_jobs_claim_index").on(table.status, table.scheduledAt, table.priority, table.createdAt),
+    index("ai_jobs_lease_index").on(table.status, table.leaseExpiresAt),
+    index("ai_jobs_cost_operation_index").on(table.costOperationId),
+    check("ai_jobs_kind_valid", sql`length(trim(${table.kind})) between 1 and 120 and ${table.kind} not glob '*[^a-z0-9.-]*'`),
+    check("ai_jobs_payload_version_valid", sql`${table.payloadVersion} between 1 and 100`),
+    check("ai_jobs_payload_json_valid", sql`length(${table.payloadJson}) between 2 and 32768 and json_valid(${table.payloadJson}) and json_type(${table.payloadJson}) = 'object'`),
+    check("ai_jobs_payload_hash_valid", sql`length(${table.payloadHash}) = 64 and ${table.payloadHash} not glob '*[^0-9a-f]*'`),
+    check("ai_jobs_dedupe_key_valid", sql`length(trim(${table.dedupeKey})) between 1 and 240`),
+    check("ai_jobs_cost_center_valid", sql`${table.costCenter} in ('STUDENT_GENERATION','KNOWLEDGE_INDEXING','AGENT_2','EVALS','EXPERIMENTS')`),
+    check("ai_jobs_priority_valid", sql`${table.priority} in ('LOW','NORMAL','HIGH','CRITICAL')`),
+    check("ai_jobs_status_valid", sql`${table.status} in ('PENDING','RUNNING','RETRY_WAIT','SUCCEEDED','DEAD_LETTER','CANCELLED')`),
+    check("ai_jobs_attempt_count_valid", sql`${table.attemptCount} between 0 and 100`),
+    check("ai_jobs_max_attempts_valid", sql`${table.maxAttempts} between 1 and 100`),
+    check("ai_jobs_timeout_valid", sql`${table.timeoutMs} between 1 and 86400000`),
+    check("ai_jobs_lease_duration_valid", sql`${table.leaseDurationMs} between 100 and 86400000`),
+    check("ai_jobs_backoff_valid", sql`${table.backoffBaseMs} between 0 and 86400000 and ${table.backoffMaxMs} between ${table.backoffBaseMs} and 86400000`),
+    check("ai_jobs_scheduled_nonnegative", sql`${table.scheduledAt} >= 0`),
+    check("ai_jobs_lease_generation_valid", sql`${table.leaseGeneration} >= 0`),
+    check("ai_jobs_lease_owner_valid", sql`${table.leaseOwner} is null or length(trim(${table.leaseOwner})) between 1 and 200`),
+    check("ai_jobs_lease_token_valid", sql`${table.leaseToken} is null or length(trim(${table.leaseToken})) between 1 and 200`),
+    check("ai_jobs_last_error_valid", sql`${table.lastErrorCode} is null or length(trim(${table.lastErrorCode})) between 1 and 120`),
+    check("ai_jobs_created_nonnegative", sql`${table.createdAt} >= 0`),
+    check("ai_jobs_updated_ordered", sql`${table.updatedAt} >= ${table.createdAt}`),
+    check("ai_jobs_completed_valid", sql`${table.completedAt} is null or ${table.completedAt} >= ${table.createdAt}`),
+    check("ai_jobs_lease_fields_valid", sql`(${table.status} = 'RUNNING' and ${table.leaseOwner} is not null and ${table.leaseToken} is not null and ${table.leaseExpiresAt} is not null and ${table.lastHeartbeatAt} is not null and ${table.leaseGeneration} >= 1) or (${table.status} <> 'RUNNING' and ${table.leaseOwner} is null and ${table.leaseToken} is null and ${table.leaseExpiresAt} is null and ${table.lastHeartbeatAt} is null)`),
+  ],
+);
+
+/** Immutable execution history for a durable Job attempt. */
+export const aiJobAttempts = sqliteTable(
+  "ai_job_attempts",
+  {
+    id: text("id").primaryKey(),
+    jobId: text("job_id").notNull().references(() => aiJobs.id, { onDelete: "restrict" }),
+    attemptNumber: integer("attempt_number").notNull(),
+    workerId: text("worker_id").notNull(),
+    leaseGeneration: integer("lease_generation").notNull(),
+    startedAt: integer("started_at").notNull(),
+    lastHeartbeatAt: integer("last_heartbeat_at"),
+    completedAt: integer("completed_at"),
+    outcome: text("outcome").$type<AIJobAttemptOutcome>().notNull(),
+    safeErrorCode: text("safe_error_code"),
+    retryScheduledAt: integer("retry_scheduled_at"),
+  },
+  (table) => [
+    uniqueIndex("ai_job_attempts_job_number_unique").on(table.jobId, table.attemptNumber),
+    index("ai_job_attempts_job_index").on(table.jobId, table.startedAt),
+    check("ai_job_attempts_number_valid", sql`${table.attemptNumber} between 1 and 100`),
+    check("ai_job_attempts_worker_valid", sql`length(trim(${table.workerId})) between 1 and 200`),
+    check("ai_job_attempts_generation_valid", sql`${table.leaseGeneration} >= 1`),
+    check("ai_job_attempts_started_nonnegative", sql`${table.startedAt} >= 0`),
+    check("ai_job_attempts_heartbeat_valid", sql`${table.lastHeartbeatAt} is null or ${table.lastHeartbeatAt} >= ${table.startedAt}`),
+    check("ai_job_attempts_completed_valid", sql`${table.completedAt} is null or ${table.completedAt} >= ${table.startedAt}`),
+    check("ai_job_attempts_outcome_valid", sql`${table.outcome} in ('RUNNING','SUCCEEDED','RETRYABLE_FAILURE','NON_RETRYABLE_FAILURE','TIMED_OUT','LEASE_EXPIRED','CANCELLED')`),
+    check("ai_job_attempts_error_valid", sql`${table.safeErrorCode} is null or length(trim(${table.safeErrorCode})) between 1 and 120`),
+    check("ai_job_attempts_retry_time_valid", sql`${table.retryScheduledAt} is null or ${table.retryScheduledAt} >= ${table.startedAt}`),
+  ],
+);
+
+/** Transactional durable dispatch intent; successful dispatch rows remain operational history. */
+export const aiOutboxEvents = sqliteTable(
+  "ai_outbox_events",
+  {
+    id: text("id").primaryKey(),
+    eventType: text("event_type").notNull(),
+    payloadVersion: integer("payload_version").notNull(),
+    payloadJson: text("payload_json").notNull(),
+    payloadHash: text("payload_hash").notNull(),
+    dedupeKey: text("dedupe_key").notNull(),
+    status: text("status").$type<AIOutboxStatus>().notNull(),
+    scheduledAt: integer("scheduled_at").notNull(),
+    dispatchedJobId: text("dispatched_job_id").references(() => aiJobs.id, { onDelete: "restrict" }),
+    safeErrorCode: text("safe_error_code"),
+    createdAt: integer("created_at").notNull(),
+    dispatchedAt: integer("dispatched_at"),
+  },
+  (table) => [
+    uniqueIndex("ai_outbox_events_type_dedupe_unique").on(table.eventType, table.dedupeKey),
+    index("ai_outbox_events_dispatch_index").on(table.status, table.scheduledAt, table.createdAt),
+    check("ai_outbox_events_type_valid", sql`length(trim(${table.eventType})) between 1 and 120 and ${table.eventType} not glob '*[^a-z0-9.-]*'`),
+    check("ai_outbox_events_payload_version_valid", sql`${table.payloadVersion} between 1 and 100`),
+    check("ai_outbox_events_payload_json_valid", sql`length(${table.payloadJson}) between 2 and 32768 and json_valid(${table.payloadJson}) and json_type(${table.payloadJson}) = 'object'`),
+    check("ai_outbox_events_payload_hash_valid", sql`length(${table.payloadHash}) = 64 and ${table.payloadHash} not glob '*[^0-9a-f]*'`),
+    check("ai_outbox_events_dedupe_key_valid", sql`length(trim(${table.dedupeKey})) between 1 and 240`),
+    check("ai_outbox_events_status_valid", sql`${table.status} in ('PENDING','DISPATCHED','FAILED','CANCELLED')`),
+    check("ai_outbox_events_scheduled_nonnegative", sql`${table.scheduledAt} >= 0`),
+    check("ai_outbox_events_error_valid", sql`${table.safeErrorCode} is null or length(trim(${table.safeErrorCode})) between 1 and 120`),
+    check("ai_outbox_events_created_nonnegative", sql`${table.createdAt} >= 0`),
+    check("ai_outbox_events_dispatched_valid", sql`(${table.status} = 'DISPATCHED' and ${table.dispatchedJobId} is not null and ${table.dispatchedAt} is not null) or (${table.status} <> 'DISPATCHED' and ${table.dispatchedJobId} is null and ${table.dispatchedAt} is null)`),
+  ],
+);
+
 export type ChangeSetRow = typeof changeSets.$inferSelect;
 export type ChangeSetItemRow = typeof changeSetItems.$inferSelect;
 export type ChangeSetEventRow = typeof changeSetEvents.$inferSelect;
@@ -2023,3 +2155,6 @@ export type AIBudgetAccountRow = typeof aiBudgetAccounts.$inferSelect;
 export type AIBudgetReservationRow = typeof aiBudgetReservations.$inferSelect;
 export type AIRateLimitEventRow = typeof aiRateLimitEvents.$inferSelect;
 export type AIBudgetLedgerEntryRow = typeof aiBudgetLedgerEntries.$inferSelect;
+export type AIJobRow = typeof aiJobs.$inferSelect;
+export type AIJobAttemptRow = typeof aiJobAttempts.$inferSelect;
+export type AIOutboxEventRow = typeof aiOutboxEvents.$inferSelect;
