@@ -1862,6 +1862,7 @@ export const aiBudgetAccounts = sqliteTable(
   },
   (table) => [
     uniqueIndex("ai_budget_accounts_identity_unique").on(table.principalRef, table.budgetPolicyId, table.budgetPolicyRevision, table.periodStart, table.periodEnd),
+    uniqueIndex("ai_budget_accounts_stable_period_unique").on(table.principalRef, table.budgetPolicyId, table.periodStart, table.periodEnd),
     index("ai_budget_accounts_principal_period_index").on(table.principalRef, table.periodStart, table.periodEnd),
     index("ai_budget_accounts_policy_index").on(table.budgetPolicyId, table.budgetPolicyRevision),
     foreignKey({

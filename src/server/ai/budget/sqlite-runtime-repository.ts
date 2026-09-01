@@ -27,17 +27,15 @@ export class SQLiteAIBudgetRuntimeRepository {
     return row ? accountFromRow(row) : null;
   }
 
-  getAccountByIdentity(input: {
+  getAccountForPolicyPeriod(input: {
     principalRef: string;
     budgetPolicyId: string;
-    budgetPolicyRevision: number;
     periodStart: number;
     periodEnd: number;
   }): AIBudgetAccount | null {
     const row = this.database.db.select().from(aiBudgetAccounts).where(and(
       eq(aiBudgetAccounts.principalRef, input.principalRef),
       eq(aiBudgetAccounts.budgetPolicyId, input.budgetPolicyId),
-      eq(aiBudgetAccounts.budgetPolicyRevision, input.budgetPolicyRevision),
       eq(aiBudgetAccounts.periodStart, input.periodStart),
       eq(aiBudgetAccounts.periodEnd, input.periodEnd),
     )).get();

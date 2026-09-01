@@ -498,6 +498,105 @@ test("Budget and Rate Limit Policies are governed, revisioned, and accounts pin 
   }
 });
 
+test("One Budget Account is pinned per stable policy period and blocks revision bypasses", () => {
+  const fixture = createFixture();
+  try {
+    const budgetContent = defaultBudgetContent({
+      key: `stable-period-budget-${uuidv7()}`,
+      hardCapNano: 1_000,
+    });
+    const budget = publishBudgetPolicy(fixture, budgetContent);
+    const rate = publishRateLimitPolicy(fixture);
+    const periodStart = BASE_TIME;
+    const periodEnd = BASE_TIME + 1_000;
+    const principalRef = "principal-stable-period";
+    const firstPlan = makePlan({
+      principalRef,
+      budgetPolicyId: budget.id,
+      budgetPolicyRevision: 1,
+      rateLimitPolicyId: rate.id,
+      rateLimitPolicyRevision: 1,
+      costOperationId: createOperation(fixture, { principalRef, startedAt: periodStart + 10 }),
+      idempotencyKey: "stable-period-1",
+      maxCostNano: 600,
+      periodStart,
+      periodEnd,
+    });
+    const first = fixture.admission.admit(firstPlan);
+    assert.equal(first.account.budgetPolicyRevision, 1);
+
+    assert.equal(updateBudgetPolicy(fixture, budget.id, 1, {
+      ...budgetContent,
+      hardCapNano: 2_000,
+    }), 2);
+    const replay = fixture.admission.admit(firstPlan);
+    assert.equal(replay.replayed, true);
+    assert.equal(replay.reservation.id, first.reservation.id);
+    const conflictOperation = createOperation(fixture, { principalRef, startedAt: periodStart + 20 });
+    const conflict = expectAdmissionCode(() => fixture.admission.admit(makePlan({
+      principalRef,
+      budgetPolicyId: budget.id,
+      budgetPolicyRevision: 2,
+      rateLimitPolicyId: rate.id,
+      rateLimitPolicyRevision: 1,
+      costOperationId: conflictOperation,
+      idempotencyKey: "stable-period-2",
+      maxCostNano: 600,
+      periodStart,
+      periodEnd,
+    })), "AI_BUDGET_ACCOUNT_POLICY_REVISION_CONFLICT");
+    assert.deepEqual(conflict.details, {
+      budgetAccountId: first.account.id,
+      budgetPolicyId: budget.id,
+      pinnedBudgetPolicyRevision: 1,
+      requestedBudgetPolicyRevision: 2,
+      periodStart,
+      periodEnd,
+    });
+    const accountCount = (fixture.database.client.prepare("select count(*) as count from ai_budget_accounts where principal_ref = ? and budget_policy_id = ? and period_start = ? and period_end = ?").get(principalRef, budget.id, periodStart, periodEnd) as { count: number }).count;
+    const reservationCount = (fixture.database.client.prepare("select count(*) as count from ai_budget_reservations where principal_ref = ?").get(principalRef) as { count: number }).count;
+    assert.ok(fixture.database.client.prepare("select name from sqlite_master where type = 'index' and name = 'ai_budget_accounts_stable_period_unique'").get());
+    assert.equal(accountCount, 1);
+    assert.equal(reservationCount, 1);
+    assert.equal(fixture.admission.getBudgetSnapshot(first.account.id).activeReservedExposureNano, 600);
+
+    const sameRevision = fixture.admission.admit(makePlan({
+      principalRef,
+      budgetPolicyId: budget.id,
+      budgetPolicyRevision: 1,
+      rateLimitPolicyId: rate.id,
+      rateLimitPolicyRevision: 1,
+      costOperationId: createOperation(fixture, { principalRef, startedAt: periodStart + 30 }),
+      idempotencyKey: "stable-period-3",
+      maxCostNano: 300,
+      periodStart,
+      periodEnd,
+    }));
+    assert.equal(sameRevision.account.id, first.account.id);
+    assert.equal(fixture.admission.getBudgetSnapshot(first.account.id).activeReservedExposureNano, 900);
+
+    const nextPeriodStart = periodEnd;
+    const nextPeriodEnd = nextPeriodStart + 1_000;
+    const nextPeriod = fixture.admission.admit(makePlan({
+      principalRef,
+      budgetPolicyId: budget.id,
+      budgetPolicyRevision: 2,
+      rateLimitPolicyId: rate.id,
+      rateLimitPolicyRevision: 1,
+      costOperationId: createOperation(fixture, { principalRef, startedAt: nextPeriodStart + 10 }),
+      idempotencyKey: "stable-period-4",
+      maxCostNano: 600,
+      periodStart: nextPeriodStart,
+      periodEnd: nextPeriodEnd,
+    }));
+    assert.notEqual(nextPeriod.account.id, first.account.id);
+    assert.equal(nextPeriod.account.budgetPolicyRevision, 2);
+    assert.equal(nextPeriod.account.hardCapNano, 2_000);
+  } finally {
+    fixture.close();
+  }
+});
+
 test("Admission idempotency returns one reservation, rejects conflicts, and never creates operations", () => {
   const fixture = createFixture();
   try {

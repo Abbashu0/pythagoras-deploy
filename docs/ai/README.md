@@ -14,7 +14,7 @@ The current repository remains the root Next.js Backend/Admin application plus t
 
 ## Current runtime boundary
 
-AI-M1 provides governed Provider configuration and the encrypted local Secret Store. AI-M2 adds the governed Model Registry, normalized Generation/Embedding/Reranker contracts, server-registered adapters, and a provider-neutral Gateway with timeout, cancellation, fallback, and safe attempt tracing. AI-M3A adds revisioned Rate Cards and exact usage/cost accounting. AI-M3B adds governed Budget/Rate Limit Policies, pinned Budget Accounts, atomic reservations, idempotent admission, settlement, and sliding-window/concurrency controls through migration `0014_cynical_bloodscream`. No production vendor is selected, no external provider call occurs, no Student auth/entitlement or Student AI route exists, and no AI UI exists; M3C remains unstarted.
+AI-M1 provides governed Provider configuration and the encrypted local Secret Store. AI-M2 adds the governed Model Registry, normalized Generation/Embedding/Reranker contracts, server-registered adapters, and a provider-neutral Gateway with timeout, cancellation, fallback, and safe attempt tracing. AI-M3A adds revisioned Rate Cards and exact usage/cost accounting. AI-M3B adds governed Budget/Rate Limit Policies, exactly one pinned Budget Account per stable policy period, atomic reservations, idempotent admission, settlement, and sliding-window/concurrency controls through migrations `0014_cynical_bloodscream` and `0015_cynical_vulcan`. No production vendor is selected, no external provider call occurs, no Student auth/entitlement or Student AI route exists, and no AI UI exists; M3C remains unstarted.
 
 ## Document map
 

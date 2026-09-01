@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX `ai_budget_accounts_stable_period_unique` ON `ai_budget_accounts` (`principal_ref`,`budget_policy_id`,`period_start`,`period_end`);

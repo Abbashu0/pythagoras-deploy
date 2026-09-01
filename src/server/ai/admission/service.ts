@@ -340,10 +340,9 @@ export class AIBudgetAdmissionService {
       };
     }
     if (event.outcome === "BUDGET_EXCEEDED") {
-      const account = this.budgetRuntime.getAccountByIdentity({
+      const account = this.budgetRuntime.getAccountForPolicyPeriod({
         principalRef: plan.principalRef,
         budgetPolicyId: budgetPolicy.budgetPolicyId,
-        budgetPolicyRevision: budgetPolicy.revision,
         periodStart: plan.budgetPeriod.startAt,
         periodEnd: plan.budgetPeriod.endAt,
       });
@@ -376,31 +375,70 @@ export class AIBudgetAdmissionService {
   }
 
   private getOrCreateAccount(plan: AIAdmissionPlan, policy: AIBudgetPolicyRevision, now: number): AIBudgetAccount {
-    const existing = this.budgetRuntime.getAccountByIdentity({
+    const existing = this.budgetRuntime.getAccountForPolicyPeriod({
       principalRef: plan.principalRef,
       budgetPolicyId: policy.budgetPolicyId,
-      budgetPolicyRevision: policy.revision,
       periodStart: plan.budgetPeriod.startAt,
       periodEnd: plan.budgetPeriod.endAt,
     });
     if (existing) {
+      if (existing.budgetPolicyRevision !== policy.revision) {
+        throw new AIAdmissionError(
+          "AI_BUDGET_ACCOUNT_POLICY_REVISION_CONFLICT",
+          "The Budget period is already pinned to a different Policy revision.",
+          {
+            budgetAccountId: existing.id,
+            budgetPolicyId: policy.budgetPolicyId,
+            pinnedBudgetPolicyRevision: existing.budgetPolicyRevision,
+            requestedBudgetPolicyRevision: policy.revision,
+            periodStart: existing.periodStart,
+            periodEnd: existing.periodEnd,
+          },
+        );
+      }
       if (existing.currency !== policy.currency || existing.costCenter !== policy.costCenter || existing.hardCapNano !== policy.hardCapNano) {
         throw new AIAdmissionError("AI_BUDGET_ACCOUNT_CONFLICT", "The Budget Account policy snapshot is inconsistent.");
       }
       return existing;
     }
-    return this.budgetRuntime.createAccount({
-      id: this.idFactory(),
-      principalRef: plan.principalRef,
-      budgetPolicyId: policy.budgetPolicyId,
-      budgetPolicyRevision: policy.revision,
-      currency: policy.currency,
-      costCenter: policy.costCenter,
-      periodStart: plan.budgetPeriod.startAt,
-      periodEnd: plan.budgetPeriod.endAt,
-      hardCapNano: policy.hardCapNano,
-      createdAt: now,
-    });
+    try {
+      return this.budgetRuntime.createAccount({
+        id: this.idFactory(),
+        principalRef: plan.principalRef,
+        budgetPolicyId: policy.budgetPolicyId,
+        budgetPolicyRevision: policy.revision,
+        currency: policy.currency,
+        costCenter: policy.costCenter,
+        periodStart: plan.budgetPeriod.startAt,
+        periodEnd: plan.budgetPeriod.endAt,
+        hardCapNano: policy.hardCapNano,
+        createdAt: now,
+      });
+    } catch (error) {
+      if (!(error instanceof AIAdmissionError) || error.code !== "AI_BUDGET_ACCOUNT_CONFLICT") throw error;
+      const raced = this.budgetRuntime.getAccountForPolicyPeriod({
+        principalRef: plan.principalRef,
+        budgetPolicyId: policy.budgetPolicyId,
+        periodStart: plan.budgetPeriod.startAt,
+        periodEnd: plan.budgetPeriod.endAt,
+      });
+      if (!raced) throw error;
+      if (raced.budgetPolicyRevision !== policy.revision) {
+        throw new AIAdmissionError(
+          "AI_BUDGET_ACCOUNT_POLICY_REVISION_CONFLICT",
+          "The Budget period is already pinned to a different Policy revision.",
+          {
+            budgetAccountId: raced.id,
+            budgetPolicyId: policy.budgetPolicyId,
+            pinnedBudgetPolicyRevision: raced.budgetPolicyRevision,
+            requestedBudgetPolicyRevision: policy.revision,
+            periodStart: raced.periodStart,
+            periodEnd: raced.periodEnd,
+          },
+        );
+      }
+      return raced;
+    }
   }
 
   private snapshotForAccount(account: AIBudgetAccount): AIBudgetSnapshot {
