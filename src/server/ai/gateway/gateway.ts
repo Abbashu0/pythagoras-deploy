@@ -19,10 +19,11 @@ import type {
   AIModelSelectionPlan,
   EmbeddingGatewayRequest,
   EmbeddingProviderResult,
+  GatewayGenerationStreamEvent,
   GenerationGatewayRequest,
   GenerationProviderRequest,
-  GenerationStreamEvent,
   NormalizedProviderUsage,
+  ProviderGenerationStreamEvent,
   RerankGatewayRequest,
   RerankProviderResult,
 } from "./contracts";
@@ -181,7 +182,7 @@ export class AIProviderGateway {
     request: GenerationGatewayRequest,
     options: AIProviderGatewayOperationOptions,
     resolveTrace: (value: readonly AIProviderAttemptTrace[]) => void,
-  ): AsyncGenerator<GenerationStreamEvent> {
+  ): AsyncGenerator<GatewayGenerationStreamEvent> {
     const attempts: AIProviderAttemptTrace[] = [];
     const gatewayRequestId = this.newGatewayRequestId();
     const parentSignal = options.signal ?? new AbortController().signal;
@@ -251,30 +252,34 @@ export class AIProviderGateway {
             while (true) {
               const next = await nextWithAbort(iterator, control.signal);
               if (next.done) break;
-              const event = validateGenerationEvent(next.value, {
+              const providerEvent = validateProviderGenerationEvent(next.value, {
                 started,
                 terminal,
               });
-              if (event.type === "STARTED") {
+              if (providerEvent.type === "STARTED") {
                 started = true;
-                if (event.providerRequestId) {
-                  trace.providerRequestId = event.providerRequestId;
+                if (providerEvent.providerRequestId) {
+                  trace.providerRequestId = providerEvent.providerRequestId;
                 }
-              } else if (event.type === "TEXT_DELTA") {
+              } else if (providerEvent.type === "TEXT_DELTA") {
                 partialOutput = true;
-              } else if (event.type === "COMPLETED") {
+              } else if (providerEvent.type === "COMPLETED") {
                 terminal = true;
-                if (event.providerRequestId) {
-                  trace.providerRequestId = event.providerRequestId;
+                if (providerEvent.providerRequestId) {
+                  trace.providerRequestId = providerEvent.providerRequestId;
                 }
-              } else if (event.type === "USAGE") {
+              } else if (providerEvent.type === "USAGE") {
                 attemptHadUsage = true;
               }
-              if (event.type !== "STARTED" || !gatewayStarted) {
-                if (event.type === "STARTED") gatewayStarted = true;
-                yield event;
+              if (providerEvent.type === "STARTED") {
+                if (!gatewayStarted) {
+                  gatewayStarted = true;
+                  yield { type: "STARTED" };
+                }
+              } else {
+                yield toGatewayGenerationEvent(providerEvent);
               }
-              if (event.type === "COMPLETED") {
+              if (providerEvent.type === "COMPLETED") {
                 const trailing = await nextWithAbort(iterator, control.signal);
                 if (!trailing.done) throw new GatewayProtocolError();
                 break;
@@ -637,10 +642,10 @@ function validateRerankRequest(request: RerankGatewayRequest): void {
   }
 }
 
-function validateGenerationEvent(
+function validateProviderGenerationEvent(
   value: unknown,
   state: { started: boolean; terminal: boolean },
-): GenerationStreamEvent {
+): ProviderGenerationStreamEvent {
   if (!isPlainObject(value) || typeof value.type !== "string") {
     throw new GatewayProtocolError();
   }
@@ -682,6 +687,23 @@ function validateGenerationEvent(
     };
   }
   throw new GatewayProtocolError();
+}
+
+function toGatewayGenerationEvent(
+  event: Exclude<ProviderGenerationStreamEvent, { type: "STARTED" }>,
+): Exclude<GatewayGenerationStreamEvent, { type: "STARTED" }> {
+  switch (event.type) {
+    case "TEXT_DELTA":
+      return { type: "TEXT_DELTA", text: event.text };
+    case "USAGE":
+      return { type: "USAGE", usage: event.usage };
+    case "COMPLETED":
+      return {
+        type: "COMPLETED",
+        finishReason: event.finishReason,
+        usage: event.usage,
+      };
+  }
 }
 
 function validateEmbeddingResult(

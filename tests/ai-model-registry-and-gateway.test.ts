@@ -24,9 +24,10 @@ import {
   type EmbeddingProviderResult,
   type GenerationProviderAdapter,
   type GenerationProviderRequest,
-  type GenerationStreamEvent,
+  type GatewayGenerationStreamEvent,
   type NormalizedProviderUsage,
   type ProviderAdapterExecutionContext,
+  type ProviderGenerationStreamEvent,
   type RerankerProviderAdapter,
   type RerankProviderRequest,
   type RerankProviderResult,
@@ -264,13 +265,13 @@ class FakeGenerationAdapter implements GenerationProviderAdapter {
     private readonly behavior: (
       request: GenerationProviderRequest,
       context: ProviderAdapterExecutionContext,
-    ) => AsyncIterable<GenerationStreamEvent>,
+    ) => AsyncIterable<ProviderGenerationStreamEvent>,
     adapterKey = "test.fake-generation",
   ) {
     this.adapterKey = adapterKey;
   }
 
-  generate(request: GenerationProviderRequest, context: ProviderAdapterExecutionContext): AsyncIterable<GenerationStreamEvent> {
+  generate(request: GenerationProviderRequest, context: ProviderAdapterExecutionContext): AsyncIterable<ProviderGenerationStreamEvent> {
     this.calls += 1;
     this.credentials.push(context.credential);
     this.requests.push(request);
@@ -314,8 +315,8 @@ class FakeRerankerAdapter implements RerankerProviderAdapter {
   }
 }
 
-async function collect(stream: { events: AsyncIterable<GenerationStreamEvent> }): Promise<GenerationStreamEvent[]> {
-  const events: GenerationStreamEvent[] = [];
+async function collect(stream: { events: AsyncIterable<GatewayGenerationStreamEvent> }): Promise<GatewayGenerationStreamEvent[]> {
+  const events: GatewayGenerationStreamEvent[] = [];
   for await (const event of stream.events) events.push(event);
   return events;
 }
@@ -630,6 +631,7 @@ test("Generation Gateway resolves an opaque credential only in request scope and
     const events = await collect(stream);
     const trace = await stream.trace;
     assert.deepEqual(events.map((event) => event.type), ["STARTED", "TEXT_DELTA", "USAGE", "COMPLETED"]);
+    assert.equal(events.every((event) => !("providerRequestId" in event)), true);
     assert.equal(adapter.credentials.length, 1);
     assert.equal(adapter.credentials[0], provider.secret);
     assert.equal(trace.length, 1);
@@ -686,7 +688,7 @@ test("Generation fallback uses only eligible failures and records every safe att
     }, "test.primary");
     const fallback = new FakeGenerationAdapter(async function* () {
       yield { type: "STARTED", providerRequestId: "fallback-request" };
-      yield { type: "TEXT_DELTA", text: "fallback" };
+      yield { type: "TEXT_DELTA", text: "الجواب" };
       yield { type: "COMPLETED", finishReason: "STOP", usage: emptyUsage(), providerRequestId: "fallback-request" };
     });
     const gateway = new AIProviderGateway({
@@ -700,7 +702,13 @@ test("Generation fallback uses only eligible failures and records every safe att
       generationRequest(),
     );
     const events = await collect(stream);
+    assert.deepEqual(events, [
+      { type: "STARTED" },
+      { type: "TEXT_DELTA", text: "الجواب" },
+      { type: "COMPLETED", finishReason: "STOP", usage: emptyUsage() },
+    ]);
     assert.equal(events.filter((event) => event.type === "STARTED").length, 1);
+    assert.equal(events.every((event) => !("providerRequestId" in event)), true);
     const trace = await stream.trace;
     assert.deepEqual(trace.map((item) => [item.attemptIndex, item.status, item.errorCode]), [
       [0, "FAILED", "UNAVAILABLE"],
@@ -708,6 +716,43 @@ test("Generation fallback uses only eligible failures and records every safe att
     ]);
     assert.equal(primary.calls, 1);
     assert.equal(fallback.calls, 1);
+  } finally {
+    fixture.close();
+  }
+});
+
+test("A fallback that is the first provider to start still emits one provider-neutral STARTED event", async () => {
+  const fixture = createFixture();
+  try {
+    const provider = await createProvider(fixture);
+    const primaryId = publishModel(fixture, provider.id, "GENERATION", "test.not-started");
+    const fallbackId = publishModel(fixture, provider.id, "GENERATION", "test.fake-generation");
+    const primary = new FakeGenerationAdapter(async function* () {
+      throw new AIProviderAdapterError("UNAVAILABLE");
+    }, "test.not-started");
+    const fallback = new FakeGenerationAdapter(async function* () {
+      yield { type: "STARTED", providerRequestId: "fallback-only-request" };
+      yield { type: "COMPLETED", finishReason: "STOP", usage: emptyUsage(), providerRequestId: "fallback-only-request" };
+    });
+    const gateway = new AIProviderGateway({
+      providerConfigs: fixture.providers,
+      modelConfigs: fixture.models,
+      secrets: fixture.secrets,
+      adapters: new ProviderAdapterRegistry([primary, fallback]),
+    });
+    const stream = gateway.generate(
+      { capability: "GENERATION", attempts: [primaryId, fallbackId] },
+      generationRequest(),
+    );
+    const events = await collect(stream);
+    assert.deepEqual(events, [
+      { type: "STARTED" },
+      { type: "COMPLETED", finishReason: "STOP", usage: emptyUsage() },
+    ]);
+    assert.equal(events.every((event) => !("providerRequestId" in event)), true);
+    const trace = await stream.trace;
+    assert.equal(trace[0].providerRequestId, undefined);
+    assert.equal(trace[1].providerRequestId, "fallback-only-request");
   } finally {
     fixture.close();
   }
@@ -789,7 +834,7 @@ test("Timeout is distinct from caller cancellation and can fall back before text
 
     const slowModelId = publishModel(fixture, provider.id, "GENERATION", "test.slow-timeout");
     const slow = new FakeGenerationAdapter(async function* (_request, context) {
-      yield { type: "STARTED" };
+      yield { type: "STARTED", providerRequestId: "slow-timeout-request" };
       await new Promise<void>((resolve) => {
         if (context.signal.aborted) resolve();
         else context.signal.addEventListener("abort", () => resolve(), { once: true });
@@ -807,7 +852,9 @@ test("Timeout is distinct from caller cancellation and can fall back before text
       generationRequest(),
     );
     await assert.rejects(() => collect(slowStream), expectGatewayCode("TIMEOUT"));
-    assert.equal((await slowStream.trace)[0].status, "TIMEOUT");
+    const slowTrace = await slowStream.trace;
+    assert.equal(slowTrace[0].status, "TIMEOUT");
+    assert.equal(slowTrace[0].providerRequestId, "slow-timeout-request");
   } finally {
     fixture.close();
   }

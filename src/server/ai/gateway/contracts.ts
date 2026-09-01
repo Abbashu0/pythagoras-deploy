@@ -79,7 +79,8 @@ export const GENERATION_FINISH_REASONS = [
 
 export type GenerationFinishReason = (typeof GENERATION_FINISH_REASONS)[number];
 
-export type GenerationStreamEvent =
+/** Adapter-facing events. Provider request identity is allowed only at this boundary. */
+export type ProviderGenerationStreamEvent =
   | {
       type: "STARTED";
       providerRequestId?: string;
@@ -97,6 +98,25 @@ export type GenerationStreamEvent =
       finishReason: GenerationFinishReason;
       usage: NormalizedProviderUsage;
       providerRequestId?: string;
+    };
+
+/** Gateway-facing Product stream. Provider attempt identity is deliberately absent. */
+export type GatewayGenerationStreamEvent =
+  | {
+      type: "STARTED";
+    }
+  | {
+      type: "TEXT_DELTA";
+      text: string;
+    }
+  | {
+      type: "USAGE";
+      usage: NormalizedProviderUsage;
+    }
+  | {
+      type: "COMPLETED";
+      finishReason: GenerationFinishReason;
+      usage: NormalizedProviderUsage;
     };
 
 export interface EmbeddingProviderRequest {
@@ -164,7 +184,7 @@ export interface GenerationProviderAdapter {
   generate(
     request: GenerationProviderRequest,
     context: ProviderAdapterExecutionContext,
-  ): AsyncIterable<GenerationStreamEvent>;
+  ): AsyncIterable<ProviderGenerationStreamEvent>;
 }
 
 export interface EmbeddingProviderAdapter {
@@ -218,7 +238,7 @@ export interface AIProviderAttemptTrace {
 }
 
 export interface AIProviderGatewayStream {
-  events: AsyncIterable<GenerationStreamEvent>;
+  events: AsyncIterable<GatewayGenerationStreamEvent>;
   /** Resolves after the stream ends, including a failed stream. */
   trace: Promise<readonly AIProviderAttemptTrace[]>;
 }
