@@ -9,17 +9,21 @@ Pythagoras is an Arabic study product with two product surfaces:
 
 The former `public/pythagoras/` vanilla HTML/CSS/JS Student harness was retired and removed in Phase B after it successfully validated the Backend and public client-neutral APIs. Git history remains its archive; it is not copied into an archive directory.
 
-The production Student client is `mobile/` with Expo SDK 57, React Native 0.86.x, React, TypeScript 6, Expo Router, and `@expo/ui`. The current approved client includes the four-item NativeTabs shell, Home with the approved Banner carousel and profile/settings actions, Materials, native Stack destinations, Settings/Appearance, Profile, and the Arabic Question Bank with search, Reader, local Favorites, and its fixed Grammar topic-switcher control row.
+The production Student client is `mobile/` with Expo SDK 57, React Native 0.86.x, React, TypeScript 6, Expo Router, and `@expo/ui`. The current approved client includes the four-item NativeTabs shell, Home with the approved Banner carousel and profile/settings actions, Materials, native Stack destinations, Settings/Appearance, Profile, and the Arabic Question Bank with search, Reader, local Favorites, and its fixed two-level Arabic section/topic selector control row.
 
-The Arabic Question Bank currently enters Grammar directly. Its nine Product-defined Grammar topics come from the published Public Layout: the iOS control row uses a stable native `GlassView` trigger with a SwiftUI `Popover`, Android uses native Compose presentation, Search is scoped to the selected Bank, and Favorites remain subject-wide. The Arabic Literature/root selector remains deferred until that Product experience is designed.
+The Arabic Question Bank currently enters Grammar directly. Its nine Product-defined Grammar topics and direct Literature bank come from the published Public Layout: the iOS control row uses a stable native `GlassView` trigger with a SwiftUI `Popover`, Android uses native Compose presentation, Search is scoped to the selected Bank, and Favorites remain subject-wide. Literature has no further Mobile subtopic selector yet; the Product-defined two-level section choice is now part of the approved shell.
 
 For current visual and Product UI rules, read `docs/product/DESIGN-SYSTEM.md`. That document describes the active Pythagoras design language and is subordinate to newer explicit Product Owner decisions.
 
-The current published Question data includes the Arabic Grammar `الاستفهام` Package (`arabic-grammar-istifham`) with 482 Questions, 482 Variants, and 482 Occurrences assigned to the Arabic Question Bank. Do not re-import, mutate, delete, or re-publish this content as part of the Mobile foundation work.
+Published Question data is runtime-owned under `PYTHAGORAS_DATA_DIR` and is never committed. The Student reads only the Question Packages and Material Bank placements that are currently published through the public APIs; do not re-import, mutate, delete, or re-publish runtime content as part of architecture work.
 
 Development currently uses Expo Go on the Product Owner's physical iPhone 17 Pro Max. Metro LAN and Fast Refresh have been physically verified. Expo Go is the fast development environment for now; a Development Build will be introduced only when a real native dependency or native configuration requires it. The Mobile app will consume the existing published-only, client-neutral public APIs. Backend/Admin architecture and Rich Content contracts remain unchanged.
 
 For appropriate system controls, prefer `@expo/ui` or other Expo/native platform UI. Pythagoras-branded Product surfaces remain custom React Native UI. Do not infer final Product navigation from the foundation screen.
+
+## Current AI phase
+
+The Pythagoras AI Intelligence System has started at **AI-M0 — Architecture Lock & Backend Readiness Specification**. AI-M0 is documentation and repository-audit only: no production AI runtime, provider SDK, AI database tables, AI API, Admin AI UI, or Mobile AI UI exists yet. The locked boundaries and future milestone plan are in [docs/ai/README.md](docs/ai/README.md).
 
 The content-platform master plan supersedes the earlier no-backend restriction. M1 provides a local Next.js server foundation backed by SQLite + Drizzle under `src/server/content/`, with committed migrations in `drizzle/`. Runtime data is configured by `PYTHAGORAS_DATA_DIR`; its safe Windows fallback is `%LOCALAPPDATA%\Pythagoras\data`. Runtime databases and assets must never be committed.
 
