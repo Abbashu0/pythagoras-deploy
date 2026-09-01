@@ -19,11 +19,30 @@ AI milestones are future delivery boundaries. Each milestone is one coherent com
 **Delivered boundary:** Governed `ai.model-config` records through Change Sets and OWNER publication; separate Generation, Embedding, and Reranker adapter contracts; a server-registered adapter registry; a provider-neutral Gateway with capability checks, request-scoped credential resolution, timeout/cancellation, normalized errors/usage, explicit fallback, and safe per-attempt traces; and a validated outbound target/transport boundary. Migration `0012_ai-model-registry` adds only safe model metadata.
 **Explicit boundary:** No production provider or vendor was selected, no external provider call or SDK was added, and no Student AI, conversation, RAG, budget/cost ledger, or Admin/Mobile AI UI was implemented. Deterministic fakes are test-only.
 
+## AI-M3 — Operations Core
+
+**Status:** Refined into reviewed checkpoints; the overall M3 milestone is not complete until M3A, M3B, and M3C are accepted.
+
+### AI-M3A — Economics & Usage Accounting
+
+**Status:** Implemented.
+**Delivered boundary:** Governed immutable Rate Card revisions, exact nano-currency calculation, recurring IANA-timezone pricing bands, billing-safe usage normalization, immutable cost-operation/usage observations, append-only corrections, historical model/rate reconstruction, and cumulative Generation usage aggregation. Migration `0013_ai-economics-and-accounting` adds only canonical accounting and pricing rows.
+**Explicit boundary:** No budget enforcement, reservation/settlement, rate limits, circuit breakers, durable jobs, real Provider pricing, external Provider call, or Student/Admin AI UI was added.
+
+### AI-M3B — Budget & Admission Control
+
+**Status:** Not started.
+**Boundary:** Future configurable budgets, admission preflight, reservation/settlement, entitlement integration, and rate limits.
+
+### AI-M3C — Durable Jobs & Operations
+
+**Status:** Not started.
+**Boundary:** Future durable jobs/outbox, leases, retries, circuit breakers, and operational recovery.
+
 ## Remaining future milestones
 
 | Milestone | Coherent boundary | Independent exit gate |
 | --- | --- | --- |
-| **AI-M3 Operations Core** | Rate cards, usage/cost records, Budget Ledger, atomic reservation/settlement, rate limits, circuit breakers, and job/outbox foundation | Concurrent reservations, idempotent settlement, partial streams, retries, and provider outage are tested without overspend |
 | **AI-M4 Conversation Core** | Server-resolved StudentPrincipal boundary, subject-immutable conversations, messages, streaming generations, and deletion lifecycle | Client identity substitution fails; subject scope cannot change; stream lifecycle and private access isolation pass |
 | **AI-M5 Policy & Context Engine** | Global/subject policy revisions, ContextBudgetManager, bounded summaries/recent turns, output constraints, and context audit | Budget plan is deterministic/revisioned; hard/soft limits and policy precedence pass representative tests |
 | **AI-M6 Knowledge Domain** | Knowledge Sources, `pythagoras.knowledge-package`, validation, publication, source trust, and Question/Knowledge projector boundaries | Published-only eligibility, provenance, revisioning, rights metadata, and governed publication pass |

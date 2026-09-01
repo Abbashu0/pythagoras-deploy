@@ -9,6 +9,7 @@ import {
 } from "../material-question-bank";
 import { AIProviderConfigChangeAdapter } from "../ai/configuration";
 import { AIModelConfigChangeAdapter } from "../ai/model-registry";
+import { AIRateCardChangeAdapter } from "../ai/economics";
 
 export class ChangeResourceAdapterRegistry {
   private readonly adapters = new Map<string, ChangeResourceAdapter>();
@@ -69,6 +70,7 @@ export function createDefaultChangeResourceRegistry(): ChangeResourceAdapterRegi
       new MaterialQuestionBankChangeAdapter(),
       new AIProviderConfigChangeAdapter(),
       new AIModelConfigChangeAdapter(),
+      new AIRateCardChangeAdapter(),
     ],
     [new QuestionChangeSetCoordinator(), new MaterialQuestionBankChangeSetCoordinator()],
   );

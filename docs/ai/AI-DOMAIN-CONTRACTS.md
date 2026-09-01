@@ -39,6 +39,8 @@ The adapter-facing `ProviderGenerationStreamEvent` may carry a provider request 
 
 Gateway failures use a closed normalized taxonomy with explicit retry/fallback flags. Each invocation returns safe attempt metadata with model/provider revisions and no prompt, credential, raw provider body, or permanent usage record. The M2 transport boundary requires an HTTPS target whose resolved addresses pass the denylist for private, loopback, link-local, multicast, metadata, unspecified, and reserved networks; a future transport must pin/use that validated resolution to reduce DNS rebinding risk. No production HTTP adapter or vendor protocol adapter is shipped in M2.
 
+AI-M3A materializes only the economics side of the Operations Core. Rate Card revisions and relational price lines/time bands are governed data; `AIBillingUsageNormalizer` is an explicit server-registered boundary because M2 telemetry is not automatically billable; `AICostCalculator` uses integer nano-currency arithmetic; and accounting observations/corrections are append-only. AI-M3A does not reserve or settle budgets, enforce entitlements/rate limits, or run durable jobs.
+
 ## 2. Policy, subject, conversation, and student boundaries
 
 | Boundary | Contract |

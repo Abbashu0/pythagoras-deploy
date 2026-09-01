@@ -2,6 +2,10 @@
 
 AI cost is a Product and safety boundary. Every expensive operation is attributed before it runs and reconciled after it finishes.
 
+## Current implementation boundary
+
+AI-M3A is implemented as the economics-only checkpoint of Operations Core. The runtime has governed, revisioned Rate Cards; billing-safe normalizer and exact nano-unit calculator contracts; cost-operation identities with immutable attempt usage/cost and correction repositories; historical Model/Rate Card revision resolution; and maximum/best-known Generation usage aggregation. No real Provider prices are seeded, and no budget admission, reservation/settlement, rate-limit, circuit-breaker, or durable-job runtime exists until AI-M3B/M3C.
+
 ## 1. Cost centers
 
 The immutable cost-center vocabulary is:

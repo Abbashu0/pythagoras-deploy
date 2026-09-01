@@ -36,6 +36,16 @@ import type {
 } from "../ai/configuration/contracts";
 import type { AIModelCapability } from "../ai/model-registry/contracts";
 import type {
+  AIAccountingActorType,
+  AICostBasis,
+  AICostCenter,
+  AICostCompleteness,
+  AICostOperationStatus,
+  AIRateCardPriceComponent,
+  AIRateCardPriceUnit,
+} from "../ai/economics/contracts";
+import type { AIProviderAttemptStatus } from "../ai/gateway/contracts";
+import type {
   AISecretAuditActorType,
   AISecretAuditEventType,
   AISecretAuditOutcome,
@@ -1431,6 +1441,308 @@ export const aiSecretAuditEvents = sqliteTable(
   ],
 );
 
+/** Stable Rate Card identity; its pricing lives in immutable revision rows. */
+export const aiRateCards = sqliteTable(
+  "ai_rate_cards",
+  {
+    id: text("id").primaryKey(),
+    key: text("rate_card_key").notNull(),
+    currentRevision: integer("current_revision").notNull().default(1),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => adminUsers.id, { onDelete: "restrict" }),
+    updatedBy: text("updated_by")
+      .notNull()
+      .references(() => adminUsers.id, { onDelete: "restrict" }),
+  },
+  (table) => [
+    uniqueIndex("ai_rate_cards_key_unique").on(table.key),
+    index("ai_rate_cards_updated_at_index").on(table.updatedAt),
+    check(
+      "ai_rate_cards_key_valid",
+      sql`length(trim(${table.key})) between 1 and 120 and ${table.key} not glob '*[^a-z0-9.-]*'`,
+    ),
+    check("ai_rate_cards_revision_positive", sql`${table.currentRevision} >= 1`),
+    check(
+      "ai_rate_cards_timestamps_ordered",
+      sql`${table.updatedAt} >= ${table.createdAt}`,
+    ),
+  ],
+);
+
+/** Immutable pricing definition for one Rate Card revision. */
+export const aiRateCardRevisions = sqliteTable(
+  "ai_rate_card_revisions",
+  {
+    id: text("id").primaryKey(),
+    rateCardId: text("rate_card_id")
+      .notNull()
+      .references(() => aiRateCards.id, { onDelete: "restrict" }),
+    revision: integer("revision").notNull(),
+    displayName: text("display_name").notNull(),
+    modelConfigId: text("model_config_id")
+      .notNull()
+      .references(() => aiModelConfigs.id, { onDelete: "restrict" }),
+    modelConfigRevision: integer("model_config_revision").notNull(),
+    currency: text("currency").notNull(),
+    billingUsageNormalizerKey: text("billing_usage_normalizer_key").notNull(),
+    effectiveFrom: integer("effective_from").notNull(),
+    effectiveTo: integer("effective_to"),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(false),
+    createdAt: integer("created_at").notNull(),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => adminUsers.id, { onDelete: "restrict" }),
+  },
+  (table) => [
+    uniqueIndex("ai_rate_card_revisions_identity_unique").on(table.rateCardId, table.revision),
+    index("ai_rate_card_revisions_target_index").on(
+      table.modelConfigId,
+      table.modelConfigRevision,
+      table.currency,
+      table.effectiveFrom,
+    ),
+    index("ai_rate_card_revisions_enabled_index").on(table.enabled),
+    check("ai_rate_card_revisions_revision_positive", sql`${table.revision} >= 1`),
+    check("ai_rate_card_revisions_model_revision_positive", sql`${table.modelConfigRevision} >= 1`),
+    check(
+      "ai_rate_card_revisions_currency_valid",
+      sql`length(${table.currency}) = 3 and ${table.currency} not glob '*[^A-Z]*'`,
+    ),
+    check(
+      "ai_rate_card_revisions_normalizer_key_valid",
+      sql`length(trim(${table.billingUsageNormalizerKey})) between 1 and 120 and ${table.billingUsageNormalizerKey} not glob '*[^a-z0-9.-]*'`,
+    ),
+    check("ai_rate_card_revisions_effective_from_valid", sql`${table.effectiveFrom} >= 0`),
+    check(
+      "ai_rate_card_revisions_effective_window_valid",
+      sql`${table.effectiveTo} is null or ${table.effectiveTo} > ${table.effectiveFrom}`,
+    ),
+    check("ai_rate_card_revisions_enabled_boolean", sql`${table.enabled} in (0,1)`),
+    check(
+      "ai_rate_card_revisions_display_name_valid",
+      sql`length(trim(${table.displayName})) between 1 and 200`,
+    ),
+  ],
+);
+
+/** Recurring local-time pricing bands; cross-midnight ranges are not representable. */
+export const aiRateCardTimeBands = sqliteTable(
+  "ai_rate_card_time_bands",
+  {
+    id: text("id").primaryKey(),
+    rateCardRevisionId: text("rate_card_revision_id")
+      .notNull()
+      .references(() => aiRateCardRevisions.id, { onDelete: "restrict" }),
+    timeZone: text("time_zone").notNull(),
+    daysOfWeekMask: integer("days_of_week_mask").notNull(),
+    startMinute: integer("start_minute").notNull(),
+    endMinute: integer("end_minute").notNull(),
+  },
+  (table) => [
+    index("ai_rate_card_time_bands_revision_index").on(table.rateCardRevisionId),
+    check("ai_rate_card_time_bands_timezone_valid", sql`length(trim(${table.timeZone})) between 1 and 120`),
+    check("ai_rate_card_time_bands_days_valid", sql`${table.daysOfWeekMask} between 1 and 127`),
+    check("ai_rate_card_time_bands_start_valid", sql`${table.startMinute} between 0 and 1439`),
+    check("ai_rate_card_time_bands_end_valid", sql`${table.endMinute} between 1 and 1440`),
+    check("ai_rate_card_time_bands_ordered", sql`${table.startMinute} < ${table.endMinute}`),
+  ],
+);
+
+/** Default and time-band price lines; the nullable band identity distinguishes their scope. */
+export const aiRateCardPriceLines = sqliteTable(
+  "ai_rate_card_price_lines",
+  {
+    id: text("id").primaryKey(),
+    rateCardRevisionId: text("rate_card_revision_id")
+      .notNull()
+      .references(() => aiRateCardRevisions.id, { onDelete: "restrict" }),
+    timeBandId: text("time_band_id").references(() => aiRateCardTimeBands.id, {
+      onDelete: "restrict",
+    }),
+    component: text("component").$type<AIRateCardPriceComponent>().notNull(),
+    unit: text("unit").$type<AIRateCardPriceUnit>().notNull(),
+    amountNano: integer("amount_nano").notNull(),
+  },
+  (table) => [
+    index("ai_rate_card_price_lines_revision_index").on(table.rateCardRevisionId),
+    index("ai_rate_card_price_lines_band_index").on(table.timeBandId),
+    check(
+      "ai_rate_card_price_lines_component_valid",
+      sql`${table.component} in ('STANDARD_INPUT','CACHE_HIT_INPUT','CACHE_MISS_INPUT','OUTPUT','REASONING','REQUEST')`,
+    ),
+    check(
+      "ai_rate_card_price_lines_unit_valid",
+      sql`${table.unit} in ('PER_MILLION_TOKENS','PER_REQUEST')`,
+    ),
+    check("ai_rate_card_price_lines_amount_valid", sql`${table.amountNano} between 0 and 9007199254740991`),
+  ],
+);
+
+/** Higher-level accounting identity; it contains metadata only, never raw prompts or answers. */
+export const aiCostOperations = sqliteTable(
+  "ai_cost_operations",
+  {
+    id: text("id").primaryKey(),
+    costCenter: text("cost_center").$type<AICostCenter>().notNull(),
+    idempotencyKey: text("idempotency_key"),
+    opaquePrincipalRef: text("opaque_principal_ref"),
+    subjectKey: text("subject_key"),
+    conversationId: text("conversation_id"),
+    responseId: text("response_id"),
+    jobId: text("job_id"),
+    evalRunId: text("eval_run_id"),
+    knowledgeRevision: integer("knowledge_revision"),
+    status: text("status").$type<AICostOperationStatus>().notNull(),
+    startedAt: integer("started_at").notNull(),
+    completedAt: integer("completed_at"),
+  },
+  (table) => [
+    index("ai_cost_operations_cost_center_index").on(table.costCenter, table.startedAt),
+    index("ai_cost_operations_status_index").on(table.status, table.startedAt),
+    index("ai_cost_operations_subject_index").on(table.subjectKey, table.startedAt),
+    index("ai_cost_operations_idempotency_index").on(table.idempotencyKey),
+    check(
+      "ai_cost_operations_cost_center_valid",
+      sql`${table.costCenter} in ('STUDENT_GENERATION','KNOWLEDGE_INDEXING','AGENT_2','EVALS','EXPERIMENTS')`,
+    ),
+    check(
+      "ai_cost_operations_status_valid",
+      sql`${table.status} in ('OPEN','COMPLETED','FAILED','CANCELLED')`,
+    ),
+    check("ai_cost_operations_knowledge_revision_valid", sql`${table.knowledgeRevision} is null or ${table.knowledgeRevision} >= 1`),
+    check("ai_cost_operations_started_nonnegative", sql`${table.startedAt} >= 0`),
+    check(
+      "ai_cost_operations_timestamps_ordered",
+      sql`${table.completedAt} is null or ${table.completedAt} >= ${table.startedAt}`,
+    ),
+    check("ai_cost_operations_idempotency_length", sql`${table.idempotencyKey} is null or length(trim(${table.idempotencyKey})) between 1 and 200`),
+    check("ai_cost_operations_principal_length", sql`${table.opaquePrincipalRef} is null or length(trim(${table.opaquePrincipalRef})) between 1 and 200`),
+    check("ai_cost_operations_subject_length", sql`${table.subjectKey} is null or length(trim(${table.subjectKey})) between 1 and 120`),
+    check("ai_cost_operations_conversation_length", sql`${table.conversationId} is null or length(trim(${table.conversationId})) between 1 and 120`),
+    check("ai_cost_operations_response_length", sql`${table.responseId} is null or length(trim(${table.responseId})) between 1 and 120`),
+    check("ai_cost_operations_job_length", sql`${table.jobId} is null or length(trim(${table.jobId})) between 1 and 120`),
+    check("ai_cost_operations_eval_length", sql`${table.evalRunId} is null or length(trim(${table.evalRunId})) between 1 and 120`),
+  ],
+);
+
+/** Immutable usage/cost observation for one provider attempt. */
+export const aiUsageCostRecords = sqliteTable(
+  "ai_usage_cost_records",
+  {
+    id: text("id").primaryKey(),
+    operationId: text("operation_id")
+      .notNull()
+      .references(() => aiCostOperations.id, { onDelete: "restrict" }),
+    gatewayRequestId: text("gateway_request_id"),
+    attemptIndex: integer("attempt_index"),
+    capability: text("capability").$type<AIModelCapability>().notNull(),
+    modelConfigId: text("model_config_id")
+      .notNull()
+      .references(() => aiModelConfigs.id, { onDelete: "restrict" }),
+    modelConfigRevision: integer("model_config_revision").notNull(),
+    providerConfigId: text("provider_config_id")
+      .notNull()
+      .references(() => aiProviderConfigs.id, { onDelete: "restrict" }),
+    providerConfigRevision: integer("provider_config_revision").notNull(),
+    providerRequestId: text("provider_request_id"),
+    rateCardId: text("rate_card_id")
+      .notNull()
+      .references(() => aiRateCards.id, { onDelete: "restrict" }),
+    rateCardRevision: integer("rate_card_revision").notNull(),
+    rateCardRevisionId: text("rate_card_revision_id")
+      .notNull()
+      .references(() => aiRateCardRevisions.id, { onDelete: "restrict" }),
+    resolvedPricingRule: text("resolved_pricing_rule").notNull(),
+    normalizedInputTokens: integer("normalized_input_tokens"),
+    normalizedCacheHitInputTokens: integer("normalized_cache_hit_input_tokens"),
+    normalizedCacheMissInputTokens: integer("normalized_cache_miss_input_tokens"),
+    normalizedOutputTokens: integer("normalized_output_tokens"),
+    normalizedReasoningTokens: integer("normalized_reasoning_tokens"),
+    billableStandardInputTokens: integer("billable_standard_input_tokens"),
+    billableCacheHitInputTokens: integer("billable_cache_hit_input_tokens"),
+    billableCacheMissInputTokens: integer("billable_cache_miss_input_tokens"),
+    billableOutputTokens: integer("billable_output_tokens"),
+    billableReasoningTokens: integer("billable_reasoning_tokens"),
+    requestUnits: integer("request_units").notNull(),
+    currency: text("currency").notNull(),
+    knownCostNano: integer("known_cost_nano").notNull(),
+    costCompleteness: text("cost_completeness").$type<AICostCompleteness>().notNull(),
+    costBasis: text("cost_basis").$type<AICostBasis>().notNull(),
+    attemptStatus: text("attempt_status").$type<AIProviderAttemptStatus>().notNull(),
+    startedAt: integer("started_at").notNull(),
+    completedAt: integer("completed_at"),
+    latencyMs: integer("latency_ms"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    index("ai_usage_cost_records_operation_index").on(table.operationId, table.createdAt),
+    index("ai_usage_cost_records_gateway_index").on(table.gatewayRequestId),
+    index("ai_usage_cost_records_model_index").on(table.modelConfigId, table.modelConfigRevision, table.createdAt),
+    index("ai_usage_cost_records_provider_index").on(table.providerConfigId, table.createdAt),
+    index("ai_usage_cost_records_currency_index").on(table.currency, table.createdAt),
+    check("ai_usage_cost_records_attempt_index_valid", sql`${table.attemptIndex} is null or ${table.attemptIndex} >= 0`),
+    check("ai_usage_cost_records_capability_valid", sql`${table.capability} in ('GENERATION','EMBEDDING','RERANK')`),
+    check("ai_usage_cost_records_model_revision_positive", sql`${table.modelConfigRevision} >= 1`),
+    check("ai_usage_cost_records_provider_revision_positive", sql`${table.providerConfigRevision} >= 1`),
+    check("ai_usage_cost_records_rate_card_revision_positive", sql`${table.rateCardRevision} >= 1`),
+    check("ai_usage_cost_records_gateway_length", sql`${table.gatewayRequestId} is null or length(trim(${table.gatewayRequestId})) between 1 and 120`),
+    check("ai_usage_cost_records_provider_request_length", sql`${table.providerRequestId} is null or length(trim(${table.providerRequestId})) between 1 and 200`),
+    check("ai_usage_cost_records_pricing_rule_length", sql`length(trim(${table.resolvedPricingRule})) between 1 and 200`),
+    check("ai_usage_cost_records_currency_valid", sql`length(${table.currency}) = 3 and ${table.currency} not glob '*[^A-Z]*'`),
+    check("ai_usage_cost_records_nonnegative_usage", sql`
+      (${table.normalizedInputTokens} is null or ${table.normalizedInputTokens} >= 0) and
+      (${table.normalizedCacheHitInputTokens} is null or ${table.normalizedCacheHitInputTokens} >= 0) and
+      (${table.normalizedCacheMissInputTokens} is null or ${table.normalizedCacheMissInputTokens} >= 0) and
+      (${table.normalizedOutputTokens} is null or ${table.normalizedOutputTokens} >= 0) and
+      (${table.normalizedReasoningTokens} is null or ${table.normalizedReasoningTokens} >= 0) and
+      (${table.billableStandardInputTokens} is null or ${table.billableStandardInputTokens} >= 0) and
+      (${table.billableCacheHitInputTokens} is null or ${table.billableCacheHitInputTokens} >= 0) and
+      (${table.billableCacheMissInputTokens} is null or ${table.billableCacheMissInputTokens} >= 0)
+    `),
+    check("ai_usage_cost_records_billable_output_nonnegative", sql`${table.billableOutputTokens} is null or ${table.billableOutputTokens} >= 0`),
+    check("ai_usage_cost_records_billable_reasoning_nonnegative", sql`${table.billableReasoningTokens} is null or ${table.billableReasoningTokens} >= 0`),
+    check("ai_usage_cost_records_request_units_valid", sql`${table.requestUnits} >= 0`),
+    check("ai_usage_cost_records_known_cost_valid", sql`${table.knownCostNano} between 0 and 9007199254740991`),
+    check("ai_usage_cost_records_completeness_valid", sql`${table.costCompleteness} in ('COMPLETE','PARTIAL')`),
+    check("ai_usage_cost_records_basis_valid", sql`${table.costBasis} in ('RATE_CARD','PROVIDER_REPORTED')`),
+    check("ai_usage_cost_records_status_valid", sql`${table.attemptStatus} in ('SUCCEEDED','FAILED','CANCELLED','TIMEOUT')`),
+    check("ai_usage_cost_records_started_nonnegative", sql`${table.startedAt} >= 0`),
+    check("ai_usage_cost_records_completed_ordered", sql`${table.completedAt} is null or ${table.completedAt} >= ${table.startedAt}`),
+    check("ai_usage_cost_records_latency_valid", sql`${table.latencyMs} is null or ${table.latencyMs} >= 0`),
+    check("ai_usage_cost_records_created_nonnegative", sql`${table.createdAt} >= 0`),
+  ],
+);
+
+/** Append-only compensating correction; original usage/cost rows are never rewritten. */
+export const aiCostCorrections = sqliteTable(
+  "ai_cost_corrections",
+  {
+    id: text("id").primaryKey(),
+    originalRecordId: text("original_record_id")
+      .notNull()
+      .references(() => aiUsageCostRecords.id, { onDelete: "restrict" }),
+    currency: text("currency").notNull(),
+    deltaCostNano: integer("delta_cost_nano").notNull(),
+    reasonCode: text("reason_code").notNull(),
+    actorType: text("actor_type").$type<AIAccountingActorType>().notNull(),
+    actorUserId: text("actor_user_id").references(() => adminUsers.id, { onDelete: "restrict" }),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    index("ai_cost_corrections_original_index").on(table.originalRecordId, table.createdAt),
+    index("ai_cost_corrections_currency_index").on(table.currency, table.createdAt),
+    check("ai_cost_corrections_currency_valid", sql`length(${table.currency}) = 3 and ${table.currency} not glob '*[^A-Z]*'`),
+    check("ai_cost_corrections_delta_valid", sql`${table.deltaCostNano} between -9007199254740991 and 9007199254740991`),
+    check("ai_cost_corrections_reason_valid", sql`length(trim(${table.reasonCode})) between 1 and 120 and ${table.reasonCode} not glob '*[^A-Z0-9_.-]*'`),
+    check("ai_cost_corrections_actor_valid", sql`(${table.actorType} = 'SYSTEM' and ${table.actorUserId} is null) or (${table.actorType} = 'ADMIN' and ${table.actorUserId} is not null)`),
+    check("ai_cost_corrections_actor_type_valid", sql`${table.actorType} in ('ADMIN','SYSTEM')`),
+    check("ai_cost_corrections_created_nonnegative", sql`${table.createdAt} >= 0`),
+  ],
+);
+
 export type ChangeSetRow = typeof changeSets.$inferSelect;
 export type ChangeSetItemRow = typeof changeSetItems.$inferSelect;
 export type ChangeSetEventRow = typeof changeSetEvents.$inferSelect;
@@ -1458,3 +1770,10 @@ export type AIProviderConfigRow = typeof aiProviderConfigs.$inferSelect;
 export type AIModelConfigRow = typeof aiModelConfigs.$inferSelect;
 export type AISecretRefRow = typeof aiSecretRefs.$inferSelect;
 export type AISecretAuditEventRow = typeof aiSecretAuditEvents.$inferSelect;
+export type AIRateCardRow = typeof aiRateCards.$inferSelect;
+export type AIRateCardRevisionRow = typeof aiRateCardRevisions.$inferSelect;
+export type AIRateCardTimeBandRow = typeof aiRateCardTimeBands.$inferSelect;
+export type AIRateCardPriceLineRow = typeof aiRateCardPriceLines.$inferSelect;
+export type AICostOperationRow = typeof aiCostOperations.$inferSelect;
+export type AIUsageCostRecordRow = typeof aiUsageCostRecords.$inferSelect;
+export type AICostCorrectionRow = typeof aiCostCorrections.$inferSelect;

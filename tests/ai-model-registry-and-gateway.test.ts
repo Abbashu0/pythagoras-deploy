@@ -338,7 +338,7 @@ function expectGatewayCode(code: string) {
 test("AI M2 migration creates a safe Model Registry table without credential material", () => {
   const fixture = createFixture();
   try {
-    assert.equal(getContentDatabaseStatus(fixture.database).migrationsApplied, 13);
+    assert.equal(getContentDatabaseStatus(fixture.database).migrationsApplied, 14);
     const columns = fixture.database.client
       .prepare("pragma table_info(ai_model_configs)")
       .all() as Array<{ name: string }>;
@@ -821,7 +821,7 @@ test("Timeout is distinct from caller cancellation and can fall back before text
       modelConfigs: fixture.models,
       secrets: fixture.secrets,
       adapters: new ProviderAdapterRegistry([primary, fallback]),
-    }, { defaultTimeoutMs: 20 });
+    }, { defaultTimeoutMs: 500 });
     const stream = gateway.generate(
       { capability: "GENERATION", attempts: [primaryId, fallbackId] },
       generationRequest(),

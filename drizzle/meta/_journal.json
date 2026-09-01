@@ -92,6 +92,13 @@
       "when": 1788291684727,
       "tag": "0012_ai-model-registry",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1788295919410,
+      "tag": "0013_ai-economics-and-accounting",
+      "breakpoints": true
     }
   ]
 }
