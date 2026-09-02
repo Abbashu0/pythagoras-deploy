@@ -365,6 +365,12 @@ test("Context Snapshot is metadata-only, idempotent per Response, immutable, and
     assert.throws(() => fixture.database.client.prepare("update ai_context_snapshots set total_input_tokens = total_input_tokens + 1 where id = ?").run(first.plan.snapshot.id), /immutable/i);
     const item = fixture.context.listSnapshotItems(PRINCIPAL, pending.turn.response.id)[0]!;
     assert.throws(() => fixture.database.client.prepare("update ai_context_snapshot_items set decision = 'OMITTED' where snapshot_id = ? and ordinal = ?").run(item.snapshotId, item.ordinal), /immutable/i);
+    const itemCount = (fixture.database.client.prepare("select count(*) as count from ai_context_snapshot_items where snapshot_id = ?").get(first.plan.snapshot.id) as { count: number }).count;
+    assert.throws(() => fixture.database.client.prepare("delete from ai_context_snapshots where id = ?").run(first.plan.snapshot.id), /immutable/i);
+    assert.throws(() => fixture.database.client.prepare("delete from ai_context_snapshot_items where snapshot_id = ? and ordinal = ?").run(item.snapshotId, item.ordinal), /immutable/i);
+    assert.equal((fixture.database.client.prepare("select count(*) as count from ai_context_snapshots where id = ?").get(first.plan.snapshot.id) as { count: number }).count, 1);
+    assert.equal((fixture.database.client.prepare("select count(*) as count from ai_context_snapshot_items where snapshot_id = ?").get(first.plan.snapshot.id) as { count: number }).count, itemCount);
+    assert.equal(fixture.context.getSnapshot(PRINCIPAL, pending.turn.response.id).fingerprint, first.plan.snapshot.fingerprint);
 
     secondDatabase = openContentDatabase({ dataDirectory: fixture.root, migrationsDirectory });
     const secondContext = new AIContextService(secondDatabase);
@@ -409,6 +415,7 @@ test("Context deletion interaction purges raw C4 while retaining only metadata a
     const marker = "TOP_SECRET_STUDENT_MESSAGE_42";
     const pending = beginTurn(fixture, "biology", marker);
     const built = fixture.context.build(PRINCIPAL, { responseId: pending.turn.response.id, contextPolicyId: policies.context.id, estimator: estimator() });
+    const snapshotItemCount = (fixture.database.client.prepare("select count(*) as count from ai_context_snapshot_items where snapshot_id = ?").get(built.plan.snapshot.id) as { count: number }).count;
     assert.equal(built.plan.currentMessage.content, marker);
     const metadataBeforeDelete = JSON.stringify({ snapshot: built.plan.snapshot, items: fixture.context.listSnapshotItems(PRINCIPAL, pending.turn.response.id) });
     assert.equal(metadataBeforeDelete.includes(marker), false);
@@ -420,6 +427,7 @@ test("Context deletion interaction purges raw C4 while retaining only metadata a
     fixture.conversations.deleteConversation(PRINCIPAL, pending.conversation.id);
     assert.equal((fixture.database.client.prepare("select count(*) as count from ai_conversation_messages where content = ?").get(marker) as { count: number }).count, 0);
     assert.equal((fixture.database.client.prepare("select count(*) as count from ai_context_snapshots where id = ?").get(built.plan.snapshot.id) as { count: number }).count, 1);
+    assert.equal((fixture.database.client.prepare("select count(*) as count from ai_context_snapshot_items where snapshot_id = ?").get(built.plan.snapshot.id) as { count: number }).count, snapshotItemCount);
     assert.equal(JSON.stringify(fixture.database.client.prepare("select * from ai_context_snapshots").all()).includes(marker), false);
     expectCode(() => fixture.context.getSnapshot(PRINCIPAL, pending.turn.response.id), "AI_CONTEXT_RESPONSE_INVALID");
   } finally {
