@@ -46,6 +46,11 @@ export interface NormalizedProviderUsage {
 
 export type GenerationMessageRole = "system" | "user" | "assistant";
 
+/** Provider-neutral structural limits shared by planning and Gateway validation. */
+export const AI_GATEWAY_MAX_GENERATION_MESSAGES = 128;
+export const AI_GATEWAY_MAX_GENERATION_MESSAGE_BYTES = 256 * 1_024;
+export const AI_GATEWAY_MAX_GENERATION_INSTRUCTIONS_BYTES = 256 * 1_024;
+
 export interface GenerationMessage {
   role: GenerationMessageRole;
   content: string;

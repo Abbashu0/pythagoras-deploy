@@ -104,6 +104,18 @@ import {
   AI_RETRIEVAL_FUSION_ALGORITHM_KEY,
   AI_RETRIEVAL_FUSION_ALGORITHM_REVISION,
 } from "../ai/retrieval-config/contracts";
+import {
+  AI_TUTOR_CITATION_PROTOCOL_KEY,
+  AI_TUTOR_CITATION_PROTOCOL_REVISION,
+  AI_TUTOR_GROUNDING_PROTOCOL_KEY,
+  AI_TUTOR_GROUNDING_PROTOCOL_REVISION,
+} from "../ai/tutor/configuration/contracts";
+import type {
+  AITutorTraceOriginKind,
+  AITutorTraceProjectionKind,
+  AITutorTraceSafeErrorCode,
+  AITutorTraceStatus,
+} from "../ai/tutor/trace/contracts";
 
 export type ContentPayload = Record<string, unknown>;
 
@@ -3097,6 +3109,166 @@ export const aiRetrievalConfigRevisions = sqliteTable(
   ],
 );
 
+/** Stable governed Tutor configuration identity; behavior lives in revisions. */
+export const aiTutorConfigs = sqliteTable(
+  "ai_tutor_configs",
+  {
+    id: text("id").primaryKey(),
+    key: text("key").notNull(),
+    subjectKey: text("subject_key").notNull().references(() => canonicalMaterials.subjectKey, { onDelete: "restrict" }),
+    currentRevision: integer("current_revision").notNull().default(1),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    createdBy: text("created_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+    updatedBy: text("updated_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+  },
+  (table) => [
+    uniqueIndex("ai_tutor_configs_key_unique").on(table.key),
+    index("ai_tutor_configs_subject_index").on(table.subjectKey),
+    check("ai_tutor_configs_key_valid", sql`length(trim(${table.key})) between 1 and 120 and ${table.key} not glob '*[^a-z0-9.-]*'`),
+    check("ai_tutor_configs_subject_valid", sql`length(trim(${table.subjectKey})) between 1 and 80 and ${table.subjectKey} not glob '*[^a-z0-9-]*'`),
+    check("ai_tutor_configs_revision_positive", sql`${table.currentRevision} >= 1`),
+    check("ai_tutor_configs_created_nonnegative", sql`${table.createdAt} >= 0`),
+    check("ai_tutor_configs_timestamps_ordered", sql`${table.updatedAt} >= ${table.createdAt}`),
+  ],
+);
+
+/** Immutable governed Tutor behavior revision. */
+export const aiTutorConfigRevisions = sqliteTable(
+  "ai_tutor_config_revisions",
+  {
+    id: text("id").primaryKey(),
+    tutorConfigId: text("tutor_config_id").notNull().references(() => aiTutorConfigs.id, { onDelete: "restrict" }),
+    revision: integer("revision").notNull(),
+    displayName: text("display_name").notNull(),
+    enabled: integer("enabled", { mode: "boolean" }).notNull(),
+    generationModelConfigId: text("generation_model_config_id").notNull().references(() => aiModelConfigs.id, { onDelete: "restrict" }),
+    contextPolicyId: text("context_policy_id").notNull().references(() => aiContextPolicies.id, { onDelete: "restrict" }),
+    retrievalConfigId: text("retrieval_config_id").notNull().references(() => aiRetrievalConfigs.id, { onDelete: "restrict" }),
+    budgetPolicyId: text("budget_policy_id").notNull().references(() => aiBudgetPolicies.id, { onDelete: "restrict" }),
+    rateLimitPolicyId: text("rate_limit_policy_id").notNull().references(() => aiRateLimitPolicies.id, { onDelete: "restrict" }),
+    maxOutputTokens: integer("max_output_tokens").notNull(),
+    groundingProtocolKey: text("grounding_protocol_key").notNull().default(AI_TUTOR_GROUNDING_PROTOCOL_KEY),
+    groundingProtocolRevision: integer("grounding_protocol_revision").notNull().default(AI_TUTOR_GROUNDING_PROTOCOL_REVISION),
+    citationProtocolKey: text("citation_protocol_key").notNull().default(AI_TUTOR_CITATION_PROTOCOL_KEY),
+    citationProtocolRevision: integer("citation_protocol_revision").notNull().default(AI_TUTOR_CITATION_PROTOCOL_REVISION),
+    createdAt: integer("created_at").notNull(),
+    createdBy: text("created_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+  },
+  (table) => [
+    uniqueIndex("ai_tutor_config_revisions_identity_unique").on(table.tutorConfigId, table.revision),
+    index("ai_tutor_config_revisions_config_index").on(table.tutorConfigId, table.revision),
+    index("ai_tutor_config_revisions_enabled_index").on(table.enabled),
+    check("ai_tutor_config_revisions_revision_positive", sql`${table.revision} >= 1`),
+    check("ai_tutor_config_revisions_display_name_valid", sql`length(trim(${table.displayName})) between 1 and 200`),
+    check("ai_tutor_config_revisions_enabled_boolean", sql`${table.enabled} in (0,1)`),
+    check("ai_tutor_config_revisions_max_output_valid", sql`${table.maxOutputTokens} between 1 and 1000000`),
+    check("ai_tutor_config_revisions_grounding_protocol_valid", sql`${table.groundingProtocolKey} = 'evidence-grounded-v1' and ${table.groundingProtocolRevision} = 1`),
+    check("ai_tutor_config_revisions_citation_protocol_valid", sql`${table.citationProtocolKey} = 'evidence-ref-v1' and ${table.citationProtocolRevision} = 1`),
+    check("ai_tutor_config_revisions_created_nonnegative", sql`${table.createdAt} >= 0`),
+  ],
+);
+
+/** Metadata-only Response Trace foundation; raw Conversation/Policy/Evidence text is excluded. */
+export const aiTutorResponseTraces = sqliteTable(
+  "ai_tutor_response_traces",
+  {
+    id: text("id").primaryKey(),
+    responseId: text("response_id").notNull().references(() => aiConversationResponses.id, { onDelete: "restrict" }),
+    conversationId: text("conversation_id").notNull().references(() => aiConversations.id, { onDelete: "restrict" }),
+    principalRef: text("principal_ref").notNull(),
+    subjectKey: text("subject_key").notNull().references(() => canonicalMaterials.subjectKey, { onDelete: "restrict" }),
+    tutorConfigId: text("tutor_config_id").notNull().references(() => aiTutorConfigs.id, { onDelete: "restrict" }),
+    tutorConfigRevision: integer("tutor_config_revision").notNull(),
+    contextSnapshotId: text("context_snapshot_id").notNull().references(() => aiContextSnapshots.id, { onDelete: "restrict" }),
+    contextSnapshotFingerprint: text("context_snapshot_fingerprint").notNull(),
+    retrievalConfigId: text("retrieval_config_id").notNull().references(() => aiRetrievalConfigs.id, { onDelete: "restrict" }),
+    retrievalConfigRevision: integer("retrieval_config_revision").notNull(),
+    fusionAlgorithmKey: text("fusion_algorithm_key").notNull(),
+    fusionAlgorithmRevision: integer("fusion_algorithm_revision").notNull(),
+    generationModelConfigId: text("generation_model_config_id").notNull().references(() => aiModelConfigs.id, { onDelete: "restrict" }),
+    generationModelConfigRevision: integer("generation_model_config_revision").notNull(),
+    generationProviderConfigId: text("generation_provider_config_id").notNull().references(() => aiProviderConfigs.id, { onDelete: "restrict" }),
+    generationProviderConfigRevision: integer("generation_provider_config_revision").notNull(),
+    providerModelId: text("provider_model_id").notNull(),
+    adapterKey: text("adapter_key").notNull(),
+    groundingProtocolKey: text("grounding_protocol_key").notNull(),
+    groundingProtocolRevision: integer("grounding_protocol_revision").notNull(),
+    citationProtocolKey: text("citation_protocol_key").notNull(),
+    citationProtocolRevision: integer("citation_protocol_revision").notNull(),
+    costOperationId: text("cost_operation_id").notNull().references(() => aiCostOperations.id, { onDelete: "restrict" }),
+    budgetReservationId: text("budget_reservation_id").notNull().references(() => aiBudgetReservations.id, { onDelete: "restrict" }),
+    budgetPolicyId: text("budget_policy_id").notNull().references(() => aiBudgetPolicies.id, { onDelete: "restrict" }),
+    budgetPolicyRevision: integer("budget_policy_revision").notNull(),
+    rateLimitPolicyId: text("rate_limit_policy_id").notNull().references(() => aiRateLimitPolicies.id, { onDelete: "restrict" }),
+    rateLimitPolicyRevision: integer("rate_limit_policy_revision").notNull(),
+    planFingerprint: text("plan_fingerprint").notNull(),
+    status: text("status").$type<AITutorTraceStatus>().notNull(),
+    safeErrorCode: text("safe_error_code").$type<AITutorTraceSafeErrorCode>(),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    completedAt: integer("completed_at"),
+  },
+  (table) => [
+    uniqueIndex("ai_tutor_response_traces_response_unique").on(table.responseId),
+    index("ai_tutor_response_traces_principal_index").on(table.principalRef, table.createdAt),
+    check("ai_tutor_response_traces_principal_valid", sql`length(trim(${table.principalRef})) between 1 and 200 and ${table.principalRef} not glob '*[^A-Za-z0-9_-]*'`),
+    check("ai_tutor_response_traces_subject_valid", sql`length(trim(${table.subjectKey})) between 1 and 80 and ${table.subjectKey} not glob '*[^a-z0-9-]*'`),
+    check("ai_tutor_response_traces_revisions_positive", sql`${table.tutorConfigRevision} >= 1 and ${table.retrievalConfigRevision} >= 1 and ${table.fusionAlgorithmRevision} >= 1 and ${table.generationModelConfigRevision} >= 1 and ${table.generationProviderConfigRevision} >= 1 and ${table.budgetPolicyRevision} >= 1 and ${table.rateLimitPolicyRevision} >= 1 and ${table.groundingProtocolRevision} >= 1 and ${table.citationProtocolRevision} >= 1`),
+    check("ai_tutor_response_traces_hashes_valid", sql`length(${table.contextSnapshotFingerprint}) = 64 and ${table.contextSnapshotFingerprint} not glob '*[^0-9a-f]*' and length(${table.planFingerprint}) = 64 and ${table.planFingerprint} not glob '*[^0-9a-f]*'`),
+    check("ai_tutor_response_traces_algorithm_valid", sql`${table.fusionAlgorithmKey} = 'weighted-rrf-v1' and ${table.fusionAlgorithmRevision} = 1`),
+    check("ai_tutor_response_traces_protocols_valid", sql`${table.groundingProtocolKey} = 'evidence-grounded-v1' and ${table.groundingProtocolRevision} = 1 and ${table.citationProtocolKey} = 'evidence-ref-v1' and ${table.citationProtocolRevision} = 1`),
+    check("ai_tutor_response_traces_status_valid", sql`${table.status} in ('PLANNED','STREAMING','COMPLETED','FAILED','CANCELLED','BLOCKED')`),
+    check("ai_tutor_response_traces_error_consistency", sql`(${table.status} in ('PLANNED','STREAMING','COMPLETED') and ${table.safeErrorCode} is null) or (${table.status} in ('FAILED','CANCELLED','BLOCKED') and ${table.safeErrorCode} is not null)`),
+    check("ai_tutor_response_traces_safe_error_valid", sql`${table.safeErrorCode} is null or ${table.safeErrorCode} in ('AI_TUTOR_TRACE_INVALID','AI_TUTOR_TRACE_BLOCKED','AI_TUTOR_TRACE_FAILED','AI_TUTOR_TRACE_CANCELLED')`),
+    check("ai_tutor_response_traces_timestamps_valid", sql`${table.updatedAt} >= ${table.createdAt} and ((${table.status} in ('PLANNED','STREAMING') and ${table.completedAt} is null) or (${table.status} in ('COMPLETED','FAILED','CANCELLED','BLOCKED') and ${table.completedAt} is not null and ${table.completedAt} >= ${table.createdAt}))`),
+    check("ai_tutor_response_traces_created_nonnegative", sql`${table.createdAt} >= 0`),
+  ],
+);
+
+/** Exact M7 projection revisions considered by a Tutor EvidencePack. */
+export const aiTutorTraceProjectionRefs = sqliteTable(
+  "ai_tutor_trace_projection_refs",
+  {
+    traceId: text("trace_id").notNull().references(() => aiTutorResponseTraces.id, { onDelete: "restrict" }),
+    projectionKind: text("projection_kind").$type<AITutorTraceProjectionKind>().notNull(),
+    projectionRevisionId: text("projection_revision_id").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.traceId, table.projectionKind, table.projectionRevisionId] }),
+    index("ai_tutor_trace_projection_refs_trace_index").on(table.traceId),
+    check("ai_tutor_trace_projection_refs_kind_valid", sql`${table.projectionKind} in ('M7A','M7B')`),
+    check("ai_tutor_trace_projection_refs_id_valid", sql`length(trim(${table.projectionRevisionId})) between 1 and 240`),
+  ],
+);
+
+/** Exact selected Evidence identities and deterministic citation labels; no text is stored. */
+export const aiTutorTraceEvidenceRefs = sqliteTable(
+  "ai_tutor_trace_evidence_refs",
+  {
+    traceId: text("trace_id").notNull().references(() => aiTutorResponseTraces.id, { onDelete: "restrict" }),
+    ordinal: integer("ordinal").notNull(),
+    citationLabel: text("citation_label").notNull(),
+    chunkId: text("chunk_id").notNull(),
+    m7aProjectionRevisionId: text("m7a_projection_revision_id").notNull(),
+    m7bEmbeddingProjectionRevisionId: text("m7b_embedding_projection_revision_id"),
+    originKind: text("origin_kind").$type<AITutorTraceOriginKind>().notNull(),
+    originId: text("origin_id").notNull(),
+    questionId: text("question_id"),
+    questionRevision: integer("question_revision"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.traceId, table.ordinal] }),
+    uniqueIndex("ai_tutor_trace_evidence_refs_label_unique").on(table.traceId, table.citationLabel),
+    index("ai_tutor_trace_evidence_refs_trace_index").on(table.traceId, table.ordinal),
+    check("ai_tutor_trace_evidence_refs_ordinal_valid", sql`${table.ordinal} between 1 and 50`),
+    check("ai_tutor_trace_evidence_refs_label_valid", sql`${table.citationLabel} = '[E' || ${table.ordinal} || ']'`),
+    check("ai_tutor_trace_evidence_refs_ids_valid", sql`length(trim(${table.chunkId})) between 1 and 240 and length(trim(${table.m7aProjectionRevisionId})) between 1 and 240 and (${table.m7bEmbeddingProjectionRevisionId} is null or length(trim(${table.m7bEmbeddingProjectionRevisionId})) between 1 and 240) and length(trim(${table.originId})) between 1 and 240`),
+    check("ai_tutor_trace_evidence_refs_origin_valid", sql`${table.originKind} in ('KNOWLEDGE_PACKAGE','QUESTION_PACKAGE')`),
+    check("ai_tutor_trace_evidence_refs_question_valid", sql`(${table.questionId} is null and ${table.questionRevision} is null) or (${table.questionId} is not null and ${table.questionRevision} is not null and ${table.questionRevision} >= 1)`),
+  ],
+);
+
 export type ChangeSetRow = typeof changeSets.$inferSelect;
 export type ChangeSetItemRow = typeof changeSetItems.$inferSelect;
 export type ChangeSetEventRow = typeof changeSetEvents.$inferSelect;
@@ -3151,3 +3323,8 @@ export type AIEmbeddingProjectionRevisionRow = typeof aiEmbeddingProjectionRevis
 export type AIEmbeddingVectorRow = typeof aiEmbeddingVectors.$inferSelect;
 export type AIRetrievalConfigRow = typeof aiRetrievalConfigs.$inferSelect;
 export type AIRetrievalConfigRevisionRow = typeof aiRetrievalConfigRevisions.$inferSelect;
+export type AITutorConfigRow = typeof aiTutorConfigs.$inferSelect;
+export type AITutorConfigRevisionRow = typeof aiTutorConfigRevisions.$inferSelect;
+export type AITutorResponseTraceRow = typeof aiTutorResponseTraces.$inferSelect;
+export type AITutorTraceProjectionRefRow = typeof aiTutorTraceProjectionRefs.$inferSelect;
+export type AITutorTraceEvidenceRefRow = typeof aiTutorTraceEvidenceRefs.$inferSelect;

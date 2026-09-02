@@ -14,6 +14,8 @@ AI-M7B uses the existing `KNOWLEDGE_INDEXING` cost center for document embedding
 
 AI-M7C query embedding and optional reranking are variable-cost work in the caller's existing `STUDENT_GENERATION` operation. M7C requires the matching reservation to be `EXECUTING`, records each actual Gateway attempt through M3A accounting, and leaves operation completion and reservation settlement to the owning orchestration milestone. M7C never charges query work to `KNOWLEDGE_INDEXING` and does not create a second admission.
 
+AI-M8A performs provider-neutral cost preflight only. It estimates one bounded Tutor turn as QUERY embedding plus optional reranking plus Generation using the exact pinned Model/Provider and Rate Card revisions, integer nano-currency, and one UTF-8 byte as an upper bound for one input token. It requires all components to resolve to the Budget Policy currency and fails closed on incomplete or mixed-currency cards. M8A creates no Cost Operation, Budget Reservation, admission, settlement, or Provider usage record; M8B owns that lifecycle after the plan is accepted.
+
 The immutable cost-center vocabulary is:
 
 - `STUDENT_GENERATION` — student-facing generation, reasoning, query embedding, reranking, and any approved student-facing model/tool call;

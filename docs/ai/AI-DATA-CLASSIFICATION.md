@@ -1,6 +1,6 @@
 # AI data classification, privacy, and retention
 
-AI-M0 established data handling rules before AI runtime existed. AI-M4 materializes the private Conversation core, AI-M5 materializes governed Policy/Context metadata, AI-M6 materializes governed Knowledge content, AI-M7A materializes rebuildable Chunk/FTS projections, and AI-M7B materializes rebuildable embedding/vector projections while preserving these classifications. Classification follows the strictest applicable class when a record contains multiple kinds of data.
+AI-M0 established data handling rules before AI runtime existed. AI-M4 materializes the private Conversation core, AI-M5 materializes governed Policy/Context metadata, AI-M6 materializes governed Knowledge content, AI-M7A materializes rebuildable Chunk/FTS projections, AI-M7B materializes rebuildable embedding/vector projections, and AI-M8A materializes Tutor planning and metadata-only Response Trace foundations while preserving these classifications. Classification follows the strictest applicable class when a record contains multiple kinds of data.
 
 ## 1. Data classes
 
@@ -29,6 +29,8 @@ server-resolved principal + raw message
 ```
 
 Account metadata removal is not de-identification: a student may type a phone number, address, name, school, or other personal information into a message. The minimization pipeline must inspect message content and derived fields before analytics, Agent 2, or eval export.
+
+M8A Tutor Config rows are C2 governed routing metadata. Runtime preflight and Generation plans may carry selected Conversation/Policy/Evidence text in memory, but the Response Trace foundation is C5 metadata only: it stores exact revision and identity references, projection references, and selected Evidence identities without raw query/message/policy/evidence text, prompt text, Provider output, credentials, or chain-of-thought. M8A's plan fingerprint and cost estimate contain no raw Student text.
 
 Raw content may be retained for the declared conversation-history period and legally required audit purpose, but it does not automatically enter model context, training data, curriculum, Agent 2 samples, or eval datasets. Every secondary use requires a purpose, access policy, retention, and provenance.
 

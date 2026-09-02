@@ -71,7 +71,7 @@ AI milestones are future delivery boundaries. Each milestone is one coherent com
 
 ## AI-M7 — Retrieval Engine
 
-**Status:** Implemented; M7A and M7B are approved, and M7C is implemented pending independent review.
+**Status:** Implemented and approved; AI-M7A, AI-M7B, and AI-M7C are approved, making AI-M7 Retrieval Engine complete.
 
 ### AI-M7A — Chunk Projection & Lexical Retrieval Foundation
 
@@ -88,16 +88,35 @@ AI milestones are future delivery boundaries. Each milestone is one coherent com
 
 ### AI-M7C — Hybrid Retrieval, Deterministic Fusion, Optional Reranking & EvidencePack
 
-**Status:** Implemented; pending independent review.
+**Status:** Implemented and approved.
 
 **Delivered boundary:** Governed subject-bound Retrieval Config identities/revisions through Change Sets and OWNER publication; append-only SQLite Config history and server-pinned `weighted-rrf-v1@1` identity through correction migration `0027_many_chat`; exact published M7A/M7B coverage gates; bounded exact lexical and per-origin semantic retrieval with a global semantic candidate limit; deterministic integer weighted Reciprocal Rank Fusion; optional single-model reranking with strict result validation; exact eligible-origin final scope fencing; live Source rights and projection/model/config final fences; preserved bounded Question occurrence/taxonomy provenance; caller-owned Student-generation Cost Operation and EXECUTING Budget Reservation attribution without settlement; and bounded runtime-only EvidencePacks with provenance, trust, scores, inclusion signals, and no query persistence. Migration `0026_steady_turbo` contains the safe Retrieval Config metadata; `0027_many_chat` contains only its lifecycle/version hardening.
-**Explicit boundary:** No Grounded Tutor, Generation, conversation orchestration, Web Search, durable Retrieval Trace, memory, eval runtime, external vector technology, vendor SDK, or production Provider was added. AI-M7 remains incomplete until the M7C review gate is passed.
+**Explicit boundary:** No Grounded Tutor execution, Generation, conversation orchestration, Web Search, durable Retrieval Trace, memory, eval runtime, external vector technology, vendor SDK, or production Provider was added. AI-M7 Retrieval Engine is approved/complete.
+
+## AI-M8 — Grounded Tutor
+
+**Status:** Refined into independently reviewed checkpoints; AI-M8A is implemented pending independent review, while AI-M8B and AI-M8C are not started. AI-M8 overall remains incomplete.
+
+### AI-M8A — Tutor Configuration, Preflight, Grounded Generation Plan & Response Trace Foundation
+
+**Status:** Implemented; pending independent review.
+**Delivered boundary:** Governed `ai.tutor-config` identities/revisions through Change Sets and OWNER publication; server-owned `evidence-grounded-v1@1` and `evidence-ref-v1@1` protocols; canonical Conversation/M5 Context preflight; exact current Retrieval/Model/Provider/Budget/Rate Limit revision pinning; conservative integer nano-currency preflight cost estimates for QUERY embedding, optional reranking, and Generation; trusted internal EvidencePack validation and deterministic one-model/no-fallback Generation request planning; and metadata-only Response Trace tables with ownership/lifecycle protections through migration `0028_yellow_the_fury`.
+**Explicit boundary:** M8A makes zero Generation, Embedding, or Rerank calls; it does not execute Hybrid Retrieval, create admission/reservations, settle cost, stream Conversation responses, validate generated citations, expose a Student API/UI, add tools/Web Search, persist prompts/content, or select a production Provider. M8B owns execution and M8C owns grounding/citation validation and replay hardening.
+
+### AI-M8B — Grounded Generation Execution
+
+**Status:** Not started.
+**Boundary:** Future end-to-end orchestration from M7C EvidencePack through Gateway Generation, Conversation streaming, usage accounting, terminal response lifecycle, and admission settlement.
+
+### AI-M8C — Grounding/Citation Validation & Integration Hardening
+
+**Status:** Not started.
+**Boundary:** Future output citation/grounding validation, cancellation/failure/replay hardening, and final M8 integration review.
 
 ## Remaining future milestones
 
 | Milestone | Coherent boundary | Independent exit gate |
 | --- | --- | --- |
-| **AI-M8 Grounded Tutor** | Grounded Tutor Orchestrator, evidence-constrained generation, insufficient-evidence behavior, streaming response, and response trace | End-to-end fake-provider tests prove subject scope, grounding, trace completeness, budget accounting, and no tool/secret escape |
 | **AI-M9 Evals V1** | Versioned Eval Suite, deterministic graders, supplementary judge adapter, regression cases, security/cost/latency gates | Baseline suites cover all required dimensions and block an unsafe or materially regressed promotion |
 | **AI-M10 Memory & Compaction** | Student-scoped memory policy, memory extraction/review, conversation summaries, compaction revisions, deletion, and context selection | No cross-user memory; summaries are traceable; old history is preserved but not replayed by default; deletion propagates |
 | **AI-M11 Intelligence Telemetry** | Retrieval traces, feedback/events, de-identified analytics, usage dashboards/data contracts, and privacy-safe operational metrics | Analytics cannot reveal raw PII by default; response/retrieval/cost traces correlate end to end |

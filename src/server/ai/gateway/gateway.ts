@@ -28,6 +28,9 @@ import type {
   RerankProviderResult,
 } from "./contracts";
 import {
+  AI_GATEWAY_MAX_GENERATION_INSTRUCTIONS_BYTES,
+  AI_GATEWAY_MAX_GENERATION_MESSAGE_BYTES,
+  AI_GATEWAY_MAX_GENERATION_MESSAGES,
   AI_PROVIDER_ERROR_CODES,
   GENERATION_FINISH_REASONS,
 } from "./contracts";
@@ -47,8 +50,6 @@ import type {
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_TIMEOUT_MS = 120_000;
 const MAX_SELECTION_ATTEMPTS = 5;
-const MAX_MESSAGES = 128;
-const MAX_MESSAGE_BYTES = 256 * 1_024;
 const MAX_TEXT_BYTES = 256 * 1_024;
 const MAX_EMBEDDING_BATCH = 128;
 const MAX_RERANK_CANDIDATES = 128;
@@ -750,7 +751,7 @@ function validateGenerationRequest(request: GenerationGatewayRequest): void {
   if (!isPlainObject(request) || !boundedText(request.requestId, 120, false)) {
     throw invalidRequestError();
   }
-  if (!Array.isArray(request.messages) || request.messages.length < 1 || request.messages.length > MAX_MESSAGES) {
+  if (!Array.isArray(request.messages) || request.messages.length < 1 || request.messages.length > AI_GATEWAY_MAX_GENERATION_MESSAGES) {
     throw invalidRequestError();
   }
   if (request.stream !== true) throw invalidRequestError();
@@ -758,12 +759,12 @@ function validateGenerationRequest(request: GenerationGatewayRequest): void {
     if (
       !isPlainObject(message) ||
       !["system", "user", "assistant"].includes(String(message.role)) ||
-      !boundedText(message.content, MAX_MESSAGE_BYTES, true)
+      !boundedText(message.content, AI_GATEWAY_MAX_GENERATION_MESSAGE_BYTES, true)
     ) {
       throw invalidRequestError();
     }
   }
-  if (request.instructions !== undefined && !boundedText(request.instructions, MAX_TEXT_BYTES, false)) {
+  if (request.instructions !== undefined && !boundedText(request.instructions, AI_GATEWAY_MAX_GENERATION_INSTRUCTIONS_BYTES, false)) {
     throw invalidRequestError();
   }
   if (

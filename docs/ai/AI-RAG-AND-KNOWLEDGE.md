@@ -1,6 +1,6 @@
 # Knowledge and grounded retrieval
 
-AI-M6 implements the source and published-package boundary only. Approved AI-M7A implements the first rebuildable structural Chunk Projection and lexical FTS5 foundation. Approved AI-M7B implements the semantic embedding/vector projection foundation over exact fresh M7A revisions. AI-M7C is implemented pending independent review and adds the governed hybrid retrieval, deterministic fusion, optional reranking, and bounded runtime EvidencePack boundary. Package publication still does not create retrieval data automatically.
+AI-M6 implements the source and published-package boundary only. Approved AI-M7A implements the first rebuildable structural Chunk Projection and lexical FTS5 foundation. Approved AI-M7B implements the semantic embedding/vector projection foundation over exact fresh M7A revisions. Approved AI-M7C adds the governed hybrid retrieval, deterministic fusion, optional reranking, and bounded runtime EvidencePack boundary. AI-M8A consumes that EvidencePack only through a trusted internal planning boundary; Package publication still does not create retrieval data automatically.
 
 ## 1. Knowledge is a separate domain
 
@@ -52,7 +52,7 @@ M7B's semantic projection consumes one exact current/fresh M7A READY revision an
 
 ### AI-M7C implementation status
 
-AI-M7C is implemented pending independent review. Retrieval Config is governed and subject-bound. Runtime selection is bounded and published-only: eligible origins must have exact fresh/current M7A projections and complete current M7B coverage in one embedding space before the query Provider is called. Lexical candidates are scoped to those M7A revisions; one query embedding is obtained through the existing Gateway; semantic ranks are recomputed globally; integer weighted RRF deduplicates the union; and an optional single reranker receives only bounded query plus candidate ID/text. A final live Source, projection, Model/Provider, and Config fence returns no evidence on a race. EvidencePack is runtime-only, no raw query is persisted, and M7C does not implement Generation, Web Search, or the Tutor.
+AI-M7C is approved. Retrieval Config is governed and subject-bound. Runtime selection is bounded and published-only: eligible origins must have exact fresh/current M7A projections and complete current M7B coverage in one embedding space before the query Provider is called. Lexical candidates are scoped to those M7A revisions; one query embedding is obtained through the existing Gateway; semantic ranks are recomputed globally; integer weighted RRF deduplicates the union; and an optional single reranker receives only bounded query plus candidate ID/text. A final live Source, projection, Model/Provider, and Config fence returns no evidence on a race. EvidencePack is runtime-only, no raw query is persisted, and M7C does not implement Generation, Web Search, or the Tutor.
 
 The M7C correction makes the Config revision history append-only at SQLite level and pins the server-owned `weighted-rrf-v1@1` algorithm on every Config revision. `semanticCandidateLimit` is the global semantic K after per-origin vector scans and global cosine ordering; `fusionCandidateLimit` applies only after that semantic cap to the lexical/semantic union. The final fence re-enumerates and stable-sorts the eligible `(originKind, originId, subjectKey)` set, so newly published or newly re-enabled origins fail closed without another Provider call. Evidence items carry bounded cloned M7A origin metadata, including Question projection identity, occurrence revisions/source fields, and taxonomy assignments; text and serialized provenance consume the evidence byte budget together, and neither is truncated.
 
@@ -118,6 +118,10 @@ Canonical content remains SQLite-first in the current architecture. AI-M0 does n
 
 Existing Question FTS5 is a Product Question Search projection. It may be an input to a future lexical retrieval adapter, but its placement-scoped public search contract and health gate are not silently changed into AI RAG.
 
+## 8. M8A Tutor boundary
+
+M8A does not execute retrieval. A future M8B orchestrator must obtain the EvidencePack directly from approved M7C and pass it across the trusted internal boundary. `AITutorGenerationPlanner` requires sufficient, subject-matching Evidence with the exact Retrieval Config and fusion identity; it consumes whole items under the M5 evidence budget, emits deterministic `[E#]` labels, and sends only labels plus exact Evidence text as user/data messages. Provenance remains in the runtime citation map and metadata-only Response Trace references; it is not sent to Generation. An insufficient or mismatched EvidencePack produces no Generation plan and no Provider call.
+
 ## 7. Grounding contract
 
 The Grounded Tutor receives:
@@ -131,6 +135,6 @@ The Grounded Tutor receives:
 
 It does not receive database handles, secret values, unrestricted search, arbitrary tools, or executable retrieved instructions. A response that cannot meet the minimum evidence threshold must follow the configured insufficient-evidence behavior.
 
-## 8. Web Search
+## 9. Web Search
 
 Web Search is OFF by default. The baseline Tutor is grounded in Pythagoras-owned published knowledge and approved Product data. External web retrieval is a future separately governed capability, not part of the baseline contract.

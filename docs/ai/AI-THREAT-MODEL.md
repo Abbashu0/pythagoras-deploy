@@ -42,7 +42,11 @@ Restricted: secrets, raw private data, operational controls
 
 “Trusted evidence” means source-authorized and published; it does not mean executable. The model cannot call a repository, read a secret store, publish a Change Set, or bypass an entitlement because text told it to do so.
 
-## 3. Security requirements for provider calls
+## 3. M8A Tutor planning controls
+
+M8A is a no-execution boundary: preflight and planning do not call Generation, Embedding, Rerank, admission, or settlement. Tutor Config owns only governed routing references and bounded output; Instruction Policies own product instructions. The planner accepts EvidencePack only from a trusted internal M7C-to-M8B boundary, places Evidence in an explicitly labelled user/data envelope, and never puts Evidence or Student text into trusted instructions. Response Trace persists only revision/ownership metadata and immutable references, so prompt injection remains data and cannot become stored authority.
+
+## 4. Security requirements for provider calls
 
 - Provider adapters receive only the minimum context required for the operation.
 - Credentials are resolved immediately before use and are not copied into request objects that can be logged or traced.
@@ -52,7 +56,7 @@ Restricted: secrets, raw private data, operational controls
 - Provider capability, retention, region, and training-use metadata are part of routing eligibility.
 - Fallback must preserve subject scope, policy revision, budget accounting, and traceability.
 
-## 4. Security tests and operational evidence
+## 5. Security tests and operational evidence
 
 Before a capability is production-eligible, its Eval/security suite must include:
 
@@ -68,6 +72,6 @@ Before a capability is production-eligible, its Eval/security suite must include
 
 Security incidents require an append-only audit record, affected revision/request IDs, containment, deletion or key-rotation assessment, and a regression Eval where the failure can be reproduced safely.
 
-## 5. Web Search policy
+## 6. Web Search policy
 
 Generic Web Search is **OFF by default**. The baseline Student Tutor is grounded in Pythagoras-owned published knowledge and existing approved Product data. Any future external retrieval capability would require a separate threat review, source policy, cost policy, provenance model, and explicit Product approval.
