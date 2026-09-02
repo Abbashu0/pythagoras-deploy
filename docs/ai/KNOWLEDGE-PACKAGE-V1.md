@@ -44,6 +44,8 @@ Package content may exceed the Change Set snapshot limit. AI-M6 stages a validat
 
 The canonical package retains historical revisions and the exact source pin. Disabling a source or restricting its rights does not erase history; the published-only eligibility query excludes the package while the current source state is unavailable or not cleared.
 
+SQLite additionally enforces that a Package revision's pinned Source identity has the same `subjectKey` as the owning Package. Historical Source pins do not need to equal the Source's current revision; only the subject ownership invariant is checked at Package revision insertion.
+
 ## Explicit non-goals
 
 V1 has no chunks, embeddings, vector index, retrieval scores, rerank scores, Evidence Pack, web search, provider call, Conversation flow, Student/Admin AI UI, or AI-assisted ingestion runtime. Those are later milestones and must consume this published contract through replaceable projection boundaries.

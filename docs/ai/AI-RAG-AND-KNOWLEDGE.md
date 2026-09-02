@@ -6,7 +6,7 @@ AI-M6 implements the source and published-package boundary only. Retrieval remai
 
 `pythagoras.knowledge-package` is a portable contract for approved source documents. Its V1 envelope and strict diagnostics are defined in [KNOWLEDGE-PACKAGE-V1.md](./KNOWLEDGE-PACKAGE-V1.md). It is not `pythagoras.question-package`, and it does not copy the relational Question domain.
 
-The Question domain remains authoritative for Questions, Variants, Occurrences, shared Answers, taxonomy assignments, and placement-scoped Question Browse. AI-M6's read-only Question Knowledge Projector may expose already-published Question content to a later retrieval boundary, but it preserves canonical IDs, per-Variant provenance, publication scope, shared-answer identity, subject, and revision identity without writing duplicate Knowledge rows.
+The Question domain remains authoritative for Questions, Variants, Occurrences, shared Answers, taxonomy assignments, and placement-scoped Question Browse. AI-M6's read-only Question Knowledge Projector is a canonical SQLite read boundary: it exposes only published rows, derives the subject from the owning Package, rejects a caller scope that differs from that Package, and preserves Package revision/contentRevision, Question revision, Variant revision, and Occurrence revisions. Its stable logical projection identity is separate from a SHA-256 revision fingerprint built from safe IDs, revisions, display/order metadata, and taxonomy identity; raw Question/Answer text is not hashed as a substitute for revision identity. No Question rows are copied into Knowledge storage.
 
 ## 2. Knowledge Package contract
 

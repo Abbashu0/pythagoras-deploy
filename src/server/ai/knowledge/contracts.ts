@@ -5,7 +5,6 @@ import type {
 } from "../../question-packages/contracts";
 import type {
   CanonicalRichDocument,
-  QuestionAggregate,
   QuestionOccurrenceEntity,
   QuestionTaxonomyAssignmentEntity,
 } from "../../questions/contracts";
@@ -319,13 +318,16 @@ export interface AIQuestionKnowledgeProjection {
   questionPackageContentRevision: number;
   questionId: string;
   questionDisplayOrder: number;
+  questionRevision: number;
   variantId: string;
   variantDisplayOrder: number;
+  variantRevision: number;
   isPrimaryVariant: boolean;
   formulation: CanonicalRichDocument;
   sharedAnswer: CanonicalRichDocument | null;
   occurrences: QuestionOccurrenceEntity[];
   taxonomyAssignments: QuestionTaxonomyAssignmentEntity[];
+  projectionRevisionFingerprint: string;
 }
 
 export interface QuestionKnowledgeProjector {
@@ -333,5 +335,8 @@ export interface QuestionKnowledgeProjector {
     packageId: string;
     subjectKey: string;
   }): AIQuestionKnowledgeProjection[];
-  projectQuestion(question: QuestionAggregate, subjectKey: string): AIQuestionKnowledgeProjection[];
+  projectQuestionById(input: {
+    questionId: string;
+    subjectKey: string;
+  }): AIQuestionKnowledgeProjection[];
 }

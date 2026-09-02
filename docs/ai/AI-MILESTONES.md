@@ -66,8 +66,8 @@ AI milestones are future delivery boundaries. Each milestone is one coherent com
 ## AI-M6 — Knowledge Domain
 
 **Status:** Implemented; pending independent review.
-**Delivered boundary:** Governed Knowledge Source identities and immutable metadata revisions; strict `pythagoras.knowledge-package` V1 inspection; hash-pinned local package artifacts; bounded Change Set metadata with OWNER publication; normalized immutable Package/Document/Asset-binding rows; source rights/trust and published-only eligibility; and a read-only Question Knowledge Projector that preserves canonical Question, Variant, Answer, Occurrence, taxonomy, subject, and revision identity.
-**Explicit boundary:** No real corpus was imported; no AI-assisted ingestion, OCR/PDF extraction, retrieval, chunks, embeddings, vector index, reranking, Evidence Pack, web search, Provider call, Conversation flow, Student/Admin AI UI, or AI-M7 runtime was started. Migration `0021_nifty_komodo` adds only Knowledge Domain storage and immutability triggers.
+**Delivered boundary:** Governed Knowledge Source identities and immutable metadata revisions; strict `pythagoras.knowledge-package` V1 inspection; hash-pinned local package artifacts; bounded Change Set metadata with OWNER publication; normalized immutable Package/Document/Asset-binding rows; source rights/trust and published-only eligibility; and a canonical read-only Question Knowledge Projector that preserves Package/Package-content, Question, Variant, Occurrence, taxonomy, subject, and revision identity. Migration `0022_knowledge-package-source-subject-consistency` adds the database-level Package/Source subject invariant.
+**Explicit boundary:** No real corpus was imported; no AI-assisted ingestion, OCR/PDF extraction, retrieval, chunks, embeddings, vector index, reranking, Evidence Pack, web search, Provider call, Conversation flow, Student/Admin AI UI, or AI-M7 runtime was started. Migration `0021_nifty_komodo` remains the Knowledge storage migration; `0022` is a focused canonical-boundary correction.
 
 ## Remaining future milestones
 
