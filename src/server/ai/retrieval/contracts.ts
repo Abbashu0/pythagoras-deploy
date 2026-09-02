@@ -241,5 +241,11 @@ export interface AIRetrievalProjectionRepository {
   markFailed(revisionId: string, safeErrorCode: string, now: number): void;
   finalizeReady(revisionId: string, now: number): AIRetrievalProjectionRevision;
   countChunks(revisionId: string): number;
+  listChunksPage(input: {
+    revisionId: string;
+    after?: { chunkOrdinal: number; chunkId: string };
+    limit: number;
+  }): AIRetrievalChunk[];
+  getChunkStats(revisionId: string): { chunkCount: number; totalBytes: number; originRevision: number | null };
   listChunks(revisionId: string): AIRetrievalChunk[];
 }

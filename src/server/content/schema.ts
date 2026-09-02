@@ -4,6 +4,7 @@ import {
   foreignKey,
   index,
   integer,
+  blob,
   primaryKey,
   real,
   sqliteTable,
@@ -91,6 +92,10 @@ import type {
   AIRetrievalOriginKind,
   AIRetrievalProjectionStatus,
 } from "../ai/retrieval/contracts";
+import type {
+  AIEmbeddingProjectionStatus,
+  AIEmbeddingVectorCodecKey,
+} from "../ai/embedding/contracts";
 
 export type ContentPayload = Record<string, unknown>;
 
@@ -2897,6 +2902,121 @@ export const aiOutboxEvents = sqliteTable(
   ],
 );
 
+/** Stable semantic projection identity for one M7A source set and one vector space. */
+export const aiEmbeddingProjectionSets = sqliteTable(
+  "ai_embedding_projection_sets",
+  {
+    id: text("id").primaryKey(),
+    subjectKey: text("subject_key").notNull().references(() => canonicalMaterials.subjectKey, { onDelete: "restrict" }),
+    chunkProjectionSetId: text("chunk_projection_set_id").notNull().references(() => aiRetrievalProjectionSets.id, { onDelete: "restrict" }),
+    modelConfigId: text("model_config_id").notNull().references(() => aiModelConfigs.id, { onDelete: "restrict" }),
+    vectorCodecKey: text("vector_codec_key").$type<AIEmbeddingVectorCodecKey>().notNull(),
+    vectorCodecRevision: integer("vector_codec_revision").notNull(),
+    vectorIndexAdapterKey: text("vector_index_adapter_key").notNull(),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("ai_embedding_projection_sets_identity_unique").on(table.chunkProjectionSetId, table.modelConfigId, table.vectorCodecKey, table.vectorCodecRevision, table.vectorIndexAdapterKey),
+    index("ai_embedding_projection_sets_subject_index").on(table.subjectKey),
+    index("ai_embedding_projection_sets_chunk_set_index").on(table.chunkProjectionSetId),
+    check("ai_embedding_projection_sets_subject_valid", sql`length(trim(${table.subjectKey})) between 1 and 120`),
+    check("ai_embedding_projection_sets_codec_valid", sql`length(trim(${table.vectorCodecKey})) between 1 and 120 and ${table.vectorCodecKey} not glob '*[^a-z0-9.-]*' and ${table.vectorCodecRevision} >= 1`),
+    check("ai_embedding_projection_sets_index_key_valid", sql`length(trim(${table.vectorIndexAdapterKey})) between 1 and 120 and ${table.vectorIndexAdapterKey} not glob '*[^a-z0-9.-]*'`),
+    check("ai_embedding_projection_sets_timestamps_valid", sql`${table.createdAt} >= 0 and ${table.updatedAt} >= ${table.createdAt}`),
+  ],
+);
+
+/** Immutable/rebuildable semantic projection revision pinned to one M7A revision and vector space. */
+export const aiEmbeddingProjectionRevisions = sqliteTable(
+  "ai_embedding_projection_revisions",
+  {
+    id: text("id").primaryKey(),
+    embeddingProjectionSetId: text("embedding_projection_set_id").notNull().references(() => aiEmbeddingProjectionSets.id, { onDelete: "restrict" }),
+    revision: integer("revision").notNull(),
+    subjectKey: text("subject_key").notNull().references(() => canonicalMaterials.subjectKey, { onDelete: "restrict" }),
+    chunkProjectionSetId: text("chunk_projection_set_id").notNull().references(() => aiRetrievalProjectionSets.id, { onDelete: "restrict" }),
+    chunkProjectionRevisionId: text("chunk_projection_revision_id").notNull().references(() => aiRetrievalProjectionRevisions.id, { onDelete: "restrict" }),
+    chunkProjectionInputFingerprint: text("chunk_projection_input_fingerprint").notNull(),
+    chunkCount: integer("chunk_count").notNull(),
+    modelConfigId: text("model_config_id").notNull().references(() => aiModelConfigs.id, { onDelete: "restrict" }),
+    modelConfigRevision: integer("model_config_revision").notNull(),
+    providerConfigId: text("provider_config_id").notNull().references(() => aiProviderConfigs.id, { onDelete: "restrict" }),
+    providerConfigRevision: integer("provider_config_revision").notNull(),
+    providerModelId: text("provider_model_id").notNull(),
+    embeddingAdapterKey: text("embedding_adapter_key").notNull(),
+    dimensions: integer("dimensions").notNull(),
+    vectorCodecKey: text("vector_codec_key").$type<AIEmbeddingVectorCodecKey>().notNull(),
+    vectorCodecRevision: integer("vector_codec_revision").notNull(),
+    vectorIndexAdapterKey: text("vector_index_adapter_key").notNull(),
+    inputFingerprint: text("input_fingerprint").notNull(),
+    status: text("status").$type<AIEmbeddingProjectionStatus>().notNull(),
+    isCurrent: integer("is_current", { mode: "boolean" }).notNull().default(false),
+    sourceCursor: text("source_cursor", { mode: "json" }).$type<Record<string, unknown> | null>(),
+    batchCount: integer("batch_count").notNull().default(0),
+    vectorCount: integer("vector_count").notNull().default(0),
+    jobId: text("job_id").notNull().references(() => aiJobs.id, { onDelete: "restrict" }),
+    costOperationId: text("cost_operation_id").notNull().references(() => aiCostOperations.id, { onDelete: "restrict" }),
+    startedAt: integer("started_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    readyAt: integer("ready_at"),
+    failedAt: integer("failed_at"),
+    safeErrorCode: text("safe_error_code"),
+  },
+  (table) => [
+    uniqueIndex("ai_embedding_projection_revisions_identity_unique").on(table.embeddingProjectionSetId, table.revision),
+    uniqueIndex("ai_embedding_projection_revisions_current_unique").on(table.embeddingProjectionSetId).where(sql`${table.isCurrent} = 1`),
+    uniqueIndex("ai_embedding_projection_revisions_building_identity_unique").on(table.embeddingProjectionSetId, table.inputFingerprint).where(sql`${table.status} = 'BUILDING'`),
+    index("ai_embedding_projection_revisions_status_index").on(table.status, table.updatedAt),
+    index("ai_embedding_projection_revisions_m7a_index").on(table.chunkProjectionRevisionId),
+    check("ai_embedding_projection_revisions_revision_positive", sql`${table.revision} >= 1`),
+    check("ai_embedding_projection_revisions_subject_valid", sql`length(trim(${table.subjectKey})) between 1 and 120`),
+    check("ai_embedding_projection_revisions_chunk_fingerprint_valid", sql`length(${table.chunkProjectionInputFingerprint}) = 64 and ${table.chunkProjectionInputFingerprint} not glob '*[^0-9a-f]*'`),
+    check("ai_embedding_projection_revisions_input_fingerprint_valid", sql`length(${table.inputFingerprint}) = 64 and ${table.inputFingerprint} not glob '*[^0-9a-f]*'`),
+    check("ai_embedding_projection_revisions_chunk_count_valid", sql`${table.chunkCount} >= 0 and ${table.batchCount} >= 0 and ${table.vectorCount} >= 0`),
+    check("ai_embedding_projection_revisions_model_identity_valid", sql`${table.modelConfigRevision} >= 1 and ${table.providerConfigRevision} >= 1 and length(trim(${table.providerModelId})) between 1 and 200 and length(trim(${table.embeddingAdapterKey})) between 1 and 120 and ${table.embeddingAdapterKey} not glob '*[^a-z0-9.-]*'`),
+    check("ai_embedding_projection_revisions_dimensions_valid", sql`${table.dimensions} between 1 and 16384`),
+    check("ai_embedding_projection_revisions_codec_valid", sql`length(trim(${table.vectorCodecKey})) between 1 and 120 and ${table.vectorCodecKey} not glob '*[^a-z0-9.-]*' and ${table.vectorCodecRevision} >= 1 and length(trim(${table.vectorIndexAdapterKey})) between 1 and 120 and ${table.vectorIndexAdapterKey} not glob '*[^a-z0-9.-]*'`),
+    check("ai_embedding_projection_revisions_status_valid", sql`${table.status} in ('BUILDING','READY','FAILED')`),
+    check("ai_embedding_projection_revisions_current_boolean", sql`${table.isCurrent} in (0,1)`),
+    check("ai_embedding_projection_revisions_cursor_valid", sql`${table.sourceCursor} is null or (json_valid(${table.sourceCursor}) and json_type(${table.sourceCursor}) = 'object')`),
+    check("ai_embedding_projection_revisions_timestamps_valid", sql`${table.startedAt} >= 0 and ${table.updatedAt} >= ${table.startedAt} and (${table.readyAt} is null or ${table.readyAt} >= ${table.startedAt}) and (${table.failedAt} is null or ${table.failedAt} >= ${table.startedAt})`),
+    check("ai_embedding_projection_revisions_state_consistency", sql`(${table.status} = 'READY' and ${table.readyAt} is not null and ${table.failedAt} is null and ${table.sourceCursor} is not null and json_extract(${table.sourceCursor}, '$.kind') = 'DONE' and ${table.vectorCount} = ${table.chunkCount}) or (${table.status} = 'FAILED' and ${table.failedAt} is not null and ${table.isCurrent} = 0) or (${table.status} = 'BUILDING' and ${table.readyAt} is null and ${table.failedAt} is null and ${table.safeErrorCode} is null and ${table.isCurrent} = 0)`),
+    check("ai_embedding_projection_revisions_error_valid", sql`${table.safeErrorCode} is null or length(trim(${table.safeErrorCode})) between 1 and 120`),
+  ],
+);
+
+/** Minimal Float32 vector rows; all source content remains in the M7A Chunk Projection. */
+export const aiEmbeddingVectors = sqliteTable(
+  "ai_embedding_vectors",
+  {
+    embeddingProjectionRevisionId: text("embedding_projection_revision_id").notNull().references(() => aiEmbeddingProjectionRevisions.id, { onDelete: "restrict" }),
+    chunkProjectionRevisionId: text("chunk_projection_revision_id").notNull(),
+    chunkId: text("chunk_id").notNull(),
+    subjectKey: text("subject_key").notNull().references(() => canonicalMaterials.subjectKey, { onDelete: "restrict" }),
+    dimensions: integer("dimensions").notNull(),
+    vectorBlob: blob("vector_blob", { mode: "buffer" }).notNull(),
+    vectorHash: text("vector_hash").notNull(),
+    norm: real("norm").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.embeddingProjectionRevisionId, table.chunkProjectionRevisionId, table.chunkId] }),
+    foreignKey({
+      columns: [table.chunkProjectionRevisionId, table.chunkId],
+      foreignColumns: [aiRetrievalChunks.projectionRevisionId, aiRetrievalChunks.chunkId],
+      name: "ai_embedding_vectors_chunk_revision_fk",
+    }).onDelete("restrict"),
+    index("ai_embedding_vectors_chunk_index").on(table.chunkProjectionRevisionId, table.chunkId),
+    index("ai_embedding_vectors_subject_index").on(table.subjectKey, table.embeddingProjectionRevisionId),
+    check("ai_embedding_vectors_dimensions_valid", sql`${table.dimensions} between 1 and 16384`),
+    check("ai_embedding_vectors_blob_size_valid", sql`length(${table.vectorBlob}) = ${table.dimensions} * 4`),
+    check("ai_embedding_vectors_hash_valid", sql`length(${table.vectorHash}) = 64 and ${table.vectorHash} not glob '*[^0-9a-f]*'`),
+    check("ai_embedding_vectors_norm_valid", sql`${table.norm} > 0`),
+    check("ai_embedding_vectors_created_nonnegative", sql`${table.createdAt} >= 0`),
+  ],
+);
+
 export type ChangeSetRow = typeof changeSets.$inferSelect;
 export type ChangeSetItemRow = typeof changeSetItems.$inferSelect;
 export type ChangeSetEventRow = typeof changeSetEvents.$inferSelect;
@@ -2946,3 +3066,6 @@ export type AIBudgetLedgerEntryRow = typeof aiBudgetLedgerEntries.$inferSelect;
 export type AIJobRow = typeof aiJobs.$inferSelect;
 export type AIJobAttemptRow = typeof aiJobAttempts.$inferSelect;
 export type AIOutboxEventRow = typeof aiOutboxEvents.$inferSelect;
+export type AIEmbeddingProjectionSetRow = typeof aiEmbeddingProjectionSets.$inferSelect;
+export type AIEmbeddingProjectionRevisionRow = typeof aiEmbeddingProjectionRevisions.$inferSelect;
+export type AIEmbeddingVectorRow = typeof aiEmbeddingVectors.$inferSelect;

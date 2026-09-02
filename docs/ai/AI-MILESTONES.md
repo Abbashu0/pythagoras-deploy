@@ -75,13 +75,16 @@ AI milestones are future delivery boundaries. Each milestone is one coherent com
 
 ### AI-M7A — Chunk Projection & Lexical Retrieval Foundation
 
-**Status:** Implemented; pending independent review.
+**Status:** Implemented; AI-M7A is approved.
 **Delivered boundary:** Bounded published Knowledge/Question source readers; deterministic `structured-rich-v1` RichDocument chunking with hard byte bounds; revisioned rebuildable C3 projection sets/revisions/chunks; a separate SQLite FTS5 lexical index; bounded provider-neutral lexical retrieval with safe query generation and subject/current-source eligibility; projection health and stale detection; explicit BUILDING/READY/FAILED atomic activation without durable embedding Jobs; and persisted BUILDING resume discovery plus SQLite lifecycle/ownership protections through `0024_sad_speed`.
 **Explicit boundary:** No embeddings, vectors, semantic retrieval, hybrid fusion, reranking, EvidencePack, Provider call, real corpus import, Student/Admin AI UI, or M7B/M7C runtime was added.
 
 ### AI-M7B — Embedding Projection, VectorIndexAdapter & Durable Projection Jobs
 
-**Status:** Not started.
+**Status:** Implemented; pending independent review.
+
+**Delivered boundary:** Exact fresh/current M7A prerequisites; one-model/no-fallback semantic indexing through `AIProviderGateway.embed`; pinned Model/Provider revision identity; durable reference-only `ai.retrieval.embedding-build` Jobs with existing lease/fencing/retry/dead-letter semantics; conservative `KNOWLEDGE_INDEXING` admission and cost attribution; immutable/rebuildable Embedding Projection sets/revisions; versioned Float32 little-endian vector storage; provider-neutral local exact cosine `VectorIndexAdapter`; subject/live-Source eligibility; coverage/health/stale checks; and migration `0025_sharp_raza`.
+**Explicit boundary:** No production Provider/vendor was selected, no real network call, no external Vector DB or extension, no query-text embedding, hybrid fusion, RRF, reranking, EvidencePack, Grounded Tutor, Student/Admin AI UI, Agent 2, Memory, Evals runtime, or real corpus import was added.
 
 ### AI-M7C — Hybrid Retrieval, Deterministic Fusion, Optional Reranking & EvidencePack
 

@@ -173,6 +173,11 @@ export class SQLiteAIJobRepository {
     return jobFromRow(row);
   }
 
+  assertLeaseInTransaction(lease: AIJobLease): void {
+    const current = this.getById(lease.jobId);
+    if (!current || !matchesLease(current, lease)) throw new AIJobError("AI_JOB_LEASE_LOST", "The Job lease is no longer current.");
+  }
+
   completeInTransaction(lease: AIJobLease, now: number): { job: AIJob; attempt: AIJobAttempt } {
     const current = this.getById(lease.jobId);
     if (!current || !matchesLease(current, lease)) throw new AIJobError("AI_JOB_LEASE_LOST", "The Job lease is no longer current.");

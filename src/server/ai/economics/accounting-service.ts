@@ -19,6 +19,10 @@ import { normalizeAICostCorrectionContent, normalizeAICostOperationContent } fro
 export class AICostAccountingService {
   constructor(private readonly dependencies: AICostAccountingServiceDependencies) {}
 
+  getOperation(id: string): AICostOperation | null {
+    return this.dependencies.accounting.getOperation(id);
+  }
+
   createOperation(content: AICostOperationContent, id = uuidv7()): AICostOperation {
     return this.dependencies.accounting.createOperation({
       id,

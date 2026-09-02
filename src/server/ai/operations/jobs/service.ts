@@ -117,6 +117,14 @@ export class AIJobQueueService {
     return this.database.client.transaction(() => this.repository.heartbeatInTransaction(lease, now)).immediate();
   }
 
+  assertLease(lease: AIJobLease): void {
+    this.database.client.transaction(() => this.repository.assertLeaseInTransaction(lease)).immediate();
+  }
+
+  assertLeaseInTransaction(lease: AIJobLease): void {
+    this.repository.assertLeaseInTransaction(lease);
+  }
+
   complete(lease: AIJobLease, now = this.safeNow()): { job: AIJob; attempt: AIJobAttempt } {
     this.assertTimestamp(now);
     return this.database.client.transaction(() => this.repository.completeInTransaction(lease, now)).immediate();

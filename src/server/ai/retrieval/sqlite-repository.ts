@@ -1,4 +1,4 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, gt, or } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
 import type { ContentDatabase } from "../../content/database";
 import {
@@ -209,6 +209,47 @@ export class SQLiteAIRetrievalProjectionRepository implements AIRetrievalProject
   countChunks(revisionId: string): number {
     const row = this.database.client.prepare("select count(*) as count from ai_retrieval_chunks where projection_revision_id = ?").get(revisionId) as { count: number };
     return Number(row.count);
+  }
+
+  listChunksPage(input: {
+    revisionId: string;
+    after?: { chunkOrdinal: number; chunkId: string };
+    limit: number;
+  }): AIRetrievalChunk[] {
+    if (!Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > 200) {
+      throw new AIRetrievalError("AI_RETRIEVAL_INVALID", "The retrieval chunk page size is outside the safe bound.");
+    }
+    const conditions = [eq(aiRetrievalChunks.projectionRevisionId, input.revisionId)];
+    if (input.after) {
+      conditions.push(or(
+        gt(aiRetrievalChunks.chunkOrdinal, input.after.chunkOrdinal),
+        and(
+          eq(aiRetrievalChunks.chunkOrdinal, input.after.chunkOrdinal),
+          gt(aiRetrievalChunks.chunkId, input.after.chunkId),
+        ),
+      )!);
+    }
+    return this.database.db.select().from(aiRetrievalChunks)
+      .where(and(...conditions))
+      .orderBy(asc(aiRetrievalChunks.chunkOrdinal), asc(aiRetrievalChunks.chunkId))
+      .limit(input.limit)
+      .all()
+      .map(chunkFromRow);
+  }
+
+  getChunkStats(revisionId: string): { chunkCount: number; totalBytes: number; originRevision: number | null } {
+    const row = this.database.client.prepare(`
+      select count(*) as chunk_count,
+             coalesce(sum(length(cast(text as blob))), 0) as total_bytes,
+             max(origin_revision) as origin_revision
+      from ai_retrieval_chunks
+      where projection_revision_id = ?
+    `).get(revisionId) as { chunk_count: number; total_bytes: number; origin_revision: number | null };
+    return {
+      chunkCount: Number(row.chunk_count),
+      totalBytes: Number(row.total_bytes),
+      originRevision: row.origin_revision === null ? null : Number(row.origin_revision),
+    };
   }
 
   listChunks(revisionId: string): AIRetrievalChunk[] {

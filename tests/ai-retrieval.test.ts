@@ -690,6 +690,7 @@ test("draft Knowledge Package is not a projection origin and M7A schema has no l
 test("0024 upgrades an existing 0023 retrieval database and installs lifecycle protections", () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "pythagoras-ai-m7a-upgrade-"));
   const oldMigrations = mkdtempSync(path.join(os.tmpdir(), "pythagoras-ai-m7a-migrations-"));
+  let upgraded: ContentDatabase | null = null;
   try {
     mkdirSync(path.join(oldMigrations, "meta"), { recursive: true });
     const journal = JSON.parse(readFileSync(path.join(migrationsDirectory, "meta", "_journal.json"), "utf8")) as { entries: Array<{ idx: number; tag: string }> };
@@ -703,13 +704,13 @@ test("0024 upgrades an existing 0023 retrieval database and installs lifecycle p
     const before = openContentDatabase({ dataDirectory: root, migrationsDirectory: oldMigrations });
     assert.equal((before.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 23);
     before.close();
-    const upgraded = openContentDatabase({ dataDirectory: root, migrationsDirectory });
-    assert.equal((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 25);
+    upgraded = openContentDatabase({ dataDirectory: root, migrationsDirectory });
+    assert.equal((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 26);
     assert.ok(upgraded.client.prepare("select name from sqlite_master where type='trigger' and name='ai_retrieval_projection_revisions_lifecycle'").get());
     assert.ok(upgraded.client.prepare("select name from sqlite_master where type='trigger' and name='ai_retrieval_chunks_owner_insert'").get());
     assert.ok(upgraded.client.prepare("select name from sqlite_master where type='index' and name='ai_retrieval_projection_revisions_building_identity_unique'").get());
-    upgraded.close();
   } finally {
+    upgraded?.close();
     rmSync(root, { recursive: true, force: true });
     rmSync(oldMigrations, { recursive: true, force: true });
   }
