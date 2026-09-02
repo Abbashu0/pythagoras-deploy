@@ -30,6 +30,11 @@ export interface LocalEncryptedAISecretStoreOptions {
   masterKey: Uint8Array;
   clock?: () => number;
   credentialRefFactory?: () => string;
+  /** Test-only synchronization hook; production callers should leave it unset. */
+  beforeResolveVersionRecheck?: (input: {
+    credentialRef: string;
+    expectedSecretVersion: number;
+  }) => Promise<void> | void;
 }
 
 export interface CreateLocalAISecretStoreOptions {
@@ -45,6 +50,7 @@ export class LocalEncryptedAISecretStore implements AISecretStoreAdapter {
   private readonly masterKey: Buffer;
   private readonly clock: () => number;
   private readonly credentialRefFactory: () => string;
+  private readonly beforeResolveVersionRecheck: LocalEncryptedAISecretStoreOptions["beforeResolveVersionRecheck"];
 
   constructor(options: LocalEncryptedAISecretStoreOptions) {
     this.storageDirectory = path.resolve(options.storageDirectory);
@@ -52,6 +58,7 @@ export class LocalEncryptedAISecretStore implements AISecretStoreAdapter {
     this.masterKey = validateAISecretMasterKey(options.masterKey);
     this.clock = options.clock ?? Date.now;
     this.credentialRefFactory = options.credentialRefFactory ?? uuidv7;
+    this.beforeResolveVersionRecheck = options.beforeResolveVersionRecheck;
   }
 
   async create(input: {
@@ -103,22 +110,47 @@ export class LocalEncryptedAISecretStore implements AISecretStoreAdapter {
         "The AI secret reference was not found.",
       );
     }
-    if (metadata.status === "REVOKED") {
-      await this.recordFailure(metadata, "AI_SECRET_REVOKED");
+    return this.resolveVersion({
+      credentialRef: validRef,
+      expectedSecretVersion: metadata.secretVersion,
+    });
+  }
+
+  async resolveVersion(input: {
+    credentialRef: string;
+    expectedSecretVersion: number;
+  }): Promise<string> {
+    const validRef = assertCredentialRef(input.credentialRef);
+    assertSecretVersion(input.expectedSecretVersion);
+    const expectedSecretVersion = input.expectedSecretVersion;
+    const initialMetadata = this.getMetadataFromRepository(validRef);
+    if (!initialMetadata) {
+      throw new AISecretStoreError(
+        "AI_SECRET_NOT_FOUND",
+        "The AI secret reference was not found.",
+      );
+    }
+    if (initialMetadata.status === "REVOKED") {
+      await this.recordFailure(initialMetadata, "AI_SECRET_REVOKED", expectedSecretVersion);
       throw new AISecretStoreError(
         "AI_SECRET_REVOKED",
         "The AI secret reference has been revoked.",
       );
     }
+    if (initialMetadata.secretVersion !== expectedSecretVersion) {
+      const failure = secretVersionChangedError();
+      await this.recordFailure(initialMetadata, failure.code, expectedSecretVersion);
+      throw failure;
+    }
 
     let secret: string;
     try {
       const contents = await readFile(
-        this.versionFilePath(validRef, metadata.secretVersion),
+        this.versionFilePath(validRef, expectedSecretVersion),
         "utf8",
       );
       const envelope = parseEnvelope(contents);
-      if (envelope.secretVersion !== metadata.secretVersion) {
+      if (envelope.secretVersion !== expectedSecretVersion) {
         throw new AISecretStoreError(
           "AI_SECRET_DECRYPTION_FAILED",
           "The stored AI secret version is invalid.",
@@ -127,8 +159,48 @@ export class LocalEncryptedAISecretStore implements AISecretStoreAdapter {
       secret = decryptAISecret(validRef, envelope, this.masterKey);
       assertSecretValue(secret);
     } catch (error) {
+      const changedMetadata = this.getMetadataFromRepository(validRef);
+      if (changedMetadata?.status === "REVOKED") {
+        await this.recordFailure(changedMetadata, "AI_SECRET_REVOKED", expectedSecretVersion);
+        throw new AISecretStoreError(
+          "AI_SECRET_REVOKED",
+          "The AI secret reference has been revoked.",
+        );
+      }
+      if (changedMetadata && changedMetadata.secretVersion !== expectedSecretVersion) {
+        const failure = secretVersionChangedError();
+        await this.recordFailure(changedMetadata, failure.code, expectedSecretVersion);
+        throw failure;
+      }
       const failure = mapResolveFailure(error);
-      await this.recordFailure(metadata, failure.code);
+      await this.recordFailure(initialMetadata, failure.code, expectedSecretVersion);
+      throw failure;
+    }
+
+    await this.beforeResolveVersionRecheck?.({
+      credentialRef: validRef,
+      expectedSecretVersion,
+    });
+    const finalMetadata = this.getMetadataFromRepository(validRef);
+    if (!finalMetadata) {
+      const failure = new AISecretStoreError(
+        "AI_SECRET_NOT_FOUND",
+        "The AI secret reference was not found.",
+      );
+      await this.recordFailure(initialMetadata, failure.code, expectedSecretVersion);
+      throw failure;
+    }
+    if (finalMetadata.status === "REVOKED") {
+      const failure = new AISecretStoreError(
+        "AI_SECRET_REVOKED",
+        "The AI secret reference has been revoked.",
+      );
+      await this.recordFailure(finalMetadata, failure.code, expectedSecretVersion);
+      throw failure;
+    }
+    if (finalMetadata.secretVersion !== expectedSecretVersion) {
+      const failure = secretVersionChangedError();
+      await this.recordFailure(finalMetadata, failure.code, expectedSecretVersion);
       throw failure;
     }
 
@@ -136,7 +208,7 @@ export class LocalEncryptedAISecretStore implements AISecretStoreAdapter {
       this.metadataRepository.appendAudit({
         credentialRef: validRef,
         eventType: "RESOLVED",
-        secretVersion: metadata.secretVersion,
+        secretVersion: expectedSecretVersion,
         actor: { type: "SYSTEM" },
         outcome: "SUCCESS",
         createdAt: this.clock(),
@@ -309,12 +381,13 @@ export class LocalEncryptedAISecretStore implements AISecretStoreAdapter {
   private async recordFailure(
     metadata: AISecretMetadata,
     errorCode: string,
+    secretVersion = metadata.secretVersion,
   ): Promise<void> {
     try {
       this.metadataRepository.appendAudit({
         credentialRef: metadata.credentialRef,
         eventType: "RESOLVE_FAILED",
-        secretVersion: metadata.secretVersion,
+        secretVersion,
         actor: { type: "SYSTEM" },
         outcome: "FAILURE",
         errorCode,
@@ -324,6 +397,22 @@ export class LocalEncryptedAISecretStore implements AISecretStoreAdapter {
       throw toStoreError(error, "The AI secret audit store is unavailable.");
     }
   }
+}
+
+function assertSecretVersion(value: unknown): asserts value is number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
+    throw new AISecretStoreError(
+      "AI_SECRET_INPUT_INVALID",
+      "The AI secret version is invalid.",
+    );
+  }
+}
+
+function secretVersionChangedError(): AISecretStoreError {
+  return new AISecretStoreError(
+    "AI_SECRET_VERSION_CHANGED",
+    "The AI secret version changed during resolution.",
+  );
 }
 
 export function createLocalAISecretStore(

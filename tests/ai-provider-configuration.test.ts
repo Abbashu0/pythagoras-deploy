@@ -200,6 +200,53 @@ test("local encrypted secret store creates and resolves exact plaintext under th
   }
 });
 
+test("version-fenced Secret resolution rejects stale and revoked generations and detects rotation during post-decrypt verification", async () => {
+  const fixture = createFixture();
+  const firstSecret = fakeSecret();
+  const secondSecret = fakeSecret();
+  try {
+    const created = await fixture.secrets.create({ secret: firstSecret, actor: adminSecretActor(fixture.owner) });
+    assert.equal(await fixture.secrets.resolveVersion({ credentialRef: created.credentialRef, expectedSecretVersion: 1 }), firstSecret);
+    const rotated = await fixture.secrets.rotate({ credentialRef: created.credentialRef, secret: secondSecret, actor: adminSecretActor(fixture.owner) });
+    assert.equal(await fixture.secrets.resolveVersion({ credentialRef: created.credentialRef, expectedSecretVersion: rotated.secretVersion }), secondSecret);
+    await assert.rejects(
+      () => fixture.secrets.resolveVersion({ credentialRef: created.credentialRef, expectedSecretVersion: 1 }),
+      errorCode("AI_SECRET_VERSION_CHANGED"),
+    );
+
+    const postDecrypt = await fixture.secrets.create({ secret: firstSecret, actor: adminSecretActor(fixture.owner) });
+    let rotatedDuringResolution = false;
+    const rotatingStore = new LocalEncryptedAISecretStore({
+      storageDirectory: path.join(fixture.root, "ai-secrets"),
+      metadataRepository: fixture.secretMetadata,
+      masterKey: TEST_MASTER_KEY,
+      beforeResolveVersionRecheck: async () => {
+        if (rotatedDuringResolution) return;
+        rotatedDuringResolution = true;
+        await fixture.secrets.rotate({ credentialRef: postDecrypt.credentialRef, secret: secondSecret, actor: adminSecretActor(fixture.owner) });
+      },
+    });
+    await assert.rejects(
+      () => rotatingStore.resolveVersion({ credentialRef: postDecrypt.credentialRef, expectedSecretVersion: 1 }),
+      errorCode("AI_SECRET_VERSION_CHANGED"),
+    );
+    assert.equal(await fixture.secrets.resolveVersion({ credentialRef: postDecrypt.credentialRef, expectedSecretVersion: 2 }), secondSecret);
+
+    const revoked = await fixture.secrets.create({ secret: firstSecret, actor: adminSecretActor(fixture.owner) });
+    await fixture.secrets.revoke({ credentialRef: revoked.credentialRef, actor: adminSecretActor(fixture.owner) });
+    await assert.rejects(
+      () => fixture.secrets.resolveVersion({ credentialRef: revoked.credentialRef, expectedSecretVersion: 1 }),
+      errorCode("AI_SECRET_REVOKED"),
+    );
+    const audits = fixture.secretMetadata.listAudit(postDecrypt.credentialRef);
+    assert.equal(audits.some((event) => event.eventType === "RESOLVE_FAILED" && event.secretVersion === 1 && event.errorCode === "AI_SECRET_VERSION_CHANGED"), true);
+    assert.equal(JSON.stringify(audits).includes(firstSecret), false);
+    assert.equal(JSON.stringify(audits).includes(secondSecret), false);
+  } finally {
+    fixture.close();
+  }
+});
+
 test("AES-256-GCM envelope uses the explicit version and fresh IV for identical plaintext", () => {
   const credentialRef = uuidv7();
   const secret = fakeSecret();

@@ -58,6 +58,10 @@ export interface AISecretStoreAdapter {
     actor: AISecretActor;
   }): Promise<AISecretMetadata>;
   resolve(credentialRef: string): Promise<string>;
+  resolveVersion(input: {
+    credentialRef: string;
+    expectedSecretVersion: number;
+  }): Promise<string>;
   rotate(input: {
     credentialRef: string;
     secret: string;

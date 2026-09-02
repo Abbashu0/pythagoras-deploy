@@ -54,6 +54,7 @@ const MAX_EMBEDDING_BATCH = 128;
 const MAX_RERANK_CANDIDATES = 128;
 const MAX_GENERATION_DELTA_BYTES = 256 * 1_024;
 const MAX_PROVIDER_REQUEST_ID_LENGTH = 200;
+const MAX_SECRET_HANDSHAKE_RETRIES = 3;
 
 interface PreparedAttempt {
   model: AIModelConfig;
@@ -74,6 +75,16 @@ interface FailureDescriptor {
   fallbackEligible: boolean;
   providerRequestId?: string;
 }
+
+type AttemptHandshake =
+  | { kind: "DENIED" }
+  | {
+      kind: "GRANTED";
+      prepared: PreparedAttempt;
+      credential: string;
+      control: ExecutionControl;
+      circuitPermit?: AICircuitAttemptPermit;
+    };
 
 class GatewayAbortError extends Error {
   constructor() {
@@ -219,19 +230,23 @@ export class AIProviderGateway {
         let circuitOutcomeRecorded = false;
         let circuitDenied = false;
         try {
-          const prepared = this.prepareAttempt(plan, plan.attempts[attemptIndex], trace);
-          if (!prepared.model.supportsStreaming) {
-            throw this.gatewayError("CONFIGURATION");
-          }
-          if (
-            request.maxOutputTokens !== undefined &&
-            prepared.model.maxOutputTokens !== null &&
-            request.maxOutputTokens > prepared.model.maxOutputTokens
-          ) {
-            throw this.gatewayError("INVALID_REQUEST");
-          }
-          const circuitDecision = this.acquireCircuitPermit(prepared, options);
-          if (circuitDecision?.kind === "DENIED") {
+          const handshake = await this.resolveAttemptHandshake(
+            plan,
+            plan.attempts[attemptIndex],
+            trace,
+            options,
+            parentSignal,
+            deadlineAt,
+            (prepared) => {
+              if (!prepared.model.supportsStreaming) throw this.gatewayError("CONFIGURATION");
+              if (
+                request.maxOutputTokens !== undefined &&
+                prepared.model.maxOutputTokens !== null &&
+                request.maxOutputTokens > prepared.model.maxOutputTokens
+              ) throw this.gatewayError("INVALID_REQUEST");
+            },
+          );
+          if (handshake.kind === "DENIED") {
             circuitDenied = true;
             finishTrace(trace, "SKIPPED", this.clock, "CIRCUIT_OPEN");
             attempts.push(trace);
@@ -243,15 +258,10 @@ export class AIProviderGateway {
             if (attemptIndex === plan.attempts.length - 1 || this.clock() >= deadlineAt) throw lastError;
             continue;
           }
-          circuitPermit = circuitDecision?.permit;
+          const { prepared, credential } = handshake;
+          control = handshake.control;
+          circuitPermit = handshake.circuitPermit;
           const attemptTimeoutMs = deadlineAt - this.clock();
-          if (attemptTimeoutMs <= 0) throw this.gatewayError("TIMEOUT");
-          control = createExecutionControl(parentSignal, attemptTimeoutMs);
-          const credential = await awaitWithAbort(
-            this.dependencies.secrets.resolve(prepared.provider.credentialRef!),
-            control.signal,
-          );
-          if (control.signal.aborted) throw new GatewayAbortError();
           const providerRequest: GenerationProviderRequest = {
             requestId: request.requestId,
             providerModelId: prepared.model.providerModelId,
@@ -423,9 +433,15 @@ export class AIProviderGateway {
       let circuitOutcomeRecorded = false;
       let circuitDenied = false;
       try {
-        const prepared = this.prepareAttempt(plan, plan.attempts[attemptIndex], trace);
-        const circuitDecision = this.acquireCircuitPermit(prepared, options);
-        if (circuitDecision?.kind === "DENIED") {
+        const handshake = await this.resolveAttemptHandshake(
+          plan,
+          plan.attempts[attemptIndex],
+          trace,
+          options,
+          parentSignal,
+          deadlineAt,
+        );
+        if (handshake.kind === "DENIED") {
           circuitDenied = true;
           finishTrace(trace, "SKIPPED", this.clock, "CIRCUIT_OPEN");
           attempts.push(trace);
@@ -437,15 +453,10 @@ export class AIProviderGateway {
           if (attemptIndex === plan.attempts.length - 1 || this.clock() >= deadlineAt) throw lastError;
           continue;
         }
-        circuitPermit = circuitDecision?.permit;
+        const { prepared, credential } = handshake;
+        control = handshake.control;
+        circuitPermit = handshake.circuitPermit;
         const attemptTimeoutMs = deadlineAt - this.clock();
-        if (attemptTimeoutMs <= 0) throw this.gatewayError("TIMEOUT");
-        control = createExecutionControl(parentSignal, attemptTimeoutMs);
-        const credential = await awaitWithAbort(
-          this.dependencies.secrets.resolve(prepared.provider.credentialRef!),
-          control.signal,
-        );
-        if (control.signal.aborted) throw new GatewayAbortError();
         trace.providerInvoked = true;
         const rawValue = await awaitWithAbort(
           execute(prepared, {
@@ -532,6 +543,54 @@ export class AIProviderGateway {
     }
     const adapter = this.dependencies.adapters.require(model.adapterKey, plan.capability);
     return { model, provider, adapter, secretVersion: metadata.secretVersion };
+  }
+
+  private async resolveAttemptHandshake(
+    plan: AIModelSelectionPlan,
+    modelConfigId: string,
+    trace: AIProviderAttemptTrace,
+    options: AIProviderGatewayOperationOptions,
+    parentSignal: AbortSignal,
+    deadlineAt: number,
+    validatePrepared?: (prepared: PreparedAttempt) => void,
+  ): Promise<AttemptHandshake> {
+    for (let handshakeIndex = 0; handshakeIndex < MAX_SECRET_HANDSHAKE_RETRIES; handshakeIndex += 1) {
+      const prepared = this.prepareAttempt(plan, modelConfigId, trace);
+      validatePrepared?.(prepared);
+      const circuitDecision = this.acquireCircuitPermit(prepared, options);
+      if (circuitDecision?.kind === "DENIED") {
+        const metadata = this.dependencies.secrets.getMetadata(prepared.provider.credentialRef!);
+        if (!metadata || metadata.status !== "ACTIVE" || metadata.secretVersion !== prepared.secretVersion) continue;
+        return { kind: "DENIED" };
+      }
+      const circuitPermit = circuitDecision?.permit;
+      const attemptTimeoutMs = deadlineAt - this.clock();
+      if (attemptTimeoutMs <= 0) {
+        if (circuitPermit) this.recordCircuitNeutral(circuitPermit);
+        throw this.gatewayError("TIMEOUT");
+      }
+      const control = createExecutionControl(parentSignal, attemptTimeoutMs);
+      try {
+        const credential = await awaitWithAbort(
+          this.dependencies.secrets.resolveVersion({
+            credentialRef: prepared.provider.credentialRef!,
+            expectedSecretVersion: prepared.secretVersion,
+          }),
+          control.signal,
+        );
+        if (control.signal.aborted) throw new GatewayAbortError();
+        return { kind: "GRANTED", prepared, credential, control, circuitPermit };
+      } catch (error) {
+        control.cleanup();
+        if (circuitPermit) this.recordCircuitNeutral(circuitPermit);
+        if (isAISecretVersionChanged(error)) {
+          if (handshakeIndex + 1 < MAX_SECRET_HANDSHAKE_RETRIES) continue;
+          throw this.gatewayError("SECRET_UNAVAILABLE");
+        }
+        throw error;
+      }
+    }
+    throw this.gatewayError("SECRET_UNAVAILABLE");
   }
 
   private acquireCircuitPermit(
@@ -982,6 +1041,10 @@ function normalizeFailure(
     retryable: false,
     fallbackEligible: false,
   };
+}
+
+function isAISecretVersionChanged(error: unknown): boolean {
+  return isAISecretStoreError(error) && error.code === "AI_SECRET_VERSION_CHANGED";
 }
 
 function safeRetryable(

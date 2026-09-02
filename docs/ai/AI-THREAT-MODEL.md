@@ -46,6 +46,7 @@ Restricted: secrets, raw private data, operational controls
 
 - Provider adapters receive only the minimum context required for the operation.
 - Credentials are resolved immediately before use and are not copied into request objects that can be logged or traced.
+- Circuit enforcement binds the target to the exact Secret version returned by version-fenced resolution; rotation or revocation races fail closed before Provider invocation.
 - Timeouts, cancellation, response-size limits, and retry policy are enforced by the Gateway.
 - Provider response text is output data and is checked against policy/grounding requirements before being returned.
 - Provider capability, retention, region, and training-use metadata are part of routing eligibility.

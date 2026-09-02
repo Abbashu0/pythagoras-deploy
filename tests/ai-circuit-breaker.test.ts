@@ -37,7 +37,9 @@ import {
 import {
   AI_SECRET_KEY_BYTES,
   createLocalAISecretStore,
+  AISecretStoreError,
   type LocalEncryptedAISecretStore,
+  type AISecretStoreAdapter,
 } from "../src/server/ai/secrets";
 import { createChangeManagementService } from "../src/server/change-management";
 import {
@@ -265,19 +267,127 @@ function generationRequest() {
 function createGateway(
   fixture: Fixture,
   adapters: readonly (GenerationProviderAdapter | EmbeddingProviderAdapter | RerankerProviderAdapter)[],
+  clock?: () => number,
+  secrets: AISecretStoreAdapter = fixture.secrets,
 ): AIProviderGateway {
-  return new AIProviderGateway({
-    providerConfigs: fixture.providers,
-    modelConfigs: fixture.models,
-    secrets: fixture.secrets,
-    adapters: new ProviderAdapterRegistry(adapters),
-    circuitBreaker: fixture.circuit,
-  });
+  return new AIProviderGateway(
+    {
+      providerConfigs: fixture.providers,
+      modelConfigs: fixture.models,
+      secrets,
+      adapters: new ProviderAdapterRegistry(adapters),
+      circuitBreaker: fixture.circuit,
+    },
+    clock ? { clock } : undefined,
+  );
+}
+
+function delegatedSecretStore(fixture: Fixture): AISecretStoreAdapter {
+  return {
+    create: fixture.secrets.create.bind(fixture.secrets),
+    resolve: fixture.secrets.resolve.bind(fixture.secrets),
+    resolveVersion: fixture.secrets.resolveVersion.bind(fixture.secrets),
+    rotate: fixture.secrets.rotate.bind(fixture.secrets),
+    revoke: fixture.secrets.revoke.bind(fixture.secrets),
+    getMetadata: fixture.secrets.getMetadata.bind(fixture.secrets),
+  };
+}
+
+function rotateBeforeExactResolution(
+  fixture: Fixture,
+  credentialRef: string,
+  nextSecret: string,
+): AISecretStoreAdapter {
+  const base = delegatedSecretStore(fixture);
+  let rotated = false;
+  return {
+    ...base,
+    async resolveVersion(input) {
+      if (!rotated) {
+        rotated = true;
+        await fixture.secrets.rotate({
+          credentialRef,
+          secret: nextSecret,
+          actor: { type: "ADMIN", actorUserId: fixture.owner.actorUserId },
+        });
+      }
+      return base.resolveVersion(input);
+    },
+  };
+}
+
+function rotateBeforeMetadataRecheck(
+  fixture: Fixture,
+  credentialRef: string,
+  nextSecret: string,
+): AISecretStoreAdapter {
+  const base = delegatedSecretStore(fixture);
+  let version = 1;
+  let firstRead = true;
+  return {
+    ...base,
+    getMetadata(ref) {
+      const metadata = base.getMetadata(ref);
+      if (!metadata || ref !== credentialRef) return metadata;
+      const reported = { ...metadata, status: "ACTIVE" as const, secretVersion: version };
+      if (firstRead) {
+        firstRead = false;
+        version = 2;
+      }
+      return reported;
+    },
+    resolveVersion(input) {
+      if (input.credentialRef !== credentialRef || input.expectedSecretVersion !== version) {
+        return Promise.reject(new AISecretStoreError("AI_SECRET_VERSION_CHANGED", "The AI secret version changed during resolution."));
+      }
+      return Promise.resolve(nextSecret);
+    },
+  };
+}
+
+function revokeBeforeExactResolution(
+  fixture: Fixture,
+  credentialRef: string,
+): AISecretStoreAdapter {
+  const base = delegatedSecretStore(fixture);
+  let revoked = false;
+  return {
+    ...base,
+    async resolveVersion(input) {
+      if (!revoked) {
+        revoked = true;
+        await fixture.secrets.revoke({
+          credentialRef,
+          actor: { type: "ADMIN", actorUserId: fixture.owner.actorUserId },
+        });
+      }
+      return base.resolveVersion(input);
+    },
+  };
+}
+
+function alwaysChangingSecretStore(fixture: Fixture, credentialRef: string): AISecretStoreAdapter {
+  const base = delegatedSecretStore(fixture);
+  let reportedVersion = 1;
+  return {
+    ...base,
+    getMetadata(ref) {
+      const metadata = base.getMetadata(ref);
+      if (!metadata || ref !== credentialRef) return metadata;
+      const reported = { ...metadata, status: "ACTIVE" as const, secretVersion: reportedVersion };
+      reportedVersion += 1;
+      return reported;
+    },
+    resolveVersion() {
+      return Promise.reject(new AISecretStoreError("AI_SECRET_VERSION_CHANGED", "The AI secret version changed during resolution."));
+    },
+  };
 }
 
 class FakeGenerationAdapter implements GenerationProviderAdapter {
   readonly capability = "GENERATION" as const;
   calls = 0;
+  credentials: string[] = [];
 
   constructor(
     readonly adapterKey: string,
@@ -286,6 +396,7 @@ class FakeGenerationAdapter implements GenerationProviderAdapter {
 
   generate(_request: GenerationProviderRequest, context: ProviderAdapterExecutionContext): AsyncIterable<ProviderGenerationStreamEvent> {
     this.calls += 1;
+    this.credentials.push(context.credential);
     return this.behavior(context);
   }
 }
@@ -598,6 +709,162 @@ test("Circuit-aware Generation fallback skips the primary and preserves one Prod
     ]);
     assert.equal(primary.calls, 0);
     assert.equal(fallback.calls, 1);
+  } finally {
+    fixture.close();
+  }
+});
+
+test("Gateway retries a granted handshake after rotation and invokes the Provider only with the new Secret version", async () => {
+  const fixture = createFixture({ failureThreshold: 3 });
+  try {
+    const route = await createRoute(fixture, "GENERATION", "test.circuit.rotation-granted");
+    const rotatedSecret = `rotated-gateway-secret-${uuidv7()}-${"r".repeat(48)}`;
+    const adapter = new FakeGenerationAdapter(route.adapterKey, async function* () {
+      yield { type: "STARTED" };
+      yield { type: "COMPLETED", finishReason: "STOP", usage: emptyUsage() };
+    });
+    const gateway = createGateway(fixture, [adapter], () => BASE_TIME + 700, rotateBeforeExactResolution(fixture, route.credentialRef, rotatedSecret));
+    const stream = gateway.generate({ capability: "GENERATION", attempts: [route.modelConfigId] }, generationRequest(), {
+      circuitPolicy: { policyId: fixture.policyId, policyRevision: 1 },
+    });
+    await collect(stream);
+    const traces = await stream.trace;
+    assert.equal(traces.length, 1);
+    assert.equal(traces[0]?.providerInvoked, true);
+    assert.equal(traces[0]?.status, "SUCCEEDED");
+    assert.equal(adapter.calls, 1);
+    assert.deepEqual(adapter.credentials, [rotatedSecret]);
+    assert.equal(fixture.circuit.getSnapshot(target(fixture, route, 1))?.state, "CLOSED");
+    assert.equal(fixture.circuit.getSnapshot(target(fixture, route, 2))?.state, "CLOSED");
+  } finally {
+    fixture.close();
+  }
+});
+
+test("Gateway refreshes a stale OPEN decision instead of emitting SKIPPED when metadata has rotated", async () => {
+  const fixture = createFixture({ failureThreshold: 1 });
+  try {
+    const route = await createRoute(fixture, "GENERATION", "test.circuit.rotation-open");
+    openCircuit(fixture, route, BASE_TIME + 800);
+    const oldTarget = target(fixture, route, 1);
+    const oldSnapshot = fixture.circuit.getSnapshot(oldTarget);
+    const rotatedSecret = `rotated-open-secret-${uuidv7()}-${"s".repeat(48)}`;
+    const adapter = new FakeGenerationAdapter(route.adapterKey, async function* () {
+      yield { type: "STARTED" };
+      yield { type: "COMPLETED", finishReason: "STOP", usage: emptyUsage() };
+    });
+    const gateway = createGateway(fixture, [adapter], () => BASE_TIME + 800, rotateBeforeMetadataRecheck(fixture, route.credentialRef, rotatedSecret));
+    const stream = gateway.generate({ capability: "GENERATION", attempts: [route.modelConfigId] }, generationRequest(), {
+      circuitPolicy: { policyId: fixture.policyId, policyRevision: 1 },
+    });
+    await collect(stream);
+    const traces = await stream.trace;
+    assert.equal(traces.length, 1);
+    assert.equal(traces[0]?.status, "SUCCEEDED");
+    assert.equal(traces[0]?.providerInvoked, true);
+    assert.equal(adapter.calls, 1);
+    assert.deepEqual(adapter.credentials, [rotatedSecret]);
+    assert.deepEqual(fixture.circuit.getSnapshot(oldTarget), oldSnapshot);
+    assert.equal(fixture.circuit.getSnapshot(target(fixture, route, 2))?.state, "CLOSED");
+  } finally {
+    fixture.close();
+  }
+});
+
+test("Authentication from the rotated credential opens only the new Secret-version Circuit target", async () => {
+  const fixture = createFixture({ failureThreshold: 5 });
+  try {
+    const route = await createRoute(fixture, "GENERATION", "test.circuit.rotation-auth");
+    openCircuit(fixture, route, BASE_TIME + 900);
+    const oldTarget = target(fixture, route, 1);
+    const oldSnapshot = fixture.circuit.getSnapshot(oldTarget);
+    const rotatedSecret = `rotated-auth-secret-${uuidv7()}-${"a".repeat(48)}`;
+    const adapter = new FakeGenerationAdapter(route.adapterKey, async function* () {
+      throw new AIProviderAdapterError("AUTHENTICATION");
+    });
+    const gateway = createGateway(fixture, [adapter], () => BASE_TIME + 900, rotateBeforeMetadataRecheck(fixture, route.credentialRef, rotatedSecret));
+    const stream = gateway.generate({ capability: "GENERATION", attempts: [route.modelConfigId] }, generationRequest(), {
+      circuitPolicy: { policyId: fixture.policyId, policyRevision: 1 },
+    });
+    await assert.rejects(() => collect(stream), (error: unknown) => error instanceof AIProviderGatewayError && error.code === "AUTHENTICATION");
+    assert.equal(adapter.calls, 1);
+    assert.deepEqual(adapter.credentials, [rotatedSecret]);
+    assert.deepEqual(fixture.circuit.getSnapshot(oldTarget), oldSnapshot);
+    assert.equal(fixture.circuit.getSnapshot(target(fixture, route, 2))?.state, "OPEN");
+  } finally {
+    fixture.close();
+  }
+});
+
+test("A rotated Secret cannot use a stale half-open probe and the old probe is released before the new target runs", async () => {
+  const fixture = createFixture({ failureThreshold: 1 });
+  try {
+    const route = await createRoute(fixture, "GENERATION", "test.circuit.rotation-probe");
+    openCircuit(fixture, route, BASE_TIME + 1_000);
+    const rotatedSecret = `rotated-probe-secret-${uuidv7()}-${"p".repeat(48)}`;
+    const adapter = new FakeGenerationAdapter(route.adapterKey, async function* () {
+      yield { type: "STARTED" };
+      yield { type: "COMPLETED", finishReason: "STOP", usage: emptyUsage() };
+    });
+    const gateway = createGateway(fixture, [adapter], () => BASE_TIME + 2_000, rotateBeforeExactResolution(fixture, route.credentialRef, rotatedSecret));
+    const stream = gateway.generate({ capability: "GENERATION", attempts: [route.modelConfigId] }, generationRequest(), {
+      circuitPolicy: { policyId: fixture.policyId, policyRevision: 1 },
+    });
+    await collect(stream);
+    assert.equal(adapter.calls, 1);
+    assert.deepEqual(adapter.credentials, [rotatedSecret]);
+    const oldSnapshot = fixture.circuit.getSnapshot(target(fixture, route, 1));
+    assert.equal(oldSnapshot?.state, "OPEN");
+    assert.equal(oldSnapshot?.probeActive, false);
+    assert.equal(fixture.circuit.getSnapshot(target(fixture, route, 2))?.state, "CLOSED");
+  } finally {
+    fixture.close();
+  }
+});
+
+test("A revoke race fails safely without invoking the Provider or incrementing Circuit failures", async () => {
+  const fixture = createFixture({ failureThreshold: 3 });
+  try {
+    const route = await createRoute(fixture, "GENERATION", "test.circuit.revoke-race");
+    const adapter = new FakeGenerationAdapter(route.adapterKey, async function* () {
+      yield { type: "STARTED" };
+      yield { type: "COMPLETED", finishReason: "STOP", usage: emptyUsage() };
+    });
+    const gateway = createGateway(fixture, [adapter], () => BASE_TIME + 1_100, revokeBeforeExactResolution(fixture, route.credentialRef));
+    const stream = gateway.generate({ capability: "GENERATION", attempts: [route.modelConfigId] }, generationRequest(), {
+      circuitPolicy: { policyId: fixture.policyId, policyRevision: 1 },
+    });
+    await assert.rejects(() => collect(stream), (error: unknown) => error instanceof AIProviderGatewayError && error.code === "SECRET_UNAVAILABLE");
+    const traces = await stream.trace;
+    assert.equal(traces.length, 1);
+    assert.equal(traces[0]?.providerInvoked, false);
+    assert.equal(adapter.calls, 0);
+    assert.equal(fixture.circuit.getSnapshot(target(fixture, route))?.state, "CLOSED");
+    assert.equal(fixture.circuit.getSnapshot(target(fixture, route))?.consecutiveFailures, 0);
+  } finally {
+    fixture.close();
+  }
+});
+
+test("Repeated Secret-version changes exhaust a bounded handshake without creating Provider traces or calls", async () => {
+  const fixture = createFixture({ failureThreshold: 3 });
+  try {
+    const route = await createRoute(fixture, "GENERATION", "test.circuit.rotation-bounded");
+    const adapter = new FakeGenerationAdapter(route.adapterKey, async function* () {
+      yield { type: "STARTED" };
+      yield { type: "COMPLETED", finishReason: "STOP", usage: emptyUsage() };
+    });
+    const gateway = createGateway(fixture, [adapter], () => BASE_TIME + 1_200, alwaysChangingSecretStore(fixture, route.credentialRef));
+    const stream = gateway.generate({ capability: "GENERATION", attempts: [route.modelConfigId] }, generationRequest(), {
+      circuitPolicy: { policyId: fixture.policyId, policyRevision: 1 },
+    });
+    await assert.rejects(() => collect(stream), (error: unknown) => error instanceof AIProviderGatewayError && error.code === "SECRET_UNAVAILABLE");
+    const traces = await stream.trace;
+    assert.equal(traces.length, 1);
+    assert.equal(traces[0]?.providerInvoked, false);
+    assert.equal(traces[0]?.errorCode, "SECRET_UNAVAILABLE");
+    assert.equal(adapter.calls, 0);
+    assert.equal(fixture.circuit.listSnapshots().length, 3);
   } finally {
     fixture.close();
   }
