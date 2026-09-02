@@ -54,6 +54,8 @@ import {
 import {
   AIRetrievalConfigChangeAdapter,
   AI_RETRIEVAL_CONFIG_RESOURCE_TYPE,
+  AI_RETRIEVAL_FUSION_ALGORITHM_KEY,
+  AI_RETRIEVAL_FUSION_ALGORITHM_REVISION,
   SQLiteAIRetrievalConfigRepository,
   normalizeAIRetrievalConfigContent,
   type AIRetrievalConfigContent,
@@ -80,7 +82,7 @@ import { AIWorker } from "../src/server/ai/operations/worker";
 import { createChangeManagementService } from "../src/server/change-management";
 import { createCanonicalContentRepository } from "../src/server/canonical-content/service";
 import { openContentDatabase, type ContentDatabase } from "../src/server/content";
-import { questionPackages, questions, questionVariants, questionPrimaryVariants } from "../src/server/content/schema";
+import { questionPackages, questions, questionVariants, questionPrimaryVariants, questionTaxonomyNodes, questionTaxonomyAssignments, questionOccurrences, questionOccurrenceBranches, questionOccurrenceQualifiers } from "../src/server/content/schema";
 import type { CanonicalRichDocument } from "../src/server/questions/contracts";
 
 const migrationsDirectory = path.join(process.cwd(), "drizzle");
@@ -339,6 +341,23 @@ async function createQuestion(fixtureValue: HybridFixture, text: string, subject
   return { ...origin, ...(await createEmbeddingForOrigin(fixtureValue, "QUESTION_PACKAGE", origin.packageId, subjectKey)) };
 }
 
+async function createQuestionWithProvenance(fixtureValue: HybridFixture, text: string, subjectKey = "arabic") {
+  const origin = createQuestionPackage(fixtureValue, text, subjectKey);
+  const timestamp = fixtureValue.now - 300;
+  const taxonomyNodeId = uuidv7();
+  fixtureValue.database.db.insert(questionTaxonomyNodes).values({ id: taxonomyNodeId, packageId: origin.packageId, nodeKey: "m7c-provenance-topic", label: "M7C provenance topic", kind: "topic", parentId: null, displayOrder: 1, createdAt: timestamp, updatedAt: timestamp, updatedBy: fixtureValue.owner.actorUserId, revision: 1 }).run();
+  fixtureValue.database.db.insert(questionTaxonomyAssignments).values({ packageId: origin.packageId, questionId: origin.questionId, taxonomyNodeId, role: "PRIMARY", position: 0 }).run();
+  const occurrenceOne = uuidv7();
+  const occurrenceTwo = uuidv7();
+  fixtureValue.database.db.insert(questionOccurrences).values([
+    { id: occurrenceOne, variantId: origin.variantId, displayOrder: 1, sourceKind: "ministerial", year: 2024, roundCode: "R1", session: "morning", sourceName: "Ministry source one", notes: "First note", rawLabel: "وزارة 2024 R1", createdAt: timestamp, updatedAt: timestamp, updatedBy: fixtureValue.owner.actorUserId, revision: 2 },
+    { id: occurrenceTwo, variantId: origin.variantId, displayOrder: 2, sourceKind: "discussion-question", year: 2025, roundCode: "R2", session: "evening", sourceName: "Discussion source two", notes: "Second note", rawLabel: "أسئلة المناقشة 2025", createdAt: timestamp, updatedAt: timestamp, updatedBy: fixtureValue.owner.actorUserId, revision: 3 },
+  ]).run();
+  fixtureValue.database.db.insert(questionOccurrenceBranches).values([{ occurrenceId: occurrenceOne, position: 0, value: "Branch A" }, { occurrenceId: occurrenceTwo, position: 0, value: "Branch B" }]).run();
+  fixtureValue.database.db.insert(questionOccurrenceQualifiers).values([{ occurrenceId: occurrenceOne, position: 0, value: "Qualifier A" }, { occurrenceId: occurrenceTwo, position: 0, value: "Qualifier B" }]).run();
+  return { ...origin, occurrenceOne, occurrenceTwo, taxonomyNodeId, ...(await createEmbeddingForOrigin(fixtureValue, "QUESTION_PACKAGE", origin.packageId, subjectKey)) };
+}
+
 async function createEmbeddingForOrigin(fixtureValue: HybridFixture, originKind: "KNOWLEDGE_PACKAGE" | "QUESTION_PACKAGE", originId: string, subjectKey: string) {
   const m7a = new AIChunkProjectionBuilder(fixtureValue.database).build({ originKind, originId, subjectKey });
   const m7aSet = new SQLiteAIRetrievalProjectionRepository(fixtureValue.database).getSet({ originKind, originId, subjectKey, strategyKey: "structured-rich-v1", normalizerKey: "retrieval-text-v1" });
@@ -372,6 +391,51 @@ function configContentFromRevision(revision: AIRetrievalConfigContent): AIRetrie
   return { ...revision };
 }
 
+function insertRawRetrievalConfigRevision(fixtureValue: HybridFixture, configId: string, overrides: { allowedTrustTiers?: string[]; embeddingModelConfigId?: string; rerankModelConfigId?: string | null; fusionAlgorithmKey?: string; fusionAlgorithmRevision?: number } = {}): void {
+  const current = fixtureValue.database.client.prepare("select * from ai_retrieval_config_revisions where retrieval_config_id=? order by revision desc limit 1").get(configId) as Record<string, unknown>;
+  assert.ok(current);
+  fixtureValue.database.client.prepare(`
+    insert into ai_retrieval_config_revisions (
+      id, retrieval_config_id, revision, display_name, enabled,
+      embedding_model_config_id, rerank_model_config_id,
+      lexical_candidate_limit, semantic_candidate_limit, fusion_candidate_limit,
+      rerank_candidate_limit, evidence_item_limit, rrf_constant,
+      lexical_weight_units, semantic_weight_units, minimum_fused_score_units,
+      minimum_evidence_item_count, maximum_evidence_pack_bytes,
+      max_evidence_chunks_per_source_item, allowed_trust_tiers,
+      semantic_failure_behavior, reranker_failure_behavior, created_at, created_by,
+      fusion_algorithm_key, fusion_algorithm_revision
+    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    uuidv7(),
+    configId,
+    Number(current.revision) + 1,
+    current.display_name,
+    current.enabled,
+    overrides.embeddingModelConfigId ?? current.embedding_model_config_id,
+    overrides.rerankModelConfigId === undefined ? current.rerank_model_config_id : overrides.rerankModelConfigId,
+    current.lexical_candidate_limit,
+    current.semantic_candidate_limit,
+    current.fusion_candidate_limit,
+    current.rerank_candidate_limit,
+    current.evidence_item_limit,
+    current.rrf_constant,
+    current.lexical_weight_units,
+    current.semantic_weight_units,
+    current.minimum_fused_score_units,
+    current.minimum_evidence_item_count,
+    current.maximum_evidence_pack_bytes,
+    current.max_evidence_chunks_per_source_item,
+    JSON.stringify(overrides.allowedTrustTiers ?? JSON.parse(String(current.allowed_trust_tiers))),
+    current.semantic_failure_behavior,
+    current.reranker_failure_behavior,
+    current.created_at,
+    current.created_by,
+    overrides.fusionAlgorithmKey ?? current.fusion_algorithm_key,
+    overrides.fusionAlgorithmRevision ?? current.fusion_algorithm_revision,
+  );
+}
+
 function retrievalConfigContent(fixtureValue: HybridFixture, overrides: Partial<AIRetrievalConfigContent> = {}): AIRetrievalConfigContent {
   return { key: `m7c-config-${uuidv7()}`, subjectKey: "arabic", displayName: "M7C Retrieval", enabled: true, embeddingModelConfigId: fixtureValue.modelId, rerankModelConfigId: null, lexicalCandidateLimit: 10, semanticCandidateLimit: 10, fusionCandidateLimit: 10, rerankCandidateLimit: 10, evidenceItemLimit: 5, rrfConstant: 60, lexicalWeightUnits: 1, semanticWeightUnits: 1, minimumFusedScoreUnits: 0, minimumEvidenceItemCount: 1, maximumEvidencePackBytes: 16_384, maxEvidenceChunksPerSourceItem: 5, allowedTrustTiers: ["OFFICIAL", "PYTHAGORAS_APPROVED", "TEACHER_REVIEWED", "OTHER_APPROVED"], semanticFailureBehavior: "FAIL_RETRIEVAL", rerankerFailureBehavior: "USE_FUSION", ...overrides };
 }
@@ -394,6 +458,10 @@ function callerExecution(fixtureValue: HybridFixture): { costOperationId: string
   const admission = fixtureValue.admission.admit({ ...base, requestFingerprint: createAIAdmissionRequestFingerprint(base) });
   const reservation = fixtureValue.admission.startExecution(admission.reservation.id, fixtureValue.now);
   return { costOperationId: operationId, budgetReservationId: reservation.id };
+}
+
+function usageCountForOperation(fixtureValue: HybridFixture, operationId: string): number {
+  return Number((fixtureValue.database.client.prepare("select count(*) as count from ai_usage_cost_records where operation_id=?").get(operationId) as { count: number }).count);
 }
 
 function request(fixtureValue: HybridFixture, config: { id: string; revision: number }, query: string): AIHybridRetrievalRequest {
@@ -423,6 +491,7 @@ function hybridCandidate(chunkId: string, overrides: Partial<AIHybridChunkCandid
     text: `evidence ${chunkId}`,
     language: "ar",
     provenance: null,
+    originMetadata: {},
     ...overrides,
   };
 }
@@ -466,6 +535,41 @@ test("M7C refuses to execute a Retrieval Config outside its canonical subject sc
   } finally { fixtureValue.close(); }
 });
 
+test("M7C Retrieval Config identity/history is protected by SQLite while governed append remains valid", async () => {
+  const fixtureValue = await fixture();
+  try {
+    const config = publishRetrievalConfig(fixtureValue, retrievalConfigContent(fixtureValue));
+    const canonical = fixtureValue.configs.getById(config.id);
+    const revision = fixtureValue.configs.getCurrentRevision(config.id);
+    assert.ok(canonical);
+    assert.ok(revision);
+    assert.equal(canonical.fusionAlgorithmKey, AI_RETRIEVAL_FUSION_ALGORITHM_KEY);
+    assert.equal(canonical.fusionAlgorithmRevision, AI_RETRIEVAL_FUSION_ALGORITHM_REVISION);
+    const adapter = new AIRetrievalConfigChangeAdapter();
+    const currentState = adapter.loadCurrent(fixtureValue.database, config.id);
+    assert.throws(() => adapter.validateSnapshot({ ...currentState.snapshot, fusionAlgorithmKey: "future-rrf" }), /server-owned|fusion/i);
+    assert.throws(() => fixtureValue.database.client.prepare("update ai_retrieval_configs set key=? where id=?").run("m7c-mutated-key", config.id), /immutable/i);
+    assert.throws(() => fixtureValue.database.client.prepare("update ai_retrieval_configs set subject_key=? where id=?").run("biology", config.id), /immutable/i);
+    assert.throws(() => fixtureValue.database.client.prepare("update ai_retrieval_configs set created_at=? where id=?").run(canonical.createdAt + 1, config.id), /immutable/i);
+    assert.throws(() => fixtureValue.database.client.prepare("update ai_retrieval_configs set created_by=? where id=?").run(uuidv7(), config.id), /immutable/i);
+    assert.throws(() => fixtureValue.database.client.prepare("update ai_retrieval_configs set current_revision=? where id=?").run(0, config.id), /advance|revision/i);
+    assert.throws(() => fixtureValue.database.client.prepare("update ai_retrieval_configs set current_revision=? where id=?").run(4, config.id), /advance|revision/i);
+    assert.throws(() => fixtureValue.database.client.prepare("update ai_retrieval_config_revisions set display_name=? where id=?").run("mutated", revision.revisionId), /immutable/i);
+    assert.throws(() => fixtureValue.database.client.prepare("update ai_retrieval_config_revisions set allowed_trust_tiers=? where id=?").run(JSON.stringify(["OFFICIAL"]), revision.revisionId), /immutable/i);
+    assert.throws(() => fixtureValue.database.client.prepare("update ai_retrieval_config_revisions set embedding_model_config_id=? where id=?").run(fixtureValue.rerankModelId, revision.revisionId), /immutable/i);
+    assert.throws(() => fixtureValue.database.client.prepare("update ai_retrieval_config_revisions set semantic_failure_behavior=? where id=?").run("LEXICAL_ONLY", revision.revisionId), /immutable/i);
+    assert.throws(() => fixtureValue.database.client.prepare("delete from ai_retrieval_config_revisions where id=?").run(revision.revisionId), /immutable/i);
+    assert.throws(() => insertRawRetrievalConfigRevision(fixtureValue, config.id, { allowedTrustTiers: ["OFFICIAL", "OFFICIAL"] }), /integrity|invalid/i);
+    assert.throws(() => insertRawRetrievalConfigRevision(fixtureValue, config.id, { allowedTrustTiers: ["NOT_A_TRUST_TIER"] }), /integrity|invalid/i);
+    assert.throws(() => insertRawRetrievalConfigRevision(fixtureValue, config.id, { embeddingModelConfigId: fixtureValue.rerankModelId }), /integrity|invalid/i);
+    assert.throws(() => insertRawRetrievalConfigRevision(fixtureValue, config.id, { fusionAlgorithmKey: "future-rrf" }), /integrity|invalid/i);
+    const appended = fixtureValue.configs.appendRevision({ id: config.id, expectedRevision: revision.revision, content: { ...retrievalConfigContent(fixtureValue), key: canonical.key, subjectKey: canonical.subjectKey, displayName: "M7C Retrieval appended" }, actor: fixtureValue.owner, now: fixtureValue.now + 1 });
+    assert.equal(appended.revision, 2);
+    assert.equal(fixtureValue.configs.getCurrentRevision(config.id)?.fusionAlgorithmKey, AI_RETRIEVAL_FUSION_ALGORITHM_KEY);
+    assert.equal(fixtureValue.configs.getRevision(config.id, 1)?.displayName, revision.displayName);
+  } finally { fixtureValue.close(); }
+});
+
 test("hybrid retrieval uses exact fresh M7A/M7B, QUERY embedding, one model, RRF, and an in-memory EvidencePack", async () => {
   const fixtureValue = await fixture();
   try {
@@ -477,6 +581,10 @@ test("hybrid retrieval uses exact fresh M7A/M7B, QUERY embedding, one model, RRF
     assert.equal(result.mode, "HYBRID");
     assert.equal(result.retrievalConfigId, config.id);
     assert.equal(result.retrievalConfigRevision, config.revision);
+    assert.equal(result.fusionAlgorithmKey, AI_RETRIEVAL_FUSION_ALGORITHM_KEY);
+    assert.equal(result.fusionAlgorithmRevision, AI_RETRIEVAL_FUSION_ALGORITHM_REVISION);
+    assert.equal(result.trace.fusionAlgorithmKey, AI_RETRIEVAL_FUSION_ALGORITHM_KEY);
+    assert.equal(result.trace.fusionAlgorithmRevision, AI_RETRIEVAL_FUSION_ALGORITHM_REVISION);
     assert.ok(result.items.length > 0);
     assert.equal(fixtureValue.fakeEmbedding.requests.at(-1)?.inputType, "QUERY");
     assert.equal(fixtureValue.fakeEmbedding.requests.at(-1)?.inputs.length, 1);
@@ -493,7 +601,7 @@ test("M7C Retrieval Config tables are bounded and contain no query or provider s
   const fixtureValue = await fixture();
   try {
     const migrationCount = Number((fixtureValue.database.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count);
-    assert.equal(migrationCount, 27);
+    assert.equal(migrationCount, 28);
     for (const table of ["ai_retrieval_configs", "ai_retrieval_config_revisions"]) {
       assert.ok(fixtureValue.database.client.prepare("select name from sqlite_master where type='table' and name=?").get(table));
       const columns = fixtureValue.database.client.prepare(`pragma table_info(${table})`).all() as Array<{ name: string }>;
@@ -502,7 +610,7 @@ test("M7C Retrieval Config tables are bounded and contain no query or provider s
   } finally { fixtureValue.close(); }
 });
 
-test("0026 upgrades a 0025 database with only Retrieval Config metadata", () => {
+test("0027 upgrades a 0026 database with Retrieval Config immutability and fusion identity", () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "pythagoras-m7c-migration-"));
   const oldMigrations = mkdtempSync(path.join(os.tmpdir(), "pythagoras-m7c-old-migrations-"));
   try {
@@ -519,8 +627,11 @@ test("0026 upgrades a 0025 database with only Retrieval Config metadata", () => 
     assert.equal(Number((before.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count), 26);
     before.close();
     const upgraded = openContentDatabase({ dataDirectory: root, migrationsDirectory });
-    assert.equal(Number((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count), 27);
+    assert.equal(Number((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count), 28);
     assert.ok(upgraded.client.prepare("select name from sqlite_master where name='ai_retrieval_configs'").get());
+    assert.ok(upgraded.client.prepare("select name from pragma_table_info('ai_retrieval_config_revisions') where name='fusion_algorithm_key'").get());
+    assert.ok(upgraded.client.prepare("select name from pragma_table_info('ai_retrieval_config_revisions') where name='fusion_algorithm_revision'").get());
+    for (const trigger of ["ai_retrieval_configs_identity_no_update", "ai_retrieval_configs_revision_pointer", "ai_retrieval_config_revisions_insert_integrity", "ai_retrieval_config_revisions_no_update", "ai_retrieval_config_revisions_no_delete"]) assert.ok(upgraded.client.prepare("select name from sqlite_master where type='trigger' and name=?").get(trigger));
     upgraded.close();
   } finally {
     rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
@@ -548,14 +659,14 @@ test("RRF is integer-weighted, deterministic, and preserves both retrieval signa
   assert.equal(result[2].retrievalSignals[0], "LEXICAL");
 });
 
-test("Evidence selection skips oversized text without truncation and scopes source-item limits per origin", () => {
+test("Evidence selection includes safe provenance bytes, skips oversized text without truncation, and scopes source-item limits per origin", () => {
   const first = fusedCandidate("oversized", { text: "0123456789abc" });
   const second = fusedCandidate("fits", { text: "ok" });
   const otherOrigin = fusedCandidate("other-origin", { originId: "origin-b", sourceItemId: "item-a", text: "yes" });
-  const result = selectEvidence({ candidates: [first, second, otherOrigin], config: { evidenceItemLimit: 3, maximumEvidencePackBytes: 5, maxEvidenceChunksPerSourceItem: 1, minimumEvidenceItemCount: 1 } });
+  const result = selectEvidence({ candidates: [first, second, otherOrigin], config: { evidenceItemLimit: 3, maximumEvidencePackBytes: 17, maxEvidenceChunksPerSourceItem: 1, minimumEvidenceItemCount: 1 } });
   assert.deepEqual(result.items.map((item) => item.chunkId), ["fits", "other-origin"]);
   assert.equal(result.items[0].text, "ok");
-  assert.equal(result.evidenceByteCount, 5);
+  assert.equal(result.evidenceByteCount, 17);
   assert.equal(result.sufficient, true);
 });
 
@@ -678,7 +789,7 @@ test("M7C final source fence returns no evidence when live rights change during 
     });
     const result = await hybrid.retrieve(request(fixtureValue, config, "algebra"));
     assert.equal(result.status, "INSUFFICIENT");
-    assert.equal(result.safeReason, "SOURCE_INELIGIBLE");
+    assert.equal(result.safeReason, "RETRIEVAL_SCOPE_CHANGED");
     assert.equal(result.items.length, 0);
   } finally { fixtureValue.close(); }
 });
@@ -793,4 +904,104 @@ test("M7C searches multiple origins with one global deterministic semantic ranki
     assert.equal(result.items.some((item) => item.originId === second.packageId && item.semanticRank === 2), true);
     assert.deepEqual(result.trace.rankedSignals.map((item) => item.semanticRank).sort((left, right) => (left ?? 0) - (right ?? 0)), [1, 2]);
   } finally { fixtureValue.close(); }
+});
+
+test("M7C enforces semanticCandidateLimit globally across five origins before RRF", async () => {
+  const fixtureValue = await fixture();
+  try {
+    for (let index = 0; index < 5; index += 1) await createKnowledge(fixtureValue, `algebra relevant origin ${index}`);
+    const config = publishRetrievalConfig(fixtureValue, retrievalConfigContent(fixtureValue, { semanticCandidateLimit: 2, fusionCandidateLimit: 10 }));
+    const first = await fixtureValue.hybrid.retrieve(request(fixtureValue, config, "algebra"));
+    const second = await fixtureValue.hybrid.retrieve(request(fixtureValue, config, "algebra"));
+    assert.equal(first.status, "SUFFICIENT");
+    assert.equal(first.candidateCounts.semantic, 2);
+    assert.deepEqual(first.trace.rankedSignals.filter((item) => item.semanticRank !== null).map((item) => item.semanticRank).sort((left, right) => (left ?? 0) - (right ?? 0)), [1, 2]);
+    assert.deepEqual(first.trace.selectedChunkIds, second.trace.selectedChunkIds);
+  } finally { fixtureValue.close(); }
+});
+
+test("M7C rejects a new eligible Knowledge origin discovered by the final origin-set fence", async () => {
+  const fixtureValue = await fixture();
+  try {
+    await createKnowledge(fixtureValue, "algebra initial evidence");
+    const config = publishRetrievalConfig(fixtureValue, retrievalConfigContent(fixtureValue));
+    const requestValue = request(fixtureValue, config, "algebra");
+    const hybrid = createHybridWithFinalFence(fixtureValue, () => { createKnowledgePackage(fixtureValue, "algebra newly published evidence"); });
+    const result = await hybrid.retrieve(requestValue);
+    assert.equal(result.status, "INSUFFICIENT");
+    assert.equal(result.safeReason, "RETRIEVAL_SCOPE_CHANGED");
+    assert.equal(result.items.length, 0);
+    assert.equal(usageCountForOperation(fixtureValue, requestValue.providerExecutionContext.costOperationId), 1);
+    assert.equal(fixtureValue.fakeEmbedding.calls, 2);
+  } finally { fixtureValue.close(); }
+});
+
+test("M7C rejects a source that becomes newly eligible during retrieval", async () => {
+  const fixtureValue = await fixture();
+  try {
+    await createKnowledge(fixtureValue, "algebra initial evidence");
+    const pending = createKnowledgePackage(fixtureValue, "algebra re-enabled evidence", "arabic", { enabled: false, rightsStatus: "RESTRICTED", rightsBasis: null });
+    const config = publishRetrievalConfig(fixtureValue, retrievalConfigContent(fixtureValue));
+    const requestValue = request(fixtureValue, config, "algebra");
+    const hybrid = createHybridWithFinalFence(fixtureValue, () => {
+      const source = fixtureValue.sources.getById(pending.sourceId);
+      assert.ok(source);
+      fixtureValue.sources.appendRevision({ id: source.id, expectedRevision: source.currentRevision, content: sourceRevisionContent(source, { enabled: true, rightsStatus: "CLEARED", rightsBasis: "OWNED" }), actor: fixtureValue.owner, now: fixtureValue.now + 1 });
+    });
+    const result = await hybrid.retrieve(requestValue);
+    assert.equal(result.status, "INSUFFICIENT");
+    assert.equal(result.safeReason, "RETRIEVAL_SCOPE_CHANGED");
+    assert.equal(result.items.length, 0);
+    assert.equal(usageCountForOperation(fixtureValue, requestValue.providerExecutionContext.costOperationId), 1);
+  } finally { fixtureValue.close(); }
+});
+
+test("M7C rejects a new canonical Question origin discovered by the final origin-set fence", async () => {
+  const fixtureValue = await fixture();
+  try {
+    await createKnowledge(fixtureValue, "algebra initial evidence");
+    const config = publishRetrievalConfig(fixtureValue, retrievalConfigContent(fixtureValue));
+    const requestValue = request(fixtureValue, config, "algebra");
+    const hybrid = createHybridWithFinalFence(fixtureValue, () => { createQuestionPackage(fixtureValue, "algebra newly published Question"); });
+    const result = await hybrid.retrieve(requestValue);
+    assert.equal(result.status, "INSUFFICIENT");
+    assert.equal(result.safeReason, "RETRIEVAL_SCOPE_CHANGED");
+    assert.equal(result.items.length, 0);
+    assert.equal(usageCountForOperation(fixtureValue, requestValue.providerExecutionContext.costOperationId), 1);
+  } finally { fixtureValue.close(); }
+});
+
+test("M7C carries exact Question occurrence and taxonomy provenance into EvidencePack without promoting trust", async () => {
+  const fixtureValue = await fixture();
+  try {
+    const origin = await createQuestionWithProvenance(fixtureValue, "algebra provenance evidence");
+    const config = publishRetrievalConfig(fixtureValue, retrievalConfigContent(fixtureValue));
+    const result = await fixtureValue.hybrid.retrieve(request(fixtureValue, config, "algebra"));
+    const item = result.items.find((candidate) => candidate.questionId === origin.questionId);
+    assert.ok(item);
+    assert.equal(item.trustTier, "PYTHAGORAS_APPROVED");
+    const occurrences = item.originMetadata.occurrences as Array<Record<string, unknown>>;
+    assert.equal(occurrences.length, 2);
+    assert.equal(occurrences.find((occurrence) => occurrence.id === origin.occurrenceOne)?.revision, 2);
+    assert.equal(occurrences.find((occurrence) => occurrence.id === origin.occurrenceTwo)?.sourceKind, "discussion-question");
+    assert.deepEqual(occurrences.find((occurrence) => occurrence.id === origin.occurrenceOne)?.branches, ["Branch A"]);
+    assert.deepEqual(occurrences.find((occurrence) => occurrence.id === origin.occurrenceTwo)?.qualifiers, ["Qualifier B"]);
+    assert.equal((item.originMetadata.taxonomyAssignments as Array<Record<string, unknown>>)[0].taxonomyNodeId, origin.taxonomyNodeId);
+    assert.equal((item.originMetadata.taxonomyAssignments as Array<Record<string, unknown>>)[0].role, "PRIMARY");
+    assert.equal(typeof item.originMetadata.projectionId, "string");
+    assert.equal(typeof item.originMetadata.projectionRevisionFingerprint, "string");
+  } finally { fixtureValue.close(); }
+});
+
+test("M7C includes provenance in the EvidencePack byte bound without truncating metadata", () => {
+  const candidate = fusedCandidate("provenance-heavy", { text: "ok", provenance: { section: "Section 1" }, originMetadata: { occurrence: "0123456789" } });
+  const exactBytes = Buffer.byteLength(candidate.text, "utf8") + Buffer.byteLength(JSON.stringify(candidate.provenance), "utf8") + Buffer.byteLength(JSON.stringify(candidate.originMetadata), "utf8");
+  const tooSmall = selectEvidence({ candidates: [candidate], config: { evidenceItemLimit: 1, maximumEvidencePackBytes: exactBytes - 1, maxEvidenceChunksPerSourceItem: 1, minimumEvidenceItemCount: 1 } });
+  assert.equal(tooSmall.sufficient, false);
+  assert.equal(tooSmall.items.length, 0);
+  const exact = selectEvidence({ candidates: [candidate], config: { evidenceItemLimit: 1, maximumEvidencePackBytes: exactBytes, maxEvidenceChunksPerSourceItem: 1, minimumEvidenceItemCount: 1 } });
+  assert.equal(exact.sufficient, true);
+  assert.equal(exact.items[0].text, "ok");
+  assert.deepEqual(exact.items[0].originMetadata, { occurrence: "0123456789" });
+  assert.equal(exact.evidenceByteCount, exactBytes);
 });

@@ -100,6 +100,10 @@ import type {
   AIRetrievalRerankerFailureBehavior,
   AIRetrievalSemanticFailureBehavior,
 } from "../ai/retrieval-config/contracts";
+import {
+  AI_RETRIEVAL_FUSION_ALGORITHM_KEY,
+  AI_RETRIEVAL_FUSION_ALGORITHM_REVISION,
+} from "../ai/retrieval-config/contracts";
 
 export type ContentPayload = Record<string, unknown>;
 
@@ -3056,6 +3060,8 @@ export const aiRetrievalConfigRevisions = sqliteTable(
     enabled: integer("enabled", { mode: "boolean" }).notNull(),
     embeddingModelConfigId: text("embedding_model_config_id").notNull().references(() => aiModelConfigs.id, { onDelete: "restrict" }),
     rerankModelConfigId: text("rerank_model_config_id").references(() => aiModelConfigs.id, { onDelete: "restrict" }),
+    fusionAlgorithmKey: text("fusion_algorithm_key").notNull().default(AI_RETRIEVAL_FUSION_ALGORITHM_KEY),
+    fusionAlgorithmRevision: integer("fusion_algorithm_revision").notNull().default(AI_RETRIEVAL_FUSION_ALGORITHM_REVISION),
     lexicalCandidateLimit: integer("lexical_candidate_limit").notNull(),
     semanticCandidateLimit: integer("semantic_candidate_limit").notNull(),
     fusionCandidateLimit: integer("fusion_candidate_limit").notNull(),

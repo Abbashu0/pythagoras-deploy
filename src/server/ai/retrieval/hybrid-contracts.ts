@@ -16,6 +16,7 @@ export const AI_HYBRID_SAFE_REASONS = [
   "PROJECTION_CHANGED",
   "MODEL_SPACE_CHANGED",
   "EXECUTION_CONTEXT_INVALID",
+  "RETRIEVAL_SCOPE_CHANGED",
 ] as const;
 export type AIHybridSafeReason = (typeof AI_HYBRID_SAFE_REASONS)[number];
 
@@ -67,6 +68,7 @@ export interface AIHybridChunkCandidate {
   text: string;
   language: string;
   provenance: AIKnowledgeDocumentProvenance | null;
+  originMetadata: Readonly<Record<string, unknown>>;
 }
 
 export interface AIHybridFusedCandidate extends AIHybridChunkCandidate {
@@ -87,6 +89,8 @@ export interface AIHybridEvidenceItem extends AIHybridFusedCandidate {
 export interface AIHybridRetrievalTrace {
   retrievalConfigId: string;
   retrievalConfigRevision: number;
+  fusionAlgorithmKey: string;
+  fusionAlgorithmRevision: number;
   m7aProjectionRevisionIds: readonly string[];
   m7bEmbeddingProjectionRevisionIds: readonly string[];
   embeddingModelConfigId: string | null;
@@ -124,6 +128,8 @@ export interface AIEvidencePack {
   subjectKey: string;
   retrievalConfigId: string;
   retrievalConfigRevision: number;
+  fusionAlgorithmKey: string;
+  fusionAlgorithmRevision: number;
   mode: AIHybridRetrievalMode;
   degraded: boolean;
   safeReason: AIHybridSafeReason | null;

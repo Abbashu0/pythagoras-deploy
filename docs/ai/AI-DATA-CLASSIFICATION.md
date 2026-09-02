@@ -17,7 +17,7 @@ AI-M0 established data handling rules before AI runtime existed. AI-M4 materiali
 
 ## 2. Raw conversation versus analytics
 
-AI-M7C query text and EvidencePacks are request-scoped runtime data. The query is untrusted and bounded, is sent only to the selected embedding/reranker adapter through the Gateway, and is not placed in configuration, durable Jobs, projections, vectors, trace metadata, or cost records. EvidencePack items retain only bounded published evidence and safe provenance/scores for the future Tutor boundary.
+AI-M7C query text and EvidencePacks are request-scoped runtime data. The query is untrusted and bounded, is sent only to the selected embedding/reranker adapter through the Gateway, and is not placed in configuration, durable Jobs, projections, vectors, trace metadata, or cost records. EvidencePack items retain only bounded published evidence and safe provenance/scores for the future Tutor boundary; serialized text plus serialized origin/provenance metadata are jointly bounded and never truncated.
 
 The **Raw Conversation Store** and **De-identified Analytics Projection** are different boundaries.
 

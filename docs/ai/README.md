@@ -24,7 +24,7 @@ AI-M7A is approved and provides bounded deterministic Chunk Projection and separ
 
 ## Current implementation status
 
-AI-M7A and AI-M7B are approved. AI-M7C is implemented pending independent review. Migration `0026_steady_turbo` adds only governed Retrieval Config metadata. The current M7C runtime is bounded hybrid retrieval with exact published M7A/M7B gates, deterministic integer RRF, optional one-model reranking, live final eligibility fences, caller-owned usage attribution without settlement, and runtime-only EvidencePacks. AI-M7 remains incomplete and AI-M8 has not started; there is no production Provider, Generation call, external vector technology, or Student/Admin AI UI.
+AI-M7A and AI-M7B are approved. AI-M7C is implemented pending independent review. Migrations `0026_steady_turbo` and `0027_many_chat` add governed Retrieval Config metadata, append-only Config history, and the server-pinned weighted-RRF identity. The current M7C runtime is bounded hybrid retrieval with exact published M7A/M7B gates, a global semantic K, deterministic integer RRF, optional one-model reranking, exact eligible-origin final fences, preserved bounded Question provenance, live final eligibility fences, caller-owned usage attribution without settlement, and runtime-only EvidencePacks. AI-M7 remains incomplete and AI-M8 has not started; there is no production Provider, Generation call, external vector technology, or Student/Admin AI UI.
 
 | Document | Responsibility |
 | --- | --- |

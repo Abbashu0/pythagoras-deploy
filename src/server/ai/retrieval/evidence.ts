@@ -19,7 +19,7 @@ export function selectEvidence(input: {
     const sourceItemKey = `${candidate.originKind}:${candidate.originId}:${candidate.sourceItemId}`;
     const sourceItemCount = sourceItemCounts.get(sourceItemKey) ?? 0;
     if (sourceItemCount >= input.config.maxEvidenceChunksPerSourceItem) continue;
-    const bytes = Buffer.byteLength(candidate.text, "utf8");
+    const bytes = evidencePayloadBytes(candidate);
     if (evidenceByteCount + bytes > input.config.maximumEvidencePackBytes) continue;
     sourceItemCounts.set(sourceItemKey, sourceItemCount + 1);
     evidenceByteCount += bytes;
@@ -36,4 +36,10 @@ export function selectEvidence(input: {
     return { items: [], evidenceByteCount: 0, sufficient: false, safeReason: "BELOW_MINIMUM_EVIDENCE" };
   }
   return { items, evidenceByteCount, sufficient: true, safeReason: null };
+}
+
+function evidencePayloadBytes(candidate: AIHybridFusedCandidate): number {
+  return Buffer.byteLength(candidate.text, "utf8")
+    + Buffer.byteLength(JSON.stringify(candidate.provenance), "utf8")
+    + Buffer.byteLength(JSON.stringify(candidate.originMetadata), "utf8");
 }

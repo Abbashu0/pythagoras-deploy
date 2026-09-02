@@ -100,6 +100,8 @@ AI-M7B adds the semantic derived boundary over an exact fresh/current M7A READY 
 
 The published `ai.retrieval-config` revision is the only source of M7C retrieval behavior. `HybridRetrievalService` accepts a server-owned subject scope, bounded untrusted query, exact config revision, and caller-owned open Cost Operation with an EXECUTING Budget Reservation. It returns a bounded runtime EvidencePack after exact published M7A/M7B readiness, scoped lexical/semantic retrieval, deterministic integer RRF, optional single-model reranking, trust filtering, and a final live eligibility fence. Query embedding and reranking usage are recorded against the caller operation; M7C does not complete or settle it. No query text or Retrieval Trace row is persisted in M7C.
 
+Each Retrieval Config Revision is append-only and carries the non-user-selectable fusion identity `weighted-rrf-v1@1`. The semantic candidate limit is global after bounded per-origin scans and global cosine ranking. Before returning evidence, M7C proves that the current eligible origin identity set is unchanged, then rechecks exact M7A/M7B, Model/Provider, Config, and live Source eligibility. `AIHybridChunkCandidate` preserves a bounded cloned `originMetadata` contract through fusion and EvidencePack; rerankers receive only candidate ID/text and never provenance.
+
 | Boundary | Contract |
 | --- | --- |
 | **Student Memory** | Per-principal, subject-scoped durable memory candidates or approved memories with provenance, confidence, visibility, retention, and deletion semantics. No cross-user memory. |

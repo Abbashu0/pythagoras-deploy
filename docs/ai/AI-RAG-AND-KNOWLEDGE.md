@@ -54,6 +54,8 @@ M7B's semantic projection consumes one exact current/fresh M7A READY revision an
 
 AI-M7C is implemented pending independent review. Retrieval Config is governed and subject-bound. Runtime selection is bounded and published-only: eligible origins must have exact fresh/current M7A projections and complete current M7B coverage in one embedding space before the query Provider is called. Lexical candidates are scoped to those M7A revisions; one query embedding is obtained through the existing Gateway; semantic ranks are recomputed globally; integer weighted RRF deduplicates the union; and an optional single reranker receives only bounded query plus candidate ID/text. A final live Source, projection, Model/Provider, and Config fence returns no evidence on a race. EvidencePack is runtime-only, no raw query is persisted, and M7C does not implement Generation, Web Search, or the Tutor.
 
+The M7C correction makes the Config revision history append-only at SQLite level and pins the server-owned `weighted-rrf-v1@1` algorithm on every Config revision. `semanticCandidateLimit` is the global semantic K after per-origin vector scans and global cosine ordering; `fusionCandidateLimit` applies only after that semantic cap to the lexical/semantic union. The final fence re-enumerates and stable-sorts the eligible `(originKind, originId, subjectKey)` set, so newly published or newly re-enabled origins fail closed without another Provider call. Evidence items carry bounded cloned M7A origin metadata, including Question projection identity, occurrence revisions/source fields, and taxonomy assignments; text and serialized provenance consume the evidence byte budget together, and neither is truncated.
+
 The baseline flow is:
 
 ```text

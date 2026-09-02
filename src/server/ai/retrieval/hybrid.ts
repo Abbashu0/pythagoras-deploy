@@ -19,7 +19,7 @@ import { SQLiteAIModelConfigRepository } from "../model-registry/sqlite-reposito
 import type { AIModelConfig, AIModelConfigRepository } from "../model-registry/contracts";
 import { SQLiteAIProviderConfigRepository } from "../configuration/sqlite-repository";
 import { SQLiteAIKnowledgeSourceRepository } from "../knowledge/source-repository";
-import type { AIKnowledgeSourceRepository } from "../knowledge/contracts";
+import type { AIKnowledgeDocumentProvenance, AIKnowledgeSourceRepository } from "../knowledge/contracts";
 import { AIRetrievalProjectionHealthService } from "./health";
 import { AI_RETRIEVAL_MAX_QUERY_BYTES, type AILexicalCandidate } from "./contracts";
 import { tokenizeRetrievalQuery } from "./normalization";
@@ -39,12 +39,13 @@ import { AIHybridRetrievalError } from "./hybrid-errors";
 import { selectEvidence } from "./evidence";
 import { weightedReciprocalRankFusion, type AIHybridLexicalRankedCandidate, type AIHybridSemanticRankedCandidate } from "./fusion";
 import { SQLiteAIRetrievalConfigRepository } from "../retrieval-config/sqlite-repository";
-import type { AIRetrievalConfigRepository, AIRetrievalConfigRevision } from "../retrieval-config/contracts";
+import { AI_RETRIEVAL_FUSION_ALGORITHM_KEY, AI_RETRIEVAL_FUSION_ALGORITHM_REVISION, type AIRetrievalConfigRepository, type AIRetrievalConfigRevision } from "../retrieval-config/contracts";
 
 const MAX_REQUEST_ID_BYTES = 120;
 const MAX_ORIGINS = 100;
 const ORIGIN_PAGE_SIZE = 50;
 const MAX_RERANK_INPUT_BYTES = 64 * 1024;
+const MAX_PROVENANCE_BYTES = 16 * 1024;
 
 interface M7ASelection {
   origin: { originKind: "KNOWLEDGE_PACKAGE" | "QUESTION_PACKAGE"; originId: string; subjectKey: string };
@@ -107,6 +108,7 @@ export class HybridRetrievalService {
 
     const origins = this.listEligibleOrigins(request.subjectKey);
     if (!origins.length) return this.emptyPack(request, config, "NO_CANDIDATES");
+    const originSet = originSetFingerprint(origins);
     const m7a = this.resolveM7A(origins, request.subjectKey);
     if (m7a.kind === "INSUFFICIENT") return this.insufficientPack(request, config, "PROJECTION_NOT_READY", m7a.revisionIds, [], 0, 0);
     if (!m7a.selections.length) return this.emptyPack(request, config, "NO_CANDIDATES");
@@ -142,7 +144,7 @@ export class HybridRetrievalService {
       if (config.semanticFailureBehavior === "LEXICAL_ONLY") {
         const ordered = weightedReciprocalRankFusion(lexical, [], config);
         this.dependencies.beforeFinalAssembly?.({ requestId: request.requestId, candidateCount: ordered.length });
-        const finalFence = this.finalFence(request, config, m7a.selections, semantic.revisions, null, ordered);
+        const finalFence = this.finalFence(request, config, originSet, m7a.selections, semantic.revisions, null, ordered);
         if (!finalFence.ok) return this.insufficientPack(request, config, finalFence.reason, m7a.selections.map((selection) => selection.projectionRevisionId), semantic.revisions.map((revision) => revision.id), lexical.length, 0);
         return this.finishPack({
           request,
@@ -174,7 +176,7 @@ export class HybridRetrievalService {
     const thresholded = fused.filter((candidate) => candidate.fusionScoreUnits >= config.minimumFusedScoreUnits);
     if (thresholded.length < config.minimumEvidenceItemCount) {
       this.dependencies.beforeFinalAssembly?.({ requestId: request.requestId, candidateCount: thresholded.length });
-      const finalFence = this.finalFence(request, config, m7a.selections, semantic.revisions, null, thresholded);
+      const finalFence = this.finalFence(request, config, originSet, m7a.selections, semantic.revisions, null, thresholded);
       const safeReason = finalFence.ok ? "BELOW_MINIMUM_EVIDENCE" : finalFence.reason;
       return this.finishPack({
         request,
@@ -195,7 +197,7 @@ export class HybridRetrievalService {
     if (reranked.kind === "FAILURE") {
       if (config.rerankerFailureBehavior === "USE_FUSION") {
         this.dependencies.beforeFinalAssembly?.({ requestId: request.requestId, candidateCount: thresholded.length });
-        const finalFence = this.finalFence(request, config, m7a.selections, semantic.revisions, null, thresholded);
+        const finalFence = this.finalFence(request, config, originSet, m7a.selections, semantic.revisions, null, thresholded);
         if (!finalFence.ok) return this.insufficientPack(request, config, finalFence.reason, m7a.selections.map((selection) => selection.projectionRevisionId), semantic.revisions.map((revision) => revision.id), lexical.length, semanticCandidates.length);
         return this.finishPack({
           request,
@@ -215,7 +217,7 @@ export class HybridRetrievalService {
     }
 
     this.dependencies.beforeFinalAssembly?.({ requestId: request.requestId, candidateCount: reranked.candidates.length });
-    const finalFence = this.finalFence(request, config, m7a.selections, semantic.revisions, reranked.space, reranked.candidates);
+    const finalFence = this.finalFence(request, config, originSet, m7a.selections, semantic.revisions, reranked.space, reranked.candidates);
     if (!finalFence.ok) {
       return this.insufficientPack(request, config, finalFence.reason, m7a.selections.map((selection) => selection.projectionRevisionId), semantic.revisions.map((revision) => revision.id), lexical.length, semanticCandidates.length);
     }
@@ -237,7 +239,7 @@ export class HybridRetrievalService {
   private resolveConfig(request: AIHybridRetrievalRequest): AIRetrievalConfigRevision {
     const config = this.dependencies.configs.getById(request.retrievalConfigId);
     const revision = this.dependencies.configs.getRevision(request.retrievalConfigId, request.retrievalConfigRevision);
-    if (!config || !revision || config.currentRevision !== request.retrievalConfigRevision || !revision.enabled || revision.subjectKey !== request.subjectKey) {
+    if (!config || !revision || config.currentRevision !== request.retrievalConfigRevision || !revision.enabled || revision.subjectKey !== request.subjectKey || revision.fusionAlgorithmKey !== AI_RETRIEVAL_FUSION_ALGORITHM_KEY || revision.fusionAlgorithmRevision !== AI_RETRIEVAL_FUSION_ALGORITHM_REVISION) {
       throw new AIHybridRetrievalError("AI_HYBRID_CONFIG_INVALID", "The requested Retrieval Config revision is not active for this subject.");
     }
     this.assertModelCapabilities(revision);
@@ -282,7 +284,7 @@ export class HybridRetrievalService {
         if (rows.length <= ORIGIN_PAGE_SIZE) break;
       }
     }
-    return origins;
+    return origins.sort(compareOrigins);
   }
 
   private resolveM7A(origins: readonly M7ASelection["origin"][], subjectKey: string): { kind: "READY"; selections: M7ASelection[] } | { kind: "INSUFFICIENT"; revisionIds: string[] } {
@@ -378,7 +380,7 @@ export class HybridRetrievalService {
     }
     return [...byChunk.values()]
       .sort((left, right) => right.cosineSimilarity - left.cosineSimilarity || left.candidate.chunkId.localeCompare(right.candidate.chunkId))
-      .slice(0, config.fusionCandidateLimit)
+      .slice(0, config.semanticCandidateLimit)
       .map((entry, index) => ({ ...entry, rank: index + 1 }));
   }
 
@@ -431,9 +433,16 @@ export class HybridRetrievalService {
     }
   }
 
-  private finalFence(request: AIHybridRetrievalRequest, config: AIRetrievalConfigRevision, m7a: readonly M7ASelection[], m7b: readonly AIEmbeddingProjectionRevision[], rerank: RerankSpace | null, candidates: readonly AIHybridFusedCandidate[]): { ok: true } | { ok: false; reason: AIHybridSafeReason } {
+  private finalFence(request: AIHybridRetrievalRequest, config: AIRetrievalConfigRevision, initialOriginSet: readonly string[], m7a: readonly M7ASelection[], m7b: readonly AIEmbeddingProjectionRevision[], rerank: RerankSpace | null, candidates: readonly AIHybridFusedCandidate[]): { ok: true } | { ok: false; reason: AIHybridSafeReason } {
+    let currentOrigins: M7ASelection["origin"][];
+    try {
+      currentOrigins = this.listEligibleOrigins(request.subjectKey);
+    } catch {
+      return { ok: false, reason: "RETRIEVAL_SCOPE_CHANGED" };
+    }
+    if (!sameStringArray(initialOriginSet, originSetFingerprint(currentOrigins))) return { ok: false, reason: "RETRIEVAL_SCOPE_CHANGED" };
     const currentConfig = this.dependencies.configs.getById(config.retrievalConfigId);
-    if (!currentConfig || currentConfig.currentRevision !== config.revision || !currentConfig.enabled || this.dependencies.configs.getRevision(config.retrievalConfigId, config.revision)?.revision !== config.revision) return { ok: false, reason: "RETRIEVAL_CONFIG_CHANGED" };
+    if (!currentConfig || currentConfig.currentRevision !== config.revision || !currentConfig.enabled || this.dependencies.configs.getRevision(config.retrievalConfigId, config.revision)?.revision !== config.revision || config.fusionAlgorithmKey !== AI_RETRIEVAL_FUSION_ALGORITHM_KEY || config.fusionAlgorithmRevision !== AI_RETRIEVAL_FUSION_ALGORITHM_REVISION) return { ok: false, reason: "RETRIEVAL_CONFIG_CHANGED" };
     for (const selection of m7a) {
       const status = this.dependencies.m7aHealth.getProjectionStatus(selection.origin);
       if (status.status === "INELIGIBLE") return { ok: false, reason: "SOURCE_INELIGIBLE" };
@@ -528,6 +537,8 @@ export class HybridRetrievalService {
       subjectKey: input.request.subjectKey,
       retrievalConfigId: configId(input.config),
       retrievalConfigRevision: input.config.revision,
+      fusionAlgorithmKey: input.config.fusionAlgorithmKey,
+      fusionAlgorithmRevision: input.config.fusionAlgorithmRevision,
       mode: input.mode,
       degraded: input.degraded,
       safeReason,
@@ -573,6 +584,8 @@ export class HybridRetrievalService {
     return {
       retrievalConfigId: configId(input.config),
       retrievalConfigRevision: input.config.revision,
+      fusionAlgorithmKey: input.config.fusionAlgorithmKey,
+      fusionAlgorithmRevision: input.config.fusionAlgorithmRevision,
       m7aProjectionRevisionIds: [...input.m7aRevisionIds],
       m7bEmbeddingProjectionRevisionIds: input.m7bRevisions.map((revision) => revision.id),
       embeddingModelConfigId: input.config.embeddingModelConfigId,
@@ -647,7 +660,8 @@ function lexicalCandidate(candidate: AILexicalCandidate): AIHybridChunkCandidate
     variantRevision: candidate.variantRevision,
     text: candidate.text,
     language: candidate.language,
-    provenance: candidate.provenance,
+    provenance: safeProvenance(candidate.provenance),
+    originMetadata: safeOriginMetadata(candidate.originMetadata),
   };
 }
 
@@ -673,7 +687,8 @@ function embeddingCandidate(candidate: import("../embedding/contracts").AIEmbedd
     variantRevision: candidate.variantRevision,
     text: candidate.text,
     language: candidate.language,
-    provenance: candidate.provenance,
+    provenance: safeProvenance(candidate.provenance),
+    originMetadata: safeOriginMetadata(candidate.originMetadata),
   };
 }
 
@@ -699,4 +714,42 @@ function configId(config: AIRetrievalConfigRevision): string {
 
 function isRetrievalQueryEmpty(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && (error as { code?: unknown }).code === "AI_RETRIEVAL_QUERY_EMPTY";
+}
+
+function compareOrigins(left: M7ASelection["origin"], right: M7ASelection["origin"]): number {
+  return originKindRank(left.originKind) - originKindRank(right.originKind) || left.originId.localeCompare(right.originId) || left.subjectKey.localeCompare(right.subjectKey);
+}
+
+function originKindRank(kind: M7ASelection["origin"]["originKind"]): number {
+  return kind === "KNOWLEDGE_PACKAGE" ? 0 : 1;
+}
+
+function originSetFingerprint(origins: readonly M7ASelection["origin"][]): string[] {
+  return origins.map((origin) => `${origin.originKind}\u0000${origin.subjectKey}\u0000${origin.originId}`).sort();
+}
+
+function sameStringArray(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function safeOriginMetadata(value: unknown): Readonly<Record<string, unknown>> {
+  return boundedJsonObject(value, "Retrieved origin metadata");
+}
+
+function safeProvenance(value: unknown): AIKnowledgeDocumentProvenance | null {
+  if (value === null) return null;
+  return boundedJsonObject(value, "Retrieved provenance") as AIKnowledgeDocumentProvenance;
+}
+
+function boundedJsonObject(value: unknown, label: string): Readonly<Record<string, unknown>> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) throw new AIHybridRetrievalError("AI_HYBRID_PROVENANCE_INVALID", `${label} is invalid.`);
+  try {
+    const copy = structuredClone(value) as Record<string, unknown>;
+    const serialized = JSON.stringify(copy);
+    if (typeof serialized !== "string" || Buffer.byteLength(serialized, "utf8") > MAX_PROVENANCE_BYTES) throw new Error("bounded provenance exceeded");
+    return copy;
+  } catch (error) {
+    if (error instanceof AIHybridRetrievalError) throw error;
+    throw new AIHybridRetrievalError("AI_HYBRID_PROVENANCE_INVALID", `${label} is invalid.`, {}, { cause: error });
+  }
 }

@@ -16,6 +16,7 @@ import type {
 } from "./contracts";
 import { AIRetrievalConfigError } from "./errors";
 import { normalizeAIRetrievalConfigContent } from "./validation";
+import { AI_RETRIEVAL_FUSION_ALGORITHM_KEY, AI_RETRIEVAL_FUSION_ALGORITHM_REVISION } from "./contracts";
 
 export class SQLiteAIRetrievalConfigRepository implements AIRetrievalConfigRepository {
   constructor(private readonly database: ContentDatabase) {}
@@ -127,6 +128,8 @@ export class SQLiteAIRetrievalConfigRepository implements AIRetrievalConfigRepos
       enabled: content.enabled,
       embeddingModelConfigId: content.embeddingModelConfigId,
       rerankModelConfigId: content.rerankModelConfigId,
+      fusionAlgorithmKey: AI_RETRIEVAL_FUSION_ALGORITHM_KEY,
+      fusionAlgorithmRevision: AI_RETRIEVAL_FUSION_ALGORITHM_REVISION,
       lexicalCandidateLimit: content.lexicalCandidateLimit,
       semanticCandidateLimit: content.semanticCandidateLimit,
       fusionCandidateLimit: content.fusionCandidateLimit,
@@ -155,6 +158,8 @@ export class SQLiteAIRetrievalConfigRepository implements AIRetrievalConfigRepos
       retrievalConfigId: row.retrievalConfigId,
       revisionId: row.id,
       revision: row.revision,
+      fusionAlgorithmKey: row.fusionAlgorithmKey as typeof AI_RETRIEVAL_FUSION_ALGORITHM_KEY,
+      fusionAlgorithmRevision: row.fusionAlgorithmRevision as typeof AI_RETRIEVAL_FUSION_ALGORITHM_REVISION,
       key: config.key,
       subjectKey: config.subjectKey,
       displayName: row.displayName,

@@ -17,6 +17,7 @@ import { AI_RETRIEVAL_CONFIG_RESOURCE_TYPE, type AIRetrievalConfig, type AIRetri
 import { AIRetrievalConfigError } from "./errors";
 import { SQLiteAIRetrievalConfigRepository } from "./sqlite-repository";
 import { normalizeAIRetrievalConfigContent } from "./validation";
+import { AI_RETRIEVAL_FUSION_ALGORITHM_KEY, AI_RETRIEVAL_FUSION_ALGORITHM_REVISION } from "./contracts";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const FIELD_LABELS: Record<string, string> = {
@@ -41,6 +42,8 @@ const FIELD_LABELS: Record<string, string> = {
   allowedTrustTiers: "Allowed trust tiers",
   semanticFailureBehavior: "Semantic failure behavior",
   rerankerFailureBehavior: "Reranker failure behavior",
+  fusionAlgorithmKey: "Fusion algorithm",
+  fusionAlgorithmRevision: "Fusion algorithm revision",
 };
 
 export class AIRetrievalConfigChangeAdapter implements ChangeResourceAdapter {
@@ -77,6 +80,7 @@ export class AIRetrievalConfigChangeAdapter implements ChangeResourceAdapter {
     try {
       validateChangeSnapshot(snapshot);
       normalizeAIRetrievalConfigContent(snapshot);
+      if (("fusionAlgorithmKey" in snapshot && snapshot.fusionAlgorithmKey !== AI_RETRIEVAL_FUSION_ALGORITHM_KEY) || ("fusionAlgorithmRevision" in snapshot && snapshot.fusionAlgorithmRevision !== AI_RETRIEVAL_FUSION_ALGORITHM_REVISION)) throw new AIRetrievalConfigError("AI_RETRIEVAL_CONFIG_INVALID", "The Retrieval Config fusion algorithm is server-owned.");
     } catch (error) {
       throw mapRetrievalConfigError(error);
     }
@@ -134,6 +138,8 @@ export class AIRetrievalConfigChangeAdapter implements ChangeResourceAdapter {
 }
 
 function snapshotFromContent(content: AIRetrievalConfig | AIRetrievalConfigContent): ChangeSnapshot {
+  const fusionAlgorithmKey = "fusionAlgorithmKey" in content ? content.fusionAlgorithmKey : AI_RETRIEVAL_FUSION_ALGORITHM_KEY;
+  const fusionAlgorithmRevision = "fusionAlgorithmRevision" in content ? content.fusionAlgorithmRevision : AI_RETRIEVAL_FUSION_ALGORITHM_REVISION;
   return structuredClone({
     key: content.key,
     subjectKey: content.subjectKey,
@@ -156,6 +162,8 @@ function snapshotFromContent(content: AIRetrievalConfig | AIRetrievalConfigConte
     allowedTrustTiers: [...content.allowedTrustTiers],
     semanticFailureBehavior: content.semanticFailureBehavior,
     rerankerFailureBehavior: content.rerankerFailureBehavior,
+    fusionAlgorithmKey,
+    fusionAlgorithmRevision,
   }) as ChangeSnapshot;
 }
 

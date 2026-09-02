@@ -9,6 +9,10 @@ export type AIRetrievalSemanticFailureBehavior = (typeof AI_RETRIEVAL_SEMANTIC_F
 export const AI_RETRIEVAL_RERANKER_FAILURE_BEHAVIORS = ["USE_FUSION", "FAIL_RETRIEVAL"] as const;
 export type AIRetrievalRerankerFailureBehavior = (typeof AI_RETRIEVAL_RERANKER_FAILURE_BEHAVIORS)[number];
 
+/** Server-owned algorithm identity; it is never an Admin/client-selected field. */
+export const AI_RETRIEVAL_FUSION_ALGORITHM_KEY = "weighted-rrf-v1" as const;
+export const AI_RETRIEVAL_FUSION_ALGORITHM_REVISION = 1 as const;
+
 export const AI_RETRIEVAL_FUSION_SCORE_SCALE = 1_000_000;
 export const AI_RETRIEVAL_CONFIG_MAX_LEXICAL_CANDIDATES = 50;
 export const AI_RETRIEVAL_CONFIG_MAX_SEMANTIC_CANDIDATES = 50;
@@ -46,6 +50,8 @@ export interface AIRetrievalConfigRevision extends AIRetrievalConfigContent {
   retrievalConfigId: string;
   revisionId: string;
   revision: number;
+  fusionAlgorithmKey: typeof AI_RETRIEVAL_FUSION_ALGORITHM_KEY;
+  fusionAlgorithmRevision: typeof AI_RETRIEVAL_FUSION_ALGORITHM_REVISION;
   createdAt: number;
   createdBy: string;
 }
@@ -54,6 +60,8 @@ export interface AIRetrievalConfig extends AIRetrievalConfigContent {
   id: string;
   currentRevision: number;
   currentRevisionId: string;
+  fusionAlgorithmKey: typeof AI_RETRIEVAL_FUSION_ALGORITHM_KEY;
+  fusionAlgorithmRevision: typeof AI_RETRIEVAL_FUSION_ALGORITHM_REVISION;
   createdAt: number;
   updatedAt: number;
   createdBy: string;
