@@ -41,6 +41,13 @@ import type {
   AIConversationSafeErrorCode,
   AIConversationStatus,
 } from "../ai/conversations/contracts";
+import type {
+  AIContextSnapshotItemDecision,
+  AIContextSnapshotItemKind,
+} from "../ai/context/contracts";
+import type {
+  AIInstructionPolicyScope,
+} from "../ai/policy/instruction-contracts";
 import type { AIModelCapability } from "../ai/model-registry/contracts";
 import type {
   AICircuitEventType,
@@ -556,6 +563,188 @@ export const aiConversationResponseChunks = sqliteTable(
   ],
 );
 
+/** Governed Global/Subject Instruction Policy identities. */
+export const aiInstructionPolicies = sqliteTable(
+  "ai_instruction_policies",
+  {
+    id: text("id").primaryKey(),
+    key: text("key").notNull(),
+    scope: text("scope").$type<AIInstructionPolicyScope>().notNull(),
+    subjectKey: text("subject_key").references(() => canonicalMaterials.subjectKey, { onDelete: "restrict" }),
+    currentRevision: integer("current_revision").notNull().default(1),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    createdBy: text("created_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+    updatedBy: text("updated_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+  },
+  (table) => [
+    uniqueIndex("ai_instruction_policies_key_unique").on(table.key),
+    uniqueIndex("ai_instruction_policies_global_unique").on(table.scope).where(sql`${table.scope} = 'GLOBAL'`),
+    uniqueIndex("ai_instruction_policies_subject_unique").on(table.scope, table.subjectKey).where(sql`${table.scope} = 'SUBJECT'`),
+    index("ai_instruction_policies_scope_index").on(table.scope, table.subjectKey),
+    check("ai_instruction_policies_key_valid", sql`length(trim(${table.key})) between 1 and 120 and ${table.key} not glob '*[^a-z0-9.-]*'`),
+    check("ai_instruction_policies_scope_valid", sql`${table.scope} in ('GLOBAL','SUBJECT')`),
+    check("ai_instruction_policies_scope_subject_consistent", sql`(${table.scope} = 'GLOBAL' and ${table.subjectKey} is null) or (${table.scope} = 'SUBJECT' and ${table.subjectKey} is not null)`),
+    check("ai_instruction_policies_subject_valid", sql`${table.subjectKey} is null or (length(trim(${table.subjectKey})) between 1 and 80 and ${table.subjectKey} not glob '*[^a-z0-9-]*')`),
+    check("ai_instruction_policies_revision_positive", sql`${table.currentRevision} >= 1`),
+    check("ai_instruction_policies_created_nonnegative", sql`${table.createdAt} >= 0`),
+    check("ai_instruction_policies_updated_ordered", sql`${table.updatedAt} >= ${table.createdAt}`),
+  ],
+);
+
+/** Immutable revisions for governed Global/Subject Instruction Policies. */
+export const aiInstructionPolicyRevisions = sqliteTable(
+  "ai_instruction_policy_revisions",
+  {
+    id: text("id").primaryKey(),
+    policyId: text("policy_id").notNull().references(() => aiInstructionPolicies.id, { onDelete: "restrict" }),
+    revision: integer("revision").notNull(),
+    displayName: text("display_name").notNull(),
+    instructions: text("instructions").notNull(),
+    enabled: integer("enabled", { mode: "boolean" }).notNull(),
+    createdAt: integer("created_at").notNull(),
+    createdBy: text("created_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+  },
+  (table) => [
+    uniqueIndex("ai_instruction_policy_revisions_identity_unique").on(table.policyId, table.revision),
+    index("ai_instruction_policy_revisions_policy_index").on(table.policyId, table.revision),
+    check("ai_instruction_policy_revisions_revision_positive", sql`${table.revision} >= 1`),
+    check("ai_instruction_policy_revisions_display_name_valid", sql`length(trim(${table.displayName})) between 1 and 200`),
+    check("ai_instruction_policy_revisions_instructions_valid", sql`length(cast(${table.instructions} as blob)) between 1 and 32768`),
+    check("ai_instruction_policy_revisions_enabled_boolean", sql`${table.enabled} in (0,1)`),
+    check("ai_instruction_policy_revisions_created_nonnegative", sql`${table.createdAt} >= 0`),
+  ],
+);
+
+/** Governed Context Policy identities. */
+export const aiContextPolicies = sqliteTable(
+  "ai_context_policies",
+  {
+    id: text("id").primaryKey(),
+    key: text("key").notNull(),
+    currentRevision: integer("current_revision").notNull().default(1),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    createdBy: text("created_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+    updatedBy: text("updated_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+  },
+  (table) => [
+    uniqueIndex("ai_context_policies_key_unique").on(table.key),
+    check("ai_context_policies_key_valid", sql`length(trim(${table.key})) between 1 and 120 and ${table.key} not glob '*[^a-z0-9.-]*'`),
+    check("ai_context_policies_revision_positive", sql`${table.currentRevision} >= 1`),
+    check("ai_context_policies_created_nonnegative", sql`${table.createdAt} >= 0`),
+    check("ai_context_policies_updated_ordered", sql`${table.updatedAt} >= ${table.createdAt}`),
+  ],
+);
+
+/** Immutable revisions for governed Context Policies. */
+export const aiContextPolicyRevisions = sqliteTable(
+  "ai_context_policy_revisions",
+  {
+    id: text("id").primaryKey(),
+    contextPolicyId: text("context_policy_id").notNull().references(() => aiContextPolicies.id, { onDelete: "restrict" }),
+    revision: integer("revision").notNull(),
+    displayName: text("display_name").notNull(),
+    softInputBudgetTokens: integer("soft_input_budget_tokens").notNull(),
+    hardInputBudgetTokens: integer("hard_input_budget_tokens").notNull(),
+    outputReserveTokens: integer("output_reserve_tokens").notNull(),
+    policyBudgetTokens: integer("policy_budget_tokens").notNull(),
+    summaryBudgetTokens: integer("summary_budget_tokens").notNull(),
+    recentTurnsBudgetTokens: integer("recent_turns_budget_tokens").notNull(),
+    memoryBudgetTokens: integer("memory_budget_tokens").notNull(),
+    evidenceBudgetTokens: integer("evidence_budget_tokens").notNull(),
+    maxRecentTurns: integer("max_recent_turns").notNull(),
+    enabled: integer("enabled", { mode: "boolean" }).notNull(),
+    createdAt: integer("created_at").notNull(),
+    createdBy: text("created_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+  },
+  (table) => [
+    uniqueIndex("ai_context_policy_revisions_identity_unique").on(table.contextPolicyId, table.revision),
+    index("ai_context_policy_revisions_policy_index").on(table.contextPolicyId, table.revision),
+    check("ai_context_policy_revisions_revision_positive", sql`${table.revision} >= 1`),
+    check("ai_context_policy_revisions_display_name_valid", sql`length(trim(${table.displayName})) between 1 and 200`),
+    check("ai_context_policy_revisions_budget_bounds", sql`${table.softInputBudgetTokens} > 0 and ${table.hardInputBudgetTokens} >= ${table.softInputBudgetTokens} and ${table.outputReserveTokens} > 0 and ${table.policyBudgetTokens} between 0 and 10000000 and ${table.summaryBudgetTokens} between 0 and 10000000 and ${table.recentTurnsBudgetTokens} between 0 and 10000000 and ${table.memoryBudgetTokens} between 0 and 10000000 and ${table.evidenceBudgetTokens} between 0 and 10000000 and ${table.hardInputBudgetTokens} between 1 and 10000000`),
+    check("ai_context_policy_revisions_component_budget_bounds", sql`${table.policyBudgetTokens} <= ${table.hardInputBudgetTokens} and ${table.summaryBudgetTokens} <= ${table.hardInputBudgetTokens} and ${table.recentTurnsBudgetTokens} <= ${table.hardInputBudgetTokens} and ${table.memoryBudgetTokens} <= ${table.hardInputBudgetTokens} and ${table.evidenceBudgetTokens} <= ${table.hardInputBudgetTokens} and ${table.outputReserveTokens} <= 10000000`),
+    check("ai_context_policy_revisions_recent_turns_valid", sql`${table.maxRecentTurns} between 1 and 100`),
+    check("ai_context_policy_revisions_enabled_boolean", sql`${table.enabled} in (0,1)`),
+    check("ai_context_policy_revisions_created_nonnegative", sql`${table.createdAt} >= 0`),
+  ],
+);
+
+/** Metadata-only immutable Context planning snapshot; it has no raw C4 text. */
+export const aiContextSnapshots = sqliteTable(
+  "ai_context_snapshots",
+  {
+    id: text("id").primaryKey(),
+    responseId: text("response_id").notNull().references(() => aiConversationResponses.id, { onDelete: "restrict" }),
+    conversationId: text("conversation_id").notNull().references(() => aiConversations.id, { onDelete: "restrict" }),
+    principalRef: text("principal_ref").notNull(),
+    subjectKey: text("subject_key").notNull().references(() => canonicalMaterials.subjectKey, { onDelete: "restrict" }),
+    globalPolicyId: text("global_policy_id").notNull().references(() => aiInstructionPolicies.id, { onDelete: "restrict" }),
+    globalPolicyRevision: integer("global_policy_revision").notNull(),
+    subjectPolicyId: text("subject_policy_id").notNull().references(() => aiInstructionPolicies.id, { onDelete: "restrict" }),
+    subjectPolicyRevision: integer("subject_policy_revision").notNull(),
+    contextPolicyId: text("context_policy_id").notNull().references(() => aiContextPolicies.id, { onDelete: "restrict" }),
+    contextPolicyRevision: integer("context_policy_revision").notNull(),
+    precedenceEnvelopeVersion: integer("precedence_envelope_version").notNull(),
+    estimatorKey: text("estimator_key").notNull(),
+    softInputBudgetTokens: integer("soft_input_budget_tokens").notNull(),
+    hardInputBudgetTokens: integer("hard_input_budget_tokens").notNull(),
+    outputReserveTokens: integer("output_reserve_tokens").notNull(),
+    globalPolicyTokens: integer("global_policy_tokens").notNull(),
+    subjectPolicyTokens: integer("subject_policy_tokens").notNull(),
+    precedenceEnvelopeTokens: integer("precedence_envelope_tokens").notNull(),
+    summaryTokens: integer("summary_tokens").notNull(),
+    recentTurnsTokens: integer("recent_turns_tokens").notNull(),
+    currentMessageTokens: integer("current_message_tokens").notNull(),
+    reservedMemoryBudgetTokens: integer("reserved_memory_budget_tokens").notNull(),
+    reservedEvidenceBudgetTokens: integer("reserved_evidence_budget_tokens").notNull(),
+    totalInputTokens: integer("total_input_tokens").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("ai_context_snapshots_response_unique").on(table.responseId),
+    index("ai_context_snapshots_principal_index").on(table.principalRef, table.createdAt),
+    index("ai_context_snapshots_conversation_index").on(table.conversationId, table.createdAt),
+    check("ai_context_snapshots_principal_valid", sql`length(trim(${table.principalRef})) between 1 and 200 and ${table.principalRef} not glob '*[^A-Za-z0-9_-]*'`),
+    check("ai_context_snapshots_subject_valid", sql`length(trim(${table.subjectKey})) between 1 and 80 and ${table.subjectKey} not glob '*[^a-z0-9-]*'`),
+    check("ai_context_snapshots_revisions_positive", sql`${table.globalPolicyRevision} >= 1 and ${table.subjectPolicyRevision} >= 1 and ${table.contextPolicyRevision} >= 1`),
+    check("ai_context_snapshots_envelope_valid", sql`${table.precedenceEnvelopeVersion} = 1`),
+    check("ai_context_snapshots_estimator_valid", sql`length(trim(${table.estimatorKey})) between 1 and 120 and ${table.estimatorKey} not glob '*[^A-Za-z0-9._-]*'`),
+    check("ai_context_snapshots_budget_valid", sql`${table.softInputBudgetTokens} > 0 and ${table.hardInputBudgetTokens} >= ${table.softInputBudgetTokens} and ${table.outputReserveTokens} > 0`),
+    check("ai_context_snapshots_token_counts_valid", sql`${table.globalPolicyTokens} >= 0 and ${table.subjectPolicyTokens} >= 0 and ${table.precedenceEnvelopeTokens} >= 0 and ${table.summaryTokens} >= 0 and ${table.recentTurnsTokens} >= 0 and ${table.currentMessageTokens} >= 0 and ${table.reservedMemoryBudgetTokens} >= 0 and ${table.reservedEvidenceBudgetTokens} >= 0 and ${table.totalInputTokens} >= 0 and ${table.totalInputTokens} <= ${table.hardInputBudgetTokens}`),
+    check("ai_context_snapshots_fingerprint_valid", sql`length(${table.fingerprint}) = 64 and ${table.fingerprint} not glob '*[^0-9a-f]*'`),
+    check("ai_context_snapshots_created_nonnegative", sql`${table.createdAt} >= 0`),
+  ],
+);
+
+/** Metadata-only Context Snapshot decisions; never reference raw Message rows with an FK. */
+export const aiContextSnapshotItems = sqliteTable(
+  "ai_context_snapshot_items",
+  {
+    snapshotId: text("snapshot_id").notNull().references(() => aiContextSnapshots.id, { onDelete: "cascade" }),
+    ordinal: integer("ordinal").notNull(),
+    kind: text("kind").$type<AIContextSnapshotItemKind>().notNull(),
+    sourceId: text("source_id"),
+    sourceRevision: integer("source_revision"),
+    estimatedTokens: integer("estimated_tokens").notNull(),
+    decision: text("decision").$type<AIContextSnapshotItemDecision>().notNull(),
+    decisionReason: text("decision_reason"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.snapshotId, table.ordinal] }),
+    index("ai_context_snapshot_items_snapshot_index").on(table.snapshotId, table.ordinal),
+    check("ai_context_snapshot_items_ordinal_positive", sql`${table.ordinal} >= 1`),
+    check("ai_context_snapshot_items_kind_valid", sql`${table.kind} in ('PRECEDENCE_ENVELOPE','GLOBAL_POLICY','SUBJECT_POLICY','CONVERSATION_SUMMARY','RECENT_MESSAGE','CURRENT_MESSAGE','MEMORY','EVIDENCE')`),
+    check("ai_context_snapshot_items_source_valid", sql`${table.sourceId} is null or length(trim(${table.sourceId})) between 1 and 200`),
+    check("ai_context_snapshot_items_revision_valid", sql`${table.sourceRevision} is null or ${table.sourceRevision} >= 1`),
+    check("ai_context_snapshot_items_tokens_valid", sql`${table.estimatedTokens} between 0 and 10000000`),
+    check("ai_context_snapshot_items_decision_valid", sql`${table.decision} in ('INCLUDED','OMITTED')`),
+    check("ai_context_snapshot_items_reason_valid", sql`${table.decisionReason} is null or length(trim(${table.decisionReason})) between 1 and 200`),
+  ],
+);
+
 export type CanonicalContentStateRow = typeof canonicalContentState.$inferSelect;
 export type CanonicalBannerRow = typeof canonicalBanners.$inferSelect;
 export type CanonicalMaterialRow = typeof canonicalMaterials.$inferSelect;
@@ -567,6 +756,12 @@ export type AIConversationRow = typeof aiConversations.$inferSelect;
 export type AIConversationMessageRow = typeof aiConversationMessages.$inferSelect;
 export type AIConversationResponseRow = typeof aiConversationResponses.$inferSelect;
 export type AIConversationResponseChunkRow = typeof aiConversationResponseChunks.$inferSelect;
+export type AIInstructionPolicyRow = typeof aiInstructionPolicies.$inferSelect;
+export type AIInstructionPolicyRevisionRow = typeof aiInstructionPolicyRevisions.$inferSelect;
+export type AIContextPolicyRow = typeof aiContextPolicies.$inferSelect;
+export type AIContextPolicyRevisionRow = typeof aiContextPolicyRevisions.$inferSelect;
+export type AIContextSnapshotRow = typeof aiContextSnapshots.$inferSelect;
+export type AIContextSnapshotItemRow = typeof aiContextSnapshotItems.$inferSelect;
 
 export const legacyMigrationRuns = sqliteTable(
   "legacy_migration_runs",

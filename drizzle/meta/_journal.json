@@ -134,6 +134,13 @@
       "when": 1788311225560,
       "tag": "0018_soft_zaran",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1788314527188,
+      "tag": "0019_abnormal_kid_colt",
+      "breakpoints": true
     }
   ]
 }

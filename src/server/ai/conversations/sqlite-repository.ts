@@ -73,6 +73,37 @@ export class SQLiteAIConversationRepository {
     return rows.map((row) => messageFromRow(row.message));
   }
 
+  listMessagesBefore(input: {
+    principalRef: string;
+    conversationId: string;
+    beforeOrdinal: number;
+    afterOrdinal: number;
+    limit: number;
+  }): AIConversationMessage[] {
+    const rows = this.database.db.select({ message: aiConversationMessages }).from(aiConversationMessages)
+      .innerJoin(aiConversations, eq(aiConversationMessages.conversationId, aiConversations.id))
+      .where(and(
+        eq(aiConversationMessages.conversationId, input.conversationId),
+        eq(aiConversations.principalRef, input.principalRef),
+        eq(aiConversations.status, "ACTIVE"),
+        gt(aiConversationMessages.ordinal, input.afterOrdinal),
+        lt(aiConversationMessages.ordinal, input.beforeOrdinal),
+      )).orderBy(desc(aiConversationMessages.ordinal)).limit(input.limit).all();
+    return rows.map((row) => messageFromRow(row.message));
+  }
+
+  getMessageForConversation(principalRef: string, conversationId: string, messageId: string): AIConversationMessage | null {
+    const row = this.database.db.select({ message: aiConversationMessages }).from(aiConversationMessages)
+      .innerJoin(aiConversations, eq(aiConversationMessages.conversationId, aiConversations.id))
+      .where(and(
+        eq(aiConversationMessages.id, messageId),
+        eq(aiConversationMessages.conversationId, conversationId),
+        eq(aiConversations.principalRef, principalRef),
+        eq(aiConversations.status, "ACTIVE"),
+      )).get();
+    return row ? messageFromRow(row.message) : null;
+  }
+
   getMessage(id: string): AIConversationMessage | null {
     const row = this.database.db.select().from(aiConversationMessages).where(eq(aiConversationMessages.id, id)).get();
     return row ? messageFromRow(row) : null;

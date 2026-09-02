@@ -53,15 +53,20 @@ AI milestones are future delivery boundaries. Each milestone is one coherent com
 
 ## AI-M4 — Conversation Core
 
-**Status:** Implemented; pending independent review.
+**Status:** Implemented; AI-M4 is approved and AI-M5 is pending independent review.
 **Delivered boundary:** Server-resolved `StudentPrincipal` contract, canonical subject validation, private subject-immutable Conversations, immutable ordered Messages, idempotent turns, one active Response per Conversation, durable bounded response chunks, streaming/partial/failure/cancellation lifecycle, and explicit C4 raw-content deletion purge through migration `0018_soft_zaran`; deleted Response tombstones retain the opaque top-level idempotency identity.
-**Explicit boundary:** No production Student authentication, entitlement, public Student AI API, Provider execution, Policy/Context engine, RAG, memory, compaction, telemetry, or Admin/Mobile AI UI was added.
+**Explicit boundary:** No production Student authentication, entitlement, public Student AI API, Provider execution, Policy/Context engine, RAG, memory, compaction, telemetry, or Admin/Mobile AI UI was added in M4.
+
+## AI-M5 — Policy & Context Engine
+
+**Status:** Implemented; pending independent review.
+**Delivered boundary:** Governed revisioned Global/Subject Instruction Policies, one identity per Global/Subject scope, a separate revisioned Context Policy, structural Global-over-Subject precedence, provider-neutral token-estimator boundary, deterministic bounded ContextBudgetManager, bounded recent-turn and optional-summary consumption, reserved Memory/Evidence budget slots, and metadata-only immutable Context Snapshots/items through migration `0019_abnormal_kid_colt`.
+**Explicit boundary:** No final Product Policy text was seeded; no Student authentication, entitlement, public API, Provider call, RAG, Knowledge, Memory, summary generation, compaction job, Tutor, or Admin/Mobile AI UI was added.
 
 ## Remaining future milestones
 
 | Milestone | Coherent boundary | Independent exit gate |
 | --- | --- | --- |
-| **AI-M5 Policy & Context Engine** | Global/subject policy revisions, ContextBudgetManager, bounded summaries/recent turns, output constraints, and context audit | Budget plan is deterministic/revisioned; hard/soft limits and policy precedence pass representative tests |
 | **AI-M6 Knowledge Domain** | Knowledge Sources, `pythagoras.knowledge-package`, validation, publication, source trust, and Question/Knowledge projector boundaries | Published-only eligibility, provenance, revisioning, rights metadata, and governed publication pass |
 | **AI-M7 Retrieval Engine** | Chunk projections, embedding jobs, VectorIndexAdapter, lexical/semantic hybrid retrieval, deterministic fusion, reranking, and Evidence Pack | Scope/trust filtering, rebuildability, minimum evidence threshold, scores, and projection health pass; no permanent external vector DB is required |
 | **AI-M8 Grounded Tutor** | Grounded Tutor Orchestrator, evidence-constrained generation, insufficient-evidence behavior, streaming response, and response trace | End-to-end fake-provider tests prove subject scope, grounding, trace completeness, budget accounting, and no tool/secret escape |

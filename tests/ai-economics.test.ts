@@ -401,7 +401,7 @@ function resolvedRateCard(overrides: Partial<ResolvedAIRateCard> = {}): Resolved
 test("AI M3A migration creates normalized accounting tables without raw content or secrets", () => {
   const fixture = createFixture();
   try {
-    assert.equal(getContentDatabaseStatus(fixture.database).migrationsApplied, 19);
+    assert.equal(getContentDatabaseStatus(fixture.database).migrationsApplied, 20);
     for (const table of [
       "ai_rate_cards",
       "ai_rate_card_revisions",

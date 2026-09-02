@@ -1,7 +1,7 @@
 # AI architecture lock
 
 **Milestone:** AI-M0 — Architecture Lock & Backend Readiness Specification
-**Status:** AI-M0 is locked; the current implementation has completed AI-M1 through AI-M3C2 and implemented AI-M4 Conversation Core pending independent review, without selecting a production provider.
+**Status:** AI-M0 is locked; the current implementation has completed AI-M1 through AI-M4 and implemented AI-M5 Policy & Context pending independent review, without selecting a production provider.
 
 ## 1. Architectural position
 
@@ -70,7 +70,7 @@ These rules apply to every future AI milestone:
 
 ## 2. Current repository audit
 
-The audit was performed against `HEAD == origin/main == b528f198d25e0c7b4b64a41cdfedcb7fdd47badb`, with a clean working tree.
+The original AI-M0 audit was performed against `HEAD == origin/main == b528f198d25e0c7b4b64a41cdfedcb7fdd47badb`, with a clean working tree; later milestone status is recorded in the current AI boundary row below.
 
 | Existing boundary | Current reality | AI implication |
 | --- | --- | --- |
@@ -82,7 +82,7 @@ The audit was performed against `HEAD == origin/main == b528f198d25e0c7b4b64a41c
 | Question domain | Relational Packages, Taxonomy, Banks, Questions, Variants, Occurrences, shared Answers | Question content remains a separate canonical domain and gets its own knowledge projector |
 | Search | Published placement-scoped SQLite FTS5 projection | This is lexical Question Search, not semantic AI retrieval or a vector index |
 | Student identity | No production Student authentication or entitlement boundary | Student AI launch is blocked until a server-resolved principal and entitlement service exist |
-| AI | AI-M1 adds configuration/secrets and migration `0011`; AI-M2 adds the governed Model Registry/Gateway and migration `0012`; AI-M3A adds economics/usage accounting and migration `0013`; AI-M3B adds governed budget/rate-limit policies, one stable-period Budget Account, atomic admission, reservations, settlement, and migrations `0014_cynical_bloodscream`/`0015_cynical_vulcan`; AI-M3C1 adds durable Jobs/Outbox/recovery and migration `0016_left_queen_noir`; AI-M3C2 adds passive persistent Circuit Breakers/operational health and migration `0017_lean_oracle`; AI-M4 adds private server-side Conversation/Message/Response lifecycle and migration `0018_soft_zaran`; no production provider, external call, Student auth/entitlement, public Student AI API, or UI exists | AI-M5 remains the next unstarted AI milestone |
+| AI | AI-M1 adds configuration/secrets and migration `0011`; AI-M2 adds the governed Model Registry/Gateway and migration `0012`; AI-M3A adds economics/usage accounting and migration `0013`; AI-M3B adds governed budget/rate-limit policies, one stable-period Budget Account, atomic admission, reservations, settlement, and migrations `0014_cynical_bloodscream`/`0015_cynical_vulcan`; AI-M3C1 adds durable Jobs/Outbox/recovery and migration `0016_left_queen_noir`; AI-M3C2 adds passive persistent Circuit Breakers/operational health and migration `0017_lean_oracle`; AI-M4 adds private server-side Conversation/Message/Response lifecycle and migration `0018_soft_zaran`; AI-M5 adds governed Policy/Context planning and metadata-only Context Snapshots through migration `0019_abnormal_kid_colt`; no production provider, external call, Student auth/entitlement, public Student AI API, or UI exists | AI-M6 remains the next unstarted AI milestone |
 
 The public Student content routes currently expose published content without a Student principal. That is acceptable for the current read-only content surface but is not an acceptable trust boundary for a metered Student AI API.
 

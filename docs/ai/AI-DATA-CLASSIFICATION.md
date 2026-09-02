@@ -1,14 +1,14 @@
 # AI data classification, privacy, and retention
 
-AI-M0 established data handling rules before AI runtime existed. AI-M4 now materializes the private Conversation core while preserving these classifications. Classification follows the strictest applicable class when a record contains multiple kinds of data.
+AI-M0 established data handling rules before AI runtime existed. AI-M4 materializes the private Conversation core and AI-M5 materializes governed Policy/Context metadata while preserving these classifications. Classification follows the strictest applicable class when a record contains multiple kinds of data.
 
 ## 1. Data classes
 
 | Class | Examples | Allowed use | Default handling |
 | --- | --- | --- | --- |
 | **C1 — Published curriculum** | Published Questions, Variants, Occurrences, approved Knowledge Package content, taxonomy, source provenance | Student grounding, approved retrieval, deterministic eval fixtures | Canonical source remains Pythagoras-owned; public or internal access follows the existing publication boundary |
-| **C2 — Governed Product configuration** | Global/subject policy, model routing, retrieval settings, budget policy, eval thresholds, approved insights | Backend decisions and reviewed operations | Revisioned Change Set snapshots and atomic publication; no secret values |
-| **C3 — Derived projections** | Chunks, embeddings, vector/lexical indexes, retrieval features, clusters, compact summaries | Retrieval, analysis, diagnostics | Rebuildable, revision-linked, deletable/recomputable; never treated as canonical truth |
+| **C2 — Governed Product configuration** | Global/subject instruction policy, context budgets, model routing, retrieval settings, budget policy, eval thresholds, approved insights | Backend decisions and reviewed operations | Revisioned Change Set snapshots and atomic publication; no secret values |
+| **C3 — Derived projections** | Chunks, embeddings, vector/lexical indexes, retrieval features, clusters, compact summaries | Retrieval, analysis, diagnostics | Rebuildable, revision-linked, deletable/recomputable; never treated as canonical truth; M5 Context Snapshots are immutable metadata audit records, not raw-content projections |
 | **C4 — Student private content** | Messages, conversation history, summaries, memory, feedback text, uploaded student content | The scoped student's experience and privacy-controlled operations | Access isolated by server principal and subject; not curriculum truth; retention and deletion apply |
 | **C5 — Sensitive operational data** | Provider errors, rate-limit state, budget reservations, trace identifiers, abuse signals | Operations, audit, cost controls, incident response | Least-privilege internal access; minimize payloads and redact logs |
 | **C6 — Credentials and secrets** | Provider keys, encryption/master keys, secret-manager tokens | Adapter execution only | Secret-store boundary; never normal SQLite strings, API DTOs, snapshots, prompts, logs, Mobile, or Git |
