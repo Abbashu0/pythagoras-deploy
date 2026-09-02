@@ -65,15 +65,32 @@ AI milestones are future delivery boundaries. Each milestone is one coherent com
 
 ## AI-M6 — Knowledge Domain
 
-**Status:** Implemented; pending independent review.
+**Status:** Implemented; AI-M6 is approved.
 **Delivered boundary:** Governed Knowledge Source identities and immutable metadata revisions; strict `pythagoras.knowledge-package` V1 inspection; hash-pinned local package artifacts; bounded Change Set metadata with OWNER publication; normalized immutable Package/Document/Asset-binding rows; source rights/trust and published-only eligibility; and a canonical read-only Question Knowledge Projector that preserves Package/Package-content, Question, Variant, Occurrence, taxonomy, subject, and revision identity. Migration `0022_knowledge-package-source-subject-consistency` adds the database-level Package/Source subject invariant.
 **Explicit boundary:** No real corpus was imported; no AI-assisted ingestion, OCR/PDF extraction, retrieval, chunks, embeddings, vector index, reranking, Evidence Pack, web search, Provider call, Conversation flow, Student/Admin AI UI, or AI-M7 runtime was started. Migration `0021_nifty_komodo` remains the Knowledge storage migration; `0022` is a focused canonical-boundary correction.
+
+## AI-M7 — Retrieval Engine
+
+**Status:** Incomplete; refined into independently reviewed checkpoints.
+
+### AI-M7A — Chunk Projection & Lexical Retrieval Foundation
+
+**Status:** Implemented; pending independent review.
+**Delivered boundary:** Bounded published Knowledge/Question source readers; deterministic `structured-rich-v1` RichDocument chunking with hard byte bounds; revisioned rebuildable C3 projection sets/revisions/chunks; a separate SQLite FTS5 lexical index; bounded provider-neutral lexical retrieval with safe query generation and subject/current-source eligibility; projection health and stale detection; and explicit BUILDING/READY/FAILED atomic activation without durable embedding Jobs.
+**Explicit boundary:** No embeddings, vectors, semantic retrieval, hybrid fusion, reranking, EvidencePack, Provider call, real corpus import, Student/Admin AI UI, or M7B/M7C runtime was added.
+
+### AI-M7B — Embedding Projection, VectorIndexAdapter & Durable Projection Jobs
+
+**Status:** Not started.
+
+### AI-M7C — Hybrid Retrieval, Deterministic Fusion, Optional Reranking & EvidencePack
+
+**Status:** Not started.
 
 ## Remaining future milestones
 
 | Milestone | Coherent boundary | Independent exit gate |
 | --- | --- | --- |
-| **AI-M7 Retrieval Engine** | Chunk projections, embedding jobs, VectorIndexAdapter, lexical/semantic hybrid retrieval, deterministic fusion, reranking, and Evidence Pack | Scope/trust filtering, rebuildability, minimum evidence threshold, scores, and projection health pass; no permanent external vector DB is required |
 | **AI-M8 Grounded Tutor** | Grounded Tutor Orchestrator, evidence-constrained generation, insufficient-evidence behavior, streaming response, and response trace | End-to-end fake-provider tests prove subject scope, grounding, trace completeness, budget accounting, and no tool/secret escape |
 | **AI-M9 Evals V1** | Versioned Eval Suite, deterministic graders, supplementary judge adapter, regression cases, security/cost/latency gates | Baseline suites cover all required dimensions and block an unsafe or materially regressed promotion |
 | **AI-M10 Memory & Compaction** | Student-scoped memory policy, memory extraction/review, conversation summaries, compaction revisions, deletion, and context selection | No cross-user memory; summaries are traceable; old history is preserved but not replayed by default; deletion propagates |

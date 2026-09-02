@@ -87,6 +87,10 @@ import type {
   AIKnowledgeSourceType,
   AIKnowledgeTrustTier,
 } from "../ai/knowledge/contracts";
+import type {
+  AIRetrievalOriginKind,
+  AIRetrievalProjectionStatus,
+} from "../ai/retrieval/contracts";
 
 export type ContentPayload = Record<string, unknown>;
 
@@ -928,6 +932,130 @@ export const aiKnowledgePackageAssets = sqliteTable(
   ],
 );
 
+/** Stable C3 retrieval projection identity for one canonical origin and strategy pair. */
+export const aiRetrievalProjectionSets = sqliteTable(
+  "ai_retrieval_projection_sets",
+  {
+    id: text("id").primaryKey(),
+    subjectKey: text("subject_key").notNull().references(() => canonicalMaterials.subjectKey, { onDelete: "restrict" }),
+    originKind: text("origin_kind").$type<AIRetrievalOriginKind>().notNull(),
+    originId: text("origin_id").notNull(),
+    strategyKey: text("strategy_key").notNull(),
+    normalizerKey: text("normalizer_key").notNull(),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("ai_retrieval_projection_sets_identity_unique").on(table.subjectKey, table.originKind, table.originId, table.strategyKey, table.normalizerKey),
+    index("ai_retrieval_projection_sets_subject_index").on(table.subjectKey, table.originKind),
+    check("ai_retrieval_projection_sets_origin_kind_valid", sql`${table.originKind} in ('KNOWLEDGE_PACKAGE','QUESTION_PACKAGE')`),
+    check("ai_retrieval_projection_sets_origin_id_valid", sql`length(trim(${table.originId})) between 1 and 120`),
+    check("ai_retrieval_projection_sets_strategy_key_valid", sql`length(trim(${table.strategyKey})) between 1 and 120 and ${table.strategyKey} not glob '*[^a-z0-9.-]*'`),
+    check("ai_retrieval_projection_sets_normalizer_key_valid", sql`length(trim(${table.normalizerKey})) between 1 and 120 and ${table.normalizerKey} not glob '*[^a-z0-9.-]*'`),
+    check("ai_retrieval_projection_sets_created_nonnegative", sql`${table.createdAt} >= 0`),
+    check("ai_retrieval_projection_sets_updated_ordered", sql`${table.updatedAt} >= ${table.createdAt}`),
+  ],
+);
+
+/** Rebuild lifecycle metadata; BUILDING/FAILED revisions are never retrieval-visible. */
+export const aiRetrievalProjectionRevisions = sqliteTable(
+  "ai_retrieval_projection_revisions",
+  {
+    id: text("id").primaryKey(),
+    projectionSetId: text("projection_set_id").notNull().references(() => aiRetrievalProjectionSets.id, { onDelete: "restrict" }),
+    revision: integer("revision").notNull(),
+    inputFingerprint: text("input_fingerprint").notNull(),
+    strategyKey: text("strategy_key").notNull(),
+    strategyRevision: integer("strategy_revision").notNull(),
+    normalizerKey: text("normalizer_key").notNull(),
+    normalizerRevision: integer("normalizer_revision").notNull(),
+    status: text("status").$type<AIRetrievalProjectionStatus>().notNull(),
+    isCurrent: integer("is_current", { mode: "boolean" }).notNull().default(false),
+    sourceCursor: text("source_cursor", { mode: "json" }).$type<Record<string, unknown> | null>(),
+    batchCount: integer("batch_count").notNull().default(0),
+    chunkCount: integer("chunk_count").notNull().default(0),
+    startedAt: integer("started_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    readyAt: integer("ready_at"),
+    failedAt: integer("failed_at"),
+    safeErrorCode: text("safe_error_code"),
+  },
+  (table) => [
+    uniqueIndex("ai_retrieval_projection_revisions_identity_unique").on(table.projectionSetId, table.revision),
+    uniqueIndex("ai_retrieval_projection_revisions_current_unique").on(table.projectionSetId).where(sql`${table.isCurrent} = 1`),
+    index("ai_retrieval_projection_revisions_status_index").on(table.status, table.updatedAt),
+    check("ai_retrieval_projection_revisions_revision_positive", sql`${table.revision} >= 1`),
+    check("ai_retrieval_projection_revisions_fingerprint_valid", sql`length(${table.inputFingerprint}) = 64 and ${table.inputFingerprint} not glob '*[^0-9a-f]*'`),
+    check("ai_retrieval_projection_revisions_strategy_valid", sql`length(trim(${table.strategyKey})) between 1 and 120 and ${table.strategyKey} not glob '*[^a-z0-9.-]*' and ${table.strategyRevision} >= 1`),
+    check("ai_retrieval_projection_revisions_normalizer_valid", sql`length(trim(${table.normalizerKey})) between 1 and 120 and ${table.normalizerKey} not glob '*[^a-z0-9.-]*' and ${table.normalizerRevision} >= 1`),
+    check("ai_retrieval_projection_revisions_status_valid", sql`${table.status} in ('BUILDING','READY','FAILED')`),
+    check("ai_retrieval_projection_revisions_current_boolean", sql`${table.isCurrent} in (0,1)`),
+    check("ai_retrieval_projection_revisions_cursor_valid", sql`${table.sourceCursor} is null or (json_valid(${table.sourceCursor}) and json_type(${table.sourceCursor}) = 'object')`),
+    check("ai_retrieval_projection_revisions_counts_valid", sql`${table.batchCount} >= 0 and ${table.chunkCount} >= 0`),
+    check("ai_retrieval_projection_revisions_timestamps_valid", sql`${table.startedAt} >= 0 and ${table.updatedAt} >= ${table.startedAt} and (${table.readyAt} is null or ${table.readyAt} >= ${table.startedAt}) and (${table.failedAt} is null or ${table.failedAt} >= ${table.startedAt})`),
+    check("ai_retrieval_projection_revisions_state_consistency", sql`(${table.status} = 'READY' and ${table.readyAt} is not null and ${table.failedAt} is null) or (${table.status} = 'FAILED' and ${table.failedAt} is not null and ${table.isCurrent} = 0) or (${table.status} = 'BUILDING' and ${table.readyAt} is null and ${table.failedAt} is null and ${table.isCurrent} = 0)`),
+    check("ai_retrieval_projection_revisions_error_valid", sql`${table.safeErrorCode} is null or length(trim(${table.safeErrorCode})) between 1 and 120`),
+  ],
+);
+
+/** Rebuildable retrieval chunks; no provider/vector/evidence state belongs here. */
+export const aiRetrievalChunks = sqliteTable(
+  "ai_retrieval_chunks",
+  {
+    chunkId: text("chunk_id").notNull(),
+    projectionRevisionId: text("projection_revision_id").notNull().references(() => aiRetrievalProjectionRevisions.id, { onDelete: "restrict" }),
+    subjectKey: text("subject_key").notNull().references(() => canonicalMaterials.subjectKey, { onDelete: "restrict" }),
+    originKind: text("origin_kind").$type<AIRetrievalOriginKind>().notNull(),
+    originId: text("origin_id").notNull(),
+    originRevision: integer("origin_revision").notNull(),
+    originContentRevision: integer("origin_content_revision").notNull(),
+    sourceId: text("source_id"),
+    sourceRevision: integer("source_revision"),
+    sourceType: text("source_type"),
+    trustTier: text("trust_tier").$type<AIKnowledgeTrustTier>().notNull(),
+    artifactSha256: text("artifact_sha256"),
+    sourceItemId: text("source_item_id").notNull(),
+    sourceItemOrder: integer("source_item_order").notNull(),
+    questionId: text("question_id"),
+    questionRevision: integer("question_revision"),
+    variantId: text("variant_id"),
+    variantRevision: integer("variant_revision"),
+    chunkOrdinal: integer("chunk_ordinal").notNull(),
+    text: text("text").notNull(),
+    textHash: text("text_hash").notNull(),
+    language: text("language").notNull(),
+    provenance: text("provenance", { mode: "json" }).$type<Record<string, unknown> | null>(),
+    originMetadata: text("origin_metadata", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
+    strategyKey: text("strategy_key").notNull(),
+    strategyRevision: integer("strategy_revision").notNull(),
+    normalizerKey: text("normalizer_key").notNull(),
+    normalizerRevision: integer("normalizer_revision").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.projectionRevisionId, table.chunkId] }),
+    uniqueIndex("ai_retrieval_chunks_revision_ordinal_unique").on(table.projectionRevisionId, table.chunkOrdinal),
+    index("ai_retrieval_chunks_subject_origin_index").on(table.subjectKey, table.originKind, table.originId),
+    index("ai_retrieval_chunks_source_item_index").on(table.sourceItemId),
+    check("ai_retrieval_chunks_id_valid", sql`length(trim(${table.chunkId})) = 64 and ${table.chunkId} not glob '*[^0-9a-f]*'`),
+    check("ai_retrieval_chunks_origin_kind_valid", sql`${table.originKind} in ('KNOWLEDGE_PACKAGE','QUESTION_PACKAGE')`),
+    check("ai_retrieval_chunks_origin_valid", sql`length(trim(${table.originId})) between 1 and 120 and ${table.originRevision} >= 1 and ${table.originContentRevision} >= 1`),
+    check("ai_retrieval_chunks_source_pin_valid", sql`(${table.sourceId} is null and ${table.sourceRevision} is null and ${table.sourceType} is null and ${table.artifactSha256} is null) or (${table.sourceId} is not null and ${table.sourceRevision} is not null and ${table.sourceType} is not null and ${table.artifactSha256} is not null and ${table.sourceRevision} >= 1)`),
+    check("ai_retrieval_chunks_trust_valid", sql`${table.trustTier} in ('OFFICIAL','PYTHAGORAS_APPROVED','TEACHER_REVIEWED','OTHER_APPROVED')`),
+    check("ai_retrieval_chunks_artifact_hash_valid", sql`${table.artifactSha256} is null or (length(${table.artifactSha256}) = 64 and ${table.artifactSha256} not glob '*[^0-9a-f]*')`),
+    check("ai_retrieval_chunks_source_item_valid", sql`length(trim(${table.sourceItemId})) between 1 and 160 and ${table.sourceItemOrder} >= 1`),
+    check("ai_retrieval_chunks_question_identity_valid", sql`(${table.originKind} = 'KNOWLEDGE_PACKAGE' and ${table.questionId} is null and ${table.questionRevision} is null and ${table.variantId} is null and ${table.variantRevision} is null) or (${table.originKind} = 'QUESTION_PACKAGE' and ${table.questionId} is not null and ${table.questionRevision} is not null and ${table.variantId} is not null and ${table.variantRevision} is not null and ${table.questionRevision} >= 1 and ${table.variantRevision} >= 1)`),
+    check("ai_retrieval_chunks_ordinal_positive", sql`${table.chunkOrdinal} >= 1`),
+    check("ai_retrieval_chunks_text_valid", sql`length(cast(${table.text} as blob)) between 1 and 4096`),
+    check("ai_retrieval_chunks_hash_valid", sql`length(${table.textHash}) = 64 and ${table.textHash} not glob '*[^0-9a-f]*'`),
+    check("ai_retrieval_chunks_language_valid", sql`length(trim(${table.language})) between 2 and 32`),
+    check("ai_retrieval_chunks_provenance_valid", sql`${table.provenance} is null or (json_valid(${table.provenance}) and json_type(${table.provenance}) = 'object')`),
+    check("ai_retrieval_chunks_origin_metadata_valid", sql`json_valid(${table.originMetadata}) and json_type(${table.originMetadata}) = 'object'`),
+    check("ai_retrieval_chunks_strategy_valid", sql`length(trim(${table.strategyKey})) between 1 and 120 and ${table.strategyRevision} >= 1 and length(trim(${table.normalizerKey})) between 1 and 120 and ${table.normalizerRevision} >= 1`),
+    check("ai_retrieval_chunks_created_nonnegative", sql`${table.createdAt} >= 0`),
+  ],
+);
+
 export type CanonicalContentStateRow = typeof canonicalContentState.$inferSelect;
 export type CanonicalBannerRow = typeof canonicalBanners.$inferSelect;
 export type CanonicalMaterialRow = typeof canonicalMaterials.$inferSelect;
@@ -951,6 +1079,9 @@ export type AIKnowledgePackageRow = typeof aiKnowledgePackages.$inferSelect;
 export type AIKnowledgePackageRevisionRow = typeof aiKnowledgePackageRevisions.$inferSelect;
 export type AIKnowledgeDocumentRow = typeof aiKnowledgeDocuments.$inferSelect;
 export type AIKnowledgePackageAssetRow = typeof aiKnowledgePackageAssets.$inferSelect;
+export type AIRetrievalProjectionSetRow = typeof aiRetrievalProjectionSets.$inferSelect;
+export type AIRetrievalProjectionRevisionRow = typeof aiRetrievalProjectionRevisions.$inferSelect;
+export type AIRetrievalChunkRow = typeof aiRetrievalChunks.$inferSelect;
 
 export const legacyMigrationRuns = sqliteTable(
   "legacy_migration_runs",

@@ -149,7 +149,7 @@ test("0007 creates an empty Question domain and upgrades 0006 without touching c
       dataDirectory: freshRoot,
       migrationsDirectory,
     });
-    assert.equal(count(fresh, "__drizzle_migrations"), 23);
+    assert.equal(count(fresh, "__drizzle_migrations"), 24);
     for (const table of [
       "question_packages",
       "question_taxonomy_nodes",
@@ -247,7 +247,7 @@ test("0007 creates an empty Question domain and upgrades 0006 without touching c
       dataDirectory: oldRoot,
       migrationsDirectory,
     });
-    assert.equal(count(upgraded, "__drizzle_migrations"), 23);
+    assert.equal(count(upgraded, "__drizzle_migrations"), 24);
     assert.equal(count(upgraded, "canonical_banners"), bannerCount);
     assert.deepEqual(
       upgraded.db

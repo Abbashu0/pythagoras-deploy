@@ -18,6 +18,7 @@ import type {
   AIKnowledgePackageAsset,
   AIKnowledgePackageChangeContent,
   AIKnowledgePackageDocument,
+  AIKnowledgePackageProjectionMetadata,
   AIKnowledgePackageRepository,
   AIKnowledgePackageRevision,
 } from "./contracts";
@@ -150,6 +151,39 @@ export class SQLiteAIKnowledgePackageRepository implements AIKnowledgePackageRep
         const source = sourceRepository.getCurrentRevision(item.revision.sourceId);
         return Boolean(source?.enabled && source.rightsStatus === "CLEARED");
       });
+  }
+
+  getProjectionMetadata(packageId: string, subjectKey: string): AIKnowledgePackageProjectionMetadata | null {
+    const row = this.database.client.prepare(`
+      select p.id as package_id, p.subject_key, p.current_revision as package_revision,
+             pr.id as package_revision_id, pr.content_revision as package_content_revision,
+             pr.language, pr.source_id, pr.source_revision, pr.artifact_sha256,
+             pinned.source_type, pinned.trust_tier,
+             current_source.enabled as current_source_enabled,
+             current_source.rights_status as current_source_rights_status
+      from ai_knowledge_packages p
+      join ai_knowledge_package_revisions pr on pr.package_id = p.id and pr.revision = p.current_revision
+      join ai_knowledge_source_revisions pinned on pinned.source_id = pr.source_id and pinned.revision = pr.source_revision
+      join ai_knowledge_sources source on source.id = pr.source_id
+      join ai_knowledge_source_revisions current_source on current_source.source_id = source.id and current_source.revision = source.current_revision
+      where p.id = ? and p.subject_key = ?
+    `).get(packageId, subjectKey) as Record<string, unknown> | undefined;
+    if (!row) return null;
+    return {
+      packageId: String(row.package_id),
+      subjectKey: String(row.subject_key),
+      packageRevisionId: String(row.package_revision_id),
+      packageRevision: Number(row.package_revision),
+      packageContentRevision: Number(row.package_content_revision),
+      language: String(row.language),
+      sourceId: String(row.source_id),
+      sourceRevision: Number(row.source_revision),
+      sourceType: String(row.source_type) as AIKnowledgePackageProjectionMetadata["sourceType"],
+      trustTier: String(row.trust_tier) as AIKnowledgePackageProjectionMetadata["trustTier"],
+      artifactSha256: String(row.artifact_sha256),
+      currentSourceEnabled: Boolean(row.current_source_enabled),
+      currentSourceRightsStatus: String(row.current_source_rights_status) as AIKnowledgePackageProjectionMetadata["currentSourceRightsStatus"],
+    };
   }
 
   private insertRevision(revisionId: string, packageId: string, revision: number, content: AIKnowledgePackageChangeContent, actor: AdminActor, now: number): void {

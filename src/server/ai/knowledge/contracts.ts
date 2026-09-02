@@ -260,6 +260,23 @@ export interface AIKnowledgePackageAggregate {
   assets: AIKnowledgePackageAsset[];
 }
 
+/** Bounded M6 eligibility metadata for downstream rebuildable projections. */
+export interface AIKnowledgePackageProjectionMetadata {
+  packageId: string;
+  subjectKey: string;
+  packageRevisionId: string;
+  packageRevision: number;
+  packageContentRevision: number;
+  language: string;
+  sourceId: string;
+  sourceRevision: number;
+  sourceType: AIKnowledgeSourceType;
+  trustTier: AIKnowledgeTrustTier;
+  artifactSha256: string;
+  currentSourceEnabled: boolean;
+  currentSourceRightsStatus: AIKnowledgeRightsStatus;
+}
+
 export interface AIKnowledgePackageRepository {
   getById(id: string): AIKnowledgePackageAggregate | null;
   getByKey(key: string): AIKnowledgePackageAggregate | null;
@@ -284,6 +301,7 @@ export interface AIKnowledgePackageRepository {
     now: number;
   }): AIKnowledgePackageRevision;
   listProjectionEligibleKnowledge(subjectKey: string): AIKnowledgePackageAggregate[];
+  getProjectionMetadata(packageId: string, subjectKey: string): AIKnowledgePackageProjectionMetadata | null;
 }
 
 export interface AIKnowledgePackageArtifactStore {

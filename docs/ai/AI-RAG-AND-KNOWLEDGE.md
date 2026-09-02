@@ -1,6 +1,6 @@
 # Knowledge and grounded retrieval
 
-AI-M6 implements the source and published-package boundary only. Retrieval remains a future projection/runtime milestone; this document does not imply that package publication creates retrieval data.
+AI-M6 implements the source and published-package boundary only. AI-M7A now implements the first rebuildable structural Chunk Projection and lexical FTS5 foundation; later semantic retrieval remains outside this checkpoint. Package publication still does not create retrieval data automatically.
 
 ## 1. Knowledge is a separate domain
 
@@ -43,6 +43,8 @@ registered source
 ```
 
 Only approved/published Knowledge revisions are eligible for production RAG. In M6, the eligibility read boundary additionally requires subject match, an existing pinned Source revision, and the current Source state to be enabled with `rightsStatus = CLEARED`; disabling/restricting a Source removes current eligibility without erasing historical Package rows. A later projection records the exact source `knowledgeRevision`, chunking revision, embedding configuration revision, and index revision. If a projection is stale or incomplete, the retrieval policy must fail closed, use a known-good prior published projection, or return insufficient evidence according to an explicit policy; it must not silently blend unpublished content.
+
+M7A's structural projection uses bounded pages and one server-owned `structured-rich-v1` strategy. Its text is derived from canonical RichDocument semantic units, carries exact source/question revision metadata, and is indexed in a separate `ai_retrieval_fts` table. The current READY revision is activated atomically; a failed newer build leaves the prior READY revision available. The Question origin uses the canonical published-only QuestionKnowledgeProjector and the explicit safe `PYTHAGORAS_APPROVED` trust tier rather than inferring official trust from an occurrence label. M7A does not implement semantic retrieval, vector storage, fusion, reranking, or EvidencePack.
 
 ## 4. Retrieval pipeline
 

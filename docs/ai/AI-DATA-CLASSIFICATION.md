@@ -1,6 +1,6 @@
 # AI data classification, privacy, and retention
 
-AI-M0 established data handling rules before AI runtime existed. AI-M4 materializes the private Conversation core and AI-M5 materializes governed Policy/Context metadata while preserving these classifications. Classification follows the strictest applicable class when a record contains multiple kinds of data.
+AI-M0 established data handling rules before AI runtime existed. AI-M4 materializes the private Conversation core, AI-M5 materializes governed Policy/Context metadata, AI-M6 materializes governed Knowledge content, and AI-M7A materializes rebuildable Chunk/FTS projections while preserving these classifications. Classification follows the strictest applicable class when a record contains multiple kinds of data.
 
 ## 1. Data classes
 
@@ -8,7 +8,7 @@ AI-M0 established data handling rules before AI runtime existed. AI-M4 materiali
 | --- | --- | --- | --- |
 | **C1 — Published curriculum** | Published Questions, Variants, Occurrences, approved Knowledge Package content, taxonomy, source provenance | Student grounding, approved retrieval, deterministic eval fixtures | Canonical source remains Pythagoras-owned; public or internal access follows the existing publication boundary. M6 package content is eligible only after governed publication and current Source rights/enabled checks |
 | **C2 — Governed Product configuration** | Global/subject instruction policy, context budgets, model routing, retrieval settings, budget policy, eval thresholds, approved insights, bounded Knowledge Source/Package publication metadata | Backend decisions and reviewed operations | Revisioned Change Set snapshots and atomic publication; large M6 Package content is hash-pinned in a runtime artifact rather than copied into a snapshot; no secret values |
-| **C3 — Derived projections** | Chunks, embeddings, vector/lexical indexes, retrieval features, clusters, compact summaries | Retrieval, analysis, diagnostics | Rebuildable, revision-linked, deletable/recomputable; never treated as canonical truth; M5 Context Snapshots are immutable metadata audit records, not raw-content projections |
+| **C3 — Derived projections** | M7A chunks and separate lexical FTS rows, later embeddings/vector indexes, retrieval features, clusters, compact summaries | Retrieval, analysis, diagnostics | Rebuildable, revision-linked, deletable/recomputable; never treated as canonical truth; M5 Context Snapshots are immutable metadata audit records, not raw-content projections; M7A rows retain no Student C4 data or provider state |
 | **C4 — Student private content** | Messages, conversation history, summaries, memory, feedback text, uploaded student content | The scoped student's experience and privacy-controlled operations | Access isolated by server principal and subject; not curriculum truth; retention and deletion apply |
 | **C5 — Sensitive operational data** | Provider errors, rate-limit state, budget reservations, trace identifiers, abuse signals | Operations, audit, cost controls, incident response | Least-privilege internal access; minimize payloads and redact logs |
 | **C6 — Credentials and secrets** | Provider keys, encryption/master keys, secret-manager tokens | Adapter execution only | Secret-store boundary; never normal SQLite strings, API DTOs, snapshots, prompts, logs, Mobile, or Git |

@@ -1,0 +1,10 @@
+export * from "./contracts";
+export { AIRetrievalError, AI_RETRIEVAL_ERROR_CODES, type AIRetrievalErrorCode } from "./errors";
+export { buildSafeRetrievalMatch, normalizeRetrievalText, tokenizeRetrievalQuery } from "./normalization";
+export { createStructuredRichDocumentChunkingStrategy, StructuredRichDocumentChunkingStrategy } from "./structured-rich-strategy";
+export { createDefaultAIChunkingStrategyRegistry, DefaultAIChunkingStrategyRegistry } from "./strategy-registry";
+export { AIRetrievalSourceReader, type AIRetrievalSourceBatch, type AIRetrievalSourceDescriptor } from "./source-reader";
+export { SQLiteAIRetrievalProjectionRepository } from "./sqlite-repository";
+export { AIChunkProjectionBuilder, createAIChunkProjectionBuilder, type AIRetrievalBuildSession, type AIRetrievalBuilderOptions } from "./builder";
+export { createAIRetrievalProjectionHealthService, AIRetrievalProjectionHealthService } from "./health";
+export { createSQLiteAILexicalRetrievalAdapter, SQLiteAILexicalRetrievalAdapter } from "./lexical";
