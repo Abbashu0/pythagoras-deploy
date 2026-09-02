@@ -34,6 +34,15 @@ import {
 import type { AIModelCapability, AIModelConfig } from "../model-registry";
 import type { AIProviderConfig } from "../configuration";
 import { isAISecretStoreError } from "../secrets";
+import {
+  classifyAICircuitProviderOutcome,
+} from "../circuit-breaker/contracts";
+import { isAICircuitBreakerError } from "../circuit-breaker/errors";
+import type {
+  AICircuitAttemptPermit,
+  AICircuitPermitDecision,
+  AICircuitTarget,
+} from "../circuit-breaker/contracts";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_TIMEOUT_MS = 120_000;
@@ -50,6 +59,7 @@ interface PreparedAttempt {
   model: AIModelConfig;
   provider: AIProviderConfig;
   adapter: AIProviderAdapter;
+  secretVersion: number;
 }
 
 interface ExecutionControl {
@@ -205,6 +215,9 @@ export class AIProviderGateway {
         let control: ExecutionControl | undefined;
         let partialOutput = false;
         let attemptHadUsage = false;
+        let circuitPermit: AICircuitAttemptPermit | undefined;
+        let circuitOutcomeRecorded = false;
+        let circuitDenied = false;
         try {
           const prepared = this.prepareAttempt(plan, plan.attempts[attemptIndex], trace);
           if (!prepared.model.supportsStreaming) {
@@ -217,6 +230,20 @@ export class AIProviderGateway {
           ) {
             throw this.gatewayError("INVALID_REQUEST");
           }
+          const circuitDecision = this.acquireCircuitPermit(prepared, options);
+          if (circuitDecision?.kind === "DENIED") {
+            circuitDenied = true;
+            finishTrace(trace, "SKIPPED", this.clock, "CIRCUIT_OPEN");
+            attempts.push(trace);
+            lastError = this.gatewayError("CIRCUIT_OPEN", {
+              retryable: true,
+              fallbackEligible: true,
+              attempts,
+            });
+            if (attemptIndex === plan.attempts.length - 1 || this.clock() >= deadlineAt) throw lastError;
+            continue;
+          }
+          circuitPermit = circuitDecision?.permit;
           const attemptTimeoutMs = deadlineAt - this.clock();
           if (attemptTimeoutMs <= 0) throw this.gatewayError("TIMEOUT");
           control = createExecutionControl(parentSignal, attemptTimeoutMs);
@@ -235,6 +262,7 @@ export class AIProviderGateway {
             temperature: request.temperature,
             stream: true,
           };
+          trace.providerInvoked = true;
           const iterator = prepared.adapter.capability === "GENERATION"
             ? prepared.adapter
                 .generate(providerRequest, {
@@ -289,11 +317,21 @@ export class AIProviderGateway {
             await returnIterator(iterator);
           }
           if (!started || !terminal) throw new GatewayProtocolError();
+          if (circuitPermit) {
+            this.recordCircuitSuccess(circuitPermit);
+            circuitOutcomeRecorded = true;
+          }
           finishTrace(trace, "SUCCEEDED", this.clock);
           attempts.push(trace);
           return;
         } catch (error) {
+          if (circuitDenied) throw error;
           const failure = normalizeFailure(error, control, parentSignal);
+          if (circuitPermit && !circuitOutcomeRecorded) {
+            if (trace.providerInvoked) this.recordCircuitFailure(circuitPermit, failure.code);
+            else this.recordCircuitNeutral(circuitPermit);
+            circuitOutcomeRecorded = true;
+          }
           if (failure.providerRequestId) trace.providerRequestId = failure.providerRequestId;
           finishTrace(
             trace,
@@ -381,8 +419,25 @@ export class AIProviderGateway {
         plan.attempts[attemptIndex],
       );
       let control: ExecutionControl | undefined;
+      let circuitPermit: AICircuitAttemptPermit | undefined;
+      let circuitOutcomeRecorded = false;
+      let circuitDenied = false;
       try {
         const prepared = this.prepareAttempt(plan, plan.attempts[attemptIndex], trace);
+        const circuitDecision = this.acquireCircuitPermit(prepared, options);
+        if (circuitDecision?.kind === "DENIED") {
+          circuitDenied = true;
+          finishTrace(trace, "SKIPPED", this.clock, "CIRCUIT_OPEN");
+          attempts.push(trace);
+          lastError = this.gatewayError("CIRCUIT_OPEN", {
+            retryable: true,
+            fallbackEligible: true,
+            attempts,
+          });
+          if (attemptIndex === plan.attempts.length - 1 || this.clock() >= deadlineAt) throw lastError;
+          continue;
+        }
+        circuitPermit = circuitDecision?.permit;
         const attemptTimeoutMs = deadlineAt - this.clock();
         if (attemptTimeoutMs <= 0) throw this.gatewayError("TIMEOUT");
         control = createExecutionControl(parentSignal, attemptTimeoutMs);
@@ -391,6 +446,7 @@ export class AIProviderGateway {
           control.signal,
         );
         if (control.signal.aborted) throw new GatewayAbortError();
+        trace.providerInvoked = true;
         const rawValue = await awaitWithAbort(
           execute(prepared, {
             signal: control.signal,
@@ -402,11 +458,21 @@ export class AIProviderGateway {
         const value = validateResult(rawValue, prepared);
         const providerRequestId = getProviderRequestId(value);
         if (providerRequestId) trace.providerRequestId = providerRequestId;
+        if (circuitPermit) {
+          this.recordCircuitSuccess(circuitPermit);
+          circuitOutcomeRecorded = true;
+        }
         finishTrace(trace, "SUCCEEDED", this.clock);
         attempts.push(trace);
         return { value, attempts: Object.freeze([...attempts]) };
       } catch (error) {
+        if (circuitDenied) throw error;
         const failure = normalizeFailure(error, control, parentSignal);
+        if (circuitPermit && !circuitOutcomeRecorded) {
+          if (trace.providerInvoked) this.recordCircuitFailure(circuitPermit, failure.code);
+          else this.recordCircuitNeutral(circuitPermit);
+          circuitOutcomeRecorded = true;
+        }
         if (failure.providerRequestId) trace.providerRequestId = failure.providerRequestId;
         finishTrace(
           trace,
@@ -465,7 +531,70 @@ export class AIProviderGateway {
       throw this.gatewayError("SECRET_UNAVAILABLE");
     }
     const adapter = this.dependencies.adapters.require(model.adapterKey, plan.capability);
-    return { model, provider, adapter };
+    return { model, provider, adapter, secretVersion: metadata.secretVersion };
+  }
+
+  private acquireCircuitPermit(
+    prepared: PreparedAttempt,
+    options: AIProviderGatewayOperationOptions,
+  ): AICircuitPermitDecision | null {
+    const breaker = this.dependencies.circuitBreaker;
+    const policy = options.circuitPolicy;
+    if (!policy) return null;
+    if (!breaker) throw this.gatewayError("CONFIGURATION");
+    const target: AICircuitTarget = {
+      policyId: policy.policyId,
+      policyRevision: policy.policyRevision,
+      modelConfigId: prepared.model.id,
+      modelConfigRevision: prepared.model.revision,
+      providerConfigId: prepared.provider.id,
+      providerConfigRevision: prepared.provider.revision,
+      capability: prepared.model.capability,
+      adapterKey: prepared.model.adapterKey,
+      secretVersion: prepared.secretVersion,
+    };
+    try {
+      return breaker.acquirePermit({ target, at: this.clock() });
+    } catch (error) {
+      if (isAICircuitBreakerError(error)) throw this.gatewayError("CONFIGURATION");
+      throw error;
+    }
+  }
+
+  private recordCircuitSuccess(permit: AICircuitAttemptPermit): void {
+    try {
+      this.dependencies.circuitBreaker?.recordSuccess(permit, this.clock());
+    } catch (error) {
+      if (isAICircuitBreakerError(error) && error.code === "AI_CIRCUIT_STALE_PERMIT") return;
+      throw error;
+    }
+  }
+
+  private recordCircuitFailure(permit: AICircuitAttemptPermit, errorCode: FailureDescriptor["code"]): void {
+    const classification = classifyAICircuitProviderOutcome(errorCode);
+    try {
+      if (classification === "COUNTED" || classification === "AUTHENTICATION") {
+        this.dependencies.circuitBreaker?.recordFailure({
+          permit,
+          errorCode: errorCode as "RATE_LIMITED" | "TIMEOUT" | "UNAVAILABLE" | "BAD_RESPONSE" | "UNKNOWN" | "AUTHENTICATION",
+          at: this.clock(),
+        });
+      } else {
+        this.dependencies.circuitBreaker?.recordNeutral(permit, this.clock());
+      }
+    } catch (error) {
+      if (isAICircuitBreakerError(error) && error.code === "AI_CIRCUIT_STALE_PERMIT") return;
+      throw error;
+    }
+  }
+
+  private recordCircuitNeutral(permit: AICircuitAttemptPermit): void {
+    try {
+      this.dependencies.circuitBreaker?.recordNeutral(permit, this.clock());
+    } catch (error) {
+      if (isAICircuitBreakerError(error) && error.code === "AI_CIRCUIT_STALE_PERMIT") return;
+      throw error;
+    }
   }
 
   private createAttemptTrace(
@@ -488,6 +617,7 @@ export class AIProviderGateway {
       completedAt: null,
       latencyMs: null,
       status: "FAILED",
+      providerInvoked: false,
     };
   }
 

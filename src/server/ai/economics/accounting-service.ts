@@ -47,6 +47,12 @@ export class AICostAccountingService {
     calculation: AICostCalculation;
   } {
     const attempt = observation.attempt;
+    if (!attempt.providerInvoked || attempt.status === "SKIPPED") {
+      throw new AIAccountingError(
+        "AI_ACCOUNTING_CONFLICT",
+        "A Gateway attempt without a Provider invocation cannot produce a usage record.",
+      );
+    }
     if (
       attempt.modelConfigRevision === null ||
       attempt.providerConfigId === null ||

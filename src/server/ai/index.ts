@@ -7,3 +7,4 @@ export * from "./budget";
 export * from "./rate-limits";
 export * from "./admission";
 export * from "./operations";
+export * from "./circuit-breaker";

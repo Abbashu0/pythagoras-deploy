@@ -6,9 +6,11 @@ import type {
   AIProviderConfigRepository,
 } from "../configuration";
 import type { AISecretStoreAdapter } from "../secrets";
+import type { AICircuitBreaker } from "../circuit-breaker/contracts";
 
 export const AI_PROVIDER_ERROR_CODES = [
   "CONFIGURATION",
+  "CIRCUIT_OPEN",
   "AUTHENTICATION",
   "INVALID_REQUEST",
   "CAPABILITY_MISMATCH",
@@ -28,6 +30,7 @@ export const AI_PROVIDER_ATTEMPT_STATUSES = [
   "FAILED",
   "CANCELLED",
   "TIMEOUT",
+  "SKIPPED",
 ] as const;
 
 export type AIProviderAttemptStatus =
@@ -233,6 +236,7 @@ export interface AIProviderAttemptTrace {
   completedAt: number | null;
   latencyMs: number | null;
   status: AIProviderAttemptStatus;
+  providerInvoked: boolean;
   errorCode?: AIProviderErrorCode;
   providerRequestId?: string;
 }
@@ -255,11 +259,17 @@ export interface AIProviderGatewayDependencies {
   adapters: {
     require(adapterKey: string, capability: AIModelCapability): AIProviderAdapter;
   };
+  circuitBreaker?: AICircuitBreaker;
 }
 
 export interface AIProviderGatewayOperationOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
+  /** Server-owned exact Circuit Breaker Policy reference; clients must never provide this. */
+  circuitPolicy?: {
+    policyId: string;
+    policyRevision: number;
+  };
 }
 
 export interface AIProviderGatewayOptions {

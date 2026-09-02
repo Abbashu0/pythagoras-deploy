@@ -12,6 +12,7 @@ import { AIModelConfigChangeAdapter } from "../ai/model-registry";
 import { AIRateCardChangeAdapter } from "../ai/economics";
 import { AIBudgetPolicyChangeAdapter } from "../ai/budget";
 import { AIRateLimitPolicyChangeAdapter } from "../ai/rate-limits";
+import { AICircuitBreakerPolicyChangeAdapter } from "../ai/circuit-breaker";
 
 export class ChangeResourceAdapterRegistry {
   private readonly adapters = new Map<string, ChangeResourceAdapter>();
@@ -75,6 +76,7 @@ export function createDefaultChangeResourceRegistry(): ChangeResourceAdapterRegi
       new AIRateCardChangeAdapter(),
       new AIBudgetPolicyChangeAdapter(),
       new AIRateLimitPolicyChangeAdapter(),
+      new AICircuitBreakerPolicyChangeAdapter(),
     ],
     [new QuestionChangeSetCoordinator(), new MaterialQuestionBankChangeSetCoordinator()],
   );

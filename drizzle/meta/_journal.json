@@ -120,6 +120,13 @@
       "when": 1788304444046,
       "tag": "0016_left_queen_noir",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1788307653153,
+      "tag": "0017_lean_oracle",
+      "breakpoints": true
     }
   ]
 }

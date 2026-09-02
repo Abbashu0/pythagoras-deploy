@@ -36,6 +36,10 @@ import type {
 } from "../ai/configuration/contracts";
 import type { AIModelCapability } from "../ai/model-registry/contracts";
 import type {
+  AICircuitEventType,
+  AICircuitStateName,
+} from "../ai/circuit-breaker/contracts";
+import type {
   AIAccountingActorType,
   AICostBasis,
   AICostCenter,
@@ -1405,6 +1409,139 @@ export const aiModelConfigs = sqliteTable(
   ],
 );
 
+/** Governed Circuit Breaker policy identity; behavior lives in immutable revisions. */
+export const aiCircuitBreakerPolicies = sqliteTable(
+  "ai_circuit_breaker_policies",
+  {
+    id: text("id").primaryKey(),
+    key: text("policy_key").notNull(),
+    currentRevision: integer("current_revision").notNull().default(1),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    createdBy: text("created_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+    updatedBy: text("updated_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+  },
+  (table) => [
+    uniqueIndex("ai_circuit_breaker_policies_key_unique").on(table.key),
+    check("ai_circuit_breaker_policies_key_valid", sql`length(trim(${table.key})) between 1 and 120 and ${table.key} not glob '*[^a-z0-9.-]*'`),
+    check("ai_circuit_breaker_policies_revision_positive", sql`${table.currentRevision} >= 1`),
+    check("ai_circuit_breaker_policies_created_nonnegative", sql`${table.createdAt} >= 0`),
+    check("ai_circuit_breaker_policies_timestamps_ordered", sql`${table.updatedAt} >= ${table.createdAt}`),
+  ],
+);
+
+/** Immutable Circuit Breaker behavior revision. */
+export const aiCircuitBreakerPolicyRevisions = sqliteTable(
+  "ai_circuit_breaker_policy_revisions",
+  {
+    id: text("id").primaryKey(),
+    circuitPolicyId: text("circuit_policy_id").notNull().references(() => aiCircuitBreakerPolicies.id, { onDelete: "restrict" }),
+    revision: integer("revision").notNull(),
+    displayName: text("display_name").notNull(),
+    failureThreshold: integer("failure_threshold").notNull(),
+    openDurationMs: integer("open_duration_ms").notNull(),
+    halfOpenProbeLeaseMs: integer("half_open_probe_lease_ms").notNull(),
+    enabled: integer("enabled", { mode: "boolean" }).notNull(),
+    createdAt: integer("created_at").notNull(),
+    createdBy: text("created_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+  },
+  (table) => [
+    uniqueIndex("ai_circuit_breaker_policy_revisions_identity_unique").on(table.circuitPolicyId, table.revision),
+    index("ai_circuit_breaker_policy_revisions_policy_index").on(table.circuitPolicyId, table.createdAt),
+    check("ai_circuit_breaker_policy_revisions_revision_positive", sql`${table.revision} >= 1`),
+    check("ai_circuit_breaker_policy_revisions_display_name_valid", sql`length(trim(${table.displayName})) between 1 and 200`),
+    check("ai_circuit_breaker_policy_revisions_threshold_valid", sql`${table.failureThreshold} between 1 and 100`),
+    check("ai_circuit_breaker_policy_revisions_open_duration_valid", sql`${table.openDurationMs} between 1000 and 86400000`),
+    check("ai_circuit_breaker_policy_revisions_probe_lease_valid", sql`${table.halfOpenProbeLeaseMs} between 100 and 86400000`),
+    check("ai_circuit_breaker_policy_revisions_enabled_boolean", sql`${table.enabled} in (0,1)`),
+    check("ai_circuit_breaker_policy_revisions_created_nonnegative", sql`${table.createdAt} >= 0`),
+  ],
+);
+
+/** Persistent state for one exact policy/model/provider/credential operational target. */
+export const aiCircuitBreakerStates = sqliteTable(
+  "ai_circuit_breaker_states",
+  {
+    id: text("id").primaryKey(),
+    targetHash: text("target_hash").notNull(),
+    policyId: text("policy_id").notNull().references(() => aiCircuitBreakerPolicies.id, { onDelete: "restrict" }),
+    policyRevision: integer("policy_revision").notNull(),
+    modelConfigId: text("model_config_id").notNull().references(() => aiModelConfigs.id, { onDelete: "restrict" }),
+    modelConfigRevision: integer("model_config_revision").notNull(),
+    providerConfigId: text("provider_config_id").notNull().references(() => aiProviderConfigs.id, { onDelete: "restrict" }),
+    providerConfigRevision: integer("provider_config_revision").notNull(),
+    capability: text("capability").$type<AIModelCapability>().notNull(),
+    adapterKey: text("adapter_key").notNull(),
+    secretVersion: integer("secret_version").notNull(),
+    state: text("state").$type<AICircuitStateName>().notNull(),
+    stateGeneration: integer("state_generation").notNull(),
+    consecutiveFailures: integer("consecutive_failures").notNull(),
+    openedAt: integer("opened_at"),
+    openUntil: integer("open_until"),
+    probeOwner: text("probe_owner"),
+    probeToken: text("probe_token"),
+    probeExpiresAt: integer("probe_expires_at"),
+    lastSuccessAt: integer("last_success_at"),
+    lastFailureAt: integer("last_failure_at"),
+    lastErrorCode: text("last_error_code"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("ai_circuit_breaker_states_target_hash_unique").on(table.targetHash),
+    index("ai_circuit_breaker_states_provider_state_index").on(table.providerConfigId, table.state, table.updatedAt),
+    index("ai_circuit_breaker_states_model_state_index").on(table.modelConfigId, table.state, table.updatedAt),
+    index("ai_circuit_breaker_states_policy_index").on(table.policyId, table.policyRevision),
+    check("ai_circuit_breaker_states_target_hash_valid", sql`length(${table.targetHash}) = 64 and ${table.targetHash} not glob '*[^0-9a-f]*'`),
+    check("ai_circuit_breaker_states_policy_revision_positive", sql`${table.policyRevision} >= 1`),
+    check("ai_circuit_breaker_states_model_revision_positive", sql`${table.modelConfigRevision} >= 1`),
+    check("ai_circuit_breaker_states_provider_revision_positive", sql`${table.providerConfigRevision} >= 1`),
+    check("ai_circuit_breaker_states_capability_valid", sql`${table.capability} in ('GENERATION','EMBEDDING','RERANK')`),
+    check("ai_circuit_breaker_states_adapter_key_valid", sql`length(trim(${table.adapterKey})) between 1 and 120 and ${table.adapterKey} not glob '*[^a-z0-9.-]*'`),
+    check("ai_circuit_breaker_states_secret_version_positive", sql`${table.secretVersion} >= 1`),
+    check("ai_circuit_breaker_states_state_valid", sql`${table.state} in ('CLOSED','OPEN','HALF_OPEN')`),
+    check("ai_circuit_breaker_states_generation_valid", sql`${table.stateGeneration} between 1 and 1000000000`),
+    check("ai_circuit_breaker_states_failure_count_valid", sql`${table.consecutiveFailures} between 0 and 1000000`),
+    check("ai_circuit_breaker_states_created_nonnegative", sql`${table.createdAt} >= 0`),
+    check("ai_circuit_breaker_states_updated_nonnegative", sql`${table.updatedAt} >= ${table.createdAt}`),
+    check("ai_circuit_breaker_states_opened_nonnegative", sql`${table.openedAt} is null or ${table.openedAt} >= 0`),
+    check("ai_circuit_breaker_states_open_until_nonnegative", sql`${table.openUntil} is null or ${table.openUntil} >= 0`),
+    check("ai_circuit_breaker_states_probe_expires_nonnegative", sql`${table.probeExpiresAt} is null or ${table.probeExpiresAt} >= 0`),
+    check("ai_circuit_breaker_states_last_success_nonnegative", sql`${table.lastSuccessAt} is null or ${table.lastSuccessAt} >= 0`),
+    check("ai_circuit_breaker_states_last_failure_nonnegative", sql`${table.lastFailureAt} is null or ${table.lastFailureAt} >= 0`),
+    check("ai_circuit_breaker_states_probe_owner_valid", sql`${table.probeOwner} is null or length(trim(${table.probeOwner})) between 1 and 200`),
+    check("ai_circuit_breaker_states_probe_token_valid", sql`${table.probeToken} is null or length(trim(${table.probeToken})) between 1 and 200`),
+    check("ai_circuit_breaker_states_error_valid", sql`${table.lastErrorCode} is null or ${table.lastErrorCode} in ('RATE_LIMITED','TIMEOUT','UNAVAILABLE','BAD_RESPONSE','UNKNOWN','AUTHENTICATION')`),
+    check("ai_circuit_breaker_states_fields_valid", sql`
+      (${table.state} = 'CLOSED' and ${table.openedAt} is null and ${table.openUntil} is null and ${table.probeOwner} is null and ${table.probeToken} is null and ${table.probeExpiresAt} is null) or
+      (${table.state} = 'OPEN' and ${table.openedAt} is not null and ${table.openUntil} is not null and ${table.openUntil} >= ${table.openedAt} and ${table.probeOwner} is null and ${table.probeToken} is null and ${table.probeExpiresAt} is null) or
+      (${table.state} = 'HALF_OPEN' and ${table.openedAt} is not null and ${table.openUntil} is null and ${table.probeOwner} is not null and ${table.probeToken} is not null and ${table.probeExpiresAt} is not null)
+    `),
+  ],
+);
+
+/** Append-only safe passive-health transition history; probe tokens are never stored here. */
+export const aiCircuitBreakerEvents = sqliteTable(
+  "ai_circuit_breaker_events",
+  {
+    id: text("id").primaryKey(),
+    targetHash: text("target_hash").notNull().references(() => aiCircuitBreakerStates.targetHash, { onDelete: "restrict" }),
+    stateGeneration: integer("state_generation").notNull(),
+    eventType: text("event_type").$type<AICircuitEventType>().notNull(),
+    errorCode: text("error_code"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    index("ai_circuit_breaker_events_target_time_index").on(table.targetHash, table.createdAt),
+    index("ai_circuit_breaker_events_time_index").on(table.createdAt),
+    check("ai_circuit_breaker_events_target_hash_valid", sql`length(${table.targetHash}) = 64 and ${table.targetHash} not glob '*[^0-9a-f]*'`),
+    check("ai_circuit_breaker_events_generation_valid", sql`${table.stateGeneration} >= 1`),
+    check("ai_circuit_breaker_events_type_valid", sql`${table.eventType} in ('FAILURE_COUNTED','OPENED','AUTHENTICATION_OPENED','HALF_OPEN_PROBE_GRANTED','HALF_OPEN_PROBE_RECLAIMED','HALF_OPEN_PROBE_RELEASED','CLOSED')`),
+    check("ai_circuit_breaker_events_error_valid", sql`${table.errorCode} is null or ${table.errorCode} in ('RATE_LIMITED','TIMEOUT','UNAVAILABLE','BAD_RESPONSE','UNKNOWN','AUTHENTICATION')`),
+    check("ai_circuit_breaker_events_created_nonnegative", sql`${table.createdAt} >= 0`),
+  ],
+);
+
 /** Append-only safe audit metadata; no ciphertext or secret payload is stored. */
 export const aiSecretAuditEvents = sqliteTable(
   "ai_secret_audit_events",
@@ -1719,7 +1856,7 @@ export const aiUsageCostRecords = sqliteTable(
     check("ai_usage_cost_records_known_cost_valid", sql`${table.knownCostNano} between 0 and 9007199254740991`),
     check("ai_usage_cost_records_completeness_valid", sql`${table.costCompleteness} in ('COMPLETE','PARTIAL')`),
     check("ai_usage_cost_records_basis_valid", sql`${table.costBasis} in ('RATE_CARD','PROVIDER_REPORTED')`),
-    check("ai_usage_cost_records_status_valid", sql`${table.attemptStatus} in ('SUCCEEDED','FAILED','CANCELLED','TIMEOUT')`),
+    check("ai_usage_cost_records_status_valid", sql`${table.attemptStatus} in ('SUCCEEDED','FAILED','CANCELLED','TIMEOUT','SKIPPED')`),
     check("ai_usage_cost_records_started_nonnegative", sql`${table.startedAt} >= 0`),
     check("ai_usage_cost_records_completed_ordered", sql`${table.completedAt} is null or ${table.completedAt} >= ${table.startedAt}`),
     check("ai_usage_cost_records_latency_valid", sql`${table.latencyMs} is null or ${table.latencyMs} >= 0`),
@@ -2138,6 +2275,10 @@ export type QuestionSearchDocumentRow =
   typeof questionSearchDocuments.$inferSelect;
 export type AIProviderConfigRow = typeof aiProviderConfigs.$inferSelect;
 export type AIModelConfigRow = typeof aiModelConfigs.$inferSelect;
+export type AICircuitBreakerPolicyRow = typeof aiCircuitBreakerPolicies.$inferSelect;
+export type AICircuitBreakerPolicyRevisionRow = typeof aiCircuitBreakerPolicyRevisions.$inferSelect;
+export type AICircuitBreakerStateRow = typeof aiCircuitBreakerStates.$inferSelect;
+export type AICircuitBreakerEventRow = typeof aiCircuitBreakerEvents.$inferSelect;
 export type AISecretRefRow = typeof aiSecretRefs.$inferSelect;
 export type AISecretAuditEventRow = typeof aiSecretAuditEvents.$inferSelect;
 export type AIRateCardRow = typeof aiRateCards.$inferSelect;

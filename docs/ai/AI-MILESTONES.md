@@ -47,8 +47,9 @@ AI milestones are future delivery boundaries. Each milestone is one coherent com
 
 #### AI-M3C2 — Circuit Breakers & Operational Health
 
-**Status:** Not started.
-**Boundary:** Future provider health, circuit breakers, outage policy, and operational health state.
+**Status:** Implemented; AI-M3C2 is complete pending independent review.
+**Delivered boundary:** Governed revisioned Circuit Breaker Policies, persistent exact-route Circuit state with CLOSED/OPEN/HALF_OPEN fencing and probes, passive health observations for Generation/Embedding/Rerank, circuit-aware Gateway fallback, safe operational health views, and migration `0017_lean_oracle`.
+**Explicit boundary:** No active synthetic health probe, production Provider adapter, external Provider call, Student auth/entitlement, Admin/Mobile AI UI, RAG, or AI-M4 conversation runtime was added.
 
 ## Remaining future milestones
 

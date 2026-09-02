@@ -343,6 +343,7 @@ function generationAttempt(modelConfigId: string, providerConfigId: string, over
     completedAt: BASE_TIME + 100,
     latencyMs: 100,
     status: "SUCCEEDED" as AIProviderAttemptStatus,
+    providerInvoked: true,
     providerRequestId: "provider-request-1",
     ...overrides,
   };
@@ -400,7 +401,7 @@ function resolvedRateCard(overrides: Partial<ResolvedAIRateCard> = {}): Resolved
 test("AI M3A migration creates normalized accounting tables without raw content or secrets", () => {
   const fixture = createFixture();
   try {
-    assert.equal(getContentDatabaseStatus(fixture.database).migrationsApplied, 17);
+    assert.equal(getContentDatabaseStatus(fixture.database).migrationsApplied, 18);
     for (const table of [
       "ai_rate_cards",
       "ai_rate_card_revisions",

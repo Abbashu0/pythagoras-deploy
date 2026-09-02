@@ -91,7 +91,7 @@ export function isAIProviderGatewayError(
 }
 
 export function defaultRetryability(code: AIProviderErrorCode): boolean {
-  return code === "RATE_LIMITED" || code === "TIMEOUT" || code === "UNAVAILABLE";
+  return code === "RATE_LIMITED" || code === "TIMEOUT" || code === "UNAVAILABLE" || code === "CIRCUIT_OPEN";
 }
 
 export function defaultFallbackEligibility(code: AIProviderErrorCode): boolean {
@@ -99,7 +99,8 @@ export function defaultFallbackEligibility(code: AIProviderErrorCode): boolean {
     code === "RATE_LIMITED" ||
     code === "TIMEOUT" ||
     code === "UNAVAILABLE" ||
-    code === "BAD_RESPONSE"
+    code === "BAD_RESPONSE" ||
+    code === "CIRCUIT_OPEN"
   );
 }
 
@@ -107,6 +108,8 @@ export function safeProviderErrorMessage(code: AIProviderErrorCode): string {
   switch (code) {
     case "CONFIGURATION":
       return "The AI Provider configuration is unavailable.";
+    case "CIRCUIT_OPEN":
+      return "The AI Provider route is temporarily unavailable.";
     case "AUTHENTICATION":
       return "The AI Provider rejected authentication.";
     case "INVALID_REQUEST":
