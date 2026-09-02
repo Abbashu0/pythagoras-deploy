@@ -275,6 +275,62 @@ function insertLegacyTrace(database: ContentDatabase, trace: AITutorResponseTrac
   );
 }
 
+function insertDirectTrace(database: ContentDatabase, trace: AITutorResponseTrace, refsSealed?: 0 | 1): void {
+  const columns = refsSealed === undefined ? "" : ", refs_sealed";
+  const placeholders = Array.from({ length: refsSealed === undefined ? 35 : 36 }, () => "?").join(", ");
+  const values: Array<string | number | null> = [
+    trace.id,
+    trace.responseId,
+    trace.conversationId,
+    trace.principalRef,
+    trace.subjectKey,
+    trace.tutorConfigId,
+    trace.tutorConfigRevision,
+    trace.contextSnapshotId,
+    trace.contextSnapshotFingerprint,
+    trace.retrievalConfigId,
+    trace.retrievalConfigRevision,
+    trace.fusionAlgorithmKey,
+    trace.fusionAlgorithmRevision,
+    trace.generationModelConfigId,
+    trace.generationModelConfigRevision,
+    trace.generationProviderConfigId,
+    trace.generationProviderConfigRevision,
+    trace.providerModelId,
+    trace.adapterKey,
+    trace.groundingProtocolKey,
+    trace.groundingProtocolRevision,
+    trace.citationProtocolKey,
+    trace.citationProtocolRevision,
+    trace.costOperationId,
+    trace.budgetReservationId,
+    trace.budgetPolicyId,
+    trace.budgetPolicyRevision,
+    trace.rateLimitPolicyId,
+    trace.rateLimitPolicyRevision,
+    trace.planFingerprint,
+    trace.status,
+    trace.safeErrorCode,
+  ];
+  if (refsSealed !== undefined) values.push(refsSealed);
+  values.push(trace.createdAt, trace.updatedAt, trace.completedAt);
+  database.client.prepare(`
+    insert into ai_tutor_response_traces (
+      id, response_id, conversation_id, principal_ref, subject_key,
+      tutor_config_id, tutor_config_revision, context_snapshot_id,
+      context_snapshot_fingerprint, retrieval_config_id, retrieval_config_revision,
+      fusion_algorithm_key, fusion_algorithm_revision, generation_model_config_id,
+      generation_model_config_revision, generation_provider_config_id,
+      generation_provider_config_revision, provider_model_id, adapter_key,
+      grounding_protocol_key, grounding_protocol_revision, citation_protocol_key,
+      citation_protocol_revision, cost_operation_id, budget_reservation_id,
+      budget_policy_id, budget_policy_revision, rate_limit_policy_id,
+      rate_limit_policy_revision, plan_fingerprint, status, safe_error_code${columns},
+      created_at, updated_at, completed_at
+    ) values (${placeholders})
+  `).run(...values);
+}
+
 function createKnowledgeChunk(fixture: TutorFixture): { projectionRevisionId: string; chunkId: string; originId: string } {
   const sourceId = uuidv7();
   new SQLiteAIKnowledgeSourceRepository(fixture.database).create({
@@ -334,7 +390,7 @@ test("Tutor Config is governed, server-owned, and protected by SQLite lifecycle 
   } finally { fixture.close(); }
 });
 
-test("0029 upgrades a populated 0028 database and seals existing Tutor Trace refs", async () => {
+test("0029 and 0030 upgrade a populated 0028 database and keep existing Tutor Trace refs sealed", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "pythagoras-ai-m8a-upgrade-"));
   const oldMigrations = mkdtempSync(path.join(os.tmpdir(), "pythagoras-ai-m8a-migrations-"));
   let oldFixture: TutorFixture | null = null;
@@ -366,13 +422,14 @@ test("0029 upgrades a populated 0028 database and seals existing Tutor Trace ref
 
     const upgradedDatabase = openContentDatabase({ dataDirectory: root, migrationsDirectory });
     upgraded = upgradedDatabase;
-    assert.equal(Number((upgradedDatabase.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count), 30);
+    assert.equal(Number((upgradedDatabase.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count), 31);
     for (const table of ["ai_tutor_configs", "ai_tutor_config_revisions", "ai_tutor_response_traces", "ai_tutor_trace_projection_refs", "ai_tutor_trace_evidence_refs"]) assert.ok(upgradedDatabase.client.prepare("select name from sqlite_master where type='table' and name=?").get(table));
     for (const trigger of ["ai_tutor_configs_identity_no_update", "ai_tutor_configs_revision_pointer", "ai_tutor_config_revisions_no_update", "ai_tutor_config_revisions_no_delete", "ai_tutor_response_traces_insert_integrity", "ai_tutor_response_traces_identity_no_update", "ai_tutor_response_traces_lifecycle", "ai_tutor_response_traces_refs_sealed_state", "ai_tutor_response_traces_requires_sealed_refs", "ai_tutor_trace_projection_refs_sealed_insert", "ai_tutor_trace_evidence_refs_sealed_insert"]) assert.ok(upgradedDatabase.client.prepare("select name from sqlite_master where type='trigger' and name=?").get(trigger));
     assert.equal((upgradedDatabase.client.prepare("select count(*) as count from ai_tutor_configs").get() as { count: number }).count, 1);
     const legacyTraceForAssertions = legacyTrace;
     if (!legacyTraceForAssertions) throw new Error("The legacy Tutor Trace fixture was not created.");
     assert.equal((upgradedDatabase.client.prepare("select refs_sealed from ai_tutor_response_traces where id=?").get(legacyTraceForAssertions.id) as { refs_sealed: number }).refs_sealed, 1);
+    assert.throws(() => insertDirectTrace(upgradedDatabase, legacyTraceForAssertions), /unsealed|PLANNED/i);
     assert.throws(() => upgradedDatabase.client.prepare("insert into ai_tutor_trace_projection_refs (trace_id, projection_kind, projection_revision_id) values (?, 'M7A', ?)").run(legacyTraceForAssertions.id, "legacy-projection"), /sealed|reference/i);
     assert.ok(upgradedDatabase.client.prepare("select subject_key from canonical_materials where subject_key='biology'").get());
   } finally {
@@ -619,6 +676,14 @@ test("M8A Response Trace foundation is metadata-only, relationally owned, unique
     foreignParentInput.projectionRefs = [{ traceId: created.id, projectionKind: "M7A", projectionRevisionId: chunk.projectionRevisionId } as unknown as AITutorTraceProjectionRefCreate];
     assert.throws(() => traces.create(foreignParentInput), /fields|reference/i);
     assert.equal(traces.getByResponse(secondTurn.response.id), null);
+    assert.throws(() => insertDirectTrace(fixture.database, createdTraceInput.trace, 1), /unsealed|PLANNED/i);
+    assert.throws(() => insertDirectTrace(fixture.database, createdTraceInput.trace), /unsealed|PLANNED/i);
+    insertDirectTrace(fixture.database, foreignParentInput.trace, 0);
+    assert.equal((fixture.database.client.prepare("select refs_sealed from ai_tutor_response_traces where id=?").get(foreignParentInput.trace.id) as { refs_sealed: number }).refs_sealed, 0);
+    assert.throws(() => traces.transition({ id: foreignParentInput.trace.id, expectedStatus: "PLANNED", status: "STREAMING", updatedAt: BASE_TIME + 301, completedAt: null, safeErrorCode: null }), /sealed|seal/i);
+    fixture.database.client.prepare("update ai_tutor_response_traces set refs_sealed=1 where id=?").run(foreignParentInput.trace.id);
+    assert.equal((fixture.database.client.prepare("select refs_sealed from ai_tutor_response_traces where id=?").get(foreignParentInput.trace.id) as { refs_sealed: number }).refs_sealed, 1);
+    assert.throws(() => fixture.database.client.prepare("insert into ai_tutor_trace_projection_refs (trace_id, projection_kind, projection_revision_id) values (?, 'M7A', ?)").run(foreignParentInput.trace.id, chunk.projectionRevisionId), /sealed|reference/i);
     assert.throws(() => fixture.database.client.prepare("insert into ai_tutor_trace_projection_refs (trace_id, projection_kind, projection_revision_id) values (?, 'M7A', ?)").run(created.id, chunk.projectionRevisionId), /sealed|reference/i);
     assert.throws(() => fixture.database.client.prepare("insert into ai_tutor_trace_evidence_refs (trace_id, ordinal, citation_label, chunk_id, m7a_projection_revision_id, m7b_embedding_projection_revision_id, origin_kind, origin_id, question_id, question_revision) values (?, 2, '[E2]', ?, ?, null, 'KNOWLEDGE_PACKAGE', ?, null, null)").run(created.id, chunk.chunkId, chunk.projectionRevisionId, chunk.originId), /sealed|reference/i);
     assert.throws(() => fixture.database.client.prepare("update ai_tutor_response_traces set plan_fingerprint=? where id=?").run("f".repeat(64), created.id), /identity|immutable/i);

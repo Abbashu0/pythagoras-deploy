@@ -112,6 +112,8 @@ Each Retrieval Config Revision is append-only and carries the non-user-selectabl
 
 `ai_tutor_response_traces` is a separate M8 answer-level metadata audit foundation, not the future M11 Retrieval Trace. One trace binds one Response to exact Tutor, Context Snapshot, Retrieval/fusion, Generation Model/Provider, grounding/citation, cost-operation, budget-reservation, and plan identities. Projection and Evidence child rows contain IDs/revisions only. The repository derives every child `traceId` from the parent and atomically seals the child set; SQLite allows child insertion only for an unsealed `PLANNED` trace and blocks post-seal insertion, update, and delete. Trace rows are lifecycle-fenced (`PLANNED`, `STREAMING`, `COMPLETED`, `FAILED`, `CANCELLED`, `BLOCKED`) and never contain raw Student messages, policy/evidence text, prompts, Provider responses, credentials, or chain-of-thought. M8A provides the repository/service but does not create live traces automatically; M8B owns insertion after admission.
 
+Migration `0030_require-unsealed-tutor-trace-creation` also requires the parent creation state itself to be `PLANNED` plus `refsSealed = 0`; existing historical rows remain sealed.
+
 | Boundary | Contract |
 | --- | --- |
 | **Student Memory** | Per-principal, subject-scoped durable memory candidates or approved memories with provenance, confidence, visibility, retention, and deletion semantics. No cross-user memory. |

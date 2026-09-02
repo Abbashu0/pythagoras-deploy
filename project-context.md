@@ -25,6 +25,8 @@ For appropriate system controls, prefer `@expo/ui` or other Expo/native platform
 
 ### Current M7C status
 
+M8A's final SQLite creation correction is migration `0030_require-unsealed-tutor-trace-creation`: new Response Traces must enter `PLANNED` and unsealed, while historical rows remain sealed.
+
 The current AI checkpoint supersedes the older M7B/M7C status wording below: AI-M7A, AI-M7B, and AI-M7C are approved, and AI-M7 Retrieval Engine is approved/complete. Migrations `0026_steady_turbo` and `0027_many_chat` add governed Retrieval Config metadata, append-only Config history, and server-pinned weighted-RRF identity. M7C provides bounded published-only hybrid retrieval, a global semantic K, exact eligible-origin final fences, preserved bounded Question provenance, deterministic RRF, optional reranking, live eligibility fences, caller-owned cost attribution without settlement, and runtime-only EvidencePacks. AI-M8A is the current Tutor planning checkpoint pending independent review; AI-M8 overall remains incomplete, and no production Provider or Student/Admin AI UI exists.
 
 The reviewed AI-M6 correction also applies `0022_knowledge-package-source-subject-consistency`: the Question Knowledge Projector now accepts only canonical SQLite truth and preserves exact Question/Variant revision identities; cross-subject Package/Source pins are rejected at the database boundary. AI-M7A, AI-M7B, and AI-M7C are approved, and AI-M7 is complete.

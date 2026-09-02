@@ -140,6 +140,8 @@ AI-M8A is implemented pending independent review. A governed `ai.tutor-config` s
 
 The M8A Response Trace foundation is metadata-only and explicitly created by its future M8B owner after admission. It binds one trace to one Response and its Conversation, Tutor/Context/Retrieval/Model/Provider revisions, cost operation, budget reservation, and plan fingerprint. Projection and selected Evidence references are inserted in one transaction and then sealed; no child ref can be added after sealing or lifecycle advancement. No raw message, policy, evidence, prompt, provider response, credential, or chain-of-thought is persisted. M11 Retrieval Trace remains a separate future telemetry boundary.
 
+Migration `0030_require-unsealed-tutor-trace-creation` closes the SQLite creation boundary: a new Trace cannot be inserted already sealed; historical Traces upgraded from `0028` remain sealed.
+
 ## 6. Governance and operational separation
 
 Governed Product configuration includes policies, routing, retrieval configuration, budgets, and knowledge publication. Operational state includes secret health, provider health, circuit breakers, queue leases, last errors, and retry state. Operational state is not a substitute for approval and secret material never enters a Change Set snapshot.

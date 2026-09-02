@@ -28,6 +28,8 @@ AI-M7A, AI-M7B, and AI-M7C are approved. Migrations `0026_steady_turbo` and `002
 
 AI-M8A is the first Tutor planning checkpoint. It governs `ai.tutor-config`, builds a deterministic server-only preflight over the canonical Conversation and M5 Context Snapshot, resolves exact Retrieval/Model/Provider/Budget/Rate Limit revisions, estimates maximum bounded cost in integer nano-currency including reasoning-capable Generation, and converts a trusted internal request-bound EvidencePack into a detached immutable runtime-only one-model Generation plan. It makes zero Generation, Embedding, or Rerank calls and does not create admission, reservations, or settlement. Its Response Trace foundation stores only revision/ownership metadata and atomically sealed projection/evidence references; it never stores raw messages, policies, evidence, prompts, provider output, credentials, or chain-of-thought. M8B owns future execution and M8C owns grounding/citation validation.
 
+Migration `0030_require-unsealed-tutor-trace-creation` ensures new Response Traces cannot bypass the unsealed creation phase; historical Traces remain sealed.
+
 | Document | Responsibility |
 | --- | --- |
 | [AI-ARCHITECTURE.md](./AI-ARCHITECTURE.md) | System shape, trust boundaries, invariants, and production request flow |

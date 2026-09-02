@@ -103,6 +103,8 @@ AI milestones are future delivery boundaries. Each milestone is one coherent com
 **Delivered boundary:** Governed `ai.tutor-config` identities/revisions through Change Sets and OWNER publication; server-owned `evidence-grounded-v1@1` and `evidence-ref-v1@1` protocols; canonical Conversation/M5 Context preflight; exact current Retrieval/Model/Provider/Budget/Rate Limit revision pinning; conservative integer nano-currency preflight cost estimates for QUERY embedding, optional reranking, and Generation including reasoning-capable output bounds; trusted internal request-bound EvidencePack validation and deterministic one-model/no-fallback Generation request planning over detached immutable runtime values; and metadata-only Response Trace tables with ownership/lifecycle protections and atomically sealed child references through migrations `0028_yellow_the_fury` and `0029_massive_rick_jones`.
 **Explicit boundary:** M8A makes zero Generation, Embedding, or Rerank calls; it does not execute Hybrid Retrieval, create admission/reservations, settle cost, stream Conversation responses, validate generated citations, expose a Student API/UI, add tools/Web Search, persist prompts/content, or select a production Provider. M8B owns execution and M8C owns grounding/citation validation and replay hardening.
 
+Migration `0030_require-unsealed-tutor-trace-creation` completes the M8A Trace creation hardening: every new Trace starts `PLANNED` and unsealed, and only the atomic repository seal may move it to sealed.
+
 ### AI-M8B — Grounded Generation Execution
 
 **Status:** Not started.
