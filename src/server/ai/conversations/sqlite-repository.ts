@@ -90,12 +90,20 @@ export class SQLiteAIConversationRepository {
   }
 
   getResponseByIdempotency(principalRef: string, idempotencyKey: string): AIConversationResponse | null {
+    return this.findResponseByIdempotency(principalRef, idempotencyKey, false);
+  }
+
+  getResponseByIdempotencyIncludingDeleted(principalRef: string, idempotencyKey: string): AIConversationResponse | null {
+    return this.findResponseByIdempotency(principalRef, idempotencyKey, true);
+  }
+
+  private findResponseByIdempotency(principalRef: string, idempotencyKey: string, includeDeleted: boolean): AIConversationResponse | null {
     const row = this.database.db.select({ response: aiConversationResponses }).from(aiConversationResponses)
       .innerJoin(aiConversations, eq(aiConversationResponses.conversationId, aiConversations.id))
       .where(and(
         eq(aiConversationResponses.principalRef, principalRef),
         eq(aiConversationResponses.idempotencyKey, idempotencyKey),
-        eq(aiConversations.status, "ACTIVE"),
+        includeDeleted ? undefined : eq(aiConversations.status, "ACTIVE"),
       )).get();
     return row ? responseFromRow(row.response) : null;
   }

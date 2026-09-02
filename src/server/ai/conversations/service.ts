@@ -89,14 +89,14 @@ export class AIConversationService {
         subjectKey: conversation.subjectKey,
         userContent,
       });
-      const replay = this.repository.getResponseByIdempotency(activePrincipal.principalRef, idempotencyKey);
-      if (replay) {
-        if (replay.conversationId !== conversationId || replay.requestFingerprint !== requestFingerprint) {
+      const historicalResponse = this.repository.getResponseByIdempotencyIncludingDeleted(activePrincipal.principalRef, idempotencyKey);
+      if (historicalResponse) {
+        if (historicalResponse.conversationId !== conversationId || historicalResponse.requestFingerprint === null || historicalResponse.requestFingerprint !== requestFingerprint) {
           throw new AIConversationError("AI_CONVERSATION_IDEMPOTENCY_CONFLICT", "The Conversation idempotency key is bound to a different request.");
         }
-        const userMessage = replay.requestMessageId ? this.repository.getMessage(replay.requestMessageId) : null;
+        const userMessage = historicalResponse.requestMessageId ? this.repository.getMessage(historicalResponse.requestMessageId) : null;
         if (!userMessage) throw new AIConversationError("AI_CONVERSATION_INVALID", "The idempotent Conversation request is incomplete.");
-        return { replayed: true, conversation, userMessage, response: replay };
+        return { replayed: true, conversation, userMessage, response: historicalResponse };
       }
 
       const responses = this.repository.listResponsesForConversation(conversationId, activePrincipal.principalRef);
@@ -314,7 +314,6 @@ export class AIConversationService {
       const responses = this.repository.listResponsesForConversation(normalizedConversationId, activePrincipal.principalRef);
       for (const response of responses) {
         const patch: Parameters<SQLiteAIConversationRepository["updateResponse"]>[0]["patch"] = {
-          idempotencyKey: null,
           requestFingerprint: null,
           requestMessageId: null,
           assistantMessageId: null,

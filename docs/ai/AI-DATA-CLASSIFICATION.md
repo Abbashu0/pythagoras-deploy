@@ -56,7 +56,7 @@ Future implementation must define policy values before enabling production data:
 4. Secret revocation and audit retention independent of conversation retention.
 5. Legal hold handling without silently keeping unrelated data.
 
-AI-M4 implements explicit Student-owned Conversation deletion: active response state is terminalized safely, temporary chunks and raw Messages are purged, and only minimal response/Conversation tombstone metadata remains. Broader retention, derived projections, queued jobs, caches, analytics references, and provider-side deletion responsibilities remain future privacy-hardening work. Deletion is a workflow, not a single row delete.
+AI-M4 implements explicit Student-owned Conversation deletion: active response state is terminalized safely, temporary chunks and raw Messages are purged, and only minimal response/Conversation tombstone metadata remains. The opaque top-level idempotency key is retained as operational identity so deletion cannot make a request reusable, while raw C4 content and its fingerprint/message references are removed. Broader retention, derived projections, queued jobs, caches, analytics references, and provider-side deletion responsibilities remain future privacy-hardening work. Deletion is a workflow, not a single row delete.
 
 ## 6. Prompt and trace minimization
 
