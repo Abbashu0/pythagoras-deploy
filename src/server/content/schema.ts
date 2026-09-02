@@ -34,6 +34,13 @@ import type {
   AIProviderRetentionPolicy,
   AIProviderTrainingPolicy,
 } from "../ai/configuration/contracts";
+import type {
+  AIConversationFinishReason,
+  AIConversationMessageRole,
+  AIConversationResponseStatus,
+  AIConversationSafeErrorCode,
+  AIConversationStatus,
+} from "../ai/conversations/contracts";
 import type { AIModelCapability } from "../ai/model-registry/contracts";
 import type {
   AICircuitEventType,
@@ -429,6 +436,126 @@ export const canonicalCarouselSettings = sqliteTable(
   ],
 );
 
+/** Private Student conversation tombstone; authentication truth remains outside this domain. */
+export const aiConversations = sqliteTable(
+  "ai_conversations",
+  {
+    id: text("id").primaryKey(),
+    principalRef: text("principal_ref").notNull(),
+    subjectKey: text("subject_key").notNull().references(() => canonicalMaterials.subjectKey, { onDelete: "restrict" }),
+    status: text("status").$type<AIConversationStatus>().notNull().default("ACTIVE"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    lastActivityAt: integer("last_activity_at").notNull(),
+    deletedAt: integer("deleted_at"),
+    revision: integer("revision").notNull().default(1),
+  },
+  (table) => [
+    uniqueIndex("ai_conversations_identity_unique").on(table.id, table.principalRef),
+    index("ai_conversations_principal_activity_index").on(table.principalRef, table.status, table.lastActivityAt, table.id),
+    index("ai_conversations_subject_index").on(table.subjectKey, table.status, table.lastActivityAt),
+    check("ai_conversations_principal_valid", sql`length(trim(${table.principalRef})) between 1 and 200 and ${table.principalRef} not glob '*[^A-Za-z0-9_-]*'`),
+    check("ai_conversations_subject_valid", sql`length(trim(${table.subjectKey})) between 1 and 80 and ${table.subjectKey} not glob '*[^a-z0-9-]*'`),
+    check("ai_conversations_status_valid", sql`${table.status} in ('ACTIVE','DELETED')`),
+    check("ai_conversations_revision_positive", sql`${table.revision} >= 1`),
+    check("ai_conversations_created_nonnegative", sql`${table.createdAt} >= 0`),
+    check("ai_conversations_updated_ordered", sql`${table.updatedAt} >= ${table.createdAt}`),
+    check("ai_conversations_activity_ordered", sql`${table.lastActivityAt} >= ${table.createdAt}`),
+    check("ai_conversations_deleted_consistent", sql`(${table.status} = 'ACTIVE' and ${table.deletedAt} is null) or (${table.status} = 'DELETED' and ${table.deletedAt} is not null and ${table.deletedAt} >= ${table.createdAt})`),
+  ],
+);
+
+/** Immutable private Conversation messages; raw C4 text is intentionally isolated here. */
+export const aiConversationMessages = sqliteTable(
+  "ai_conversation_messages",
+  {
+    id: text("id").primaryKey(),
+    conversationId: text("conversation_id").notNull().references(() => aiConversations.id, { onDelete: "restrict" }),
+    ordinal: integer("ordinal").notNull(),
+    role: text("role").$type<AIConversationMessageRole>().notNull(),
+    content: text("content").notNull(),
+    isPartial: integer("is_partial", { mode: "boolean" }).notNull().default(false),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("ai_conversation_messages_ordinal_unique").on(table.conversationId, table.ordinal),
+    index("ai_conversation_messages_conversation_index").on(table.conversationId, table.ordinal),
+    check("ai_conversation_messages_ordinal_positive", sql`${table.ordinal} >= 1`),
+    check("ai_conversation_messages_role_valid", sql`${table.role} in ('USER','ASSISTANT')`),
+    check("ai_conversation_messages_content_valid", sql`length(cast(${table.content} as blob)) between 1 and 524288`),
+    check("ai_conversation_messages_partial_boolean", sql`${table.isPartial} in (0,1)`),
+    check("ai_conversation_messages_created_nonnegative", sql`${table.createdAt} >= 0`),
+  ],
+);
+
+/** Product-level response identity and durable streaming lifecycle. */
+export const aiConversationResponses = sqliteTable(
+  "ai_conversation_responses",
+  {
+    id: text("id").primaryKey(),
+    conversationId: text("conversation_id").notNull(),
+    principalRef: text("principal_ref").notNull(),
+    idempotencyKey: text("idempotency_key"),
+    requestFingerprint: text("request_fingerprint"),
+    requestMessageId: text("request_message_id").references(() => aiConversationMessages.id, { onDelete: "restrict" }),
+    assistantMessageId: text("assistant_message_id").references(() => aiConversationMessages.id, { onDelete: "restrict" }),
+    status: text("status").$type<AIConversationResponseStatus>().notNull(),
+    nextChunkSequence: integer("next_chunk_sequence").notNull().default(0),
+    outputBytes: integer("output_bytes").notNull().default(0),
+    finishReason: text("finish_reason").$type<AIConversationFinishReason>(),
+    safeErrorCode: text("safe_error_code").$type<AIConversationSafeErrorCode>(),
+    createdAt: integer("created_at").notNull(),
+    startedAt: integer("started_at"),
+    completedAt: integer("completed_at"),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("ai_conversation_responses_principal_idempotency_unique").on(table.principalRef, table.idempotencyKey),
+    uniqueIndex("ai_conversation_responses_one_active_unique").on(table.conversationId).where(sql`${table.status} in ('PENDING','STREAMING')`),
+    index("ai_conversation_responses_conversation_index").on(table.conversationId, table.createdAt),
+    index("ai_conversation_responses_principal_index").on(table.principalRef, table.createdAt),
+    foreignKey({
+      columns: [table.conversationId, table.principalRef],
+      foreignColumns: [aiConversations.id, aiConversations.principalRef],
+      name: "ai_conversation_responses_owner_conversation_fk",
+    }).onDelete("restrict"),
+    check("ai_conversation_responses_principal_valid", sql`length(trim(${table.principalRef})) between 1 and 200 and ${table.principalRef} not glob '*[^A-Za-z0-9_-]*'`),
+    check("ai_conversation_responses_idempotency_valid", sql`${table.idempotencyKey} is null or length(trim(${table.idempotencyKey})) between 1 and 200`),
+    check("ai_conversation_responses_fingerprint_valid", sql`${table.requestFingerprint} is null or (length(${table.requestFingerprint}) = 64 and ${table.requestFingerprint} not glob '*[^0-9a-f]*')`),
+    check("ai_conversation_responses_status_valid", sql`${table.status} in ('PENDING','STREAMING','COMPLETED','FAILED','CANCELLED')`),
+    check("ai_conversation_responses_sequence_valid", sql`${table.nextChunkSequence} between 0 and 100000000`),
+    check("ai_conversation_responses_output_bytes_valid", sql`${table.outputBytes} between 0 and 524288`),
+    check("ai_conversation_responses_finish_reason_valid", sql`${table.finishReason} is null or ${table.finishReason} in ('STOP','LENGTH','CONTENT_FILTER','OTHER','FAILED','CANCELLED')`),
+    check("ai_conversation_responses_error_code_valid", sql`${table.safeErrorCode} is null or ${table.safeErrorCode} in ('AI_CONVERSATION_RESPONSE_INVALID','AI_CONVERSATION_STREAM_CONFLICT','AI_CONVERSATION_CANCELLED','AI_CONVERSATION_DELETED','AI_CONVERSATION_INTERNAL')`),
+    check("ai_conversation_responses_created_nonnegative", sql`${table.createdAt} >= 0`),
+    check("ai_conversation_responses_updated_ordered", sql`${table.updatedAt} >= ${table.createdAt}`),
+    check("ai_conversation_responses_started_ordered", sql`${table.startedAt} is null or ${table.startedAt} >= ${table.createdAt}`),
+    check("ai_conversation_responses_completed_ordered", sql`${table.completedAt} is null or ${table.completedAt} >= ${table.createdAt}`),
+  ],
+);
+
+/** Temporary private response chunks; successful terminalization removes these rows. */
+export const aiConversationResponseChunks = sqliteTable(
+  "ai_conversation_response_chunks",
+  {
+    responseId: text("response_id").notNull().references(() => aiConversationResponses.id, { onDelete: "restrict" }),
+    sequence: integer("sequence").notNull(),
+    text: text("text").notNull(),
+    textHash: text("text_hash").notNull(),
+    byteLength: integer("byte_length").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.responseId, table.sequence] }),
+    index("ai_conversation_response_chunks_response_index").on(table.responseId, table.sequence),
+    check("ai_conversation_response_chunks_sequence_valid", sql`${table.sequence} between 0 and 100000000`),
+    check("ai_conversation_response_chunks_text_valid", sql`length(cast(${table.text} as blob)) between 1 and 16384`),
+    check("ai_conversation_response_chunks_hash_valid", sql`length(${table.textHash}) = 64 and ${table.textHash} not glob '*[^0-9a-f]*'`),
+    check("ai_conversation_response_chunks_byte_length_valid", sql`${table.byteLength} = length(cast(${table.text} as blob)) and ${table.byteLength} between 1 and 16384`),
+    check("ai_conversation_response_chunks_created_nonnegative", sql`${table.createdAt} >= 0`),
+  ],
+);
+
 export type CanonicalContentStateRow = typeof canonicalContentState.$inferSelect;
 export type CanonicalBannerRow = typeof canonicalBanners.$inferSelect;
 export type CanonicalMaterialRow = typeof canonicalMaterials.$inferSelect;
@@ -436,6 +563,10 @@ export type CanonicalMaterialSettingsRow = typeof canonicalMaterialSettings.$inf
 export type CanonicalToolRow = typeof canonicalTools.$inferSelect;
 export type CanonicalNavigationRow = typeof canonicalNavigation.$inferSelect;
 export type CanonicalCarouselSettingsRow = typeof canonicalCarouselSettings.$inferSelect;
+export type AIConversationRow = typeof aiConversations.$inferSelect;
+export type AIConversationMessageRow = typeof aiConversationMessages.$inferSelect;
+export type AIConversationResponseRow = typeof aiConversationResponses.$inferSelect;
+export type AIConversationResponseChunkRow = typeof aiConversationResponseChunks.$inferSelect;
 
 export const legacyMigrationRuns = sqliteTable(
   "legacy_migration_runs",

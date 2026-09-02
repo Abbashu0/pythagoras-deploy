@@ -127,6 +127,13 @@
       "when": 1788307653153,
       "tag": "0017_lean_oracle",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1788311225560,
+      "tag": "0018_soft_zaran",
+      "breakpoints": true
     }
   ]
 }

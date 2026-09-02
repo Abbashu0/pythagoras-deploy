@@ -1,6 +1,6 @@
 # AI data classification, privacy, and retention
 
-AI-M0 establishes data handling rules before any AI runtime exists. Classification follows the strictest applicable class when a record contains multiple kinds of data.
+AI-M0 established data handling rules before AI runtime existed. AI-M4 now materializes the private Conversation core while preserving these classifications. Classification follows the strictest applicable class when a record contains multiple kinds of data.
 
 ## 1. Data classes
 
@@ -56,7 +56,7 @@ Future implementation must define policy values before enabling production data:
 4. Secret revocation and audit retention independent of conversation retention.
 5. Legal hold handling without silently keeping unrelated data.
 
-Deletion is a workflow, not a single row delete. It must enumerate canonical private records, derived projections, queued jobs, caches, analytics references, and provider-side deletion responsibilities where a provider contract permits retention outside Pythagoras.
+AI-M4 implements explicit Student-owned Conversation deletion: active response state is terminalized safely, temporary chunks and raw Messages are purged, and only minimal response/Conversation tombstone metadata remains. Broader retention, derived projections, queued jobs, caches, analytics references, and provider-side deletion responsibilities remain future privacy-hardening work. Deletion is a workflow, not a single row delete.
 
 ## 6. Prompt and trace minimization
 

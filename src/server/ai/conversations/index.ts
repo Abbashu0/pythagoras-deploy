@@ -1,0 +1,68 @@
+export {
+  AI_CONVERSATION_FINISH_REASONS,
+  AI_CONVERSATION_MAX_CHUNK_BYTES,
+  AI_CONVERSATION_MAX_CONVERSATION_PAGE_SIZE,
+  AI_CONVERSATION_MAX_MESSAGE_BYTES,
+  AI_CONVERSATION_MAX_MESSAGE_PAGE_SIZE,
+  AI_CONVERSATION_MAX_RESPONSE_BYTES,
+  AI_CONVERSATION_MESSAGE_ROLES,
+  AI_CONVERSATION_RESPONSE_STATUSES,
+  AI_CONVERSATION_SAFE_ERROR_CODES,
+  AI_CONVERSATION_STATUSES,
+  AI_STUDENT_PRINCIPAL_STATUSES,
+  type AIBeginTurnInput,
+  type AIBeginTurnResult,
+  type AICreateConversationResult,
+  type AIConversation,
+  type AIConversationChunkAppendResult,
+  type AIConversationFinishReason,
+  type AIConversationListCursor,
+  type AIConversationListQuery,
+  type AIConversationMessage,
+  type AIConversationMessageQuery,
+  type AIConversationMessageRole,
+  type AIConversationResponse,
+  type AIConversationResponseChunk,
+  type AIConversationResponseResult,
+  type AIConversationResponseStatus,
+  type AIConversationSafeErrorCode,
+  type AIConversationStatus,
+  type AIConversationSubject,
+  type AIConversationSubjectCatalog,
+  type AIStudentPrincipal,
+  type AIStudentPrincipalStatus,
+  type StudentPrincipalProvider,
+} from "./contracts";
+export {
+  AI_CONVERSATION_ERROR_CODES,
+  AIConversationError,
+  isAIConversationError,
+  type AIConversationErrorCode,
+} from "./errors";
+export {
+  assertActiveStudentPrincipal,
+  resolveActiveStudentPrincipal,
+  validateAIStudentPrincipal,
+} from "./principal";
+export { SQLiteAIConversationSubjectCatalog } from "./subject-catalog";
+export { SQLiteAIConversationRepository } from "./sqlite-repository";
+export {
+  AIConversationService,
+  type AIConversationServiceDependencies,
+} from "./service";
+export {
+  createConversationRequestFingerprint,
+  hashConversationText,
+  normalizeConversationId,
+  normalizeConversationPageLimit,
+  normalizeConversationPrincipalRef,
+  normalizeConversationSubjectKey,
+  normalizeCursor,
+  normalizeFinishReason,
+  normalizeIdempotencyKey,
+  normalizeMessagePage,
+  normalizeSafeResponseErrorCode,
+  validateResponseChunkText,
+  validateResponseOutputBytes,
+  validateUserMessageContent,
+} from "./validation";

@@ -21,7 +21,7 @@ AI milestones are future delivery boundaries. Each milestone is one coherent com
 
 ## AI-M3 — Operations Core
 
-**Status:** Refined into reviewed checkpoints; the overall M3 milestone is not complete until M3A, M3B, and M3C are accepted.
+**Status:** Complete; AI-M3A, AI-M3B, AI-M3C1, and AI-M3C2 are implemented reviewed checkpoints.
 
 ### AI-M3A — Economics & Usage Accounting
 
@@ -31,31 +31,36 @@ AI milestones are future delivery boundaries. Each milestone is one coherent com
 
 ### AI-M3B — Budget & Admission Control
 
-**Status:** Implemented; AI-M3B is complete pending independent review.
+**Status:** Implemented; AI-M3B is approved.
 **Delivered boundary:** Governed revisioned `ai.budget-policy` and `ai.rate-limit-policy` resources; exactly one principal/policy-identity/period Budget Account pinned to a policy revision; atomic pre-execution reservations; idempotent server-owned admission plans and safe request fingerprints; M3A-backed exposure snapshots and settlement; reconciliation handling for unknown/partial/multi-currency cost; immutable lifecycle ledger entries; persisted sliding-window request events with retry metadata; and principal/policy concurrency limits. Migration `0014_cynical_bloodscream` adds the policy and admission-control tables; migration `0015_cynical_vulcan` adds the stable-period uniqueness invariant.
 **Explicit boundary:** No Student authentication or entitlement service was invented, no `$2` allowance was seeded or hard-coded, no Provider call or Student/Admin AI UI was added, and no Circuit Breaker or Durable Job runtime was started.
 
 ### AI-M3C — Durable Jobs & Operations
 
-**Status:** Refined into independently reviewed checkpoints; overall M3C remains incomplete until both checkpoints are accepted.
+**Status:** Refined into independently reviewed checkpoints; both checkpoints are approved.
 
 #### AI-M3C1 — Durable Jobs, Outbox & Recovery
 
-**Status:** Implemented; AI-M3C1 is complete pending independent review.
+**Status:** Implemented; AI-M3C1 is approved.
 **Delivered boundary:** SQLite-backed at-least-once Jobs with versioned reference-only payloads, closed handler registry, dedupe, priority scheduling, fenced leases/generations, heartbeats, attempts, timeout/cancellation behavior, deterministic retry/backoff, dead letters, expired-lease recovery, transactional Outbox and closed router registry, atomic Outbox-to-Job dispatch, standalone `ai:worker -- --once` runtime, and M3B stale-reservation/reconciliation recovery.
 **Explicit boundary:** No provider execution, Student auth/entitlement, Admin/Mobile UI, Circuit Breaker, health probe, RAG, or AI-M4 conversation runtime was added.
 
 #### AI-M3C2 — Circuit Breakers & Operational Health
 
-**Status:** Implemented; AI-M3C2 is complete pending independent review.
+**Status:** Implemented; AI-M3C2 is approved.
 **Delivered boundary:** Governed revisioned Circuit Breaker Policies, persistent exact-route Circuit state with CLOSED/OPEN/HALF_OPEN fencing and probes, passive health observations for Generation/Embedding/Rerank, circuit-aware Gateway fallback, safe operational health views, and migration `0017_lean_oracle`.
 **Explicit boundary:** No active synthetic health probe, production Provider adapter, external Provider call, Student auth/entitlement, Admin/Mobile AI UI, RAG, or AI-M4 conversation runtime was added.
+
+## AI-M4 — Conversation Core
+
+**Status:** Implemented; pending independent review.
+**Delivered boundary:** Server-resolved `StudentPrincipal` contract, canonical subject validation, private subject-immutable Conversations, immutable ordered Messages, idempotent turns, one active Response per Conversation, durable bounded response chunks, streaming/partial/failure/cancellation lifecycle, and explicit C4 raw-content deletion purge through migration `0018_soft_zaran`.
+**Explicit boundary:** No production Student authentication, entitlement, public Student AI API, Provider execution, Policy/Context engine, RAG, memory, compaction, telemetry, or Admin/Mobile AI UI was added.
 
 ## Remaining future milestones
 
 | Milestone | Coherent boundary | Independent exit gate |
 | --- | --- | --- |
-| **AI-M4 Conversation Core** | Server-resolved StudentPrincipal boundary, subject-immutable conversations, messages, streaming generations, and deletion lifecycle | Client identity substitution fails; subject scope cannot change; stream lifecycle and private access isolation pass |
 | **AI-M5 Policy & Context Engine** | Global/subject policy revisions, ContextBudgetManager, bounded summaries/recent turns, output constraints, and context audit | Budget plan is deterministic/revisioned; hard/soft limits and policy precedence pass representative tests |
 | **AI-M6 Knowledge Domain** | Knowledge Sources, `pythagoras.knowledge-package`, validation, publication, source trust, and Question/Knowledge projector boundaries | Published-only eligibility, provenance, revisioning, rights metadata, and governed publication pass |
 | **AI-M7 Retrieval Engine** | Chunk projections, embedding jobs, VectorIndexAdapter, lexical/semantic hybrid retrieval, deterministic fusion, reranking, and Evidence Pack | Scope/trust filtering, rebuildability, minimum evidence threshold, scores, and projection health pass; no permanent external vector DB is required |

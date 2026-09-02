@@ -313,7 +313,7 @@ test("0008 applies to fresh and existing 0007 DBs and M14 source keeps public co
   const oldMigrations = mkdtempSync(path.join(os.tmpdir(), "pythagoras-m14-migrations-"));
   try {
     const fresh = openContentDatabase({ dataDirectory: freshRoot, migrationsDirectory });
-    assert.equal((fresh.client.prepare("select count(*) count from __drizzle_migrations").get() as { count: number }).count, 18); fresh.close();
+    assert.equal((fresh.client.prepare("select count(*) count from __drizzle_migrations").get() as { count: number }).count, 19); fresh.close();
     mkdirSync(path.join(oldMigrations, "meta"), { recursive: true });
     const journal = JSON.parse(readFileSync(path.join(migrationsDirectory, "meta", "_journal.json"), "utf8"));
     for (const entry of journal.entries.slice(0, 8)) copyFileSync(path.join(migrationsDirectory, `${entry.tag}.sql`), path.join(oldMigrations, `${entry.tag}.sql`));
