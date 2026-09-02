@@ -169,6 +169,13 @@
       "when": 1788359677387,
       "tag": "0023_fearless_vanisher",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1788363113934,
+      "tag": "0024_sad_speed",
+      "breakpoints": true
     }
   ]
 }

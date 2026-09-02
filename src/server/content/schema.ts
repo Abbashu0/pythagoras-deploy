@@ -983,6 +983,7 @@ export const aiRetrievalProjectionRevisions = sqliteTable(
   (table) => [
     uniqueIndex("ai_retrieval_projection_revisions_identity_unique").on(table.projectionSetId, table.revision),
     uniqueIndex("ai_retrieval_projection_revisions_current_unique").on(table.projectionSetId).where(sql`${table.isCurrent} = 1`),
+    uniqueIndex("ai_retrieval_projection_revisions_building_identity_unique").on(table.projectionSetId, table.inputFingerprint, table.strategyKey, table.strategyRevision, table.normalizerKey, table.normalizerRevision).where(sql`${table.status} = 'BUILDING'`),
     index("ai_retrieval_projection_revisions_status_index").on(table.status, table.updatedAt),
     check("ai_retrieval_projection_revisions_revision_positive", sql`${table.revision} >= 1`),
     check("ai_retrieval_projection_revisions_fingerprint_valid", sql`length(${table.inputFingerprint}) = 64 and ${table.inputFingerprint} not glob '*[^0-9a-f]*'`),

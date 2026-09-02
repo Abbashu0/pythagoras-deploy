@@ -226,6 +226,14 @@ export interface AIRetrievalProjectionRepository {
   getSet(input: AIRetrievalOriginInput & { strategyKey: string; normalizerKey: string }): AIRetrievalProjectionSet | null;
   getSetById(id: string): AIRetrievalProjectionSet | null;
   getCurrentRevision(projectionSetId: string): AIRetrievalProjectionRevision | null;
+  getCompatibleBuildingRevision(input: {
+    projectionSetId: string;
+    inputFingerprint: string;
+    strategyKey: string;
+    strategyRevision: number;
+    normalizerKey: string;
+    normalizerRevision: number;
+  }): AIRetrievalProjectionRevision | null;
   getRevision(id: string): AIRetrievalProjectionRevision | null;
   listRevisions(projectionSetId: string): AIRetrievalProjectionRevision[];
   createRevision(input: { projectionSetId: string; revision: number; inputFingerprint: string; strategyKey: string; strategyRevision: number; normalizerKey: string; normalizerRevision: number; now: number }): AIRetrievalProjectionRevision;

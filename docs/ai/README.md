@@ -18,7 +18,7 @@ AI-M1 provides governed Provider configuration and the encrypted local Secret St
 
 The reviewed AI-M6 correction adds migration `0022_knowledge-package-source-subject-consistency`: the Question projector is canonical/published-only, preserves exact Package/Question/Variant/Occurrence revision identities, and SQLite rejects cross-subject Package/Source pins. AI-M7 overall remains incomplete; AI-M7A is the current checkpoint described below.
 
-AI-M7A is the current incomplete checkpoint: it adds bounded deterministic Chunk Projection and separate FTS5 Lexical Retrieval with BUILDING/READY/FAILED health and stale semantics. M7B and M7C remain not started; there are no embeddings, vectors, reranking, EvidencePack, or Provider calls.
+AI-M7A is the current incomplete checkpoint: it adds bounded deterministic Chunk Projection and separate FTS5 Lexical Retrieval with BUILDING/READY/FAILED health and stale semantics. Its persisted BUILDING resume and SQLite lifecycle/ownership protections are delivered through migration `0024_sad_speed`. M7B and M7C remain not started; there are no embeddings, vectors, reranking, EvidencePack, or Provider calls.
 
 ## Document map
 

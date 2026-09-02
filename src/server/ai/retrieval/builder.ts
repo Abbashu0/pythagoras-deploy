@@ -77,21 +77,41 @@ export class AIChunkProjectionBuilder {
     if (current && current.status === "READY" && current.inputFingerprint === inputFingerprint && current.strategyRevision === strategy.revision && current.normalizerRevision === AI_RETRIEVAL_NORMALIZER_REVISION) {
       return { projectionSet, projectionRevision: current, inputFingerprint, reused: true };
     }
-    if (current && current.status === "BUILDING" && current.inputFingerprint === inputFingerprint && current.strategyRevision === strategy.revision && current.normalizerRevision === AI_RETRIEVAL_NORMALIZER_REVISION) {
-      return { projectionSet, projectionRevision: current, inputFingerprint, reused: false };
-    }
-    const revisions = this.repository.listRevisions(projectionSet.id);
-    const nextRevision = Math.max(0, ...revisions.map((revision) => revision.revision)) + 1;
-    const projectionRevision = this.repository.createRevision({
+    const compatibleBuilding = this.repository.getCompatibleBuildingRevision({
       projectionSetId: projectionSet.id,
-      revision: nextRevision,
       inputFingerprint,
       strategyKey: strategy.key,
       strategyRevision: strategy.revision,
       normalizerKey: AI_RETRIEVAL_NORMALIZER_KEY,
       normalizerRevision: AI_RETRIEVAL_NORMALIZER_REVISION,
-      now: Date.now(),
     });
+    if (compatibleBuilding) return { projectionSet, projectionRevision: compatibleBuilding, inputFingerprint, reused: false };
+    const revisions = this.repository.listRevisions(projectionSet.id);
+    const nextRevision = Math.max(0, ...revisions.map((revision) => revision.revision)) + 1;
+    let projectionRevision: AIRetrievalProjectionRevision;
+    try {
+      projectionRevision = this.repository.createRevision({
+        projectionSetId: projectionSet.id,
+        revision: nextRevision,
+        inputFingerprint,
+        strategyKey: strategy.key,
+        strategyRevision: strategy.revision,
+        normalizerKey: AI_RETRIEVAL_NORMALIZER_KEY,
+        normalizerRevision: AI_RETRIEVAL_NORMALIZER_REVISION,
+        now: Date.now(),
+      });
+    } catch (error) {
+      const racedBuilding = this.repository.getCompatibleBuildingRevision({
+        projectionSetId: projectionSet.id,
+        inputFingerprint,
+        strategyKey: strategy.key,
+        strategyRevision: strategy.revision,
+        normalizerKey: AI_RETRIEVAL_NORMALIZER_KEY,
+        normalizerRevision: AI_RETRIEVAL_NORMALIZER_REVISION,
+      });
+      if (racedBuilding) return { projectionSet, projectionRevision: racedBuilding, inputFingerprint, reused: false };
+      throw error;
+    }
     return { projectionSet, projectionRevision, inputFingerprint, reused: false };
   }
 

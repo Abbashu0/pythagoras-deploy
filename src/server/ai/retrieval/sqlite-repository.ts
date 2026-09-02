@@ -69,6 +69,27 @@ export class SQLiteAIRetrievalProjectionRepository implements AIRetrievalProject
     const row = this.database.db.select().from(aiRetrievalProjectionRevisions).where(and(
       eq(aiRetrievalProjectionRevisions.projectionSetId, projectionSetId),
       eq(aiRetrievalProjectionRevisions.isCurrent, true),
+      eq(aiRetrievalProjectionRevisions.status, "READY"),
+    )).get();
+    return row ? revisionFromRow(row) : null;
+  }
+
+  getCompatibleBuildingRevision(input: {
+    projectionSetId: string;
+    inputFingerprint: string;
+    strategyKey: string;
+    strategyRevision: number;
+    normalizerKey: string;
+    normalizerRevision: number;
+  }): AIRetrievalProjectionRevision | null {
+    const row = this.database.db.select().from(aiRetrievalProjectionRevisions).where(and(
+      eq(aiRetrievalProjectionRevisions.projectionSetId, input.projectionSetId),
+      eq(aiRetrievalProjectionRevisions.inputFingerprint, input.inputFingerprint),
+      eq(aiRetrievalProjectionRevisions.strategyKey, input.strategyKey),
+      eq(aiRetrievalProjectionRevisions.strategyRevision, input.strategyRevision),
+      eq(aiRetrievalProjectionRevisions.normalizerKey, input.normalizerKey),
+      eq(aiRetrievalProjectionRevisions.normalizerRevision, input.normalizerRevision),
+      eq(aiRetrievalProjectionRevisions.status, "BUILDING"),
     )).get();
     return row ? revisionFromRow(row) : null;
   }

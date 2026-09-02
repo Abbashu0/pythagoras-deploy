@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -41,6 +41,7 @@ import {
   SQLiteAILexicalRetrievalAdapter,
   SQLiteAIRetrievalProjectionRepository,
   StructuredRichDocumentChunkingStrategy,
+  type AIRetrievalChunk,
   type AIChunkSourceItem,
 } from "../src/server/ai/retrieval";
 
@@ -130,10 +131,10 @@ function knowledgeDocument(text: string, order: number, title = `Document ${orde
 }
 
 function createKnowledgePackage(fixtureValue: RetrievalFixture, texts: string[], subjectKey = "arabic") {
-  const sourceId = createSource(fixtureValue, { key: `m7a.${subjectKey}.${uuidv7().slice(0, 8)}`, subjectKey });
+  const sourceId = createSource(fixtureValue, { key: `m7a.${subjectKey}.${uuidv7()}`, subjectKey });
   const packageId = uuidv7();
   const content = {
-    key: `m7a.package.${subjectKey}.${uuidv7().slice(0, 8)}`,
+    key: `m7a.package.${subjectKey}.${uuidv7()}`,
     subjectKey,
     title: `M7A ${subjectKey} package`,
     language: "ar",
@@ -210,6 +211,54 @@ function sourceItem(content: CanonicalRichDocument, overrides: Partial<AIChunkSo
   };
 }
 
+function uniqueChunkId(): string {
+  return uuidv7().replace(/-/gu, "").repeat(2);
+}
+
+function insertChunk(database: ContentDatabase, chunk: AIRetrievalChunk, overrides: Partial<AIRetrievalChunk> = {}): void {
+  const value = { ...chunk, ...overrides };
+  database.client.prepare(`
+    insert into ai_retrieval_chunks (
+      chunk_id, projection_revision_id, subject_key, origin_kind, origin_id,
+      origin_revision, origin_content_revision, source_id, source_revision,
+      source_type, trust_tier, artifact_sha256, source_item_id, source_item_order,
+      question_id, question_revision, variant_id, variant_revision, chunk_ordinal,
+      text, text_hash, language, provenance, origin_metadata, strategy_key,
+      strategy_revision, normalizer_key, normalizer_revision, created_at
+    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    value.chunkId,
+    value.projectionRevisionId,
+    value.subjectKey,
+    value.originKind,
+    value.originId,
+    value.originRevision,
+    value.originContentRevision,
+    value.sourceId,
+    value.sourceRevision,
+    value.sourceType,
+    value.trustTier,
+    value.artifactSha256,
+    value.sourceItemId,
+    value.sourceItemOrder,
+    value.questionId,
+    value.questionRevision,
+    value.variantId,
+    value.variantRevision,
+    value.chunkOrdinal,
+    value.text,
+    value.textHash,
+    value.language,
+    value.provenance === null ? null : JSON.stringify(value.provenance),
+    JSON.stringify(value.originMetadata),
+    value.strategyKey,
+    value.strategyRevision,
+    value.normalizerKey,
+    value.normalizerRevision,
+    value.createdAt,
+  );
+}
+
 test("structured-rich-v1 handles every RichDocument block as deterministic semantic text", () => {
   const imageAssetId = uuidv7();
   const content: CanonicalRichDocument = {
@@ -270,6 +319,189 @@ test("Knowledge projection builds in bounded resumable batches, activates atomic
     const second = builder.build({ originKind: "KNOWLEDGE_PACKAGE", originId: knowledge.packageId, subjectKey: "arabic", batchSize: 2 });
     assert.equal(second.reused, true);
     assert.equal(second.projectionRevisionId, ready.id);
+  } finally { fixtureValue.close(); }
+});
+
+test("a BUILDING projection is discovered and resumed after a process-style restart", () => {
+  const fixtureValue = fixture();
+  let originalClosed = false;
+  let reopened: ContentDatabase | null = null;
+  try {
+    const knowledge = createKnowledgePackage(fixtureValue, ["الإصدار الأول", "الإصدار الثاني", "الإصدار الثالث"]);
+    const firstBuilder = new AIChunkProjectionBuilder(fixtureValue.database);
+    const first = firstBuilder.startBuild({ originKind: "KNOWLEDGE_PACKAGE", originId: knowledge.packageId, subjectKey: "arabic", batchSize: 1 });
+    const firstBatch = firstBuilder.processNextBatch(first.projectionRevision.id, 1);
+    assert.equal(firstBatch.done, false);
+    const repositoryBeforeRestart = new SQLiteAIRetrievalProjectionRepository(fixtureValue.database);
+    const persistedBeforeRestart = repositoryBeforeRestart.getRevision(first.projectionRevision.id)!;
+    assert.equal(persistedBeforeRestart.status, "BUILDING");
+    assert.deepEqual(persistedBeforeRestart.sourceCursor, firstBatch.cursor);
+    assert.equal(repositoryBeforeRestart.listChunks(first.projectionRevision.id).length, 1);
+
+    fixtureValue.database.close();
+    originalClosed = true;
+    reopened = openContentDatabase({ dataDirectory: fixtureValue.root, migrationsDirectory });
+    const restartedBuilder = new AIChunkProjectionBuilder(reopened);
+    const resumed = restartedBuilder.startBuild({ originKind: "KNOWLEDGE_PACKAGE", originId: knowledge.packageId, subjectKey: "arabic", batchSize: 1 });
+    assert.equal(resumed.projectionRevision.id, first.projectionRevision.id);
+    assert.equal(resumed.reused, false);
+    assert.deepEqual(resumed.projectionRevision.sourceCursor, persistedBeforeRestart.sourceCursor);
+    assert.equal(new SQLiteAIRetrievalProjectionRepository(reopened).listRevisions(first.projectionSet.id).length, 1);
+
+    let batch = restartedBuilder.processNextBatch(resumed.projectionRevision.id, 1);
+    while (!batch.done) batch = restartedBuilder.processNextBatch(resumed.projectionRevision.id, 1);
+    const ready = restartedBuilder.finalize(resumed.projectionRevision.id);
+    const repositoryAfterRestart = new SQLiteAIRetrievalProjectionRepository(reopened);
+    const chunks = repositoryAfterRestart.listChunks(ready.id);
+    assert.equal(ready.status, "READY");
+    assert.equal(chunks.length, 3);
+    assert.equal(new Set(chunks.map((chunk) => chunk.chunkId)).size, 3);
+    assert.equal(chunks.map((chunk) => chunk.chunkOrdinal).join(","), "1,2,3");
+  } finally {
+    if (!originalClosed) fixtureValue.database.close();
+    reopened?.close();
+    rmSync(fixtureValue.root, { recursive: true, force: true });
+  }
+});
+
+test("compatible BUILDING projection identity is unique and reused by another builder", () => {
+  const fixtureValue = fixture();
+  try {
+    const knowledge = createKnowledgePackage(fixtureValue, ["قابل للاستئناف"]);
+    const firstBuilder = new AIChunkProjectionBuilder(fixtureValue.database);
+    const secondBuilder = new AIChunkProjectionBuilder(fixtureValue.database);
+    const first = firstBuilder.startBuild({ originKind: "KNOWLEDGE_PACKAGE", originId: knowledge.packageId, subjectKey: "arabic" });
+    const second = secondBuilder.startBuild({ originKind: "KNOWLEDGE_PACKAGE", originId: knowledge.packageId, subjectKey: "arabic" });
+    assert.equal(second.projectionRevision.id, first.projectionRevision.id);
+    const repository = new SQLiteAIRetrievalProjectionRepository(fixtureValue.database);
+    assert.equal(repository.getCompatibleBuildingRevision({
+      projectionSetId: first.projectionSet.id,
+      inputFingerprint: first.inputFingerprint,
+      strategyKey: first.projectionRevision.strategyKey,
+      strategyRevision: first.projectionRevision.strategyRevision,
+      normalizerKey: first.projectionRevision.normalizerKey,
+      normalizerRevision: first.projectionRevision.normalizerRevision,
+    })?.id, first.projectionRevision.id);
+    assert.throws(() => repository.createRevision({
+      projectionSetId: first.projectionSet.id,
+      revision: first.projectionRevision.revision + 1,
+      inputFingerprint: first.inputFingerprint,
+      strategyKey: first.projectionRevision.strategyKey,
+      strategyRevision: first.projectionRevision.strategyRevision,
+      normalizerKey: first.projectionRevision.normalizerKey,
+      normalizerRevision: first.projectionRevision.normalizerRevision,
+      now: 1_900_000_001_000,
+    }), /could not be created/i);
+    assert.equal(repository.listRevisions(first.projectionSet.id).length, 1);
+  } finally { fixtureValue.close(); }
+});
+
+test("projection Set and Revision lifecycle is protected at the SQLite boundary", () => {
+  const fixtureValue = fixture();
+  try {
+    const knowledge = createKnowledgePackage(fixtureValue, ["الإصدار القديم"]);
+    const builder = new AIChunkProjectionBuilder(fixtureValue.database);
+    const initial = builder.build({ originKind: "KNOWLEDGE_PACKAGE", originId: knowledge.packageId, subjectKey: "arabic" });
+    const repository = new SQLiteAIRetrievalProjectionRepository(fixtureValue.database);
+    const set = repository.getSet({ originKind: "KNOWLEDGE_PACKAGE", originId: knowledge.packageId, subjectKey: "arabic", strategyKey: AI_RETRIEVAL_STRATEGY_KEY, normalizerKey: "retrieval-text-v1" })!;
+    const readyBefore = repository.getRevision(initial.projectionRevisionId)!;
+
+    const setMutations: Array<[string, string | number]> = [
+      ["subject_key", "physics"],
+      ["origin_kind", "QUESTION_PACKAGE"],
+      ["origin_id", uuidv7()],
+      ["strategy_key", "another-strategy"],
+      ["normalizer_key", "another-normalizer"],
+      ["created_at", readyBefore.startedAt + 1],
+      ["updated_at", readyBefore.startedAt + 1],
+    ];
+    for (const [column, value] of setMutations) {
+      assert.throws(() => fixtureValue.database.client.prepare(`update ai_retrieval_projection_sets set ${column}=? where id=?`).run(value, set.id), /immutable/i);
+    }
+
+    const revisionMutations: Array<[string, string | number]> = [
+      ["id", uuidv7()],
+      ["projection_set_id", uuidv7()],
+      ["revision", readyBefore.revision + 1],
+      ["input_fingerprint", "b".repeat(64)],
+      ["strategy_key", "another-strategy"],
+      ["strategy_revision", readyBefore.strategyRevision + 1],
+      ["normalizer_key", "another-normalizer"],
+      ["normalizer_revision", readyBefore.normalizerRevision + 1],
+      ["started_at", readyBefore.startedAt + 1],
+    ];
+    for (const [column, value] of revisionMutations) {
+      assert.throws(() => fixtureValue.database.client.prepare(`update ai_retrieval_projection_revisions set ${column}=? where id=?`).run(value, readyBefore.id), /immutable|lifecycle/i);
+    }
+    assert.throws(() => fixtureValue.database.client.prepare("update ai_retrieval_projection_revisions set status='FAILED', is_current=0, failed_at=?, updated_at=?, safe_error_code='DIRECT_FAILURE' where id=?").run(1_900_000_001_000, 1_900_000_001_000, readyBefore.id), /lifecycle/i);
+    assert.throws(() => fixtureValue.database.client.prepare("update ai_retrieval_projection_revisions set status='BUILDING', is_current=0, ready_at=null, updated_at=? where id=?").run(1_900_000_001_000, readyBefore.id), /lifecycle/i);
+    assert.equal(repository.getRevision(readyBefore.id)?.status, "READY");
+    assert.equal(repository.getRevision(readyBefore.id)?.isCurrent, true);
+
+    const progressKnowledge = createKnowledgePackage(fixtureValue, ["تقدم البناء"]);
+    const progress = builder.startBuild({ originKind: "KNOWLEDGE_PACKAGE", originId: progressKnowledge.packageId, subjectKey: "arabic" });
+    const progressBatch = builder.processNextBatch(progress.projectionRevision.id);
+    assert.equal(progressBatch.done, true);
+    assert.equal(repository.getRevision(progress.projectionRevision.id)?.status, "BUILDING");
+    const progressReady = builder.finalize(progress.projectionRevision.id);
+    assert.equal(progressReady.status, "READY");
+
+    const failedKnowledge = createKnowledgePackage(fixtureValue, ["فشل البناء"]);
+    const failed = builder.startBuild({ originKind: "KNOWLEDGE_PACKAGE", originId: failedKnowledge.packageId, subjectKey: "arabic" });
+    repository.markFailed(failed.projectionRevision.id, "AI_RETRIEVAL_PROJECTION_FAILED", 1_900_000_001_100);
+    assert.equal(repository.getRevision(failed.projectionRevision.id)?.status, "FAILED");
+    assert.throws(() => fixtureValue.database.client.prepare("update ai_retrieval_projection_revisions set status='BUILDING', failed_at=null, safe_error_code=null, updated_at=? where id=?").run(1_900_000_001_200, failed.projectionRevision.id), /lifecycle/i);
+    assert.throws(() => fixtureValue.database.client.prepare("update ai_retrieval_projection_revisions set status='READY', is_current=1, failed_at=null, ready_at=?, safe_error_code=null, source_cursor=? where id=?").run(1_900_000_001_200, JSON.stringify({ kind: "DONE" }), failed.projectionRevision.id), /lifecycle/i);
+
+    const oldFields = { ...readyBefore };
+    const packageBefore = fixtureValue.packageRepository.getById(knowledge.packageId)!;
+    fixtureValue.packageRepository.appendRevision({
+      id: knowledge.packageId,
+      expectedRevision: packageBefore.package.currentRevision,
+      content: { ...knowledge.content, contentRevision: 2, artifactRef: "b".repeat(64), artifactSha256: "b".repeat(64) },
+      documents: [knowledgeDocument("الإصدار الجديد", 1)],
+      assets: [],
+      actor: owner,
+      now: 1_900_000_001_300,
+    });
+    const activated = builder.build({ originKind: "KNOWLEDGE_PACKAGE", originId: knowledge.packageId, subjectKey: "arabic" });
+    assert.equal(activated.status, "READY");
+    const demoted = repository.getRevision(readyBefore.id)!;
+    assert.equal(demoted.status, "READY");
+    assert.equal(demoted.isCurrent, false);
+    assert.deepEqual({ ...demoted, isCurrent: oldFields.isCurrent }, oldFields);
+
+    const activatedChunk = repository.listChunks(activated.projectionRevisionId)[0];
+    assert.ok(activatedChunk);
+    assert.throws(() => fixtureValue.database.client.prepare("update ai_retrieval_projection_revisions set status='FAILED', is_current=0, failed_at=?, updated_at=?, safe_error_code='DIRECT_FAILURE' where id=?").run(1_900_000_001_400, 1_900_000_001_400, activated.projectionRevisionId), /lifecycle/i);
+    assert.throws(() => fixtureValue.database.client.prepare("update ai_retrieval_chunks set text=? where projection_revision_id=? and chunk_id=?").run("tampered", activatedChunk.projectionRevisionId, activatedChunk.chunkId), /immutable/i);
+    assert.throws(() => fixtureValue.database.client.prepare("delete from ai_retrieval_chunks where projection_revision_id=? and chunk_id=?").run(activatedChunk.projectionRevisionId, activatedChunk.chunkId), /immutable/i);
+  } finally { fixtureValue.close(); }
+});
+
+test("retrieval chunks enforce parent ownership and are immutable from insertion", () => {
+  const fixtureValue = fixture();
+  try {
+    const knowledge = createKnowledgePackage(fixtureValue, ["ملكية المقطع"]);
+    const builder = new AIChunkProjectionBuilder(fixtureValue.database);
+    const session = builder.startBuild({ originKind: "KNOWLEDGE_PACKAGE", originId: knowledge.packageId, subjectKey: "arabic" });
+    const batch = builder.processNextBatch(session.projectionRevision.id);
+    assert.equal(batch.done, true);
+    const validChunk = new SQLiteAIRetrievalProjectionRepository(fixtureValue.database).listChunks(session.projectionRevision.id)[0];
+    assert.ok(validChunk);
+    const mismatches: Array<Partial<AIRetrievalChunk>> = [
+      { subjectKey: "physics" },
+      { originId: uuidv7() },
+      { strategyKey: "another-strategy" },
+      { strategyRevision: validChunk.strategyRevision + 1 },
+      { normalizerKey: "another-normalizer" },
+      { normalizerRevision: validChunk.normalizerRevision + 1 },
+    ];
+    for (const mismatch of mismatches) {
+      assert.throws(() => insertChunk(fixtureValue.database, validChunk, { ...mismatch, chunkId: uniqueChunkId(), chunkOrdinal: validChunk.chunkOrdinal + 1 }), /ownership/i);
+    }
+    assert.throws(() => fixtureValue.database.client.prepare("update ai_retrieval_chunks set chunk_id=? where projection_revision_id=? and chunk_id=?").run(uniqueChunkId(), validChunk.projectionRevisionId, validChunk.chunkId), /immutable/i);
+    assert.equal(new SQLiteAIRetrievalProjectionRepository(fixtureValue.database).listChunks(session.projectionRevision.id).length, 1);
   } finally { fixtureValue.close(); }
 });
 
@@ -453,4 +685,32 @@ test("draft Knowledge Package is not a projection origin and M7A schema has no l
     assert.equal(columns.some((column) => /embedding|vector|rerank|evidence/iu.test(column.name)), false);
     assert.ok(fixtureValue.database.client.prepare("select name from sqlite_master where type='table' and name='ai_retrieval_fts'").get());
   } finally { fixtureValue.close(); }
+});
+
+test("0024 upgrades an existing 0023 retrieval database and installs lifecycle protections", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "pythagoras-ai-m7a-upgrade-"));
+  const oldMigrations = mkdtempSync(path.join(os.tmpdir(), "pythagoras-ai-m7a-migrations-"));
+  try {
+    mkdirSync(path.join(oldMigrations, "meta"), { recursive: true });
+    const journal = JSON.parse(readFileSync(path.join(migrationsDirectory, "meta", "_journal.json"), "utf8")) as { entries: Array<{ idx: number; tag: string }> };
+    const priorEntries = journal.entries.slice(0, 23);
+    for (const entry of priorEntries) {
+      copyFileSync(path.join(migrationsDirectory, `${entry.tag}.sql`), path.join(oldMigrations, `${entry.tag}.sql`));
+      const snapshotName = `${entry.idx.toString().padStart(4, "0")}_snapshot.json`;
+      if (existsSync(path.join(migrationsDirectory, "meta", snapshotName))) copyFileSync(path.join(migrationsDirectory, "meta", snapshotName), path.join(oldMigrations, "meta", snapshotName));
+    }
+    writeFileSync(path.join(oldMigrations, "meta", "_journal.json"), JSON.stringify({ ...journal, entries: priorEntries }));
+    const before = openContentDatabase({ dataDirectory: root, migrationsDirectory: oldMigrations });
+    assert.equal((before.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 23);
+    before.close();
+    const upgraded = openContentDatabase({ dataDirectory: root, migrationsDirectory });
+    assert.equal((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 25);
+    assert.ok(upgraded.client.prepare("select name from sqlite_master where type='trigger' and name='ai_retrieval_projection_revisions_lifecycle'").get());
+    assert.ok(upgraded.client.prepare("select name from sqlite_master where type='trigger' and name='ai_retrieval_chunks_owner_insert'").get());
+    assert.ok(upgraded.client.prepare("select name from sqlite_master where type='index' and name='ai_retrieval_projection_revisions_building_identity_unique'").get());
+    upgraded.close();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(oldMigrations, { recursive: true, force: true });
+  }
 });
