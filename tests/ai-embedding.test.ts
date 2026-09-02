@@ -31,6 +31,7 @@ import {
 import {
   AIEmbeddingError,
   AIEmbeddingProjectionHealthService,
+  AIEmbeddingProjectionRecoveryService,
   AIEmbeddingProjectionService,
   AI_EMBEDDING_JOB_KIND,
   AI_EMBEDDING_JOB_PAYLOAD_VERSION,
@@ -283,6 +284,7 @@ async function fixture(options: { budgetCapNano?: number; behavior?: EmbeddingBe
   const jobHandlers = new AIJobHandlerRegistry();
   const jobQueue = new AIJobQueueService(database, jobHandlers, { clock: () => now });
   const embeddingRepository = new SQLiteAIEmbeddingProjectionRepository(database);
+  const admission = new AIBudgetAdmissionService(database);
   const embedding = new AIEmbeddingProjectionService(database, {
     models,
     providers,
@@ -290,7 +292,7 @@ async function fixture(options: { budgetCapNano?: number; behavior?: EmbeddingBe
     adapters,
     gateway,
     jobs: jobQueue,
-    admission: new AIBudgetAdmissionService(database),
+    admission,
     accounting,
     costEstimator: createSQLiteAIEmbeddingCostEstimator(new AIRateCardResolver(rateCards, new SQLiteAIRateCardModelRevisionRepository(database))),
     projections: embeddingRepository,
@@ -299,7 +301,8 @@ async function fixture(options: { budgetCapNano?: number; behavior?: EmbeddingBe
   jobHandlers.register(createAIEmbeddingJobHandler(embedding));
   const vectorIndex = new SQLiteAIVectorIndexAdapter(database, { isRevisionSearchable: (revision) => embedding.isRevisionSearchable(revision) });
   const health = new AIEmbeddingProjectionHealthService(database, { projections: embeddingRepository, vectorIndex, models });
-  const worker = new AIWorker({ jobs: jobQueue, handlers: jobHandlers, workerId: `m7b-worker-${uuidv7()}`, clock: () => now });
+  const terminalRecovery = new AIEmbeddingProjectionRecoveryService({ projections: embeddingRepository, admission, accounting });
+  const worker = new AIWorker({ jobs: jobQueue, handlers: jobHandlers, terminalReconciler: terminalRecovery, workerId: `m7b-worker-${uuidv7()}`, clock: () => now });
   return {
     root,
     now,
@@ -874,6 +877,75 @@ test("durable embedding Job lease recovery resumes from the persisted cursor", a
   } finally { fixtureValue.close(); }
 });
 
+test("terminal maxAttempts=1 lease recovery fails the embedding projection and cost operation", async () => {
+  const fixtureValue = await fixture();
+  try {
+    const source = createKnowledge(fixtureValue, ["terminal lease expiry"]);
+    const result = fixtureValue.embedding.startBuild(buildInput(fixtureValue, source.chunkProjectionSetId, { maxAttempts: 1 }));
+    const claimed = fixtureValue.jobs.claimNext({ workerId: "terminal-expiry-worker", supportedKinds: [AI_EMBEDDING_JOB_KIND], now: fixtureValue.now });
+    assert.ok(claimed);
+    const expiredAt = claimed.job.leaseExpiresAt! + 1;
+    fixtureValue.now = expiredAt;
+    fixtureValue.setNow(expiredAt);
+    const recovery = await fixtureValue.worker.runOnce(expiredAt);
+    assert.equal(recovery.recoveredJobs, 1);
+    assert.equal(fixtureValue.jobs.getJob(result.jobId!)?.status, "DEAD_LETTER");
+    assert.equal(fixtureValue.embeddingRepository.getRevision(result.embeddingProjectionRevisionId)?.status, "FAILED");
+    assert.equal(new SQLiteAIAccountingRepository(fixtureValue.database).getOperation(result.costOperationId!)?.status, "FAILED");
+    assert.equal((fixtureValue.database.client.prepare("select count(*) as count from ai_embedding_vectors where embedding_projection_revision_id=?").get(result.embeddingProjectionRevisionId) as { count: number }).count, 0);
+
+    const failedRevision = fixtureValue.embeddingRepository.getRevision(result.embeddingProjectionRevisionId)!;
+    await fixtureValue.worker.runOnce(expiredAt);
+    assert.deepEqual(fixtureValue.embeddingRepository.getRevision(result.embeddingProjectionRevisionId), failedRevision);
+    assert.equal(fixtureValue.fake.calls, 0);
+  } finally { fixtureValue.close(); }
+});
+
+test("final lease loss after Provider usage writes zero vectors and terminally reconciles cost/admission", async () => {
+  const fixtureValue = await fixture();
+  try {
+    fixtureValue.fake.behavior = async (request) => {
+      fixtureValue.jobs.recoverExpiredLeases(fixtureValue.now + 200_000);
+      return {
+        vectors: request.inputs.map(() => [1, 0, 0]),
+        dimensions: 3,
+        usage: { inputTokens: request.inputs.length, outputTokens: null, reasoningTokens: null, cacheHitInputTokens: null, cacheMissInputTokens: null },
+      };
+    };
+    const source = createKnowledge(fixtureValue, ["usage before lease loss"]);
+    const result = fixtureValue.embedding.startBuild(buildInput(fixtureValue, source.chunkProjectionSetId, { maxAttempts: 1 }));
+    const workerResult = await fixtureValue.worker.runOnce(fixtureValue.now);
+    assert.equal(workerResult.completedJobId, null);
+    assert.equal(fixtureValue.fake.calls, 1);
+    assert.equal(fixtureValue.jobs.getJob(result.jobId!)?.status, "DEAD_LETTER");
+    assert.equal(fixtureValue.embeddingRepository.getRevision(result.embeddingProjectionRevisionId)?.status, "FAILED");
+    assert.equal(new SQLiteAIAccountingRepository(fixtureValue.database).listUsageCostRecords(result.costOperationId!).length, 1);
+    assert.equal(new SQLiteAIAccountingRepository(fixtureValue.database).getOperation(result.costOperationId!)?.status, "FAILED");
+    assert.equal((fixtureValue.database.client.prepare("select count(*) as count from ai_embedding_vectors where embedding_projection_revision_id=?").get(result.embeddingProjectionRevisionId) as { count: number }).count, 0);
+    assert.equal((fixtureValue.database.client.prepare("select status from ai_budget_reservations where operation_id=?").get(result.costOperationId!) as { status: string }).status, "SETTLED");
+
+    const failedRevision = fixtureValue.embeddingRepository.getRevision(result.embeddingProjectionRevisionId)!;
+    await fixtureValue.worker.runOnce(fixtureValue.now);
+    assert.deepEqual(fixtureValue.embeddingRepository.getRevision(result.embeddingProjectionRevisionId), failedRevision);
+    assert.equal(fixtureValue.fake.calls, 1);
+  } finally { fixtureValue.close(); }
+});
+
+test("cancelled embedding Jobs reconcile BUILDING projections without invoking a Provider", async () => {
+  const fixtureValue = await fixture();
+  try {
+    const source = createKnowledge(fixtureValue, ["cancelled embedding"]);
+    const result = fixtureValue.embedding.startBuild(buildInput(fixtureValue, source.chunkProjectionSetId));
+    fixtureValue.jobs.cancelPending(result.jobId!, fixtureValue.now);
+    await fixtureValue.worker.runOnce(fixtureValue.now);
+    assert.equal(fixtureValue.jobs.getJob(result.jobId!)?.status, "CANCELLED");
+    assert.equal(fixtureValue.embeddingRepository.getRevision(result.embeddingProjectionRevisionId)?.status, "FAILED");
+    assert.equal(new SQLiteAIAccountingRepository(fixtureValue.database).getOperation(result.costOperationId!)?.status, "FAILED");
+    assert.equal((fixtureValue.database.client.prepare("select count(*) as count from ai_budget_reservations where operation_id=?").get(result.costOperationId!) as { count: number }).count, 0);
+    assert.equal(fixtureValue.fake.calls, 0);
+  } finally { fixtureValue.close(); }
+});
+
 test("a stale worker cannot persist vectors after Provider return, while actual usage remains accounted", async () => {
   const fixtureValue = await fixture();
   try {
@@ -925,6 +997,52 @@ test("M7A replacement makes the old embedding projection STALE and a new revisio
     assert.equal(fixtureValue.embeddingRepository.getRevision(second.embeddingProjectionRevisionId)?.chunkProjectionRevisionId, rebuiltM7A.projectionRevisionId);
     assert.equal(fixtureValue.embeddingRepository.getRevision(second.embeddingProjectionRevisionId)?.status, "READY");
     assert.equal(fixtureValue.embeddingRepository.getCurrentRevision(first.embeddingProjectionSetId)?.id, second.embeddingProjectionRevisionId);
+    assert.throws(() => fixtureValue.vectorIndex.search({ subjectKey: "arabic", embeddingProjectionRevisionId: first.embeddingProjectionRevisionId, queryVector: [1, 0, 0] }), (error) => error instanceof AIEmbeddingError && error.code === "AI_EMBEDDING_PROJECTION_NOT_FOUND");
+    assert.ok(fixtureValue.vectorIndex.search({ subjectKey: "arabic", embeddingProjectionRevisionId: second.embeddingProjectionRevisionId, queryVector: [1, 0, 0] }).length > 0);
+  } finally { fixtureValue.close(); }
+});
+
+test("active vector search fails closed when Model or Provider configuration becomes stale", async () => {
+  for (const changed of ["model", "provider"] as const) {
+    const fixtureValue = await fixture();
+    try {
+      const source = createKnowledge(fixtureValue, [`search freshness ${changed}`]);
+      const result = fixtureValue.embedding.startBuild(buildInput(fixtureValue, source.chunkProjectionSetId));
+      await fixtureValue.worker.runOnce(fixtureValue.now);
+      assert.ok(fixtureValue.vectorIndex.search({ subjectKey: "arabic", embeddingProjectionRevisionId: result.embeddingProjectionRevisionId, queryVector: [1, 0, 0] }).length > 0);
+      if (changed === "model") {
+        const model = fixtureValue.models.getById(fixtureValue.modelId)!;
+        fixtureValue.models.update({ id: model.id, expectedRevision: model.revision, content: { ...model, displayName: "Stale search Model" }, actor: fixtureValue.owner, now: fixtureValue.now });
+      } else {
+        const provider = fixtureValue.providers.getById(fixtureValue.providerId)!;
+        fixtureValue.providers.update({ id: provider.id, expectedRevision: provider.revision, content: { ...provider, displayName: "Stale search Provider" }, actor: fixtureValue.owner, now: fixtureValue.now });
+      }
+      assert.deepEqual(fixtureValue.vectorIndex.search({ subjectKey: "arabic", embeddingProjectionRevisionId: result.embeddingProjectionRevisionId, queryVector: [1, 0, 0] }), []);
+      assert.equal(fixtureValue.health.getHealth({ embeddingProjectionSetId: result.embeddingProjectionSetId }).status, "STALE");
+    } finally { fixtureValue.close(); }
+  }
+});
+
+test("getHealthForRevision evaluates the requested exact revision, not the current sibling", async () => {
+  const fixtureValue = await fixture();
+  try {
+    const source = createKnowledge(fixtureValue, ["exact revision health one"]);
+    const first = fixtureValue.embedding.startBuild(buildInput(fixtureValue, source.chunkProjectionSetId));
+    await fixtureValue.worker.runOnce(fixtureValue.now);
+    updateKnowledge(fixtureValue, source.packageId, 2, ["exact revision health two"]);
+    new AIChunkProjectionBuilder(fixtureValue.database).build({ originKind: "KNOWLEDGE_PACKAGE", originId: source.packageId, subjectKey: "arabic" });
+    const second = fixtureValue.embedding.startBuild(buildInput(fixtureValue, source.chunkProjectionSetId));
+    await fixtureValue.worker.runOnce(fixtureValue.now);
+
+    const firstHealth = fixtureValue.health.getHealthForRevision(first.embeddingProjectionRevisionId);
+    const secondHealth = fixtureValue.health.getHealthForRevision(second.embeddingProjectionRevisionId);
+    assert.equal(firstHealth.embeddingProjectionRevisionId, first.embeddingProjectionRevisionId);
+    assert.equal(firstHealth.status, "STALE");
+    assert.equal(secondHealth.embeddingProjectionRevisionId, second.embeddingProjectionRevisionId);
+    assert.equal(secondHealth.status, "READY");
+
+    const defaultHealth = new AIEmbeddingProjectionHealthService(fixtureValue.database, { projections: fixtureValue.embeddingRepository, models: fixtureValue.models });
+    assert.equal(defaultHealth.getHealth({ embeddingProjectionSetId: second.embeddingProjectionSetId }).status, "READY");
   } finally { fixtureValue.close(); }
 });
 
@@ -1063,6 +1181,8 @@ test("M7B production boundaries use only the existing Gateway and bounded vector
   assert.equal(serviceSource.includes("dependencies.gateway.embed"), true);
   assert.equal(serviceSource.includes("adapter.embed("), false);
   assert.equal(serviceSource.includes("fetch("), false);
+  assert.equal(vectorSource.includes("isRevisionSearchable?:"), false);
+  assert.equal(vectorSource.includes("?? (() => true)"), false);
   assert.equal(vectorSource.includes("statement.iterate("), true);
   assert.equal(vectorSource.includes("select * from ai_embedding_vectors"), false);
   assert.equal(vectorSource.includes(".all()"), false);

@@ -5,5 +5,6 @@ export { SQLiteAIEmbeddingProjectionRepository } from "./sqlite-projection-repos
 export { SQLiteAIVectorIndexAdapter, createSQLiteAIVectorIndexAdapter, type SQLiteAIVectorIndexOptions } from "./vector-index";
 export { SQLiteAIEmbeddingCostEstimator, createSQLiteAIEmbeddingCostEstimator } from "./cost-estimator";
 export { createAIEmbeddingJobHandler, validateAIEmbeddingJobPayload } from "./job";
+export { AIEmbeddingProjectionRecoveryService, type AIEmbeddingProjectionRecoveryDependencies } from "./recovery";
 export { AIEmbeddingProjectionService, createAIEmbeddingProjectionService, type AIEmbeddingProjectionServiceDependencies } from "./service";
 export { AIEmbeddingProjectionHealthService, createAIEmbeddingProjectionHealthService, type AIEmbeddingProjectionHealthOptions } from "./health";

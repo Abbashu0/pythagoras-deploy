@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import type { AIJobExecutionContext, AIClaimedJob } from "../jobs";
+import type { AIJob, AIJobExecutionContext, AIClaimedJob, AIJobTerminalReconciler } from "../jobs";
 import {
   AIJobError,
   AIJobExecutionError,
@@ -26,6 +26,7 @@ export interface AIWorkerDependencies {
   handlers: AIJobHandlerRegistry;
   outbox?: AIOutboxService;
   recovery?: AIOperationalRecoveryService;
+  terminalReconciler?: AIJobTerminalReconciler;
   recoveryPolicy?: AIOperationalRecoveryPolicy;
   pollIntervalMs?: number;
   workerId?: string;
@@ -60,6 +61,7 @@ export class AIWorker {
     if (!Number.isSafeInteger(now) || now < 0) throw new AIJobError("AI_JOB_INVALID", "Worker timestamp is invalid.");
     const recoveredJobs = this.dependencies.jobs.recoverExpiredLeases(now);
     const recovery = this.dependencies.recovery?.runOnce(now);
+    this.reconcileTerminalJobs(recoveredJobs, now);
     const dispatchedOutbox = !this.stopping && this.dependencies.outbox
       ? this.dependencies.outbox.dispatchOne({ now })
       : null;
@@ -73,6 +75,8 @@ export class AIWorker {
     });
     if (!claimed) return { recoveredJobs: recoveredJobs.length, recovery, dispatchedOutbox, claimedJobId: null, completedJobId: null };
     const completed = await this.executeClaimed(claimed);
+    const terminalJob = this.dependencies.jobs.getJob(claimed.job.id);
+    if (terminalJob) this.reconcileTerminalJobs([terminalJob], now);
     return {
       recoveredJobs: recoveredJobs.length,
       recovery,
@@ -80,6 +84,23 @@ export class AIWorker {
       claimedJobId: claimed.job.id,
       completedJobId: completed ? claimed.job.id : null,
     };
+  }
+
+  private reconcileTerminalJobs(jobs: readonly AIJob[], now: number): void {
+    const reconciler = this.dependencies.terminalReconciler;
+    if (!reconciler) return;
+    const seen = new Set<string>();
+    const candidates = [...jobs];
+    for (const view of this.dependencies.jobs.listTerminal(100)) {
+      if (seen.has(view.id)) continue;
+      const job = this.dependencies.jobs.getJob(view.id);
+      if (job) candidates.push(job);
+    }
+    for (const job of candidates) {
+      if (seen.has(job.id)) continue;
+      seen.add(job.id);
+      if (job.status === "DEAD_LETTER" || job.status === "CANCELLED") reconciler.reconcile(job, now);
+    }
   }
 
   async runContinuous(): Promise<void> {

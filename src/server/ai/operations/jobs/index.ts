@@ -15,6 +15,7 @@ export {
   type AIJobPriority,
   type AIJobSpec,
   type AIJobStatus,
+  type AIJobTerminalReconciler,
 } from "./contracts";
 export {
   AI_JOB_ERROR_CODES,

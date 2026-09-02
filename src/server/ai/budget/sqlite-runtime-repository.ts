@@ -75,6 +75,11 @@ export class SQLiteAIBudgetRuntimeRepository {
     return row ? reservationFromRow(row) : null;
   }
 
+  getReservationByOperationId(operationId: string): AIBudgetReservation | null {
+    const row = this.database.db.select().from(aiBudgetReservations).where(eq(aiBudgetReservations.operationId, operationId)).get();
+    return row ? reservationFromRow(row) : null;
+  }
+
   listActiveReservations(accountId: string): AIBudgetReservation[] {
     return this.database.db.select().from(aiBudgetReservations).where(and(
       eq(aiBudgetReservations.budgetAccountId, accountId),

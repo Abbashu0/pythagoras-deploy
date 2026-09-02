@@ -16,7 +16,12 @@ import { Float32LEEmbeddingVectorCodec, stableNorm, type AIEmbeddingVectorCodec 
 
 export interface SQLiteAIVectorIndexOptions {
   codec?: AIEmbeddingVectorCodec;
-  isRevisionSearchable?: (revision: AIEmbeddingProjectionRevision) => boolean;
+  /**
+   * The active semantic-search boundary must be explicit. Numeric/unit tests
+   * may inject a deliberately permissive predicate, but production callers
+   * must provide the M7A/config eligibility policy.
+   */
+  isRevisionSearchable: (revision: AIEmbeddingProjectionRevision) => boolean;
 }
 
 interface VectorRow {
@@ -38,10 +43,13 @@ export class SQLiteAIVectorIndexAdapter implements AIEmbeddingVectorIndexAdapter
 
   constructor(
     private readonly database: ContentDatabase,
-    options: SQLiteAIVectorIndexOptions = {},
+    options: SQLiteAIVectorIndexOptions,
   ) {
+    if (!options || typeof options.isRevisionSearchable !== "function") {
+      throw new AIEmbeddingError("AI_EMBEDDING_INVALID", "An explicit embedding projection eligibility policy is required for vector search.");
+    }
     this.codec = options.codec ?? new Float32LEEmbeddingVectorCodec();
-    this.isRevisionSearchable = options.isRevisionSearchable ?? (() => true);
+    this.isRevisionSearchable = options.isRevisionSearchable;
   }
 
   persistBatch(input: { projectionRevisionId: string; vectors: readonly AIEmbeddingVector[] }): { insertedVectors: number } {
@@ -264,7 +272,7 @@ export class SQLiteAIVectorIndexAdapter implements AIEmbeddingVectorIndexAdapter
   }
 }
 
-export function createSQLiteAIVectorIndexAdapter(database: ContentDatabase, options: SQLiteAIVectorIndexOptions = {}): SQLiteAIVectorIndexAdapter {
+export function createSQLiteAIVectorIndexAdapter(database: ContentDatabase, options: SQLiteAIVectorIndexOptions): SQLiteAIVectorIndexAdapter {
   return new SQLiteAIVectorIndexAdapter(database, options);
 }
 

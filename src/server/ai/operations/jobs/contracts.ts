@@ -149,6 +149,15 @@ export interface AIJobHandlerDefinition {
   execute(payload: Record<string, unknown>, context: AIJobExecutionContext): void | Promise<void>;
 }
 
+/**
+ * Optional domain hook for terminal Jobs whose durable state lives outside
+ * the generic Jobs tables. It is deliberately generic so the Job repository
+ * does not depend on any AI domain.
+ */
+export interface AIJobTerminalReconciler {
+  reconcile(job: AIJob, now: number): void;
+}
+
 export interface AIJobOperationalSummary {
   status: AIJobStatus;
   count: number;

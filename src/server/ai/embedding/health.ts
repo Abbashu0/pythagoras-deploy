@@ -37,7 +37,9 @@ export class AIEmbeddingProjectionHealthService {
     this.m7aProjections = options.m7aProjections ?? new SQLiteAIRetrievalProjectionRepository(database);
     this.m7aHealth = options.m7aHealth ?? new AIRetrievalProjectionHealthService(database);
     this.projections = options.projections ?? new SQLiteAIEmbeddingProjectionRepository(database);
-    this.vectorIndex = options.vectorIndex ?? new SQLiteAIVectorIndexAdapter(database);
+    this.vectorIndex = options.vectorIndex ?? new SQLiteAIVectorIndexAdapter(database, {
+      isRevisionSearchable: (revision) => this.isRevisionSearchable(revision),
+    });
   }
 
   getHealth(input: { embeddingProjectionSetId: string }): AIEmbeddingProjectionHealth {
@@ -47,6 +49,28 @@ export class AIEmbeddingProjectionHealthService {
     const latest = this.projections.listRevisions(set.id).at(-1) ?? null;
     const candidate = current ?? latest;
     if (!candidate) return emptyHealth(set.subjectKey, set.id);
+    return this.buildHealth(set, candidate, false, current !== null);
+  }
+
+  getHealthForRevision(revisionId: string): AIEmbeddingProjectionHealth {
+    const revision = this.projections.getRevision(revisionId);
+    if (!revision) throw new AIEmbeddingError("AI_EMBEDDING_PROJECTION_NOT_FOUND", "The embedding projection revision was not found.");
+    const set = this.projections.getSetById(revision.embeddingProjectionSetId);
+    if (!set) throw new AIEmbeddingError("AI_EMBEDDING_PROJECTION_NOT_FOUND", "The embedding projection set was not found.");
+    return this.buildHealth(set, revision, true);
+  }
+
+  isRevisionSearchable(revision: AIEmbeddingProjectionRevision): boolean {
+    if (this.options.isRevisionSearchable) return this.options.isRevisionSearchable(revision);
+    return revision.status === "READY" && revision.isCurrent && this.isM7AExactReady(revision) && this.isConfigCurrent(revision);
+  }
+
+  private buildHealth(
+    set: { id: string; subjectKey: string },
+    candidate: AIEmbeddingProjectionRevision,
+    exactRevision: boolean,
+    hasCurrentRevision = false,
+  ): AIEmbeddingProjectionHealth {
     const m7aStatus = this.m7aStatus(candidate);
     const coverage = this.vectorIndex.getCoverage({
       projectionRevisionId: candidate.id,
@@ -56,19 +80,28 @@ export class AIEmbeddingProjectionHealthService {
     const configCurrent = this.isConfigCurrent(candidate);
     const m7aExactReady = this.isM7AExactReady(candidate);
     let status: AIEmbeddingProjectionHealth["status"];
-    if (!current) {
+    if (m7aStatus === "INELIGIBLE") {
+      status = "INELIGIBLE";
+    } else if (exactRevision) {
       status = candidate.status === "BUILDING"
         ? "BUILDING"
         : candidate.status === "FAILED"
           ? "FAILED"
-          : "MISSING";
-      if (m7aStatus === "INELIGIBLE") status = "INELIGIBLE";
-    } else if (m7aStatus === "INELIGIBLE") {
-      status = "INELIGIBLE";
-    } else if (m7aStatus !== "READY" || !m7aExactReady || !configCurrent || !coverage.complete) {
-      status = "STALE";
+          : candidate.status === "READY" && candidate.isCurrent && m7aStatus === "READY" && m7aExactReady && configCurrent && coverage.complete
+            ? "READY"
+            : candidate.status === "READY"
+              ? "STALE"
+              : "MISSING";
     } else {
-      status = "READY";
+      status = !hasCurrentRevision
+        ? candidate.status === "BUILDING"
+          ? "BUILDING"
+          : candidate.status === "FAILED"
+            ? "FAILED"
+            : "MISSING"
+        : m7aStatus !== "READY" || !m7aExactReady || !configCurrent || !coverage.complete
+          ? "STALE"
+          : "READY";
     }
     return {
       subjectKey: set.subjectKey,
@@ -89,17 +122,6 @@ export class AIEmbeddingProjectionHealthService {
       jobStatus: this.jobStatus(candidate.jobId),
       status,
     };
-  }
-
-  getHealthForRevision(revisionId: string): AIEmbeddingProjectionHealth {
-    const revision = this.projections.getRevision(revisionId);
-    if (!revision) throw new AIEmbeddingError("AI_EMBEDDING_PROJECTION_NOT_FOUND", "The embedding projection revision was not found.");
-    return this.getHealth({ embeddingProjectionSetId: revision.embeddingProjectionSetId });
-  }
-
-  isRevisionSearchable(revision: AIEmbeddingProjectionRevision): boolean {
-    if (this.options.isRevisionSearchable) return this.options.isRevisionSearchable(revision);
-    return revision.status === "READY" && revision.isCurrent && this.isM7AExactReady(revision) && this.isConfigCurrent(revision);
   }
 
   private m7aStatus(revision: AIEmbeddingProjectionRevision): string {

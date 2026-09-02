@@ -89,6 +89,10 @@ export class AIBudgetAdmissionService {
     return this.budgetRuntime.getReservation(reservationId);
   }
 
+  getReservationByOperationId(operationId: string): AIBudgetReservation | null {
+    return this.budgetRuntime.getReservationByOperationId(operationId);
+  }
+
   listLedger(reservationId: string) {
     return this.budgetRuntime.listLedger(reservationId);
   }

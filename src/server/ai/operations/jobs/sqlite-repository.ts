@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 
-import { and, asc, desc, eq, isNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
 
 import type { ContentDatabase } from "../../../content/database";
 import {
@@ -372,6 +372,11 @@ export class SQLiteAIJobRepository {
 
   listRecent(limit: number): AIJobOperationalView[] {
     return this.database.db.select().from(aiJobs).orderBy(desc(aiJobs.updatedAt), desc(aiJobs.id)).limit(limit).all().map((row) => operationalViewFromJob(jobFromRow(row)));
+  }
+
+  listTerminal(limit: number): AIJobOperationalView[] {
+    return this.database.db.select().from(aiJobs).where(inArray(aiJobs.status, ["DEAD_LETTER", "CANCELLED"]))
+      .orderBy(desc(aiJobs.updatedAt), desc(aiJobs.id)).limit(limit).all().map((row) => operationalViewFromJob(jobFromRow(row)));
   }
 }
 

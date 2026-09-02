@@ -2,7 +2,7 @@ import type { ContentDatabase } from "../../../content/database";
 import { openContentDatabase } from "../../../content/database";
 import { AIBudgetAdmissionService, SQLiteAIBudgetAccountingReader } from "../../admission";
 import { SQLiteAIBudgetRuntimeRepository } from "../../budget";
-import { AIJobHandlerRegistry, AIJobQueueService } from "../jobs";
+import { AIJobHandlerRegistry, AIJobQueueService, type AIJobTerminalReconciler } from "../jobs";
 import { AIOutboxRouterRegistry, AIOutboxService } from "../outbox";
 import {
   AIOperationalRecoveryService,
@@ -28,6 +28,7 @@ export function createAIOperationsRuntime(options: {
   recoveryPolicy?: AIOperationalRecoveryPolicy;
   pollIntervalMs?: number;
   workerId?: string;
+  terminalReconciler?: AIJobTerminalReconciler;
 } = {}): AIOperationsRuntime {
   const database = options.database ?? openContentDatabase();
   const admission = new AIBudgetAdmissionService(database);
@@ -48,6 +49,7 @@ export function createAIOperationsRuntime(options: {
     handlers,
     outbox,
     recovery,
+    terminalReconciler: options.terminalReconciler,
     pollIntervalMs: options.pollIntervalMs,
     workerId: options.workerId,
   });
