@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { v7 as uuidv7 } from "uuid";
+import { eq } from "drizzle-orm";
 
 import type { AdminActor } from "../src/server/admin-auth/contracts";
 import { SQLiteAdminIdentityRepository } from "../src/server/admin-auth/sqlite-admin-identity-repository";
@@ -43,6 +45,7 @@ import {
   Float32LEEmbeddingVectorCodec,
   SQLiteAIEmbeddingProjectionRepository,
   SQLiteAIVectorIndexAdapter,
+  type AIEmbeddingPendingTerminalProjection,
   createAIEmbeddingJobHandler,
   createSQLiteAIEmbeddingCostEstimator,
   type AIEmbeddingVector,
@@ -87,6 +90,8 @@ import {
 import type { ContentDatabase } from "../src/server/content";
 import { openContentDatabase } from "../src/server/content";
 import {
+  aiCostOperations,
+  aiEmbeddingProjectionRevisions,
   aiEmbeddingVectors,
   aiJobs,
   questionPackages,
@@ -157,7 +162,7 @@ interface EmbeddingFixture {
   close(): void;
 }
 
-async function fixture(options: { budgetCapNano?: number; behavior?: EmbeddingBehavior } = {}): Promise<EmbeddingFixture> {
+async function fixture(options: { budgetCapNano?: number; behavior?: EmbeddingBehavior; terminalReconciliationBatchSize?: number } = {}): Promise<EmbeddingFixture> {
   const root = mkdtempSync(path.join(os.tmpdir(), "pythagoras-ai-m7b-"));
   const database = openContentDatabase({ dataDirectory: root, migrationsDirectory });
   const canonical = createCanonicalContentRepository(database);
@@ -302,7 +307,7 @@ async function fixture(options: { budgetCapNano?: number; behavior?: EmbeddingBe
   const vectorIndex = new SQLiteAIVectorIndexAdapter(database, { isRevisionSearchable: (revision) => embedding.isRevisionSearchable(revision) });
   const health = new AIEmbeddingProjectionHealthService(database, { projections: embeddingRepository, vectorIndex, models });
   const terminalRecovery = new AIEmbeddingProjectionRecoveryService({ projections: embeddingRepository, admission, accounting });
-  const worker = new AIWorker({ jobs: jobQueue, handlers: jobHandlers, terminalReconciler: terminalRecovery, workerId: `m7b-worker-${uuidv7()}`, clock: () => now });
+  const worker = new AIWorker({ jobs: jobQueue, handlers: jobHandlers, terminalReconciler: terminalRecovery, terminalReconciliationBatchSize: options.terminalReconciliationBatchSize, workerId: `m7b-worker-${uuidv7()}`, clock: () => now });
   return {
     root,
     now,
@@ -482,6 +487,98 @@ function vectorFor(fixtureValue: EmbeddingFixture, projectionRevisionId: string,
     norm: encoded.norm,
     createdAt: fixtureValue.now,
   };
+}
+
+interface TerminalBacklogItem {
+  jobId: string;
+  projectionRevisionId: string;
+  costOperationId: string;
+}
+
+function createTerminalEmbeddingBacklog(fixtureValue: EmbeddingFixture, count: number): { items: TerminalBacklogItem[]; seed: TerminalBacklogItem } {
+  const source = createKnowledge(fixtureValue, ["terminal backlog seed"]);
+  const seed = fixtureValue.embedding.startBuild(buildInput(fixtureValue, source.chunkProjectionSetId, { maxAttempts: 1 }));
+  const seedJob = fixtureValue.database.db.select().from(aiJobs).where(eq(aiJobs.id, seed.jobId!)).get();
+  const seedRevision = fixtureValue.database.db.select().from(aiEmbeddingProjectionRevisions).where(eq(aiEmbeddingProjectionRevisions.id, seed.embeddingProjectionRevisionId)).get();
+  const seedOperation = fixtureValue.database.db.select().from(aiCostOperations).where(eq(aiCostOperations.id, seed.costOperationId!)).get();
+  assert.ok(seedJob);
+  assert.ok(seedRevision);
+  assert.ok(seedOperation);
+  fixtureValue.jobs.cancelPending(seed.jobId!, fixtureValue.now);
+  const items: TerminalBacklogItem[] = [{ jobId: seed.jobId!, projectionRevisionId: seed.embeddingProjectionRevisionId, costOperationId: seed.costOperationId! }];
+  const payloadJson = "{}";
+  const payloadHash = createHash("sha256").update(payloadJson).digest("hex");
+  for (let index = 0; index < count; index += 1) {
+    const jobId = uuidv7();
+    const costOperationId = uuidv7();
+    const projectionRevisionId = uuidv7();
+    const createdAt = fixtureValue.now + index + 1;
+    const status = index % 2 === 0 ? "CANCELLED" as const : "DEAD_LETTER" as const;
+    fixtureValue.database.db.insert(aiCostOperations).values({
+      ...seedOperation,
+      id: costOperationId,
+      idempotencyKey: `m7b-backlog-${costOperationId}`,
+      jobId,
+      status: "OPEN",
+      startedAt: fixtureValue.now,
+      completedAt: null,
+    }).run();
+    fixtureValue.database.db.insert(aiJobs).values({
+      ...seedJob,
+      id: jobId,
+      payloadJson,
+      payloadHash,
+      dedupeKey: `m7b-backlog-${jobId}`,
+      costOperationId,
+      status,
+      attemptCount: 0,
+      maxAttempts: 1,
+      leaseOwner: null,
+      leaseToken: null,
+      leaseGeneration: 0,
+      leaseExpiresAt: null,
+      lastHeartbeatAt: null,
+      lastErrorCode: "AI_TEST_TERMINAL",
+      cancellationRequestedAt: status === "CANCELLED" ? createdAt : null,
+      createdAt,
+      updatedAt: createdAt,
+      completedAt: createdAt,
+    }).run();
+    fixtureValue.database.db.insert(aiEmbeddingProjectionRevisions).values({
+      ...seedRevision,
+      id: projectionRevisionId,
+      revision: seedRevision.revision + index + 1,
+      inputFingerprint: createHash("sha256").update(`m7b-terminal-backlog-${index}`).digest("hex"),
+      status: "BUILDING",
+      isCurrent: false,
+      sourceCursor: { kind: "START" },
+      batchCount: 0,
+      vectorCount: 0,
+      jobId,
+      costOperationId,
+      startedAt: fixtureValue.now,
+      updatedAt: createdAt,
+      readyAt: null,
+      failedAt: null,
+      safeErrorCode: null,
+    }).run();
+    items.push({ jobId, projectionRevisionId, costOperationId });
+  }
+  return { items, seed: items[0] };
+}
+
+function createRestartRecoveryWorker(database: ContentDatabase, now: number, batchSize: number): AIWorker {
+  const accountingRepository = new SQLiteAIAccountingRepository(database);
+  const accounting: Pick<AICostAccountingService, "getOperation" | "completeOperation"> = {
+    getOperation: (id) => accountingRepository.getOperation(id),
+    completeOperation: (id, expectedStatus, status, completedAt) => accountingRepository.updateOperationStatus({ id, expectedStatus, status, completedAt }),
+  };
+  const admission = new AIBudgetAdmissionService(database);
+  const projections = new SQLiteAIEmbeddingProjectionRepository(database);
+  const handlers = new AIJobHandlerRegistry();
+  const jobs = new AIJobQueueService(database, handlers, { clock: () => now });
+  const recovery = new AIEmbeddingProjectionRecoveryService({ projections, admission, accounting });
+  return new AIWorker({ jobs, handlers, terminalReconciler: recovery, terminalReconciliationBatchSize: batchSize, workerId: `m7b-restarted-worker-${uuidv7()}`, clock: () => now });
 }
 
 test("M7B uses the exact current/fresh M7A revision, one model, and a durable reference-only Job", async () => {
@@ -946,6 +1043,158 @@ test("cancelled embedding Jobs reconcile BUILDING projections without invoking a
   } finally { fixtureValue.close(); }
 });
 
+test("bounded terminal recovery drains older embedding backlog instead of rescanning reconciled terminal Jobs", async () => {
+  const fixtureValue = await fixture({ terminalReconciliationBatchSize: 25 });
+  try {
+    const backlog = createTerminalEmbeddingBacklog(fixtureValue, 150);
+    const accounting = new SQLiteAIAccountingRepository(fixtureValue.database);
+    const alreadyReconciledAt = fixtureValue.now + 10_000;
+    for (const item of backlog.items.slice(-10)) {
+      fixtureValue.embeddingRepository.markFailed(item.projectionRevisionId, "AI_TEST_ALREADY_RECONCILED", alreadyReconciledAt);
+      accounting.updateOperationStatus({ id: item.costOperationId, expectedStatus: "OPEN", status: "FAILED", completedAt: alreadyReconciledAt });
+    }
+
+    let totalReconciled = 0;
+    for (let tick = 0; tick < 20; tick += 1) {
+      const result = await fixtureValue.worker.runOnce(fixtureValue.now);
+      totalReconciled += result.terminalReconciliation?.reconciled ?? 0;
+      if (backlog.items.every((item) => fixtureValue.embeddingRepository.getRevision(item.projectionRevisionId)?.status === "FAILED")) break;
+    }
+    assert.equal(totalReconciled, 141);
+    assert.equal(backlog.items.every((item) => fixtureValue.embeddingRepository.getRevision(item.projectionRevisionId)?.status === "FAILED"), true);
+    assert.equal(backlog.items.every((item) => accounting.getOperation(item.costOperationId)?.status === "FAILED"), true);
+    assert.equal(backlog.items.every((item) => accounting.listUsageCostRecords(item.costOperationId).length === 0), true);
+    assert.equal(fixtureValue.fake.calls, 0);
+
+    const emptyTick = await fixtureValue.worker.runOnce(fixtureValue.now);
+    assert.deepEqual(emptyTick.terminalReconciliation, { scanned: 0, reconciled: 0, skipped: 0 });
+  } finally { fixtureValue.close(); }
+});
+
+test("terminal embedding backlog recovery resumes from durable unresolved state after process restart", async () => {
+  const fixtureValue = await fixture({ terminalReconciliationBatchSize: 25 });
+  let databaseReopened = false;
+  let reopened: ContentDatabase | null = null;
+  try {
+    const backlog = createTerminalEmbeddingBacklog(fixtureValue, 60);
+    const firstTick = await fixtureValue.worker.runOnce(fixtureValue.now);
+    assert.equal(firstTick.terminalReconciliation?.reconciled, 25);
+    assert.ok(backlog.items.some((item) => fixtureValue.embeddingRepository.getRevision(item.projectionRevisionId)?.status === "BUILDING"));
+    const root = fixtureValue.root;
+    fixtureValue.database.close();
+    databaseReopened = true;
+    reopened = openContentDatabase({ dataDirectory: root, migrationsDirectory });
+    const restartedWorker = createRestartRecoveryWorker(reopened, fixtureValue.now + 20_000, 25);
+    for (let tick = 0; tick < 10; tick += 1) {
+      await restartedWorker.runOnce(fixtureValue.now + 20_000);
+      const remaining = new SQLiteAIEmbeddingProjectionRepository(reopened);
+      if (backlog.items.every((item) => remaining.getRevision(item.projectionRevisionId)?.status === "FAILED")) break;
+    }
+    const restartedRepository = new SQLiteAIEmbeddingProjectionRepository(reopened);
+    assert.equal(backlog.items.every((item) => restartedRepository.getRevision(item.projectionRevisionId)?.status === "FAILED"), true);
+    const restartedAccounting = new SQLiteAIAccountingRepository(reopened);
+    assert.equal(backlog.items.every((item) => restartedAccounting.getOperation(item.costOperationId)?.status === "FAILED"), true);
+    assert.equal(backlog.items.every((item) => restartedAccounting.listUsageCostRecords(item.costOperationId).length === 0), true);
+  } finally {
+    if (!databaseReopened) fixtureValue.close();
+    reopened?.close();
+    if (databaseReopened) rmSync(fixtureValue.root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
+  }
+});
+
+test("malformed embedding Job payload does not block relational terminal reconciliation", async () => {
+  const fixtureValue = await fixture();
+  try {
+    const source = createKnowledge(fixtureValue, ["malformed terminal payload"]);
+    const result = fixtureValue.embedding.startBuild(buildInput(fixtureValue, source.chunkProjectionSetId));
+    fixtureValue.jobs.cancelPending(result.jobId!, fixtureValue.now);
+    const payloadJson = "{}";
+    fixtureValue.database.client.prepare("update ai_jobs set payload_json=?, payload_hash=? where id=?").run(payloadJson, createHash("sha256").update(payloadJson).digest("hex"), result.jobId);
+    const tick = await fixtureValue.worker.runOnce(fixtureValue.now);
+    assert.equal(tick.terminalReconciliation?.reconciled, 1);
+    assert.equal(fixtureValue.embeddingRepository.getRevision(result.embeddingProjectionRevisionId)?.status, "FAILED");
+    assert.equal(new SQLiteAIAccountingRepository(fixtureValue.database).getOperation(result.costOperationId!)?.status, "FAILED");
+    assert.equal(fixtureValue.fake.calls, 0);
+  } finally { fixtureValue.close(); }
+});
+
+test("unrelated terminal Jobs do not poison the bounded embedding recovery batch", async () => {
+  const fixtureValue = await fixture({ terminalReconciliationBatchSize: 25 });
+  try {
+    const backlog = createTerminalEmbeddingBacklog(fixtureValue, 2);
+    const template = fixtureValue.database.db.select().from(aiJobs).where(eq(aiJobs.id, backlog.seed.jobId)).get();
+    assert.ok(template);
+    const unrelatedId = uuidv7();
+    const payloadJson = "{}";
+    fixtureValue.database.db.insert(aiJobs).values({
+      ...template,
+      id: unrelatedId,
+      kind: "ai.unrelated-terminal",
+      payloadJson,
+      payloadHash: createHash("sha256").update(payloadJson).digest("hex"),
+      dedupeKey: `m7b-unrelated-${unrelatedId}`,
+      costOperationId: null,
+      status: "DEAD_LETTER",
+      attemptCount: 0,
+      leaseOwner: null,
+      leaseToken: null,
+      leaseGeneration: 0,
+      leaseExpiresAt: null,
+      lastHeartbeatAt: null,
+      lastErrorCode: "AI_TEST_UNRELATED",
+      cancellationRequestedAt: null,
+      completedAt: fixtureValue.now,
+    }).run();
+    const tick = await fixtureValue.worker.runOnce(fixtureValue.now);
+    assert.equal(tick.terminalReconciliation?.reconciled, 3);
+    assert.equal(backlog.items.every((item) => fixtureValue.embeddingRepository.getRevision(item.projectionRevisionId)?.status === "FAILED"), true);
+    assert.equal(fixtureValue.jobs.getJob(unrelatedId)?.status, "DEAD_LETTER");
+    assert.equal(fixtureValue.fake.calls, 0);
+  } finally { fixtureValue.close(); }
+});
+
+test("one unreconcilable embedding item is skipped without blocking the rest of its batch", async () => {
+  const fixtureValue = await fixture({ terminalReconciliationBatchSize: 25 });
+  try {
+    const backlog = createTerminalEmbeddingBacklog(fixtureValue, 2);
+    const realRepository = fixtureValue.embeddingRepository;
+    const pending = backlog.items.map((item): AIEmbeddingPendingTerminalProjection => {
+      const job = fixtureValue.jobs.getJob(item.jobId)!;
+      assert.ok(job.status === "CANCELLED" || job.status === "DEAD_LETTER");
+      return {
+        revision: realRepository.getRevision(item.projectionRevisionId)!,
+        job: {
+          id: job.id,
+          kind: job.kind,
+          payloadVersion: job.payloadVersion,
+          status: job.status,
+          costOperationId: job.costOperationId,
+        },
+      };
+    });
+    const realAccounting = new SQLiteAIAccountingRepository(fixtureValue.database);
+    const accounting: Pick<AICostAccountingService, "getOperation" | "completeOperation"> = {
+      getOperation: (id) => id === backlog.items[0].costOperationId ? null : realAccounting.getOperation(id),
+      completeOperation: (id, expectedStatus, status, completedAt) => realAccounting.updateOperationStatus({ id, expectedStatus, status, completedAt }),
+    };
+    const recovery = new AIEmbeddingProjectionRecoveryService({
+      projections: {
+        listRevisionsByJobId: realRepository.listRevisionsByJobId.bind(realRepository),
+        listPendingTerminalReconciliations: (limit) => pending.slice(0, limit),
+        markFailed: realRepository.markFailed.bind(realRepository),
+      },
+      admission: new AIBudgetAdmissionService(fixtureValue.database),
+      accounting,
+    });
+    const result = recovery.reconcilePending({ limit: 2, now: fixtureValue.now });
+    assert.deepEqual(result, { scanned: 2, reconciled: 1, skipped: 1 });
+    assert.equal(realRepository.getRevision(backlog.items[0].projectionRevisionId)?.status, "BUILDING");
+    assert.equal(realRepository.getRevision(backlog.items[1].projectionRevisionId)?.status, "FAILED");
+    assert.equal(realRepository.getRevision(backlog.items[2].projectionRevisionId)?.status, "BUILDING");
+    assert.equal(fixtureValue.fake.calls, 0);
+  } finally { fixtureValue.close(); }
+});
+
 test("a stale worker cannot persist vectors after Provider return, while actual usage remains accounted", async () => {
   const fixtureValue = await fixture();
   try {
@@ -1178,6 +1427,7 @@ test("0025 upgrades an existing 0024 database and installs M7B tables, indexes, 
 test("M7B production boundaries use only the existing Gateway and bounded vector iteration", () => {
   const serviceSource = readFileSync(path.join(process.cwd(), "src/server/ai/embedding/service.ts"), "utf8");
   const vectorSource = readFileSync(path.join(process.cwd(), "src/server/ai/embedding/vector-index.ts"), "utf8");
+  const workerSource = readFileSync(path.join(process.cwd(), "src/server/ai/operations/worker/worker.ts"), "utf8");
   assert.equal(serviceSource.includes("dependencies.gateway.embed"), true);
   assert.equal(serviceSource.includes("adapter.embed("), false);
   assert.equal(serviceSource.includes("fetch("), false);
@@ -1186,4 +1436,6 @@ test("M7B production boundaries use only the existing Gateway and bounded vector
   assert.equal(vectorSource.includes("statement.iterate("), true);
   assert.equal(vectorSource.includes("select * from ai_embedding_vectors"), false);
   assert.equal(vectorSource.includes(".all()"), false);
+  assert.equal(workerSource.includes("listTerminal"), false);
+  assert.equal(workerSource.includes("reconcilePending"), true);
 });

@@ -96,10 +96,6 @@ export class AIJobQueueService {
     return this.repository.listDeadLetters(this.queryLimit(limit));
   }
 
-  listTerminal(limit = 100): AIJobOperationalView[] {
-    return this.repository.listTerminal(this.queryLimit(limit));
-  }
-
   listRecentAttempts(limit = 50): AIJobAttempt[] {
     return this.repository.listRecentAttempts(this.queryLimit(limit));
   }

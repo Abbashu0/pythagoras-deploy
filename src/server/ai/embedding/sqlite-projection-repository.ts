@@ -1,14 +1,17 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, or } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
 
 import type { ContentDatabase } from "../../content/database";
 import {
+  aiCostOperations,
   aiEmbeddingProjectionRevisions,
   aiEmbeddingProjectionSets,
+  aiJobs,
   type AIEmbeddingProjectionRevisionRow,
   type AIEmbeddingProjectionSetRow,
 } from "../../content/schema";
 import type {
+  AIEmbeddingPendingTerminalProjection,
   AIEmbeddingProjectionRepository,
   AIEmbeddingProjectionRevision,
   AIEmbeddingProjectionSet,
@@ -16,6 +19,7 @@ import type {
   AIEmbeddingSourceCursor,
   AIEmbeddingVectorCodecKey,
 } from "./contracts";
+import { AI_EMBEDDING_JOB_KIND, AI_EMBEDDING_JOB_PAYLOAD_VERSION } from "./contracts";
 import { AIEmbeddingError } from "./errors";
 
 export class SQLiteAIEmbeddingProjectionRepository implements AIEmbeddingProjectionRepository {
@@ -94,6 +98,48 @@ export class SQLiteAIEmbeddingProjectionRepository implements AIEmbeddingProject
       eq(aiEmbeddingProjectionRevisions.status, "BUILDING"),
     )).get();
     return row ? revisionFromRow(row) : null;
+  }
+
+  listRevisionsByJobId(jobId: string): AIEmbeddingProjectionRevision[] {
+    return this.database.db.select().from(aiEmbeddingProjectionRevisions)
+      .where(eq(aiEmbeddingProjectionRevisions.jobId, jobId))
+      .orderBy(asc(aiEmbeddingProjectionRevisions.revision))
+      .all()
+      .map(revisionFromRow);
+  }
+
+  listPendingTerminalReconciliations(limit: number): AIEmbeddingPendingTerminalProjection[] {
+    const rows = this.database.db.select({
+      revision: aiEmbeddingProjectionRevisions,
+      jobId: aiJobs.id,
+      jobKind: aiJobs.kind,
+      jobPayloadVersion: aiJobs.payloadVersion,
+      jobStatus: aiJobs.status,
+      jobCostOperationId: aiJobs.costOperationId,
+    }).from(aiEmbeddingProjectionRevisions)
+      .innerJoin(aiJobs, eq(aiJobs.id, aiEmbeddingProjectionRevisions.jobId))
+      .innerJoin(aiCostOperations, eq(aiCostOperations.id, aiEmbeddingProjectionRevisions.costOperationId))
+      .where(and(
+        eq(aiEmbeddingProjectionRevisions.status, "BUILDING"),
+        eq(aiEmbeddingProjectionRevisions.costOperationId, aiJobs.costOperationId),
+        eq(aiJobs.kind, AI_EMBEDDING_JOB_KIND),
+        eq(aiJobs.payloadVersion, AI_EMBEDDING_JOB_PAYLOAD_VERSION),
+        inArray(aiJobs.status, ["DEAD_LETTER", "CANCELLED"]),
+        or(isNull(aiCostOperations.jobId), eq(aiCostOperations.jobId, aiJobs.id)),
+      ))
+      .orderBy(asc(aiEmbeddingProjectionRevisions.updatedAt), asc(aiEmbeddingProjectionRevisions.id))
+      .limit(limit)
+      .all();
+    return rows.map((row) => ({
+      revision: revisionFromRow(row.revision),
+      job: {
+        id: row.jobId,
+        kind: row.jobKind,
+        payloadVersion: row.jobPayloadVersion,
+        status: row.jobStatus as "DEAD_LETTER" | "CANCELLED",
+        costOperationId: row.jobCostOperationId,
+      },
+    }));
   }
 
   getRevision(id: string): AIEmbeddingProjectionRevision | null {

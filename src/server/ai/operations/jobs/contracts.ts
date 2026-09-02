@@ -154,8 +154,15 @@ export interface AIJobHandlerDefinition {
  * the generic Jobs tables. It is deliberately generic so the Job repository
  * does not depend on any AI domain.
  */
+export interface AIJobTerminalReconciliationResult {
+  scanned: number;
+  reconciled: number;
+  skipped: number;
+}
+
 export interface AIJobTerminalReconciler {
   reconcile(job: AIJob, now: number): void;
+  reconcilePending(input: { limit: number; now: number }): AIJobTerminalReconciliationResult;
 }
 
 export interface AIJobOperationalSummary {

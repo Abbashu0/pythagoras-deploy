@@ -29,6 +29,7 @@ export function createAIOperationsRuntime(options: {
   pollIntervalMs?: number;
   workerId?: string;
   terminalReconciler?: AIJobTerminalReconciler;
+  terminalReconciliationBatchSize?: number;
 } = {}): AIOperationsRuntime {
   const database = options.database ?? openContentDatabase();
   const admission = new AIBudgetAdmissionService(database);
@@ -50,6 +51,7 @@ export function createAIOperationsRuntime(options: {
     outbox,
     recovery,
     terminalReconciler: options.terminalReconciler,
+    terminalReconciliationBatchSize: options.terminalReconciliationBatchSize,
     pollIntervalMs: options.pollIntervalMs,
     workerId: options.workerId,
   });

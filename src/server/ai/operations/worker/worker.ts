@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import type { AIJob, AIJobExecutionContext, AIClaimedJob, AIJobTerminalReconciler } from "../jobs";
+import type { AIJob, AIJobExecutionContext, AIClaimedJob, AIJobTerminalReconciliationResult, AIJobTerminalReconciler } from "../jobs";
 import {
   AIJobError,
   AIJobExecutionError,
@@ -16,6 +16,7 @@ import { AIOperationalRecoveryService } from "../recovery";
 export interface AIWorkerRunResult {
   recoveredJobs: number;
   recovery?: AIRecoveryRunResult;
+  terminalReconciliation?: AIJobTerminalReconciliationResult;
   dispatchedOutbox: AIOutboxEvent | null;
   claimedJobId: string | null;
   completedJobId: string | null;
@@ -27,6 +28,7 @@ export interface AIWorkerDependencies {
   outbox?: AIOutboxService;
   recovery?: AIOperationalRecoveryService;
   terminalReconciler?: AIJobTerminalReconciler;
+  terminalReconciliationBatchSize?: number;
   recoveryPolicy?: AIOperationalRecoveryPolicy;
   pollIntervalMs?: number;
   workerId?: string;
@@ -37,6 +39,7 @@ export class AIWorker {
   private readonly workerId: string;
   private readonly clock: () => number;
   private readonly pollIntervalMs: number;
+  private readonly terminalReconciliationBatchSize: number;
   private stopping = false;
   private currentAbortController: AbortController | null = null;
 
@@ -44,8 +47,12 @@ export class AIWorker {
     this.workerId = dependencies.workerId ?? dependencies.jobs.createWorkerId();
     this.clock = dependencies.clock ?? Date.now;
     this.pollIntervalMs = dependencies.pollIntervalMs ?? 1_000;
+    this.terminalReconciliationBatchSize = dependencies.terminalReconciliationBatchSize ?? 50;
     if (!Number.isSafeInteger(this.pollIntervalMs) || this.pollIntervalMs < 50 || this.pollIntervalMs > 60_000) {
       throw new AIJobError("AI_JOB_INVALID", "Worker poll interval is invalid.");
+    }
+    if (!Number.isSafeInteger(this.terminalReconciliationBatchSize) || this.terminalReconciliationBatchSize < 1 || this.terminalReconciliationBatchSize > 500) {
+      throw new AIJobError("AI_JOB_INVALID", "Terminal reconciliation batch size is invalid.");
     }
   }
 
@@ -62,24 +69,26 @@ export class AIWorker {
     const recoveredJobs = this.dependencies.jobs.recoverExpiredLeases(now);
     const recovery = this.dependencies.recovery?.runOnce(now);
     this.reconcileTerminalJobs(recoveredJobs, now);
+    const terminalReconciliation = this.dependencies.terminalReconciler?.reconcilePending({ limit: this.terminalReconciliationBatchSize, now });
     const dispatchedOutbox = !this.stopping && this.dependencies.outbox
       ? this.dependencies.outbox.dispatchOne({ now })
       : null;
     if (this.stopping) {
-      return { recoveredJobs: recoveredJobs.length, recovery, dispatchedOutbox, claimedJobId: null, completedJobId: null };
+      return { recoveredJobs: recoveredJobs.length, recovery, terminalReconciliation, dispatchedOutbox, claimedJobId: null, completedJobId: null };
     }
     const claimed = this.dependencies.jobs.claimNext({
       workerId: this.workerId,
       supportedKinds: this.dependencies.handlers.supportedKinds(),
       now,
     });
-    if (!claimed) return { recoveredJobs: recoveredJobs.length, recovery, dispatchedOutbox, claimedJobId: null, completedJobId: null };
+    if (!claimed) return { recoveredJobs: recoveredJobs.length, recovery, terminalReconciliation, dispatchedOutbox, claimedJobId: null, completedJobId: null };
     const completed = await this.executeClaimed(claimed);
     const terminalJob = this.dependencies.jobs.getJob(claimed.job.id);
     if (terminalJob) this.reconcileTerminalJobs([terminalJob], now);
     return {
       recoveredJobs: recoveredJobs.length,
       recovery,
+      terminalReconciliation,
       dispatchedOutbox,
       claimedJobId: claimed.job.id,
       completedJobId: completed ? claimed.job.id : null,
@@ -89,16 +98,7 @@ export class AIWorker {
   private reconcileTerminalJobs(jobs: readonly AIJob[], now: number): void {
     const reconciler = this.dependencies.terminalReconciler;
     if (!reconciler) return;
-    const seen = new Set<string>();
-    const candidates = [...jobs];
-    for (const view of this.dependencies.jobs.listTerminal(100)) {
-      if (seen.has(view.id)) continue;
-      const job = this.dependencies.jobs.getJob(view.id);
-      if (job) candidates.push(job);
-    }
-    for (const job of candidates) {
-      if (seen.has(job.id)) continue;
-      seen.add(job.id);
+    for (const job of jobs) {
       if (job.status === "DEAD_LETTER" || job.status === "CANCELLED") reconciler.reconcile(job, now);
     }
   }

@@ -15,6 +15,7 @@ export {
   type AIJobPriority,
   type AIJobSpec,
   type AIJobStatus,
+  type AIJobTerminalReconciliationResult,
   type AIJobTerminalReconciler,
 } from "./contracts";
 export {

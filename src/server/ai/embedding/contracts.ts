@@ -78,6 +78,17 @@ export interface AIEmbeddingProjectionRevision {
   safeErrorCode: string | null;
 }
 
+export interface AIEmbeddingPendingTerminalProjection {
+  revision: AIEmbeddingProjectionRevision;
+  job: {
+    id: string;
+    kind: string;
+    payloadVersion: number;
+    status: "DEAD_LETTER" | "CANCELLED";
+    costOperationId: string | null;
+  };
+}
+
 export interface AIEmbeddingVector {
   embeddingProjectionRevisionId: string;
   chunkProjectionRevisionId: string;
@@ -163,6 +174,8 @@ export interface AIEmbeddingProjectionRepository {
     projectionSetId: string;
     inputFingerprint: string;
   }): AIEmbeddingProjectionRevision | null;
+  listRevisionsByJobId(jobId: string): AIEmbeddingProjectionRevision[];
+  listPendingTerminalReconciliations(limit: number): AIEmbeddingPendingTerminalProjection[];
   getRevision(id: string): AIEmbeddingProjectionRevision | null;
   listRevisions(projectionSetId: string): AIEmbeddingProjectionRevision[];
   createRevision(input: {
