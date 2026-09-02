@@ -20,7 +20,7 @@ import { SQLiteAIRetrievalConfigRepository, type AIRetrievalConfigContent } from
 import type { AIEvidencePack, AIHybridEvidenceItem } from "../src/server/ai/retrieval";
 import { AIChunkProjectionBuilder, SQLiteAIRetrievalProjectionRepository } from "../src/server/ai/retrieval";
 import { SQLiteAIKnowledgePackageRepository, SQLiteAIKnowledgeSourceRepository } from "../src/server/ai/knowledge";
-import { AI_TUTOR_CONFIG_RESOURCE_TYPE, AITutorGenerationPlanner, AITutorPreflightError, AITutorPreflightService, AITutorResponseTraceService, AI_TUTOR_CITATION_PROTOCOL_KEY, AI_TUTOR_CITATION_PROTOCOL_REVISION, AI_TUTOR_GROUNDING_PROTOCOL_KEY, AI_TUTOR_GROUNDING_PROTOCOL_REVISION, SQLiteAITutorConfigRepository, type AITutorConfigContent, type AITutorPreflightPlan, type AITutorResponseTrace, type AITutorTraceCreateInput } from "../src/server/ai/tutor";
+import { AI_TUTOR_CONFIG_RESOURCE_TYPE, AITutorGenerationPlanner, AITutorPlanningError, AITutorPreflightError, AITutorPreflightService, AITutorResponseTraceService, AI_TUTOR_CITATION_PROTOCOL_KEY, AI_TUTOR_CITATION_PROTOCOL_REVISION, AI_TUTOR_GROUNDING_PROTOCOL_KEY, AI_TUTOR_GROUNDING_PROTOCOL_REVISION, SQLiteAITutorConfigRepository, type AITutorConfigContent, type AITutorPreflightPlan, type AITutorResponseTrace, type AITutorTraceCreateInput, type AITutorTraceProjectionRefCreate } from "../src/server/ai/tutor";
 import { AIConversationService, type AIStudentPrincipal } from "../src/server/ai/conversations";
 import { createLocalAISecretStore } from "../src/server/ai/secrets";
 import { SQLiteAIModelConfigRepository } from "../src/server/ai/model-registry";
@@ -70,7 +70,10 @@ class NoCallRerankAdapter {
 }
 
 interface TutorFixtureOptions {
+  dataDirectory?: string;
   withRerank?: boolean;
+  generationSupportsReasoning?: boolean;
+  generationHasReasoningPrice?: boolean;
   currencies?: { embedding?: string; rerank?: string; generation?: string };
   generationHasOutputPrice?: boolean;
 }
@@ -104,12 +107,12 @@ interface TutorFixture {
   embedding: NoCallEmbeddingAdapter;
   rerank: NoCallRerankAdapter;
   now: number;
-  close(): void;
+  close(removeFiles?: boolean): void;
 }
 
-async function createFixture(options: TutorFixtureOptions = {}): Promise<TutorFixture> {
-  const root = mkdtempSync(path.join(os.tmpdir(), "pythagoras-ai-m8a-"));
-  const database = openContentDatabase({ dataDirectory: root, migrationsDirectory });
+async function createFixture(options: TutorFixtureOptions = {}, fixtureMigrationsDirectory = migrationsDirectory): Promise<TutorFixture> {
+  const root = options.dataDirectory ?? mkdtempSync(path.join(os.tmpdir(), "pythagoras-ai-m8a-"));
+  const database = openContentDatabase({ dataDirectory: root, migrationsDirectory: fixtureMigrationsDirectory });
   createCanonicalContentRepository(database).bootstrap();
   const identities = new SQLiteAdminIdentityRepository(database);
   const ownerUser = identities.createInitialOwner({ id: uuidv7(), email: `owner-${uuidv7()}@m8a.test`, displayName: "M8A Owner", passwordHash: "fixture", createdAt: BASE_TIME });
@@ -122,7 +125,7 @@ async function createFixture(options: TutorFixtureOptions = {}): Promise<TutorFi
   providers.create({ id: providerId, content: { key: `m8a-provider-${uuidv7()}`, displayName: "M8A Provider", baseUrl: "https://provider.example/v1", credentialRef: secret.credentialRef, enabled: true, retentionPolicy: "UNKNOWN", trainingPolicy: "UNKNOWN", zdrSupported: false, zdrRequired: false }, actor: owner, now: now - 90 });
   const models = new SQLiteAIModelConfigRepository(database);
   const generationModelId = uuidv7();
-  models.create({ id: generationModelId, content: { key: `m8a-generation-${uuidv7()}`, displayName: "M8A Generation", providerConfigId: providerId, providerModelId: "m8a-generation-model", capability: "GENERATION", adapterKey: "test.m8a-generation", enabled: true, contextWindowTokens: 10_000, maxOutputTokens: 100, embeddingDimensions: null, supportsStreaming: true, supportsReasoning: false, supportsStructuredOutput: false }, actor: owner, now: now - 80 });
+  models.create({ id: generationModelId, content: { key: `m8a-generation-${uuidv7()}`, displayName: "M8A Generation", providerConfigId: providerId, providerModelId: "m8a-generation-model", capability: "GENERATION", adapterKey: "test.m8a-generation", enabled: true, contextWindowTokens: 10_000, maxOutputTokens: 100, embeddingDimensions: null, supportsStreaming: true, supportsReasoning: options.generationSupportsReasoning === true, supportsStructuredOutput: false }, actor: owner, now: now - 80 });
   const embeddingModelId = uuidv7();
   models.create({ id: embeddingModelId, content: { key: `m8a-embedding-${uuidv7()}`, displayName: "M8A Embedding", providerConfigId: providerId, providerModelId: "m8a-embedding-model", capability: "EMBEDDING", adapterKey: "test.m8a-embedding", enabled: true, contextWindowTokens: null, maxOutputTokens: null, embeddingDimensions: 3, supportsStreaming: false, supportsReasoning: false, supportsStructuredOutput: false }, actor: owner, now: now - 70 });
   const rerankModelId = options.withRerank ? uuidv7() : null;
@@ -150,7 +153,7 @@ async function createFixture(options: TutorFixtureOptions = {}): Promise<TutorFi
   const currencies = options.currencies ?? {};
   createRateCard(rateCards, embeddingModelId, currencies.embedding ?? "USD", `m8a-embedding-rate-${uuidv7()}`, owner, now - 40);
   if (rerankModelId) createRateCard(rateCards, rerankModelId, currencies.rerank ?? "USD", `m8a-rerank-rate-${uuidv7()}`, owner, now - 39);
-  createRateCard(rateCards, generationModelId, currencies.generation ?? "USD", `m8a-generation-rate-${uuidv7()}`, owner, now - 38, options.generationHasOutputPrice !== false);
+  createRateCard(rateCards, generationModelId, currencies.generation ?? "USD", `m8a-generation-rate-${uuidv7()}`, owner, now - 38, options.generationHasOutputPrice !== false, options.generationSupportsReasoning === true && options.generationHasReasoningPrice !== false);
 
   const generation = new NoCallGenerationAdapter();
   const embedding = new NoCallEmbeddingAdapter();
@@ -163,11 +166,11 @@ async function createFixture(options: TutorFixtureOptions = {}): Promise<TutorFi
   const admission = new AIBudgetAdmissionService(database, { clock: () => now });
   const tutorConfigs = new SQLiteAITutorConfigRepository(database);
   const preflight = new AITutorPreflightService(database, { context, models, providers, retrievalConfigs: retrievals, contextPolicies: contexts, adapters, clock: () => now });
-  return { root, database, owner, principal: PRINCIPAL, conversations, context, instructions, contexts, retrievals, models, changes, preflight, admission, accounting, tutorConfigs, generationModelId, embeddingModelId, rerankModelId, providerId, contextPolicyId, retrievalConfigId, budgetPolicyId, rateLimitPolicyId, adapters, generation, embedding, rerank, now, close() { database.close(); rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 }); } };
+  return { root, database, owner, principal: PRINCIPAL, conversations, context, instructions, contexts, retrievals, models, changes, preflight, admission, accounting, tutorConfigs, generationModelId, embeddingModelId, rerankModelId, providerId, contextPolicyId, retrievalConfigId, budgetPolicyId, rateLimitPolicyId, adapters, generation, embedding, rerank, now, close(removeFiles = true) { database.close(); if (removeFiles) rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 }); } };
 }
 
-function createRateCard(repository: SQLiteAIRateCardRepository, modelConfigId: string, currency: string, key: string, actor: AdminActor, now: number, includeOutput = true): void {
-  repository.create({ id: uuidv7(), content: { key, displayName: "M8A Rate Card", modelConfigId, modelConfigRevision: 1, currency, billingUsageNormalizerKey: "m8a.test", effectiveFrom: 0, effectiveTo: null, enabled: true, priceLines: [{ component: "STANDARD_INPUT", unit: "PER_MILLION_TOKENS", amountNano: 1_000_000 }, ...(includeOutput ? [{ component: "OUTPUT", unit: "PER_MILLION_TOKENS", amountNano: 2_000_000 } as const] : []), { component: "REQUEST", unit: "PER_REQUEST", amountNano: 100 }], timeBands: [] }, actor, now });
+function createRateCard(repository: SQLiteAIRateCardRepository, modelConfigId: string, currency: string, key: string, actor: AdminActor, now: number, includeOutput = true, includeReasoning = false): void {
+  repository.create({ id: uuidv7(), content: { key, displayName: "M8A Rate Card", modelConfigId, modelConfigRevision: 1, currency, billingUsageNormalizerKey: "m8a.test", effectiveFrom: 0, effectiveTo: null, enabled: true, priceLines: [{ component: "STANDARD_INPUT", unit: "PER_MILLION_TOKENS", amountNano: 1_000_000 }, ...(includeOutput ? [{ component: "OUTPUT", unit: "PER_MILLION_TOKENS", amountNano: 2_000_000 } as const] : []), ...(includeReasoning ? [{ component: "REASONING", unit: "PER_MILLION_TOKENS", amountNano: 13_000_000 } as const] : []), { component: "REQUEST", unit: "PER_REQUEST", amountNano: 100 }], timeBands: [] }, actor, now });
 }
 
 function retrievalConfigContent(embeddingModelConfigId: string, rerankModelConfigId: string | null, subjectKey = "biology"): AIRetrievalConfigContent {
@@ -216,6 +219,60 @@ function admittedReservation(fixture: TutorFixture, plan: AITutorPreflightPlan):
 function traceInput(plan: AITutorPreflightPlan, responseId: string, operationId: string, reservationId: string): AITutorTraceCreateInput {
   const trace: AITutorResponseTrace = { id: uuidv7(), responseId, conversationId: plan.conversationId, principalRef: plan.principalRef, subjectKey: plan.subjectKey, tutorConfigId: plan.tutorConfigId, tutorConfigRevision: plan.tutorConfigRevision, contextSnapshotId: plan.contextSnapshotId, contextSnapshotFingerprint: plan.contextSnapshotFingerprint, retrievalConfigId: plan.retrievalConfigId, retrievalConfigRevision: plan.retrievalConfigRevision, fusionAlgorithmKey: plan.retrievalConfig.fusionAlgorithmKey, fusionAlgorithmRevision: plan.retrievalConfig.fusionAlgorithmRevision, generationModelConfigId: plan.generationModelConfigId, generationModelConfigRevision: plan.generationModelConfigRevision, generationProviderConfigId: plan.generationProviderConfigId, generationProviderConfigRevision: plan.generationProviderConfigRevision, providerModelId: plan.providerModelId, adapterKey: plan.adapterKey, groundingProtocolKey: AI_TUTOR_GROUNDING_PROTOCOL_KEY, groundingProtocolRevision: AI_TUTOR_GROUNDING_PROTOCOL_REVISION, citationProtocolKey: AI_TUTOR_CITATION_PROTOCOL_KEY, citationProtocolRevision: AI_TUTOR_CITATION_PROTOCOL_REVISION, costOperationId: operationId, budgetReservationId: reservationId, budgetPolicyId: plan.budgetPolicyId, budgetPolicyRevision: plan.budgetPolicyRevision, rateLimitPolicyId: plan.rateLimitPolicyId, rateLimitPolicyRevision: plan.rateLimitPolicyRevision, planFingerprint: plan.planFingerprint, status: "PLANNED", safeErrorCode: null, createdAt: BASE_TIME + 300, updatedAt: BASE_TIME + 300, completedAt: null };
   return { trace, projectionRefs: [], evidenceRefs: [] };
+}
+
+function insertLegacyTrace(database: ContentDatabase, trace: AITutorResponseTrace): void {
+  database.client.prepare(`
+    insert into ai_tutor_response_traces (
+      id, response_id, conversation_id, principal_ref, subject_key,
+      tutor_config_id, tutor_config_revision, context_snapshot_id,
+      context_snapshot_fingerprint, retrieval_config_id, retrieval_config_revision,
+      fusion_algorithm_key, fusion_algorithm_revision, generation_model_config_id,
+      generation_model_config_revision, generation_provider_config_id,
+      generation_provider_config_revision, provider_model_id, adapter_key,
+      grounding_protocol_key, grounding_protocol_revision, citation_protocol_key,
+      citation_protocol_revision, cost_operation_id, budget_reservation_id,
+      budget_policy_id, budget_policy_revision, rate_limit_policy_id,
+      rate_limit_policy_revision, plan_fingerprint, status, safe_error_code,
+      created_at, updated_at, completed_at
+    ) values (${Array.from({ length: 35 }, () => "?").join(", ")})
+  `).run(
+    trace.id,
+    trace.responseId,
+    trace.conversationId,
+    trace.principalRef,
+    trace.subjectKey,
+    trace.tutorConfigId,
+    trace.tutorConfigRevision,
+    trace.contextSnapshotId,
+    trace.contextSnapshotFingerprint,
+    trace.retrievalConfigId,
+    trace.retrievalConfigRevision,
+    trace.fusionAlgorithmKey,
+    trace.fusionAlgorithmRevision,
+    trace.generationModelConfigId,
+    trace.generationModelConfigRevision,
+    trace.generationProviderConfigId,
+    trace.generationProviderConfigRevision,
+    trace.providerModelId,
+    trace.adapterKey,
+    trace.groundingProtocolKey,
+    trace.groundingProtocolRevision,
+    trace.citationProtocolKey,
+    trace.citationProtocolRevision,
+    trace.costOperationId,
+    trace.budgetReservationId,
+    trace.budgetPolicyId,
+    trace.budgetPolicyRevision,
+    trace.rateLimitPolicyId,
+    trace.rateLimitPolicyRevision,
+    trace.planFingerprint,
+    trace.status,
+    trace.safeErrorCode,
+    trace.createdAt,
+    trace.updatedAt,
+    trace.completedAt,
+  );
 }
 
 function createKnowledgeChunk(fixture: TutorFixture): { projectionRevisionId: string; chunkId: string; originId: string } {
@@ -277,39 +334,50 @@ test("Tutor Config is governed, server-owned, and protected by SQLite lifecycle 
   } finally { fixture.close(); }
 });
 
-test("0028 upgrades an existing 0027 database and adds Tutor/Trace tables without rewriting prior data", () => {
+test("0029 upgrades a populated 0028 database and seals existing Tutor Trace refs", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "pythagoras-ai-m8a-upgrade-"));
   const oldMigrations = mkdtempSync(path.join(os.tmpdir(), "pythagoras-ai-m8a-migrations-"));
-  let before: ContentDatabase | null = null;
+  let oldFixture: TutorFixture | null = null;
   let upgraded: ContentDatabase | null = null;
+  let legacyTrace: AITutorResponseTrace | null = null;
   try {
     mkdirSync(path.join(oldMigrations, "meta"), { recursive: true });
     const journal = JSON.parse(readFileSync(path.join(migrationsDirectory, "meta", "_journal.json"), "utf8")) as { entries: Array<{ idx: number; tag: string }>; [key: string]: unknown };
-    const priorEntries = journal.entries.slice(0, 28);
+    const priorEntries = journal.entries.slice(0, 29);
     for (const entry of priorEntries) {
       copyFileSync(path.join(migrationsDirectory, `${entry.tag}.sql`), path.join(oldMigrations, `${entry.tag}.sql`));
       const snapshotName = `${entry.idx.toString().padStart(4, "0")}_snapshot.json`;
       if (existsSync(path.join(migrationsDirectory, "meta", snapshotName))) copyFileSync(path.join(migrationsDirectory, "meta", snapshotName), path.join(oldMigrations, "meta", snapshotName));
     }
     writeFileSync(path.join(oldMigrations, "meta", "_journal.json"), JSON.stringify({ ...journal, entries: priorEntries }));
-    before = openContentDatabase({ dataDirectory: root, migrationsDirectory: oldMigrations });
-    assert.equal(Number((before.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count), 28);
-    createCanonicalContentRepository(before).bootstrap();
-    const owner = new SQLiteAdminIdentityRepository(before).createInitialOwner({ id: uuidv7(), email: `owner-${uuidv7()}@m8a-upgrade.test`, displayName: "M8A Upgrade Owner", passwordHash: "fixture", createdAt: BASE_TIME });
-    assert.ok(before.client.prepare("select subject_key from canonical_materials where subject_key='biology'").get());
-    assert.ok(owner.id);
-    before.close();
-    before = null;
+    oldFixture = await createFixture({ dataDirectory: root }, oldMigrations);
+    assert.equal(Number((oldFixture.database.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count), 29);
+    assert.ok(oldFixture.database.client.prepare("select subject_key from canonical_materials where subject_key='biology'").get());
+    const tutor = publishTutor(oldFixture);
+    const turn = createPendingTurn(oldFixture);
+    const plan = oldFixture.preflight.preflight({ principal: oldFixture.principal, responseId: turn.response.id, tutorConfigId: tutor.id, estimator: estimator() });
+    const admission = admittedReservation(oldFixture, plan);
+    const createdLegacyTrace = traceInput(plan, turn.response.id, admission.operationId, admission.reservationId).trace;
+    legacyTrace = createdLegacyTrace;
+    insertLegacyTrace(oldFixture.database, createdLegacyTrace);
+    assert.equal((oldFixture.database.client.prepare("select count(*) as count from ai_tutor_response_traces").get() as { count: number }).count, 1);
+    oldFixture.close(false);
+    oldFixture = null;
 
-    upgraded = openContentDatabase({ dataDirectory: root, migrationsDirectory });
-    assert.equal(Number((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count), 29);
-    for (const table of ["ai_tutor_configs", "ai_tutor_config_revisions", "ai_tutor_response_traces", "ai_tutor_trace_projection_refs", "ai_tutor_trace_evidence_refs"]) assert.ok(upgraded.client.prepare("select name from sqlite_master where type='table' and name=?").get(table));
-    for (const trigger of ["ai_tutor_configs_identity_no_update", "ai_tutor_configs_revision_pointer", "ai_tutor_config_revisions_no_update", "ai_tutor_config_revisions_no_delete", "ai_tutor_response_traces_insert_integrity", "ai_tutor_response_traces_identity_no_update", "ai_tutor_response_traces_lifecycle", "ai_tutor_trace_projection_refs_no_update", "ai_tutor_trace_evidence_refs_no_update"]) assert.ok(upgraded.client.prepare("select name from sqlite_master where type='trigger' and name=?").get(trigger));
-    assert.equal((upgraded.client.prepare("select count(*) as count from ai_tutor_configs").get() as { count: number }).count, 0);
-    assert.ok(upgraded.client.prepare("select subject_key from canonical_materials where subject_key='biology'").get());
+    const upgradedDatabase = openContentDatabase({ dataDirectory: root, migrationsDirectory });
+    upgraded = upgradedDatabase;
+    assert.equal(Number((upgradedDatabase.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count), 30);
+    for (const table of ["ai_tutor_configs", "ai_tutor_config_revisions", "ai_tutor_response_traces", "ai_tutor_trace_projection_refs", "ai_tutor_trace_evidence_refs"]) assert.ok(upgradedDatabase.client.prepare("select name from sqlite_master where type='table' and name=?").get(table));
+    for (const trigger of ["ai_tutor_configs_identity_no_update", "ai_tutor_configs_revision_pointer", "ai_tutor_config_revisions_no_update", "ai_tutor_config_revisions_no_delete", "ai_tutor_response_traces_insert_integrity", "ai_tutor_response_traces_identity_no_update", "ai_tutor_response_traces_lifecycle", "ai_tutor_response_traces_refs_sealed_state", "ai_tutor_response_traces_requires_sealed_refs", "ai_tutor_trace_projection_refs_sealed_insert", "ai_tutor_trace_evidence_refs_sealed_insert"]) assert.ok(upgradedDatabase.client.prepare("select name from sqlite_master where type='trigger' and name=?").get(trigger));
+    assert.equal((upgradedDatabase.client.prepare("select count(*) as count from ai_tutor_configs").get() as { count: number }).count, 1);
+    const legacyTraceForAssertions = legacyTrace;
+    if (!legacyTraceForAssertions) throw new Error("The legacy Tutor Trace fixture was not created.");
+    assert.equal((upgradedDatabase.client.prepare("select refs_sealed from ai_tutor_response_traces where id=?").get(legacyTraceForAssertions.id) as { refs_sealed: number }).refs_sealed, 1);
+    assert.throws(() => upgradedDatabase.client.prepare("insert into ai_tutor_trace_projection_refs (trace_id, projection_kind, projection_revision_id) values (?, 'M7A', ?)").run(legacyTraceForAssertions.id, "legacy-projection"), /sealed|reference/i);
+    assert.ok(upgradedDatabase.client.prepare("select subject_key from canonical_materials where subject_key='biology'").get());
   } finally {
     upgraded?.close();
-    before?.close();
+    oldFixture?.close();
     rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
     rmSync(oldMigrations, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
   }
@@ -338,6 +406,64 @@ test("M8A preflight pins canonical Conversation, policies, retrieval, model/prov
     assert.equal(fixture.generation.calls, 0);
     assert.equal(fixture.embedding.calls, 0);
     assert.equal(fixture.rerank.calls, 0);
+  } finally { fixture.close(); }
+});
+
+test("M8A EvidencePack planning is bound to the exact Response request", async () => {
+  const fixture = await createFixture();
+  try {
+    const tutor = publishTutor(fixture);
+    const turnA = createPendingTurn(fixture, "Question A");
+    const turnB = createPendingTurn(fixture, "Question B");
+    const planA = fixture.preflight.preflight({ principal: fixture.principal, responseId: turnA.response.id, tutorConfigId: tutor.id, estimator: estimator() });
+    const planB = fixture.preflight.preflight({ principal: fixture.principal, responseId: turnB.response.id, tutorConfigId: tutor.id, estimator: estimator() });
+    const planner = new AITutorGenerationPlanner();
+    const packA = evidencePack(planA, [makeEvidenceItem(1, "Evidence A")]);
+    assert.doesNotThrow(() => planner.plan(planA, packA));
+    assert.throws(() => planner.plan(planB, packA), (error) => error instanceof AITutorPlanningError && error.code === "AI_TUTOR_EVIDENCE_INVALID");
+    assert.throws(() => planner.plan(planA, { ...packA, requestId: uuidv7() }), (error) => error instanceof AITutorPlanningError && error.code === "AI_TUTOR_EVIDENCE_INVALID");
+    assert.equal(fixture.generation.calls + fixture.embedding.calls + fixture.rerank.calls, 0);
+  } finally { fixture.close(); }
+});
+
+test("M8A Preflight and Generation plans are detached deeply immutable runtime values", async () => {
+  const fixture = await createFixture();
+  try {
+    const tutor = publishTutor(fixture);
+    const turn = createPendingTurn(fixture);
+    const suppliedEstimator = estimator();
+    const preflight = fixture.preflight.preflight({ principal: fixture.principal, responseId: turn.response.id, tutorConfigId: tutor.id, estimator: suppliedEstimator });
+    const originalFingerprint = preflight.planFingerprint;
+    assert.equal(Object.isFrozen(suppliedEstimator), false);
+    assert.equal(Object.isFrozen(preflight.contextPlan), true);
+    assert.equal(Object.isFrozen(preflight.contextPlan.currentMessage), true);
+    assert.equal(Object.isFrozen(preflight.contextPlan.instructionLayers[0]), true);
+    assert.equal(Reflect.set(preflight.contextPlan.currentMessage as object, "content", "mutated"), false);
+    assert.equal(Reflect.set(preflight.contextPlan.instructionLayers[0] as object, "text", "mutated"), false);
+    assert.equal(Reflect.set(preflight.retrievalConfig as object, "minimumEvidenceItemCount", 0), false);
+    assert.equal(Reflect.set(preflight.generationModel as object, "providerModelId", "mutated"), false);
+    assert.equal(Reflect.set(preflight.estimator as object, "estimate", () => 999), false);
+    assert.equal(Reflect.set(preflight.modelSelectionPlan.attempts as object, "0", "mutated"), false);
+    suppliedEstimator.estimate = () => 999;
+    assert.equal(preflight.estimator.estimate("unchanged"), 1);
+    assert.equal(preflight.planFingerprint, originalFingerprint);
+
+    const planned = new AITutorGenerationPlanner().plan(preflight, evidencePack(preflight, [makeEvidenceItem(1, "Evidence 1"), makeEvidenceItem(2, "Evidence 2")]));
+    assert.equal(Object.isFrozen(planned), true);
+    assert.equal(Object.isFrozen(planned.request), true);
+    assert.equal(Object.isFrozen(planned.request.messages), true);
+    assert.equal(Object.isFrozen(planned.request.messages[0]), true);
+    assert.equal(Object.isFrozen(planned.selectedEvidence[0]), true);
+    assert.equal(Object.isFrozen(planned.citationMap[0]), true);
+    assert.equal(Reflect.set(planned.request as object, "requestId", uuidv7()), false);
+    assert.equal(Reflect.set(planned.request.messages as object, "length", 0), false);
+    assert.equal(Reflect.set(planned.request.messages[0] as object, "content", "mutated"), false);
+    assert.equal(Reflect.set(planned.selectedEvidence as object, "length", 0), false);
+    assert.equal(Reflect.set(planned.selectedEvidence[0] as object, "label", "[E99]"), false);
+    assert.equal(Reflect.set(planned.citationMap[0] as object, "label", "[E99]"), false);
+    assert.equal(Reflect.set(planned.modelSelectionPlan.attempts as object, "0", "mutated"), false);
+    assert.equal(planned.request.messages.at(-1)?.content, "TOP_SECRET_STUDENT_QUERY_88");
+    assert.equal(preflight.planFingerprint, originalFingerprint);
   } finally { fixture.close(); }
 });
 
@@ -395,6 +521,34 @@ test("M8A conservative cost estimation includes optional Rerank, integer rate-ca
   } finally { incomplete.close(); }
 });
 
+test("M8A reasoning-capable Generation uses a conservative priced reasoning bound", async () => {
+  const reasoning = await createFixture({ generationSupportsReasoning: true });
+  try {
+    const tutor = publishTutor(reasoning);
+    const turn = createPendingTurn(reasoning);
+    const plan = reasoning.preflight.preflight({ principal: reasoning.principal, responseId: turn.response.id, tutorConfigId: tutor.id, estimator: estimator() });
+    assert.equal(plan.costEstimate.generation.reasoningTokenUpperBound, 40);
+    assert.ok(plan.costEstimate.generation.costNano > 0);
+    assert.equal(reasoning.generation.calls + reasoning.embedding.calls + reasoning.rerank.calls, 0);
+    const ordinary = await createFixture();
+    try {
+      const ordinaryTutor = publishTutor(ordinary);
+      const ordinaryTurn = createPendingTurn(ordinary);
+      const ordinaryPlan = ordinary.preflight.preflight({ principal: ordinary.principal, responseId: ordinaryTurn.response.id, tutorConfigId: ordinaryTutor.id, estimator: estimator() });
+      assert.equal(ordinaryPlan.costEstimate.generation.reasoningTokenUpperBound, 0);
+      assert.ok(plan.costEstimate.maxCostNano > ordinaryPlan.costEstimate.maxCostNano);
+    } finally { ordinary.close(); }
+  } finally { reasoning.close(); }
+
+  const missingReasoningPrice = await createFixture({ generationSupportsReasoning: true, generationHasReasoningPrice: false });
+  try {
+    const tutor = publishTutor(missingReasoningPrice);
+    const turn = createPendingTurn(missingReasoningPrice);
+    assert.throws(() => missingReasoningPrice.preflight.preflight({ principal: missingReasoningPrice.principal, responseId: turn.response.id, tutorConfigId: tutor.id, estimator: estimator() }), (error) => error instanceof AITutorPreflightError && error.code === "AI_TUTOR_COST_INVALID");
+    assert.equal(missingReasoningPrice.generation.calls + missingReasoningPrice.embedding.calls + missingReasoningPrice.rerank.calls, 0);
+  } finally { missingReasoningPrice.close(); }
+});
+
 test("M8A Generation Planner validates trusted EvidencePack, budgets whole items, and keeps data out of instructions", async () => {
   const fixture = await createFixture();
   try {
@@ -448,21 +602,34 @@ test("M8A Response Trace foundation is metadata-only, relationally owned, unique
     const admission = admittedReservation(fixture, plan);
     const createdTraceInput = traceInput(plan, turn.response.id, admission.operationId, admission.reservationId);
     const chunk = createKnowledgeChunk(fixture);
-    createdTraceInput.projectionRefs = [{ traceId: createdTraceInput.trace.id, projectionKind: "M7A", projectionRevisionId: chunk.projectionRevisionId }];
-    createdTraceInput.evidenceRefs = [{ traceId: createdTraceInput.trace.id, ordinal: 1, citationLabel: "[E1]", chunkId: chunk.chunkId, m7aProjectionRevisionId: chunk.projectionRevisionId, m7bEmbeddingProjectionRevisionId: null, originKind: "KNOWLEDGE_PACKAGE", originId: chunk.originId, questionId: null, questionRevision: null }];
+    createdTraceInput.projectionRefs = [{ projectionKind: "M7A", projectionRevisionId: chunk.projectionRevisionId }];
+    createdTraceInput.evidenceRefs = [{ ordinal: 1, citationLabel: "[E1]", chunkId: chunk.chunkId, m7aProjectionRevisionId: chunk.projectionRevisionId, m7bEmbeddingProjectionRevisionId: null, originKind: "KNOWLEDGE_PACKAGE", originId: chunk.originId, questionId: null, questionRevision: null }];
     const traces = AITutorResponseTraceService.forDatabase(fixture.database);
     const created = traces.create(createdTraceInput);
     assert.equal(created.status, "PLANNED");
+    assert.equal((fixture.database.client.prepare("select refs_sealed from ai_tutor_response_traces where id=?").get(created.id) as { refs_sealed: number }).refs_sealed, 1);
     assert.equal(traces.getByResponse(turn.response.id)?.id, created.id);
     assert.equal(traces.listProjectionRefs(created.id).length, 1);
     assert.equal(traces.listEvidenceRefs(created.id)[0]?.citationLabel, "[E1]");
+    assert.throws(() => fixture.database.client.prepare("update ai_tutor_response_traces set refs_sealed=0 where id=?").run(created.id), /immutable|seal/i);
+    const secondTurn = createPendingTurn(fixture, "Trace B");
+    const secondPlan = fixture.preflight.preflight({ principal: fixture.principal, responseId: secondTurn.response.id, tutorConfigId: tutor.id, estimator: estimator() });
+    const secondAdmission = admittedReservation(fixture, secondPlan);
+    const foreignParentInput = traceInput(secondPlan, secondTurn.response.id, secondAdmission.operationId, secondAdmission.reservationId);
+    foreignParentInput.projectionRefs = [{ traceId: created.id, projectionKind: "M7A", projectionRevisionId: chunk.projectionRevisionId } as unknown as AITutorTraceProjectionRefCreate];
+    assert.throws(() => traces.create(foreignParentInput), /fields|reference/i);
+    assert.equal(traces.getByResponse(secondTurn.response.id), null);
+    assert.throws(() => fixture.database.client.prepare("insert into ai_tutor_trace_projection_refs (trace_id, projection_kind, projection_revision_id) values (?, 'M7A', ?)").run(created.id, chunk.projectionRevisionId), /sealed|reference/i);
+    assert.throws(() => fixture.database.client.prepare("insert into ai_tutor_trace_evidence_refs (trace_id, ordinal, citation_label, chunk_id, m7a_projection_revision_id, m7b_embedding_projection_revision_id, origin_kind, origin_id, question_id, question_revision) values (?, 2, '[E2]', ?, ?, null, 'KNOWLEDGE_PACKAGE', ?, null, null)").run(created.id, chunk.chunkId, chunk.projectionRevisionId, chunk.originId), /sealed|reference/i);
     assert.throws(() => fixture.database.client.prepare("update ai_tutor_response_traces set plan_fingerprint=? where id=?").run("f".repeat(64), created.id), /identity|immutable/i);
     assert.throws(() => fixture.database.client.prepare("delete from ai_tutor_response_traces where id=?").run(created.id), /immutable/i);
     assert.throws(() => fixture.database.client.prepare("update ai_tutor_trace_evidence_refs set chunk_id=? where trace_id=? and ordinal=1").run("other-chunk", created.id), /immutable/i);
     assert.throws(() => fixture.database.client.prepare("delete from ai_tutor_trace_projection_refs where trace_id=?").run(created.id), /immutable/i);
     traces.transition({ id: created.id, expectedStatus: "PLANNED", status: "STREAMING", updatedAt: BASE_TIME + 301, completedAt: null, safeErrorCode: null });
+    assert.throws(() => fixture.database.client.prepare("insert into ai_tutor_trace_projection_refs (trace_id, projection_kind, projection_revision_id) values (?, 'M7A', ?)").run(created.id, "after-streaming"), /sealed|reference/i);
     const completed = traces.transition({ id: created.id, expectedStatus: "STREAMING", status: "COMPLETED", updatedAt: BASE_TIME + 302, completedAt: BASE_TIME + 302, safeErrorCode: null });
     assert.equal(completed.status, "COMPLETED");
+    assert.throws(() => fixture.database.client.prepare("insert into ai_tutor_trace_evidence_refs (trace_id, ordinal, citation_label, chunk_id, m7a_projection_revision_id, m7b_embedding_projection_revision_id, origin_kind, origin_id, question_id, question_revision) values (?, 3, '[E3]', ?, ?, null, 'KNOWLEDGE_PACKAGE', ?, null, null)").run(created.id, chunk.chunkId, chunk.projectionRevisionId, chunk.originId), /sealed|reference/i);
     assert.throws(() => traces.transition({ id: created.id, expectedStatus: "COMPLETED", status: "PLANNED", updatedAt: BASE_TIME + 303, completedAt: null, safeErrorCode: null }), /lifecycle|transition/i);
     const duplicate = { ...createdTraceInput, trace: { ...createdTraceInput.trace, id: uuidv7() } };
     assert.throws(() => traces.create(duplicate), /created|Trace|conflict/i);

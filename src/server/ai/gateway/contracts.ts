@@ -61,6 +61,7 @@ export interface GenerationProviderRequest {
   providerModelId: string;
   instructions?: string;
   messages: readonly GenerationMessage[];
+  /** Maximum generated-token ceiling, including provider-reported hidden reasoning usage. */
   maxOutputTokens?: number;
   reasoningEffort?: string;
   temperature?: number;
@@ -72,6 +73,7 @@ export interface GenerationGatewayRequest {
   requestId: string;
   instructions?: string;
   messages: readonly GenerationMessage[];
+  /** Maximum generated-token ceiling that the adapter must enforce, including hidden reasoning usage. */
   maxOutputTokens?: number;
   reasoningEffort?: string;
   temperature?: number;

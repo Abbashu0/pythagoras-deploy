@@ -66,6 +66,8 @@ export interface AITutorTraceProjectionRef {
   projectionRevisionId: string;
 }
 
+export type AITutorTraceProjectionRefCreate = Omit<AITutorTraceProjectionRef, "traceId">;
+
 export interface AITutorTraceEvidenceRef {
   traceId: string;
   ordinal: number;
@@ -79,10 +81,12 @@ export interface AITutorTraceEvidenceRef {
   questionRevision: number | null;
 }
 
+export type AITutorTraceEvidenceRefCreate = Omit<AITutorTraceEvidenceRef, "traceId">;
+
 export interface AITutorTraceCreateInput {
   trace: AITutorResponseTrace;
-  projectionRefs: readonly AITutorTraceProjectionRef[];
-  evidenceRefs: readonly AITutorTraceEvidenceRef[];
+  projectionRefs: readonly AITutorTraceProjectionRefCreate[];
+  evidenceRefs: readonly AITutorTraceEvidenceRefCreate[];
 }
 
 export interface AITutorResponseTraceRepository {

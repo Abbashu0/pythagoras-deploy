@@ -49,10 +49,23 @@ export class SQLiteAITutorResponseTraceRepository implements AITutorResponseTrac
           createdAt: input.trace.createdAt,
           updatedAt: input.trace.updatedAt,
           completedAt: input.trace.completedAt,
+          refsSealed: false,
         }).returning().get();
-        for (const ref of input.projectionRefs) this.database.db.insert(aiTutorTraceProjectionRefs).values(ref).run();
-        for (const ref of input.evidenceRefs) this.database.db.insert(aiTutorTraceEvidenceRefs).values(ref).run();
-        return traceFromRow(row);
+        for (const ref of input.projectionRefs) {
+          this.database.db.insert(aiTutorTraceProjectionRefs).values({
+            traceId: input.trace.id,
+            projectionKind: ref.projectionKind,
+            projectionRevisionId: ref.projectionRevisionId,
+          }).run();
+        }
+        for (const ref of input.evidenceRefs) {
+          this.database.db.insert(aiTutorTraceEvidenceRefs).values({ ...ref, traceId: input.trace.id }).run();
+        }
+        const sealed = this.database.db.update(aiTutorResponseTraces).set({ refsSealed: true })
+          .where(and(eq(aiTutorResponseTraces.id, input.trace.id), eq(aiTutorResponseTraces.status, "PLANNED"), eq(aiTutorResponseTraces.refsSealed, false)))
+          .returning().get();
+        if (!sealed) throw new AITutorTraceError("AI_TUTOR_TRACE_CONFLICT", "The Tutor Response Trace could not be sealed safely.");
+        return traceFromRow(sealed);
       }).immediate();
     } catch (error) {
       if (error instanceof AITutorTraceError) throw error;

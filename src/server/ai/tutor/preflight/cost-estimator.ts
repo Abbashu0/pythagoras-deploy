@@ -74,7 +74,7 @@ export class AIBoundedTutorCostEstimator implements AITutorCostEstimator {
     return {
       currency,
       maxCostNano: Number(maxCostNano),
-      estimateBasis: "Provider-neutral maximum: one UTF-8 byte is at most one input token; QUERY embedding, optional bounded reranking, and grounded Generation are each charged once.",
+      estimateBasis: "Provider-neutral maximum: one UTF-8 byte is at most one input token; QUERY embedding, optional bounded reranking, and grounded Generation are each charged once, with reasoning bounded by the Generation output ceiling when supported.",
       queryEmbedding: toPublicComponent(queryEmbedding),
       rerank: rerank ? toPublicComponent(rerank) : null,
       generation: toPublicComponent(generation),
@@ -96,7 +96,8 @@ export class AIBoundedTutorCostEstimator implements AITutorCostEstimator {
     } catch (error) {
       throw new AITutorCostEstimationError("AI_TUTOR_COST_RATE_CARD_UNAVAILABLE", "A complete Tutor Rate Card could not be resolved.", error);
     }
-    const usageCandidates = inputUsageCandidates(inputTokenUpperBound, outputTokenUpperBound);
+    const reasoningTokenUpperBound = capability === "GENERATION" && model.supportsReasoning ? outputTokenUpperBound : 0;
+    const usageCandidates = inputUsageCandidates(inputTokenUpperBound, outputTokenUpperBound, reasoningTokenUpperBound);
     let selected: { usage: AIBillableUsage; costNano: number } | null = null;
     for (const usage of usageCandidates) {
       try {
@@ -120,6 +121,7 @@ export class AIBoundedTutorCostEstimator implements AITutorCostEstimator {
       currency: rateCard.currency,
       inputTokenUpperBound,
       outputTokenUpperBound,
+      reasoningTokenUpperBound,
       requestUnits: selected.usage.requestUnits,
       costNano: selected.costNano,
     };
@@ -135,8 +137,8 @@ function toPublicComponent(component: InternalCostComponent): AITutorCostEstimat
   return publicComponent;
 }
 
-function inputUsageCandidates(inputTokens: number, outputTokens: number): AIBillableUsage[] {
-  const base = { cacheHitInputTokens: 0, cacheMissInputTokens: 0, outputTokens, reasoningTokens: 0, requestUnits: 1 };
+function inputUsageCandidates(inputTokens: number, outputTokens: number, reasoningTokens: number): AIBillableUsage[] {
+  const base = { cacheHitInputTokens: 0, cacheMissInputTokens: 0, outputTokens, reasoningTokens, requestUnits: 1 };
   return [
     { ...base, standardInputTokens: inputTokens },
     { ...base, standardInputTokens: 0, cacheHitInputTokens: inputTokens },

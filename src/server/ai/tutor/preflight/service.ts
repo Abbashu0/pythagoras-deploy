@@ -29,6 +29,7 @@ import { AIBoundedTutorCostEstimator, AITutorCostEstimationError } from "./cost-
 import type { AITutorPreflightInput, AITutorPreflightPlan } from "./contracts";
 import { AITutorPreflightError } from "./errors";
 import { AIRateCardResolver, AICostCalculator, SQLiteAIRateCardModelRevisionRepository, SQLiteAIRateCardRepository } from "../../economics";
+import { captureEstimator, cloneAndDeepFreeze, deepFreeze } from "../runtime-immutability";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
@@ -90,6 +91,7 @@ export class AITutorPreflightService {
       const responseId = normalizeUuid(input.responseId, "responseId");
       const tutorConfigId = normalizeUuid(input.tutorConfigId, "tutorConfigId");
       validateEstimator(input.estimator);
+      const estimator = captureEstimator(input.estimator);
       const response = this.requireResponse(principal, responseId);
       const conversation = this.conversations.getConversation(principal.principalRef, response.conversationId, true);
       if (!conversation || conversation.principalRef !== principal.principalRef || conversation.status !== "ACTIVE") {
@@ -134,7 +136,7 @@ export class AITutorPreflightService {
       const contextPlan = this.context.build(principal, {
         responseId,
         contextPolicyId: tutorConfig.contextPolicyId,
-        estimator: input.estimator,
+        estimator,
       }).plan;
       const costEstimate = this.costEstimator.estimate({
         currentMessageText: currentMessage.content,
@@ -147,7 +149,7 @@ export class AITutorPreflightService {
         at: this.safeNow(),
       });
       if (costEstimate.currency !== budgetPolicy.currency) throw new AITutorPreflightError("AI_TUTOR_COST_CURRENCY_MISMATCH", "The Tutor cost estimate does not match the Budget Policy currency.", { budgetCurrency: budgetPolicy.currency, estimateCurrency: costEstimate.currency });
-      const modelSelectionPlan: AIModelSelectionPlan = Object.freeze({ capability: "GENERATION", attempts: Object.freeze([generationModel.id]) });
+      const modelSelectionPlan: AIModelSelectionPlan = { capability: "GENERATION", attempts: [generationModel.id] };
       const planFingerprint = createPlanFingerprint({
         responseId,
         currentMessageId: currentMessage.id,
@@ -181,7 +183,7 @@ export class AITutorPreflightService {
         groundingProtocolRevision: AI_TUTOR_GROUNDING_PROTOCOL_REVISION,
         citationProtocolKey: AI_TUTOR_CITATION_PROTOCOL_KEY,
         citationProtocolRevision: AI_TUTOR_CITATION_PROTOCOL_REVISION,
-        estimatorKey: input.estimator.estimatorKey,
+        estimatorKey: estimator.estimatorKey,
         maxOutputTokens: tutorConfig.maxOutputTokens,
         costEstimate,
       });
@@ -202,7 +204,7 @@ export class AITutorPreflightService {
         contextPolicyId: contextPlan.snapshot.contextPolicyId,
         contextPolicyRevision: contextPlan.snapshot.contextPolicyRevision,
         precedenceEnvelopeVersion: contextPlan.snapshot.precedenceEnvelopeVersion,
-        estimatorKey: input.estimator.estimatorKey,
+        estimatorKey: estimator.estimatorKey,
         retrievalConfigId: retrievalRevision.retrievalConfigId,
         retrievalConfigRevision: retrievalRevision.revision,
         generationModelConfigId: generationModel.id,
@@ -222,15 +224,15 @@ export class AITutorPreflightService {
         citationProtocolKey: AI_TUTOR_CITATION_PROTOCOL_KEY,
         citationProtocolRevision: AI_TUTOR_CITATION_PROTOCOL_REVISION,
         maxOutputTokens: tutorConfig.maxOutputTokens,
-        costEstimate,
+        costEstimate: cloneAndDeepFreeze(costEstimate),
         planFingerprint,
-        modelSelectionPlan,
-        contextPlan,
-        estimator: input.estimator,
-        retrievalConfig: retrievalRevision,
-        generationModel,
-        generationProvider: { id: generationProvider.id, revision: generationProvider.revision },
-        principal,
+        modelSelectionPlan: cloneAndDeepFreeze(modelSelectionPlan),
+        contextPlan: cloneAndDeepFreeze(contextPlan),
+        estimator,
+        retrievalConfig: cloneAndDeepFreeze(retrievalRevision),
+        generationModel: cloneAndDeepFreeze(generationModel),
+        generationProvider: cloneAndDeepFreeze({ id: generationProvider.id, revision: generationProvider.revision }),
+        principal: cloneAndDeepFreeze(principal),
       };
       return freezePlan(plan);
     } catch (error) {
@@ -285,12 +287,7 @@ function createPlanFingerprint(input: Record<string, unknown>): string {
 }
 
 function freezePlan(plan: AITutorPreflightPlan): AITutorPreflightPlan {
-  Object.freeze(plan.costEstimate.queryEmbedding);
-  if (plan.costEstimate.rerank) Object.freeze(plan.costEstimate.rerank);
-  Object.freeze(plan.costEstimate.generation);
-  Object.freeze(plan.costEstimate);
-  Object.freeze(plan);
-  return plan;
+  return deepFreeze(plan);
 }
 
 function mapPreflightError(error: unknown): AITutorPreflightError {

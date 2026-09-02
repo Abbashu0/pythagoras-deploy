@@ -7,9 +7,11 @@ export {
   type AITutorResponseTraceRepository,
   type AITutorTraceCreateInput,
   type AITutorTraceEvidenceRef,
+  type AITutorTraceEvidenceRefCreate,
   type AITutorTraceOriginKind,
   type AITutorTraceProjectionKind,
   type AITutorTraceProjectionRef,
+  type AITutorTraceProjectionRefCreate,
   type AITutorTraceSafeErrorCode,
   type AITutorTraceStatus,
 } from "./contracts";

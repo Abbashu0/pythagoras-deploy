@@ -16,6 +16,7 @@ export interface AITutorCostEstimateComponent {
   rateCardRevision: number;
   inputTokenUpperBound: number;
   outputTokenUpperBound: number;
+  reasoningTokenUpperBound: number;
   requestUnits: number;
   costNano: number;
 }
@@ -73,18 +74,18 @@ export interface AITutorPreflightPlan {
   citationProtocolKey: string;
   citationProtocolRevision: number;
   maxOutputTokens: number;
-  costEstimate: AITutorCostEstimate;
+  costEstimate: Readonly<AITutorCostEstimate>;
   planFingerprint: string;
-  modelSelectionPlan: AIModelSelectionPlan;
+  modelSelectionPlan: Readonly<AIModelSelectionPlan>;
   /** Runtime-only authorized Context Plan; never persisted as trace metadata. */
-  contextPlan: AIContextPlan;
+  contextPlan: Readonly<AIContextPlan>;
   /** Runtime-only estimator used by the subsequent planner. */
-  estimator: AIContextTokenEstimator;
+  estimator: Readonly<AIContextTokenEstimator>;
   /** Runtime-only safe revisions used for deterministic planning bounds. */
-  retrievalConfig: AIRetrievalConfigRevision;
-  generationModel: AIModelConfig;
-  generationProvider: Pick<AIProviderConfig, "id" | "revision">;
-  principal: AIStudentPrincipal;
+  retrievalConfig: Readonly<AIRetrievalConfigRevision>;
+  generationModel: Readonly<AIModelConfig>;
+  generationProvider: Readonly<Pick<AIProviderConfig, "id" | "revision">>;
+  principal: Readonly<AIStudentPrincipal>;
 }
 
 export interface AITutorGenerationPlan {
@@ -110,14 +111,14 @@ export interface AITutorGenerationPlan {
   groundingProtocolRevision: number;
   citationProtocolKey: string;
   citationProtocolRevision: number;
-  modelSelectionPlan: AIModelSelectionPlan;
-  request: GenerationGatewayRequest;
+  modelSelectionPlan: Readonly<AIModelSelectionPlan>;
+  request: Readonly<GenerationGatewayRequest>;
   selectedEvidence: readonly AITutorSelectedEvidenceReference[];
   citationMap: readonly AITutorCitationMapItem[];
   selectedEvidenceTokenCount: number;
   finalEstimatedInputTokens: number;
   maxOutputTokens: number;
-  costEstimate: AITutorCostEstimate;
+  costEstimate: Readonly<AITutorCostEstimate>;
   generationModelConfigId: string;
   generationModelConfigRevision: number;
   generationProviderConfigId: string;

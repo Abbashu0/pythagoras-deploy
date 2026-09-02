@@ -1,6 +1,6 @@
 import { AI_TUTOR_CITATION_PROTOCOL_KEY, AI_TUTOR_CITATION_PROTOCOL_REVISION, AI_TUTOR_GROUNDING_PROTOCOL_KEY, AI_TUTOR_GROUNDING_PROTOCOL_REVISION } from "../configuration";
 import { AI_RETRIEVAL_FUSION_ALGORITHM_KEY, AI_RETRIEVAL_FUSION_ALGORITHM_REVISION } from "../../retrieval-config";
-import { AI_TUTOR_TRACE_ORIGIN_KINDS, AI_TUTOR_TRACE_PROJECTION_KINDS, type AITutorTraceCreateInput, type AITutorTraceEvidenceRef, type AITutorTraceProjectionRef } from "./contracts";
+import { AI_TUTOR_TRACE_ORIGIN_KINDS, AI_TUTOR_TRACE_PROJECTION_KINDS, type AITutorTraceCreateInput, type AITutorTraceEvidenceRefCreate, type AITutorTraceProjectionRefCreate } from "./contracts";
 import { AITutorTraceError } from "./errors";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -49,10 +49,10 @@ export function validateTraceCreateInput(input: AITutorTraceCreateInput): void {
   validateEvidenceRefs(input.evidenceRefs);
 }
 
-function validateProjectionRefs(refs: readonly AITutorTraceProjectionRef[]): void {
+function validateProjectionRefs(refs: readonly AITutorTraceProjectionRefCreate[]): void {
   const seen = new Set<string>();
   for (const ref of refs) {
-    uuid(ref.traceId, "projection traceId");
+    exactKeys(ref, ["projectionKind", "projectionRevisionId"], "Trace projection reference");
     if (!AI_TUTOR_TRACE_PROJECTION_KINDS.includes(ref.projectionKind) || !SAFE_ID_PATTERN.test(ref.projectionRevisionId)) invalid("Trace projection reference is invalid.");
     const identity = `${ref.projectionKind}:${ref.projectionRevisionId}`;
     if (seen.has(identity)) invalid("Trace projection references are duplicated.");
@@ -60,11 +60,11 @@ function validateProjectionRefs(refs: readonly AITutorTraceProjectionRef[]): voi
   }
 }
 
-function validateEvidenceRefs(refs: readonly AITutorTraceEvidenceRef[]): void {
+function validateEvidenceRefs(refs: readonly AITutorTraceEvidenceRefCreate[]): void {
   const ordinals = new Set<number>();
   const labels = new Set<string>();
   for (const ref of refs) {
-    uuid(ref.traceId, "evidence traceId");
+    exactKeys(ref, ["ordinal", "citationLabel", "chunkId", "m7aProjectionRevisionId", "m7bEmbeddingProjectionRevisionId", "originKind", "originId", "questionId", "questionRevision"], "Trace evidence reference");
     positive(ref.ordinal, "evidence ordinal");
     if (ref.ordinal > 50 || ref.citationLabel !== `[E${ref.ordinal}]` || ordinals.has(ref.ordinal) || labels.has(ref.citationLabel)) invalid("Trace citation reference is invalid or duplicated.");
     if (!SAFE_ID_PATTERN.test(ref.chunkId) || !SAFE_ID_PATTERN.test(ref.m7aProjectionRevisionId) || (ref.m7bEmbeddingProjectionRevisionId !== null && !SAFE_ID_PATTERN.test(ref.m7bEmbeddingProjectionRevisionId)) || !AI_TUTOR_TRACE_ORIGIN_KINDS.includes(ref.originKind) || !SAFE_ID_PATTERN.test(ref.originId)) invalid("Trace evidence reference is invalid.");
@@ -73,6 +73,13 @@ function validateEvidenceRefs(refs: readonly AITutorTraceEvidenceRef[]): void {
     ordinals.add(ref.ordinal);
     labels.add(ref.citationLabel);
   }
+}
+
+function exactKeys(value: unknown, expectedKeys: readonly string[], label: string): void {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) invalid(`${label} is invalid.`);
+  const actualKeys = Object.keys(value).sort();
+  const expected = [...expectedKeys].sort();
+  if (actualKeys.length !== expected.length || actualKeys.some((key, index) => key !== expected[index])) invalid(`${label} fields are invalid.`);
 }
 
 function uuid(value: unknown, field: string): void {

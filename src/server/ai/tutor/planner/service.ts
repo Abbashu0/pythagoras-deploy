@@ -12,6 +12,7 @@ import {
   AI_TUTOR_GROUNDING_PROTOCOL_REVISION,
 } from "../configuration";
 import type { AITutorGenerationPlan, AITutorPreflightPlan, AITutorSelectedEvidenceReference } from "../preflight/contracts";
+import { cloneAndDeepFreeze, deepFreeze } from "../runtime-immutability";
 import { AITutorPlanningError } from "./errors";
 
 /** Code-owned control instructions; Product personality remains in Instruction Policies. */
@@ -37,7 +38,7 @@ export class AITutorGenerationPlanner {
       throw new AITutorPlanningError("AI_TUTOR_EVIDENCE_CONTEXT_BUDGET_INSUFFICIENT", "The Context evidence budget cannot retain the governed minimum evidence count.", { selectedEvidenceCount: selected.items.length, minimumEvidenceItemCount: preflight.retrievalConfig.minimumEvidenceItemCount });
     }
     const instructions = this.buildInstructions(preflight);
-    const selectedReferences = Object.freeze(selected.items.map((item) => evidenceReference(item)));
+    const selectedReferences = selected.items.map((item) => evidenceReference(item));
     const evidenceMessages = this.buildEvidenceMessages(selectedReferences, evidencePack.items);
     const messages = this.buildMessages(preflight, evidenceMessages);
     this.validateGatewayShape(instructions, messages);
@@ -54,14 +55,14 @@ export class AITutorGenerationPlanner {
     if (finalEstimatedInputTokens + preflight.maxOutputTokens > preflight.contextWindowTokens) {
       throw new AITutorPlanningError("AI_TUTOR_CONTEXT_LIMIT_EXCEEDED", "The grounded Generation request exceeds the Model context window.", { finalEstimatedInputTokens, maxOutputTokens: preflight.maxOutputTokens, contextWindowTokens: preflight.contextWindowTokens });
     }
-    const request: GenerationGatewayRequest = {
+    const request = cloneAndDeepFreeze<GenerationGatewayRequest>({
       requestId: preflight.responseId,
       instructions,
       messages,
       maxOutputTokens: preflight.maxOutputTokens,
       stream: true,
-    };
-    return Object.freeze({
+    });
+    return deepFreeze({
       responseId: preflight.responseId,
       conversationId: preflight.conversationId,
       principalRef: preflight.principalRef,
@@ -84,14 +85,14 @@ export class AITutorGenerationPlanner {
       groundingProtocolRevision: AI_TUTOR_GROUNDING_PROTOCOL_REVISION,
       citationProtocolKey: AI_TUTOR_CITATION_PROTOCOL_KEY,
       citationProtocolRevision: AI_TUTOR_CITATION_PROTOCOL_REVISION,
-      modelSelectionPlan: preflight.modelSelectionPlan,
+      modelSelectionPlan: cloneAndDeepFreeze(preflight.modelSelectionPlan),
       request,
-      selectedEvidence: selectedReferences,
-      citationMap: selectedReferences,
+      selectedEvidence: cloneAndDeepFreeze(selectedReferences),
+      citationMap: cloneAndDeepFreeze(selectedReferences),
       selectedEvidenceTokenCount: selected.tokens,
       finalEstimatedInputTokens,
       maxOutputTokens: preflight.maxOutputTokens,
-      costEstimate: preflight.costEstimate,
+      costEstimate: cloneAndDeepFreeze(preflight.costEstimate),
       generationModelConfigId: preflight.generationModelConfigId,
       generationModelConfigRevision: preflight.generationModelConfigRevision,
       generationProviderConfigId: preflight.generationProviderConfigId,
@@ -114,7 +115,7 @@ export class AITutorGenerationPlanner {
 
   private validateEvidencePack(preflight: AITutorPreflightPlan, evidencePack: AIEvidencePack): void {
     if (!evidencePack || evidencePack.status !== "SUFFICIENT" || !evidencePack.sufficient) throw new AITutorPlanningError("AI_TUTOR_EVIDENCE_INVALID", "Only a sufficient EvidencePack can produce a grounded Generation plan.");
-    if (evidencePack.subjectKey !== preflight.subjectKey || evidencePack.retrievalConfigId !== preflight.retrievalConfigId || evidencePack.retrievalConfigRevision !== preflight.retrievalConfigRevision || evidencePack.fusionAlgorithmKey !== preflight.retrievalConfig.fusionAlgorithmKey || evidencePack.fusionAlgorithmRevision !== preflight.retrievalConfig.fusionAlgorithmRevision) throw new AITutorPlanningError("AI_TUTOR_EVIDENCE_INVALID", "The EvidencePack does not match the exact Tutor retrieval scope and revision.");
+    if (evidencePack.requestId !== preflight.responseId || evidencePack.subjectKey !== preflight.subjectKey || evidencePack.retrievalConfigId !== preflight.retrievalConfigId || evidencePack.retrievalConfigRevision !== preflight.retrievalConfigRevision || evidencePack.fusionAlgorithmKey !== preflight.retrievalConfig.fusionAlgorithmKey || evidencePack.fusionAlgorithmRevision !== preflight.retrievalConfig.fusionAlgorithmRevision) throw new AITutorPlanningError("AI_TUTOR_EVIDENCE_INVALID", "The EvidencePack does not match the exact Tutor request and retrieval scope.");
     if (!Number.isSafeInteger(evidencePack.evidenceByteCount) || evidencePack.evidenceByteCount < 0 || evidencePack.items.length > preflight.retrievalConfig.evidenceItemLimit || evidencePack.evidenceByteCount > preflight.retrievalConfig.maximumEvidencePackBytes) throw new AITutorPlanningError("AI_TUTOR_EVIDENCE_INVALID", "The EvidencePack exceeds the governed bounded evidence contract.");
     const seenOrdinals = new Set<number>();
     const seenChunks = new Set<string>();

@@ -391,7 +391,7 @@ test("0022 upgrades an existing 0021 database and installs only the subject-boun
     assert.equal((before.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 22);
     before.close();
     const upgraded = openContentDatabase({ dataDirectory: root, migrationsDirectory });
-    assert.equal((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 29);
+    assert.equal((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 30);
     assert.ok(upgraded.client.prepare("select name from sqlite_master where type='trigger' and name='ai_knowledge_package_revisions_source_subject_consistency'").get());
     upgraded.close();
   } finally {
