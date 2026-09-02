@@ -610,30 +610,157 @@ test("M7C Retrieval Config tables are bounded and contain no query or provider s
   } finally { fixtureValue.close(); }
 });
 
-test("0027 upgrades a 0026 database with Retrieval Config immutability and fusion identity", () => {
+test("0027 upgrades a populated 0026 database with Retrieval Config immutability and fusion identity", () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "pythagoras-m7c-migration-"));
   const oldMigrations = mkdtempSync(path.join(os.tmpdir(), "pythagoras-m7c-old-migrations-"));
+  let before: ContentDatabase | null = null;
+  let upgraded: ContentDatabase | null = null;
   try {
     mkdirSync(path.join(oldMigrations, "meta"), { recursive: true });
     const journal = JSON.parse(readFileSync(path.join(migrationsDirectory, "meta", "_journal.json"), "utf8")) as { entries: Array<{ idx: number; tag: string }>; [key: string]: unknown };
-    for (const entry of journal.entries.slice(0, 26)) {
+    const priorEntries = journal.entries.slice(0, 27);
+    for (const entry of priorEntries) {
       copyFileSync(path.join(migrationsDirectory, `${entry.tag}.sql`), path.join(oldMigrations, `${entry.tag}.sql`));
       const snapshotName = `${entry.idx.toString().padStart(4, "0")}_snapshot.json`;
       if (existsSync(path.join(migrationsDirectory, "meta", snapshotName))) copyFileSync(path.join(migrationsDirectory, "meta", snapshotName), path.join(oldMigrations, "meta", snapshotName));
     }
     const currentJournal = JSON.parse(readFileSync(path.join(migrationsDirectory, "meta", "_journal.json"), "utf8")) as { version: string; dialect: string; entries: unknown[] };
-    writeFileSync(path.join(oldMigrations, "meta", "_journal.json"), JSON.stringify({ ...currentJournal, entries: currentJournal.entries.slice(0, 26) }));
-    const before = openContentDatabase({ dataDirectory: root, migrationsDirectory: oldMigrations });
-    assert.equal(Number((before.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count), 26);
+    writeFileSync(path.join(oldMigrations, "meta", "_journal.json"), JSON.stringify({ ...currentJournal, entries: priorEntries }));
+
+    before = openContentDatabase({ dataDirectory: root, migrationsDirectory: oldMigrations });
+    assert.equal(Number((before.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count), 27);
+    createCanonicalContentRepository(before).bootstrap();
+    const identities = new SQLiteAdminIdentityRepository(before);
+    const ownerUser = identities.createInitialOwner({ id: uuidv7(), email: `owner-${uuidv7()}@m7c-upgrade.test`, displayName: "M7C Upgrade Owner", passwordHash: "fixture", createdAt: TEST_TIME - 10_000 });
+    const owner: AdminActor = { actorUserId: ownerUser.id, actorRole: "OWNER" };
+    const providerId = uuidv7();
+    new SQLiteAIProviderConfigRepository(before).create({
+      id: providerId,
+      content: { key: `m7c-upgrade-provider-${uuidv7()}`, displayName: "M7C Upgrade Provider", baseUrl: "https://provider.example/v1", credentialRef: null, enabled: false, retentionPolicy: "UNKNOWN", trainingPolicy: "UNKNOWN", zdrSupported: false, zdrRequired: false },
+      actor: owner,
+      now: TEST_TIME - 2_000,
+    });
+    const embeddingModelId = uuidv7();
+    new SQLiteAIModelConfigRepository(before).create({
+      id: embeddingModelId,
+      content: { key: `m7c-upgrade-embedding-${uuidv7()}`, displayName: "M7C Upgrade Embedding", providerConfigId: providerId, providerModelId: "m7c-upgrade-embedding", capability: "EMBEDDING", adapterKey: "test.upgrade", enabled: true, contextWindowTokens: null, maxOutputTokens: null, embeddingDimensions: 3, supportsStreaming: false, supportsReasoning: false, supportsStructuredOutput: false },
+      actor: owner,
+      now: TEST_TIME - 1_900,
+    });
+
+    const configId = uuidv7();
+    const configCreatedAt = TEST_TIME - 1_800;
+    before.client.prepare(`
+      insert into ai_retrieval_configs (id, key, subject_key, current_revision, created_at, updated_at, created_by, updated_by)
+      values (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(configId, `m7c-upgrade-config-${uuidv7()}`, "arabic", 2, configCreatedAt, configCreatedAt, ownerUser.id, ownerUser.id);
+    const allowedTrustTiers = JSON.stringify(["OFFICIAL", "PYTHAGORAS_APPROVED", "TEACHER_REVIEWED", "OTHER_APPROVED"]);
+    const insertRevision = before.client.prepare(`
+      insert into ai_retrieval_config_revisions (
+        id, retrieval_config_id, revision, display_name, enabled,
+        embedding_model_config_id, rerank_model_config_id,
+        lexical_candidate_limit, semantic_candidate_limit, fusion_candidate_limit,
+        rerank_candidate_limit, evidence_item_limit, rrf_constant,
+        lexical_weight_units, semantic_weight_units, minimum_fused_score_units,
+        minimum_evidence_item_count, maximum_evidence_pack_bytes,
+        max_evidence_chunks_per_source_item, allowed_trust_tiers,
+        semantic_failure_behavior, reranker_failure_behavior, created_at, created_by
+      ) values (${Array.from({ length: 24 }, () => "?").join(", ")})
+    `);
+    for (const [revision, displayName, createdAt] of [[1, "M7C upgrade revision 1", TEST_TIME - 1_700], [2, "M7C upgrade revision 2", TEST_TIME - 1_600]] as const) {
+      insertRevision.run(uuidv7(), configId, revision, displayName, 1, embeddingModelId, null, 10, 10, 10, 10, 5, 60, 1, 1, 0, 1, 16_384, 5, allowedTrustTiers, "FAIL_RETRIEVAL", "USE_FUSION", createdAt, ownerUser.id);
+    }
+    const historicalColumns = [
+      "id", "retrieval_config_id", "revision", "display_name", "enabled",
+      "embedding_model_config_id", "rerank_model_config_id", "lexical_candidate_limit",
+      "semantic_candidate_limit", "fusion_candidate_limit", "rerank_candidate_limit",
+      "evidence_item_limit", "rrf_constant", "lexical_weight_units", "semantic_weight_units",
+      "minimum_fused_score_units", "minimum_evidence_item_count", "maximum_evidence_pack_bytes",
+      "max_evidence_chunks_per_source_item", "allowed_trust_tiers", "semantic_failure_behavior",
+      "reranker_failure_behavior", "created_at", "created_by",
+    ];
+    const selectHistoricalRows = (database: ContentDatabase) => database.client.prepare(`select ${historicalColumns.join(", ")} from ai_retrieval_config_revisions where retrieval_config_id=? order by revision`).all(configId) as Array<Record<string, unknown>>;
+    const beforeConfig = before.client.prepare("select id, key, subject_key, current_revision, created_at, updated_at, created_by, updated_by from ai_retrieval_configs where id=?").get(configId) as Record<string, unknown>;
+    const beforeRevisions = selectHistoricalRows(before);
+    assert.equal(beforeRevisions.length, 2);
+    assert.equal(beforeConfig.current_revision, 2);
     before.close();
-    const upgraded = openContentDatabase({ dataDirectory: root, migrationsDirectory });
-    assert.equal(Number((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count), 28);
-    assert.ok(upgraded.client.prepare("select name from sqlite_master where name='ai_retrieval_configs'").get());
-    assert.ok(upgraded.client.prepare("select name from pragma_table_info('ai_retrieval_config_revisions') where name='fusion_algorithm_key'").get());
-    assert.ok(upgraded.client.prepare("select name from pragma_table_info('ai_retrieval_config_revisions') where name='fusion_algorithm_revision'").get());
-    for (const trigger of ["ai_retrieval_configs_identity_no_update", "ai_retrieval_configs_revision_pointer", "ai_retrieval_config_revisions_insert_integrity", "ai_retrieval_config_revisions_no_update", "ai_retrieval_config_revisions_no_delete"]) assert.ok(upgraded.client.prepare("select name from sqlite_master where type='trigger' and name=?").get(trigger));
-    upgraded.close();
+    before = null;
+
+    const upgradedDatabase = openContentDatabase({ dataDirectory: root, migrationsDirectory });
+    upgraded = upgradedDatabase;
+    assert.equal(Number((upgradedDatabase.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count), 28);
+    assert.ok(upgradedDatabase.client.prepare("select name from sqlite_master where name='ai_retrieval_configs'").get());
+    assert.ok(upgradedDatabase.client.prepare("select name from pragma_table_info('ai_retrieval_config_revisions') where name='fusion_algorithm_key'").get());
+    assert.ok(upgradedDatabase.client.prepare("select name from pragma_table_info('ai_retrieval_config_revisions') where name='fusion_algorithm_revision'").get());
+    for (const trigger of ["ai_retrieval_configs_initial_revision", "ai_retrieval_configs_identity_no_update", "ai_retrieval_configs_revision_pointer", "ai_retrieval_config_revisions_insert_integrity", "ai_retrieval_config_revisions_no_update", "ai_retrieval_config_revisions_no_delete"]) assert.ok(upgradedDatabase.client.prepare("select name from sqlite_master where type='trigger' and name=?").get(trigger));
+
+    const configs = new SQLiteAIRetrievalConfigRepository(upgradedDatabase);
+    const canonical = configs.getById(configId);
+    const revision1 = configs.getRevision(configId, 1);
+    const revision2 = configs.getRevision(configId, 2);
+    assert.ok(canonical);
+    assert.ok(revision1);
+    assert.ok(revision2);
+    assert.equal(canonical.key, beforeConfig.key);
+    assert.equal(canonical.subjectKey, beforeConfig.subject_key);
+    assert.equal(canonical.currentRevision, 2);
+    const afterConfig = upgradedDatabase.client.prepare("select id, key, subject_key, current_revision, created_at, updated_at, created_by, updated_by from ai_retrieval_configs where id=?").get(configId) as Record<string, unknown>;
+    assert.deepEqual(afterConfig, beforeConfig);
+    assert.equal(revision1.fusionAlgorithmKey, AI_RETRIEVAL_FUSION_ALGORITHM_KEY);
+    assert.equal(revision1.fusionAlgorithmRevision, AI_RETRIEVAL_FUSION_ALGORITHM_REVISION);
+    assert.equal(revision2.fusionAlgorithmKey, AI_RETRIEVAL_FUSION_ALGORITHM_KEY);
+    assert.equal(revision2.fusionAlgorithmRevision, AI_RETRIEVAL_FUSION_ALGORITHM_REVISION);
+    const migratedFusionRows = upgradedDatabase.client.prepare("select revision, fusion_algorithm_key, fusion_algorithm_revision from ai_retrieval_config_revisions where retrieval_config_id=? order by revision").all(configId) as Array<Record<string, unknown>>;
+    assert.deepEqual(migratedFusionRows, [
+      { revision: 1, fusion_algorithm_key: AI_RETRIEVAL_FUSION_ALGORITHM_KEY, fusion_algorithm_revision: AI_RETRIEVAL_FUSION_ALGORITHM_REVISION },
+      { revision: 2, fusion_algorithm_key: AI_RETRIEVAL_FUSION_ALGORITHM_KEY, fusion_algorithm_revision: AI_RETRIEVAL_FUSION_ALGORITHM_REVISION },
+    ]);
+    const afterRevisions = selectHistoricalRows(upgradedDatabase);
+    assert.deepEqual(afterRevisions, beforeRevisions);
+
+    assert.throws(() => upgradedDatabase.client.prepare("update ai_retrieval_config_revisions set display_name=? where id=?").run("mutated", revision1.revisionId), /immutable/i);
+    assert.throws(() => upgradedDatabase.client.prepare("delete from ai_retrieval_config_revisions where id=?").run(revision1.revisionId), /immutable/i);
+    assert.throws(() => upgradedDatabase.client.prepare("update ai_retrieval_configs set current_revision=? where id=?").run(1, configId), /advance|revision/i);
+    assert.throws(() => upgradedDatabase.client.prepare("update ai_retrieval_configs set current_revision=? where id=?").run(4, configId), /advance|revision/i);
+
+    const appended = configs.appendRevision({
+      id: configId,
+      expectedRevision: 2,
+      content: {
+        key: revision2.key,
+        subjectKey: revision2.subjectKey,
+        displayName: "M7C upgrade revision 3",
+        enabled: revision2.enabled,
+        embeddingModelConfigId: revision2.embeddingModelConfigId,
+        rerankModelConfigId: revision2.rerankModelConfigId,
+        lexicalCandidateLimit: revision2.lexicalCandidateLimit,
+        semanticCandidateLimit: revision2.semanticCandidateLimit,
+        fusionCandidateLimit: revision2.fusionCandidateLimit,
+        rerankCandidateLimit: revision2.rerankCandidateLimit,
+        evidenceItemLimit: revision2.evidenceItemLimit,
+        rrfConstant: revision2.rrfConstant,
+        lexicalWeightUnits: revision2.lexicalWeightUnits,
+        semanticWeightUnits: revision2.semanticWeightUnits,
+        minimumFusedScoreUnits: revision2.minimumFusedScoreUnits,
+        minimumEvidenceItemCount: revision2.minimumEvidenceItemCount,
+        maximumEvidencePackBytes: revision2.maximumEvidencePackBytes,
+        maxEvidenceChunksPerSourceItem: revision2.maxEvidenceChunksPerSourceItem,
+        allowedTrustTiers: [...revision2.allowedTrustTiers],
+        semanticFailureBehavior: revision2.semanticFailureBehavior,
+        rerankerFailureBehavior: revision2.rerankerFailureBehavior,
+      },
+      actor: owner,
+      now: TEST_TIME + 1_000,
+    });
+    assert.equal(appended.revision, 3);
+    assert.equal(appended.fusionAlgorithmKey, AI_RETRIEVAL_FUSION_ALGORITHM_KEY);
+    assert.equal(appended.fusionAlgorithmRevision, AI_RETRIEVAL_FUSION_ALGORITHM_REVISION);
+    assert.equal(configs.getById(configId)?.currentRevision, 3);
+    assert.deepEqual(selectHistoricalRows(upgradedDatabase).filter((row) => Number(row.revision) <= 2), beforeRevisions);
   } finally {
+    upgraded?.close();
+    before?.close();
     rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
     rmSync(oldMigrations, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
   }
