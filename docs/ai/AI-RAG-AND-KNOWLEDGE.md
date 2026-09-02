@@ -1,6 +1,6 @@
 # Knowledge and grounded retrieval
 
-AI-M6 implements the source and published-package boundary only. Approved AI-M7A implements the first rebuildable structural Chunk Projection and lexical FTS5 foundation. AI-M7B now implements the semantic embedding/vector projection foundation over exact fresh M7A revisions; hybrid retrieval remains outside these checkpoints. Package publication still does not create retrieval data automatically.
+AI-M6 implements the source and published-package boundary only. Approved AI-M7A implements the first rebuildable structural Chunk Projection and lexical FTS5 foundation. Approved AI-M7B implements the semantic embedding/vector projection foundation over exact fresh M7A revisions. AI-M7C is implemented pending independent review and adds the governed hybrid retrieval, deterministic fusion, optional reranking, and bounded runtime EvidencePack boundary. Package publication still does not create retrieval data automatically.
 
 ## 1. Knowledge is a separate domain
 
@@ -49,6 +49,10 @@ M7A's structural projection uses bounded pages and one server-owned `structured-
 M7B's semantic projection consumes one exact current/fresh M7A READY revision and one server-owned embedding Model Config. It pins Model/Provider revisions and the `float32-le-v1` codec/local exact cosine adapter identity; batches execute only through `AIProviderGateway.embed`, persist reference-only Jobs, reserve/cost-account `KNOWLEDGE_INDEXING`, and activate immutable/rebuildable vectors only after exact coverage and lease/config/M7A checks. Vector search is subject-scoped, bounded-memory, cosine-ranked, and rechecks current Knowledge Source rights/enabled state. The active search construction requires an explicit semantic-eligibility boundary and fails closed when M7A freshness/currentness or pinned Model/Provider configuration is not exact. Exact-revision health reports the requested Embedding revision rather than silently resolving a sibling current revision. Terminal embedding recovery scans only unresolved `BUILDING` projections joined to terminal embedding Jobs, in stable bounded batches, and uses the relational Job/Projection/Cost ownership contract rather than Job payload parseability; `BUILDING -> FAILED` is durable forward progress that survives restart, while retry-waiting Jobs remain BUILDING. Conversion from provider JavaScript numbers to Float32 can lose precision by design; exact dimensions, finite values, non-zero norm, byte length, and encoded-byte SHA-256 are the derived-index integrity contract. The replaceable `VectorIndexAdapter` keeps future vector storage out of the M7B public semantics. M7B does not turn query text into embeddings and does not implement fusion, reranking, or EvidencePack.
 
 ## 4. Retrieval pipeline
+
+### AI-M7C implementation status
+
+AI-M7C is implemented pending independent review. Retrieval Config is governed and subject-bound. Runtime selection is bounded and published-only: eligible origins must have exact fresh/current M7A projections and complete current M7B coverage in one embedding space before the query Provider is called. Lexical candidates are scoped to those M7A revisions; one query embedding is obtained through the existing Gateway; semantic ranks are recomputed globally; integer weighted RRF deduplicates the union; and an optional single reranker receives only bounded query plus candidate ID/text. A final live Source, projection, Model/Provider, and Config fence returns no evidence on a race. EvidencePack is runtime-only, no raw query is persisted, and M7C does not implement Generation, Web Search, or the Tutor.
 
 The baseline flow is:
 

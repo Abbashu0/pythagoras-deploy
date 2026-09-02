@@ -96,6 +96,10 @@ AI-M7B adds the semantic derived boundary over an exact fresh/current M7A READY 
 
 ## 5. Memory, telemetry, and improvement boundaries
 
+### AI-M7C retrieval contract
+
+The published `ai.retrieval-config` revision is the only source of M7C retrieval behavior. `HybridRetrievalService` accepts a server-owned subject scope, bounded untrusted query, exact config revision, and caller-owned open Cost Operation with an EXECUTING Budget Reservation. It returns a bounded runtime EvidencePack after exact published M7A/M7B readiness, scoped lexical/semantic retrieval, deterministic integer RRF, optional single-model reranking, trust filtering, and a final live eligibility fence. Query embedding and reranking usage are recorded against the caller operation; M7C does not complete or settle it. No query text or Retrieval Trace row is persisted in M7C.
+
 | Boundary | Contract |
 | --- | --- |
 | **Student Memory** | Per-principal, subject-scoped durable memory candidates or approved memories with provenance, confidence, visibility, retention, and deletion semantics. No cross-user memory. |

@@ -96,6 +96,10 @@ import type {
   AIEmbeddingProjectionStatus,
   AIEmbeddingVectorCodecKey,
 } from "../ai/embedding/contracts";
+import type {
+  AIRetrievalRerankerFailureBehavior,
+  AIRetrievalSemanticFailureBehavior,
+} from "../ai/retrieval-config/contracts";
 
 export type ContentPayload = Record<string, unknown>;
 
@@ -3017,6 +3021,76 @@ export const aiEmbeddingVectors = sqliteTable(
   ],
 );
 
+/** Stable governed Retrieval Configuration identity; behavior lives in revisions. */
+export const aiRetrievalConfigs = sqliteTable(
+  "ai_retrieval_configs",
+  {
+    id: text("id").primaryKey(),
+    key: text("key").notNull(),
+    subjectKey: text("subject_key").notNull().references(() => canonicalMaterials.subjectKey, { onDelete: "restrict" }),
+    currentRevision: integer("current_revision").notNull().default(1),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    createdBy: text("created_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+    updatedBy: text("updated_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+  },
+  (table) => [
+    uniqueIndex("ai_retrieval_configs_key_unique").on(table.key),
+    index("ai_retrieval_configs_subject_index").on(table.subjectKey),
+    check("ai_retrieval_configs_key_valid", sql`length(trim(${table.key})) between 1 and 120 and ${table.key} not glob '*[^a-z0-9.-]*'`),
+    check("ai_retrieval_configs_subject_valid", sql`length(trim(${table.subjectKey})) between 1 and 80 and ${table.subjectKey} not glob '*[^a-z0-9-]*'`),
+    check("ai_retrieval_configs_revision_positive", sql`${table.currentRevision} >= 1`),
+    check("ai_retrieval_configs_created_nonnegative", sql`${table.createdAt} >= 0`),
+    check("ai_retrieval_configs_timestamps_ordered", sql`${table.updatedAt} >= ${table.createdAt}`),
+  ],
+);
+
+/** Immutable governed Retrieval behavior revision. */
+export const aiRetrievalConfigRevisions = sqliteTable(
+  "ai_retrieval_config_revisions",
+  {
+    id: text("id").primaryKey(),
+    retrievalConfigId: text("retrieval_config_id").notNull().references(() => aiRetrievalConfigs.id, { onDelete: "restrict" }),
+    revision: integer("revision").notNull(),
+    displayName: text("display_name").notNull(),
+    enabled: integer("enabled", { mode: "boolean" }).notNull(),
+    embeddingModelConfigId: text("embedding_model_config_id").notNull().references(() => aiModelConfigs.id, { onDelete: "restrict" }),
+    rerankModelConfigId: text("rerank_model_config_id").references(() => aiModelConfigs.id, { onDelete: "restrict" }),
+    lexicalCandidateLimit: integer("lexical_candidate_limit").notNull(),
+    semanticCandidateLimit: integer("semantic_candidate_limit").notNull(),
+    fusionCandidateLimit: integer("fusion_candidate_limit").notNull(),
+    rerankCandidateLimit: integer("rerank_candidate_limit").notNull(),
+    evidenceItemLimit: integer("evidence_item_limit").notNull(),
+    rrfConstant: integer("rrf_constant").notNull(),
+    lexicalWeightUnits: integer("lexical_weight_units").notNull(),
+    semanticWeightUnits: integer("semantic_weight_units").notNull(),
+    minimumFusedScoreUnits: integer("minimum_fused_score_units").notNull(),
+    minimumEvidenceItemCount: integer("minimum_evidence_item_count").notNull(),
+    maximumEvidencePackBytes: integer("maximum_evidence_pack_bytes").notNull(),
+    maxEvidenceChunksPerSourceItem: integer("max_evidence_chunks_per_source_item").notNull(),
+    allowedTrustTiers: text("allowed_trust_tiers", { mode: "json" }).$type<AIKnowledgeTrustTier[]>().notNull(),
+    semanticFailureBehavior: text("semantic_failure_behavior").$type<AIRetrievalSemanticFailureBehavior>().notNull(),
+    rerankerFailureBehavior: text("reranker_failure_behavior").$type<AIRetrievalRerankerFailureBehavior>().notNull(),
+    createdAt: integer("created_at").notNull(),
+    createdBy: text("created_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+  },
+  (table) => [
+    uniqueIndex("ai_retrieval_config_revisions_identity_unique").on(table.retrievalConfigId, table.revision),
+    index("ai_retrieval_config_revisions_config_index").on(table.retrievalConfigId, table.revision),
+    index("ai_retrieval_config_revisions_enabled_index").on(table.enabled),
+    check("ai_retrieval_config_revisions_revision_positive", sql`${table.revision} >= 1`),
+    check("ai_retrieval_config_revisions_display_name_valid", sql`length(trim(${table.displayName})) between 1 and 200`),
+    check("ai_retrieval_config_revisions_enabled_boolean", sql`${table.enabled} in (0,1)`),
+    check("ai_retrieval_config_revisions_candidate_limits_valid", sql`${table.lexicalCandidateLimit} between 1 and 50 and ${table.semanticCandidateLimit} between 1 and 50 and ${table.fusionCandidateLimit} between 1 and 100 and ${table.rerankCandidateLimit} between 1 and 50 and ${table.evidenceItemLimit} between 1 and 50 and ${table.fusionCandidateLimit} <= ${table.lexicalCandidateLimit} + ${table.semanticCandidateLimit} and ${table.rerankCandidateLimit} <= ${table.fusionCandidateLimit} and ${table.evidenceItemLimit} <= ${table.rerankCandidateLimit}`),
+    check("ai_retrieval_config_revisions_fusion_values_valid", sql`${table.rrfConstant} between 1 and 10000 and ${table.lexicalWeightUnits} between 1 and 10000 and ${table.semanticWeightUnits} between 1 and 10000 and ${table.minimumFusedScoreUnits} between 0 and 9007199254740991`),
+    check("ai_retrieval_config_revisions_evidence_values_valid", sql`${table.minimumEvidenceItemCount} between 0 and ${table.evidenceItemLimit} and ${table.maximumEvidencePackBytes} between 1 and 65536 and ${table.maxEvidenceChunksPerSourceItem} between 1 and 20`),
+    check("ai_retrieval_config_revisions_trust_tiers_valid", sql`json_valid(${table.allowedTrustTiers}) and json_type(${table.allowedTrustTiers}) = 'array' and json_array_length(${table.allowedTrustTiers}) between 1 and 4`),
+    check("ai_retrieval_config_revisions_semantic_failure_valid", sql`${table.semanticFailureBehavior} in ('LEXICAL_ONLY','FAIL_RETRIEVAL')`),
+    check("ai_retrieval_config_revisions_reranker_failure_valid", sql`${table.rerankerFailureBehavior} in ('USE_FUSION','FAIL_RETRIEVAL')`),
+    check("ai_retrieval_config_revisions_created_nonnegative", sql`${table.createdAt} >= 0`),
+  ],
+);
+
 export type ChangeSetRow = typeof changeSets.$inferSelect;
 export type ChangeSetItemRow = typeof changeSetItems.$inferSelect;
 export type ChangeSetEventRow = typeof changeSetEvents.$inferSelect;
@@ -3069,3 +3143,5 @@ export type AIOutboxEventRow = typeof aiOutboxEvents.$inferSelect;
 export type AIEmbeddingProjectionSetRow = typeof aiEmbeddingProjectionSets.$inferSelect;
 export type AIEmbeddingProjectionRevisionRow = typeof aiEmbeddingProjectionRevisions.$inferSelect;
 export type AIEmbeddingVectorRow = typeof aiEmbeddingVectors.$inferSelect;
+export type AIRetrievalConfigRow = typeof aiRetrievalConfigs.$inferSelect;
+export type AIRetrievalConfigRevisionRow = typeof aiRetrievalConfigRevisions.$inferSelect;

@@ -8,3 +8,8 @@ export { SQLiteAIRetrievalProjectionRepository } from "./sqlite-repository";
 export { AIChunkProjectionBuilder, createAIChunkProjectionBuilder, type AIRetrievalBuildSession, type AIRetrievalBuilderOptions } from "./builder";
 export { createAIRetrievalProjectionHealthService, AIRetrievalProjectionHealthService } from "./health";
 export { createSQLiteAILexicalRetrievalAdapter, SQLiteAILexicalRetrievalAdapter } from "./lexical";
+export { HybridRetrievalService, createAIHybridRetrievalService, type AIHybridRetrievalServiceDependencies } from "./hybrid";
+export { AIHybridRetrievalError, AI_HYBRID_RETRIEVAL_ERROR_CODES, type AIHybridRetrievalErrorCode } from "./hybrid-errors";
+export { selectEvidence } from "./evidence";
+export { reciprocalContribution, weightedReciprocalRankFusion, type AIHybridLexicalRankedCandidate, type AIHybridSemanticRankedCandidate } from "./fusion";
+export * from "./hybrid-contracts";

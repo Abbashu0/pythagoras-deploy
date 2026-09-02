@@ -16,6 +16,7 @@ import { AICircuitBreakerPolicyChangeAdapter } from "../ai/circuit-breaker";
 import { AIInstructionPolicyChangeAdapter, AIContextPolicyChangeAdapter } from "../ai/policy";
 import { AIKnowledgeSourceChangeAdapter } from "../ai/knowledge/source-change-adapter";
 import { AIKnowledgePackageChangeAdapter } from "../ai/knowledge/package-change-adapter";
+import { AIRetrievalConfigChangeAdapter } from "../ai/retrieval-config";
 
 export class ChangeResourceAdapterRegistry {
   private readonly adapters = new Map<string, ChangeResourceAdapter>();
@@ -84,6 +85,7 @@ export function createDefaultChangeResourceRegistry(): ChangeResourceAdapterRegi
       new AIContextPolicyChangeAdapter(),
       new AIKnowledgeSourceChangeAdapter(),
       new AIKnowledgePackageChangeAdapter(),
+      new AIRetrievalConfigChangeAdapter(),
     ],
     [new QuestionChangeSetCoordinator(), new MaterialQuestionBankChangeSetCoordinator()],
   );

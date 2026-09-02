@@ -12,6 +12,8 @@ AI-M7B uses the existing `KNOWLEDGE_INDEXING` cost center for document embedding
 
 ## 1. Cost centers
 
+AI-M7C query embedding and optional reranking are variable-cost work in the caller's existing `STUDENT_GENERATION` operation. M7C requires the matching reservation to be `EXECUTING`, records each actual Gateway attempt through M3A accounting, and leaves operation completion and reservation settlement to the owning orchestration milestone. M7C never charges query work to `KNOWLEDGE_INDEXING` and does not create a second admission.
+
 The immutable cost-center vocabulary is:
 
 - `STUDENT_GENERATION` — student-facing generation, reasoning, query embedding, reranking, and any approved student-facing model/tool call;

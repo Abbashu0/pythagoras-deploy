@@ -71,7 +71,7 @@ AI milestones are future delivery boundaries. Each milestone is one coherent com
 
 ## AI-M7 — Retrieval Engine
 
-**Status:** Incomplete; refined into independently reviewed checkpoints.
+**Status:** Implemented; M7A and M7B are approved, and M7C is implemented pending independent review.
 
 ### AI-M7A — Chunk Projection & Lexical Retrieval Foundation
 
@@ -81,14 +81,17 @@ AI milestones are future delivery boundaries. Each milestone is one coherent com
 
 ### AI-M7B — Embedding Projection, VectorIndexAdapter & Durable Projection Jobs
 
-**Status:** Implemented; pending independent review.
+**Status:** Implemented; AI-M7B is approved.
 
 **Delivered boundary:** Exact fresh/current M7A prerequisites; one-model/no-fallback semantic indexing through `AIProviderGateway.embed`; pinned Model/Provider revision identity; durable reference-only `ai.retrieval.embedding-build` Jobs with existing lease/fencing/retry/dead-letter semantics; conservative `KNOWLEDGE_INDEXING` admission and cost attribution; immutable/rebuildable Embedding Projection sets/revisions; versioned Float32 little-endian vector storage; provider-neutral local exact cosine `VectorIndexAdapter`; subject/live-Source eligibility; coverage/health/stale checks; and migration `0025_sharp_raza`. The current correction also requires explicit fail-closed active-search eligibility, exact revision health, and a bounded durable terminal reconciler over unresolved Embedding Projection work using relational ownership rather than payload parsing; terminal projection failure is the durable progress marker.
-**Explicit boundary:** No production Provider/vendor was selected, no real network call, no external Vector DB or extension, no query-text embedding, hybrid fusion, RRF, reranking, EvidencePack, Grounded Tutor, Student/Admin AI UI, Agent 2, Memory, Evals runtime, or real corpus import was added.
+**Explicit boundary:** No production Provider/vendor was selected, no real network call, no external Vector DB or extension, no query-text embedding, hybrid fusion, RRF, reranking, EvidencePack, Grounded Tutor, Student/Admin AI UI, Agent 2, Memory, Evals runtime, or real corpus import was added in M7B.
 
 ### AI-M7C — Hybrid Retrieval, Deterministic Fusion, Optional Reranking & EvidencePack
 
-**Status:** Not started.
+**Status:** Implemented; pending independent review.
+
+**Delivered boundary:** Governed subject-bound Retrieval Config identities/revisions through Change Sets and OWNER publication; exact published M7A/M7B coverage gates; bounded exact lexical and per-origin semantic retrieval; deterministic integer weighted Reciprocal Rank Fusion; optional single-model reranking with strict result validation; live Source rights and projection/model/config final fences; caller-owned Student-generation Cost Operation and EXECUTING Budget Reservation attribution without settlement; and bounded runtime-only EvidencePacks with provenance, trust, scores, inclusion signals, and no query persistence. Migration `0026_steady_turbo` contains only safe Retrieval Config metadata.
+**Explicit boundary:** No Grounded Tutor, Generation, conversation orchestration, Web Search, durable Retrieval Trace, memory, eval runtime, external vector technology, vendor SDK, or production Provider was added. AI-M7 remains incomplete until the M7C review gate is passed.
 
 ## Remaining future milestones
 
