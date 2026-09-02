@@ -80,6 +80,13 @@ import type {
   AISecretAuditOutcome,
   AISecretStatus,
 } from "../ai/secrets/contracts";
+import type {
+  AIKnowledgePreparationMethod,
+  AIKnowledgeRightsBasis,
+  AIKnowledgeRightsStatus,
+  AIKnowledgeSourceType,
+  AIKnowledgeTrustTier,
+} from "../ai/knowledge/contracts";
 
 export type ContentPayload = Record<string, unknown>;
 
@@ -745,6 +752,182 @@ export const aiContextSnapshotItems = sqliteTable(
   ],
 );
 
+/** Stable identity for one reviewed Knowledge Source; revisions carry source metadata. */
+export const aiKnowledgeSources = sqliteTable(
+  "ai_knowledge_sources",
+  {
+    id: text("id").primaryKey(),
+    key: text("key").notNull(),
+    subjectKey: text("subject_key").notNull().references(() => canonicalMaterials.subjectKey, { onDelete: "restrict" }),
+    currentRevision: integer("current_revision").notNull().default(1),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    createdBy: text("created_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+    updatedBy: text("updated_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+  },
+  (table) => [
+    uniqueIndex("ai_knowledge_sources_key_unique").on(table.key),
+    index("ai_knowledge_sources_subject_index").on(table.subjectKey),
+    check("ai_knowledge_sources_key_valid", sql`length(trim(${table.key})) between 1 and 120 and ${table.key} not glob '*[^a-z0-9.-]*'`),
+    check("ai_knowledge_sources_subject_valid", sql`length(trim(${table.subjectKey})) between 1 and 80 and ${table.subjectKey} not glob '*[^a-z0-9-]*'`),
+    check("ai_knowledge_sources_revision_positive", sql`${table.currentRevision} >= 1`),
+    check("ai_knowledge_sources_created_nonnegative", sql`${table.createdAt} >= 0`),
+    check("ai_knowledge_sources_updated_ordered", sql`${table.updatedAt} >= ${table.createdAt}`),
+  ],
+);
+
+/** Immutable reviewed metadata revisions for a Knowledge Source. */
+export const aiKnowledgeSourceRevisions = sqliteTable(
+  "ai_knowledge_source_revisions",
+  {
+    id: text("id").primaryKey(),
+    sourceId: text("source_id").notNull().references(() => aiKnowledgeSources.id, { onDelete: "restrict" }),
+    revision: integer("revision").notNull(),
+    sourceType: text("source_type").$type<AIKnowledgeSourceType>().notNull(),
+    displayName: text("display_name").notNull(),
+    language: text("language").notNull(),
+    edition: text("edition"),
+    authorityName: text("authority_name"),
+    authorityType: text("authority_type"),
+    trustTier: text("trust_tier").$type<AIKnowledgeTrustTier>().notNull(),
+    rightsStatus: text("rights_status").$type<AIKnowledgeRightsStatus>().notNull(),
+    rightsBasis: text("rights_basis").$type<AIKnowledgeRightsBasis>(),
+    licenseName: text("license_name"),
+    attribution: text("attribution"),
+    rightsNotes: text("rights_notes"),
+    sourceUrl: text("source_url"),
+    sourceAssetId: text("source_asset_id").references(() => assets.id, { onDelete: "restrict" }),
+    enabled: integer("enabled", { mode: "boolean" }).notNull(),
+    preparationMethod: text("preparation_method").$type<AIKnowledgePreparationMethod>().notNull(),
+    producerKey: text("producer_key").notNull(),
+    producerRevision: text("producer_revision").notNull(),
+    createdAt: integer("created_at").notNull(),
+    createdBy: text("created_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+  },
+  (table) => [
+    uniqueIndex("ai_knowledge_source_revisions_identity_unique").on(table.sourceId, table.revision),
+    index("ai_knowledge_source_revisions_source_index").on(table.sourceId, table.revision),
+    check("ai_knowledge_source_revisions_revision_positive", sql`${table.revision} >= 1`),
+    check("ai_knowledge_source_revisions_type_valid", sql`${table.sourceType} in ('OFFICIAL_TEXTBOOK','MINISTERIAL_REFERENCE','PYTHAGORAS_APPROVED','TEACHER_SUPPLEMENT','REFERENCE_TABLE','OTHER_APPROVED')`),
+    check("ai_knowledge_source_revisions_display_name_valid", sql`length(trim(${table.displayName})) between 1 and 500`),
+    check("ai_knowledge_source_revisions_language_valid", sql`length(trim(${table.language})) between 2 and 32`),
+    check("ai_knowledge_source_revisions_trust_valid", sql`${table.trustTier} in ('OFFICIAL','PYTHAGORAS_APPROVED','TEACHER_REVIEWED','OTHER_APPROVED')`),
+    check("ai_knowledge_source_revisions_rights_status_valid", sql`${table.rightsStatus} in ('CLEARED','RESTRICTED','UNKNOWN')`),
+    check("ai_knowledge_source_revisions_rights_basis_valid", sql`${table.rightsBasis} is null or ${table.rightsBasis} in ('OWNED','LICENSED','PERMISSION','PUBLIC_DOMAIN','OTHER_REVIEWED')`),
+    check("ai_knowledge_source_revisions_cleared_basis", sql`(${table.rightsStatus} = 'CLEARED' and ${table.rightsBasis} is not null) or (${table.rightsStatus} <> 'CLEARED' and ${table.rightsBasis} is null)`),
+    check("ai_knowledge_source_revisions_enabled_boolean", sql`${table.enabled} in (0,1)`),
+    check("ai_knowledge_source_revisions_preparation_valid", sql`${table.preparationMethod} in ('MANUAL','DETERMINISTIC','AI_ASSISTED')`),
+    check("ai_knowledge_source_revisions_text_bounds", sql`(${table.edition} is null or length(${table.edition}) <= 500) and (${table.authorityName} is null or length(${table.authorityName}) <= 500) and (${table.authorityType} is null or length(${table.authorityType}) <= 120) and (${table.licenseName} is null or length(${table.licenseName}) <= 500) and (${table.attribution} is null or length(${table.attribution}) <= 2000) and (${table.rightsNotes} is null or length(${table.rightsNotes}) <= 2000) and (${table.sourceUrl} is null or length(${table.sourceUrl}) <= 2000)`),
+    check("ai_knowledge_source_revisions_producer_valid", sql`length(trim(${table.producerKey})) between 1 and 120 and length(trim(${table.producerRevision})) between 1 and 120`),
+    check("ai_knowledge_source_revisions_created_nonnegative", sql`${table.createdAt} >= 0`),
+  ],
+);
+
+/** Stable identity for a governed Knowledge Package; its current pointer is the only mutable identity field. */
+export const aiKnowledgePackages = sqliteTable(
+  "ai_knowledge_packages",
+  {
+    id: text("id").primaryKey(),
+    key: text("key").notNull(),
+    subjectKey: text("subject_key").notNull().references(() => canonicalMaterials.subjectKey, { onDelete: "restrict" }),
+    currentRevision: integer("current_revision").notNull().default(1),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    createdBy: text("created_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+    updatedBy: text("updated_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+  },
+  (table) => [
+    uniqueIndex("ai_knowledge_packages_key_unique").on(table.key),
+    index("ai_knowledge_packages_subject_index").on(table.subjectKey),
+    check("ai_knowledge_packages_key_valid", sql`length(trim(${table.key})) between 1 and 120 and ${table.key} not glob '*[^a-z0-9.-]*'`),
+    check("ai_knowledge_packages_subject_valid", sql`length(trim(${table.subjectKey})) between 1 and 80 and ${table.subjectKey} not glob '*[^a-z0-9-]*'`),
+    check("ai_knowledge_packages_revision_positive", sql`${table.currentRevision} >= 1`),
+    check("ai_knowledge_packages_created_nonnegative", sql`${table.createdAt} >= 0`),
+    check("ai_knowledge_packages_updated_ordered", sql`${table.updatedAt} >= ${table.createdAt}`),
+  ],
+);
+
+/** Immutable Package revisions pin the exact Source revision and an external, hash-addressed artifact. */
+export const aiKnowledgePackageRevisions = sqliteTable(
+  "ai_knowledge_package_revisions",
+  {
+    id: text("id").primaryKey(),
+    packageId: text("package_id").notNull().references(() => aiKnowledgePackages.id, { onDelete: "restrict" }),
+    revision: integer("revision").notNull(),
+    title: text("title").notNull(),
+    language: text("language").notNull(),
+    contentRevision: integer("content_revision").notNull(),
+    sourceId: text("source_id").notNull(),
+    sourceRevision: integer("source_revision").notNull(),
+    artifactRef: text("artifact_ref").notNull(),
+    artifactSha256: text("artifact_sha256").notNull(),
+    artifactByteSize: integer("artifact_byte_size").notNull(),
+    createdAt: integer("created_at").notNull(),
+    createdBy: text("created_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+  },
+  (table) => [
+    uniqueIndex("ai_knowledge_package_revisions_identity_unique").on(table.packageId, table.revision),
+    index("ai_knowledge_package_revisions_source_index").on(table.sourceId, table.sourceRevision),
+    foreignKey({ columns: [table.sourceId, table.sourceRevision], foreignColumns: [aiKnowledgeSourceRevisions.sourceId, aiKnowledgeSourceRevisions.revision], name: "ai_knowledge_package_revisions_source_pin_fk" }).onDelete("restrict"),
+    check("ai_knowledge_package_revisions_revision_positive", sql`${table.revision} >= 1`),
+    check("ai_knowledge_package_revisions_title_valid", sql`length(trim(${table.title})) between 1 and 500`),
+    check("ai_knowledge_package_revisions_language_valid", sql`length(trim(${table.language})) between 2 and 32`),
+    check("ai_knowledge_package_revisions_content_revision_positive", sql`${table.contentRevision} >= 1`),
+    check("ai_knowledge_package_revisions_source_revision_positive", sql`${table.sourceRevision} >= 1`),
+    check("ai_knowledge_package_revisions_artifact_ref_valid", sql`length(trim(${table.artifactRef})) between 1 and 128 and ${table.artifactRef} not glob '*[^0-9a-f]*'`),
+    check("ai_knowledge_package_revisions_artifact_hash_valid", sql`length(${table.artifactSha256}) = 64 and ${table.artifactSha256} not glob '*[^0-9a-f]*'`),
+    check("ai_knowledge_package_revisions_artifact_size_valid", sql`${table.artifactByteSize} > 0`),
+    check("ai_knowledge_package_revisions_created_nonnegative", sql`${table.createdAt} >= 0`),
+  ],
+);
+
+/** Structured RichDocument content remains canonical and is intentionally not a retrieval projection. */
+export const aiKnowledgeDocuments = sqliteTable(
+  "ai_knowledge_documents",
+  {
+    packageRevisionId: text("package_revision_id").notNull().references(() => aiKnowledgePackageRevisions.id, { onDelete: "restrict" }),
+    documentId: text("document_id").notNull(),
+    displayOrder: integer("display_order").notNull(),
+    title: text("title"),
+    provenance: text("provenance", { mode: "json" }).$type<Record<string, unknown> | null>(),
+    content: text("content", { mode: "json" }).$type<CanonicalRichDocument>().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.packageRevisionId, table.documentId] }),
+    index("ai_knowledge_documents_revision_order_index").on(table.packageRevisionId, table.displayOrder),
+    check("ai_knowledge_documents_id_valid", sql`length(trim(${table.documentId})) between 1 and 120`),
+    check("ai_knowledge_documents_order_positive", sql`${table.displayOrder} >= 1`),
+    check("ai_knowledge_documents_title_valid", sql`${table.title} is null or length(trim(${table.title})) between 1 and 500`),
+    check("ai_knowledge_documents_provenance_valid", sql`${table.provenance} is null or (json_valid(${table.provenance}) and json_type(${table.provenance}) = 'object')`),
+    check("ai_knowledge_documents_content_valid", sql`json_valid(${table.content}) and json_type(${table.content}) = 'object'`),
+  ],
+);
+
+/** Exact asset bindings for one immutable Package revision. */
+export const aiKnowledgePackageAssets = sqliteTable(
+  "ai_knowledge_package_assets",
+  {
+    packageRevisionId: text("package_revision_id").notNull().references(() => aiKnowledgePackageRevisions.id, { onDelete: "restrict" }),
+    assetRef: text("asset_ref").notNull(),
+    expectedSha256: text("expected_sha256").notNull(),
+    assetId: text("asset_id").notNull().references(() => assets.id, { onDelete: "restrict" }),
+    filename: text("filename").notNull(),
+    mimeType: text("mime_type").notNull(),
+    byteSize: integer("byte_size").notNull(),
+    metadata: text("metadata", { mode: "json" }).$type<Record<string, string | number | boolean | null> | null>(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.packageRevisionId, table.assetRef] }),
+    index("ai_knowledge_package_assets_asset_index").on(table.assetId),
+    check("ai_knowledge_package_assets_ref_valid", sql`length(trim(${table.assetRef})) between 1 and 120 and ${table.assetRef} not glob '*[^A-Za-z0-9._-]*'`),
+    check("ai_knowledge_package_assets_hash_valid", sql`length(${table.expectedSha256}) = 64 and ${table.expectedSha256} not glob '*[^0-9a-f]*'`),
+    check("ai_knowledge_package_assets_filename_valid", sql`length(trim(${table.filename})) between 1 and 255 and ${table.filename} not glob '*[\\/]*'`),
+    check("ai_knowledge_package_assets_mime_valid", sql`length(trim(${table.mimeType})) between 1 and 200`),
+    check("ai_knowledge_package_assets_size_valid", sql`${table.byteSize} > 0`),
+    check("ai_knowledge_package_assets_metadata_valid", sql`${table.metadata} is null or (json_valid(${table.metadata}) and json_type(${table.metadata}) = 'object')`),
+  ],
+);
+
 export type CanonicalContentStateRow = typeof canonicalContentState.$inferSelect;
 export type CanonicalBannerRow = typeof canonicalBanners.$inferSelect;
 export type CanonicalMaterialRow = typeof canonicalMaterials.$inferSelect;
@@ -762,6 +945,12 @@ export type AIContextPolicyRow = typeof aiContextPolicies.$inferSelect;
 export type AIContextPolicyRevisionRow = typeof aiContextPolicyRevisions.$inferSelect;
 export type AIContextSnapshotRow = typeof aiContextSnapshots.$inferSelect;
 export type AIContextSnapshotItemRow = typeof aiContextSnapshotItems.$inferSelect;
+export type AIKnowledgeSourceRow = typeof aiKnowledgeSources.$inferSelect;
+export type AIKnowledgeSourceRevisionRow = typeof aiKnowledgeSourceRevisions.$inferSelect;
+export type AIKnowledgePackageRow = typeof aiKnowledgePackages.$inferSelect;
+export type AIKnowledgePackageRevisionRow = typeof aiKnowledgePackageRevisions.$inferSelect;
+export type AIKnowledgeDocumentRow = typeof aiKnowledgeDocuments.$inferSelect;
+export type AIKnowledgePackageAssetRow = typeof aiKnowledgePackageAssets.$inferSelect;
 
 export const legacyMigrationRuns = sqliteTable(
   "legacy_migration_runs",

@@ -1,7 +1,7 @@
 # AI architecture lock
 
 **Milestone:** AI-M0 — Architecture Lock & Backend Readiness Specification
-**Status:** AI-M0 is locked; the current implementation has completed AI-M1 through AI-M4 and implemented AI-M5 Policy & Context pending independent review, without selecting a production provider.
+**Status:** AI-M0 is locked; the current implementation has completed AI-M1 through AI-M5 and implemented AI-M6 Knowledge pending independent review, without selecting a production provider.
 
 ## 1. Architectural position
 
@@ -82,7 +82,7 @@ The original AI-M0 audit was performed against `HEAD == origin/main == b528f198d
 | Question domain | Relational Packages, Taxonomy, Banks, Questions, Variants, Occurrences, shared Answers | Question content remains a separate canonical domain and gets its own knowledge projector |
 | Search | Published placement-scoped SQLite FTS5 projection | This is lexical Question Search, not semantic AI retrieval or a vector index |
 | Student identity | No production Student authentication or entitlement boundary | Student AI launch is blocked until a server-resolved principal and entitlement service exist |
-| AI | AI-M1 adds configuration/secrets and migration `0011`; AI-M2 adds the governed Model Registry/Gateway and migration `0012`; AI-M3A adds economics/usage accounting and migration `0013`; AI-M3B adds governed budget/rate-limit policies, one stable-period Budget Account, atomic admission, reservations, settlement, and migrations `0014_cynical_bloodscream`/`0015_cynical_vulcan`; AI-M3C1 adds durable Jobs/Outbox/recovery and migration `0016_left_queen_noir`; AI-M3C2 adds passive persistent Circuit Breakers/operational health and migration `0017_lean_oracle`; AI-M4 adds private server-side Conversation/Message/Response lifecycle and migration `0018_soft_zaran`; AI-M5 adds governed Policy/Context planning and metadata-only Context Snapshots through migration `0019_abnormal_kid_colt`; no production provider, external call, Student auth/entitlement, public Student AI API, or UI exists | AI-M6 remains the next unstarted AI milestone |
+| AI | AI-M1 adds configuration/secrets and migration `0011`; AI-M2 adds the governed Model Registry/Gateway and migration `0012`; AI-M3A adds economics/usage accounting and migration `0013`; AI-M3B adds governed budget/rate-limit policies, one stable-period Budget Account, atomic admission, reservations, settlement, and migrations `0014_cynical_bloodscream`/`0015_cynical_vulcan`; AI-M3C1 adds durable Jobs/Outbox/recovery and migration `0016_left_queen_noir`; AI-M3C2 adds passive persistent Circuit Breakers/operational health and migration `0017_lean_oracle`; AI-M4 adds private server-side Conversation/Message/Response lifecycle and migration `0018_soft_zaran`; AI-M5 adds governed Policy/Context planning and metadata-only Context Snapshots through migration `0019_abnormal_kid_colt`; AI-M6 adds governed Knowledge Source/Package publication, immutable normalized document history, and published-only rights/enabled eligibility through migration `0021_nifty_komodo`; no production provider, external call, Student auth/entitlement, public Student AI API, or UI exists | AI-M7 remains the next unstarted AI milestone |
 
 The public Student content routes currently expose published content without a Student principal. That is acceptable for the current read-only content surface but is not an acceptable trust boundary for a metered Student AI API.
 
@@ -121,7 +121,7 @@ Failure at any stage is an explicit typed failure. A stopped or partial generati
 
 ```text
 approved source -> validated pythagoras.knowledge-package
-        -> governed proposal -> OWNER approval -> published knowledge revision
+        -> bounded hash-pinned proposal -> OWNER approval -> published knowledge revision
         -> chunk / embedding / lexical projection jobs
         -> retrieval-ready revision
 ```
@@ -142,7 +142,7 @@ AI-M0 does not pretend to resolve Product or deployment choices that the current
 
 - the eventual Student login/session mechanism and the authoritative entitlement/billing integration;
 - the first production provider/model, deployment regions, provider retention terms, and fallback portfolio;
-- the concrete local or production implementation of `AISecretStoreAdapter`;
+- the production implementation of `AISecretStoreAdapter` (M1 supplies the current local encrypted adapter);
 - when local exact vector search is no longer sufficient and which future vector adapter is selected;
 - retention durations, legal basis, deletion SLAs, and the approved PII redaction taxonomy;
 - initial retrieval K values, evidence thresholds, context budgets, rate cards, and the final Premium allowance;

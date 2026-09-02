@@ -1,10 +1,12 @@
 # Knowledge and grounded retrieval
 
+AI-M6 implements the source and published-package boundary only. Retrieval remains a future projection/runtime milestone; this document does not imply that package publication creates retrieval data.
+
 ## 1. Knowledge is a separate domain
 
-`pythagoras.knowledge-package` is a portable contract for approved source documents. It is not `pythagoras.question-package`, and it does not copy the relational Question domain.
+`pythagoras.knowledge-package` is a portable contract for approved source documents. Its V1 envelope and strict diagnostics are defined in [KNOWLEDGE-PACKAGE-V1.md](./KNOWLEDGE-PACKAGE-V1.md). It is not `pythagoras.question-package`, and it does not copy the relational Question domain.
 
-The Question domain remains authoritative for Questions, Variants, Occurrences, shared Answers, taxonomy assignments, and placement-scoped Question Browse. A future Question projector may expose Question content to the Knowledge retrieval boundary, but it must preserve canonical IDs, per-Variant provenance, publication scope, and revision identity.
+The Question domain remains authoritative for Questions, Variants, Occurrences, shared Answers, taxonomy assignments, and placement-scoped Question Browse. AI-M6's read-only Question Knowledge Projector may expose already-published Question content to a later retrieval boundary, but it preserves canonical IDs, per-Variant provenance, publication scope, shared-answer identity, subject, and revision identity without writing duplicate Knowledge rows.
 
 ## 2. Knowledge Package contract
 
@@ -40,7 +42,7 @@ registered source
   -> retrieval-ready projection revision
 ```
 
-Only approved/published Knowledge revisions are eligible for production RAG. A projection records the exact source `knowledgeRevision`, chunking revision, embedding configuration revision, and index revision. If a projection is stale or incomplete, the retrieval policy must fail closed, use a known-good prior published projection, or return insufficient evidence according to an explicit policy; it must not silently blend unpublished content.
+Only approved/published Knowledge revisions are eligible for production RAG. In M6, the eligibility read boundary additionally requires subject match, an existing pinned Source revision, and the current Source state to be enabled with `rightsStatus = CLEARED`; disabling/restricting a Source removes current eligibility without erasing historical Package rows. A later projection records the exact source `knowledgeRevision`, chunking revision, embedding configuration revision, and index revision. If a projection is stale or incomplete, the retrieval policy must fail closed, use a known-good prior published projection, or return insufficient evidence according to an explicit policy; it must not silently blend unpublished content.
 
 ## 4. Retrieval pipeline
 

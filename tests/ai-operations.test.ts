@@ -133,7 +133,7 @@ test("M3C1 migration creates durable Job, Attempt, and Outbox tables without raw
   const fixture = createFixture();
   try {
     const migrationCount = (fixture.database.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count;
-    assert.equal(migrationCount, 21);
+    assert.equal(migrationCount, 22);
     for (const table of ["ai_jobs", "ai_job_attempts", "ai_outbox_events"]) {
       const columns = fixture.database.client.prepare(`pragma table_info(${table})`).all() as Array<{ name: string }>;
       assert.ok(columns.length > 0);

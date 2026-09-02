@@ -1,6 +1,6 @@
 # AI domain boundaries and conceptual contracts
 
-This document defines ownership and contracts. AI-M0 established the boundaries; AI-M1 through AI-M3C2 materialize the configuration, secrets, Model Registry, adapter, transport, Gateway, economics, admission, durable Jobs, Outbox, recovery, passive Circuit Breaker, and operational-health portions described below. AI-M4 materializes the private Conversation, Message, Product Response, and bounded streaming lifecycle boundaries, and AI-M5 materializes governed Policy/Context planning and metadata-only Context Snapshots, without selecting a production provider.
+This document defines ownership and contracts. AI-M0 established the boundaries; AI-M1 through AI-M3C2 materialize the configuration, secrets, Model Registry, adapter, transport, Gateway, economics, admission, durable Jobs, Outbox, recovery, passive Circuit Breaker, and operational-health portions described below. AI-M4 materializes the private Conversation, Message, Product Response, and bounded streaming lifecycle boundaries, AI-M5 materializes governed Policy/Context planning and metadata-only Context Snapshots, and AI-M6 materializes the governed Knowledge Source/Package domain without selecting a production provider.
 
 ## 1. Configuration, secrets, and provider boundaries
 
@@ -76,9 +76,9 @@ Embedding, compaction, memory extraction, analytics, Agent 2, and eval runs MUST
 
 | Boundary | Contract |
 | --- | --- |
-| **Knowledge Sources** | Registered source identity, ownership, rights, acquisition metadata, trust tier, and ingestion status. A source is not production evidence until its derived Package is published. |
-| **Pythagoras Knowledge Package** | Portable approved-source contract described in [AI-RAG-AND-KNOWLEDGE.md](./AI-RAG-AND-KNOWLEDGE.md). It is separate from `pythagoras.question-package`. |
-| **Knowledge Publication** | Validates, versions, and publishes a Package revision through governance. Publication records source and content revision; it does not publish chunks as canonical content. |
+| **Knowledge Sources** | Stable source identity with immutable key/subject and governed metadata revisions for source type, trust, rights, authority, language, acquisition/provenance, and preparation method. A source is not production evidence until its approved Package revision is published and its current rights/enabled state is eligible. |
+| **Pythagoras Knowledge Package** | Portable `pythagoras.knowledge-package` V1 contract described in [KNOWLEDGE-PACKAGE-V1.md](./KNOWLEDGE-PACKAGE-V1.md). It is separate from `pythagoras.question-package`, pins an exact Source revision, and contains structured documents/assets rather than retrieval data. |
+| **Knowledge Publication** | Validates, versions, and publishes a Package revision through `ai.knowledge-package` Change Sets and OWNER publication. Large content is hash-pinned outside bounded snapshots; publication materializes immutable Package/Document/Asset-binding rows and never publishes retrieval projections as canonical content. |
 | **Chunk Projection** | Deterministic, revisioned chunks with source/page/section provenance and stable chunk IDs. Rebuildable and never authoritative over the Package. |
 | **Embedding Provider** | Adapter boundary for document/query vectors, model/config revision, dimensions, and usage. It may be local or external. |
 | **Vector Index** | `VectorIndexAdapter` for insert/delete/search against a projection revision. It may begin as local exact search and later use pgvector or a service without changing RAG contracts. |
@@ -87,6 +87,8 @@ Embedding, compaction, memory extraction, analytics, Agent 2, and eval runs MUST
 | **Reranker** | Optional bounded candidate reranking with model/config revision and normalized scores. Failure can follow an explicit policy; it cannot silently widen scope. |
 | **Evidence Pack** | Bounded, ordered, deduplicated evidence items with chunk IDs, source provenance, trust tier, retrieval/rerank scores, and inclusion reasons. It is the only retrieval output exposed to the Tutor. |
 | **Grounded Tutor Orchestrator** | Combines principal, policy, context budget, conversation, memory, and Evidence Pack into a generation request and applies grounding/output rules. It does not grant tools or credentials to a model. |
+
+AI-M6 also exposes `listProjectionEligibleKnowledge(subjectKey)` as a published-only read boundary: the Package is canonical, the subject matches, the pinned Source revision exists, and the current Source state is enabled with cleared rights. A later Source disable/restriction preserves historical rows and pins but removes them from eligibility. `QuestionKnowledgeProjector` is read-only and exposes already-published canonical Questions/Variants/Occurrences/shared Answers/taxonomy with stable identities; it does not copy Question rows into Knowledge storage.
 
 ## 5. Memory, telemetry, and improvement boundaries
 
