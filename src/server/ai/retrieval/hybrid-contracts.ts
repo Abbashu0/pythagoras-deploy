@@ -71,6 +71,19 @@ export interface AIHybridChunkCandidate {
   originMetadata: Readonly<Record<string, unknown>>;
 }
 
+/** Stable, safe identity of an origin included in the retrieval scope. */
+export interface AIHybridOriginIdentity {
+  originKind: "KNOWLEDGE_PACKAGE" | "QUESTION_PACKAGE";
+  originId: string;
+  subjectKey: string;
+}
+
+/** Exact M7A selection required to re-run the final retrieval fence. */
+export interface AIHybridM7AProjectionRef extends AIHybridOriginIdentity {
+  projectionSetId: string;
+  projectionRevisionId: string;
+}
+
 export interface AIHybridFusedCandidate extends AIHybridChunkCandidate {
   lexicalRank: number | null;
   semanticRank: number | null;
@@ -92,6 +105,8 @@ export interface AIHybridRetrievalTrace {
   fusionAlgorithmKey: string;
   fusionAlgorithmRevision: number;
   m7aProjectionRevisionIds: readonly string[];
+  eligibleOriginIdentities: readonly AIHybridOriginIdentity[];
+  m7aProjectionRefs: readonly AIHybridM7AProjectionRef[];
   m7bEmbeddingProjectionRevisionIds: readonly string[];
   embeddingModelConfigId: string | null;
   embeddingModelConfigRevision: number | null;

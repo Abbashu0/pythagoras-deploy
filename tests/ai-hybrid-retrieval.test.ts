@@ -1098,6 +1098,24 @@ test("M7C rejects a new canonical Question origin discovered by the final origin
   } finally { fixtureValue.close(); }
 });
 
+test("M7C exposes a provider-free exact EvidencePack freshness fence for M8B", async () => {
+  const fixtureValue = await fixture();
+  try {
+    const origin = await createKnowledge(fixtureValue, "exact freshness evidence");
+    const config = publishRetrievalConfig(fixtureValue, retrievalConfigContent(fixtureValue));
+    const requestValue = request(fixtureValue, config, "freshness");
+    const pack = await fixtureValue.hybrid.retrieve(requestValue);
+    assert.equal(pack.status, "SUFFICIENT");
+    assert.equal(pack.trace.eligibleOriginIdentities.length, 1);
+    assert.equal(pack.trace.m7aProjectionRefs[0]?.projectionRevisionId, origin.m7aRevisionId);
+    fixtureValue.hybrid.assertEvidencePackCurrent(pack);
+    const source = fixtureValue.sources.getById(origin.sourceId);
+    assert.ok(source);
+    fixtureValue.sources.appendRevision({ id: origin.sourceId, expectedRevision: source.currentRevision, content: sourceRevisionContent(source, { rightsStatus: "RESTRICTED", rightsBasis: null }), actor: fixtureValue.owner, now: fixtureValue.now + 1 });
+    assert.throws(() => fixtureValue.hybrid.assertEvidencePackCurrent(pack), (error) => error instanceof AIHybridRetrievalError && error.code === "AI_HYBRID_FINAL_FENCE_FAILED");
+  } finally { fixtureValue.close(); }
+});
+
 test("M7C carries exact Question occurrence and taxonomy provenance into EvidencePack without promoting trust", async () => {
   const fixtureValue = await fixture();
   try {

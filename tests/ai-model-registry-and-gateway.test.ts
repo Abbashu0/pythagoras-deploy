@@ -1083,3 +1083,66 @@ test("Gateway request validation rejects client-shaped provider selection and un
     fixture.close();
   }
 });
+
+test("Gateway enforces an exact server-pinned Model and Provider identity before Provider invocation", async () => {
+  const fixture = createFixture();
+  try {
+    const provider = await createProvider(fixture);
+    const modelId = publishModel(fixture, provider.id, "GENERATION", "test.fake-generation");
+    const adapter = new FakeGenerationAdapter(async function* () {
+      yield { type: "STARTED" };
+      yield { type: "COMPLETED", finishReason: "STOP", usage: emptyUsage() };
+    });
+    const gateway = new AIProviderGateway({
+      providerConfigs: fixture.providers,
+      modelConfigs: fixture.models,
+      secrets: fixture.secrets,
+      adapters: new ProviderAdapterRegistry([adapter]),
+    });
+    const request = generationRequest();
+    const expected = {
+      modelConfigId: modelId,
+      modelConfigRevision: 1,
+      providerConfigId: provider.id,
+      providerConfigRevision: 1,
+      providerModelId: `opaque-model-${fixture.models.getById(modelId)!.key}`,
+      adapterKey: "test.fake-generation",
+    };
+    const stream = gateway.generate({ capability: "GENERATION", attempts: [modelId] }, request, { expectedIdentity: expected });
+    await collect(stream);
+    assert.equal(adapter.calls, 1);
+    const mismatched = gateway.generate({ capability: "GENERATION", attempts: [modelId] }, request, { expectedIdentity: { ...expected, providerModelId: "different-model" } });
+    await assert.rejects(() => collect(mismatched), expectGatewayCode("CONFIGURATION"));
+    const mismatchTrace = await mismatched.trace;
+    assert.equal(mismatchTrace[0]?.providerInvoked, false);
+    assert.equal(adapter.calls, 1);
+  } finally {
+    fixture.close();
+  }
+});
+
+test("Generation Gateway rejects decreasing cumulative usage snapshots", async () => {
+  const fixture = createFixture();
+  try {
+    const provider = await createProvider(fixture);
+    const modelId = publishModel(fixture, provider.id, "GENERATION", "test.fake-generation");
+    const adapter = new FakeGenerationAdapter(async function* () {
+      yield { type: "STARTED" };
+      yield { type: "USAGE", usage: { ...emptyUsage(), inputTokens: 10 } };
+      yield { type: "USAGE", usage: { ...emptyUsage(), inputTokens: 9 } };
+    });
+    const gateway = new AIProviderGateway({
+      providerConfigs: fixture.providers,
+      modelConfigs: fixture.models,
+      secrets: fixture.secrets,
+      adapters: new ProviderAdapterRegistry([adapter]),
+    });
+    const stream = gateway.generate({ capability: "GENERATION", attempts: [modelId] }, generationRequest());
+    await assert.rejects(() => collect(stream), expectGatewayCode("BAD_RESPONSE"));
+    const trace = await stream.trace;
+    assert.equal(trace[0]?.providerInvoked, true);
+    assert.equal(trace[0]?.errorCode, "BAD_RESPONSE");
+  } finally {
+    fixture.close();
+  }
+});

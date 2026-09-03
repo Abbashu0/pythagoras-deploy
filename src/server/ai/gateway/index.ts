@@ -8,6 +8,7 @@ export {
   type AIModelSelectionPlan,
   type AIProviderAdapter,
   type AIProviderAttemptStatus,
+  type AIProviderAttemptIdentity,
   type AIProviderAttemptTrace,
   type AIProviderErrorCode,
   type AIProviderGatewayDependencies,

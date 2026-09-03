@@ -248,6 +248,20 @@ export interface AIProviderAttemptTrace {
   providerRequestId?: string;
 }
 
+/**
+ * Server-owned identity captured by a runtime plan. It deliberately excludes
+ * credential references and secret versions; those remain Gateway-owned
+ * operational details.
+ */
+export interface AIProviderAttemptIdentity {
+  modelConfigId: string;
+  modelConfigRevision: number;
+  providerConfigId: string;
+  providerConfigRevision: number;
+  providerModelId: string;
+  adapterKey: string;
+}
+
 export interface AIProviderGatewayStream {
   events: AsyncIterable<GatewayGenerationStreamEvent>;
   /** Resolves after the stream ends, including a failed stream. */
@@ -272,6 +286,8 @@ export interface AIProviderGatewayDependencies {
 export interface AIProviderGatewayOperationOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
+  /** Exact server-owned Model/Provider identity pinned by the runtime plan. */
+  expectedIdentity?: Readonly<AIProviderAttemptIdentity>;
   /** Server-owned exact Circuit Breaker Policy reference; clients must never provide this. */
   circuitPolicy?: {
     policyId: string;

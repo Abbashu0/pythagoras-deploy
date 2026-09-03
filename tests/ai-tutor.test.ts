@@ -11,8 +11,8 @@ import { AIBudgetAdmissionService, createAIAdmissionRequestFingerprint } from ".
 import type { AIContextTokenEstimator } from "../src/server/ai/context";
 import { AIContextService } from "../src/server/ai/context";
 import type { GenerationProviderAdapter, EmbeddingProviderAdapter, EmbeddingProviderRequest, EmbeddingProviderResult, GenerationProviderRequest, ProviderAdapterExecutionContext, ProviderGenerationStreamEvent, RerankProviderRequest, RerankProviderResult } from "../src/server/ai/gateway";
-import { ProviderAdapterRegistry } from "../src/server/ai/gateway";
-import { SQLiteAIAccountingRepository, SQLiteAIRateCardRepository } from "../src/server/ai/economics";
+import { AIProviderAdapterError, AIProviderGateway, ProviderAdapterRegistry } from "../src/server/ai/gateway";
+import { AIBillingUsageNormalizerRegistry, AICostAccountingService, AICostCalculator, AIRateCardResolver, SQLiteAIAccountingRepository, SQLiteAIRateCardModelRevisionRepository, SQLiteAIRateCardRepository } from "../src/server/ai/economics";
 import { SQLiteAIBudgetPolicyRepository } from "../src/server/ai/budget";
 import { SQLiteAIContextPolicyRepository, SQLiteAIInstructionPolicyRepository } from "../src/server/ai/policy";
 import { SQLiteAIRateLimitPolicyRepository } from "../src/server/ai/rate-limits";
@@ -20,7 +20,7 @@ import { SQLiteAIRetrievalConfigRepository, type AIRetrievalConfigContent } from
 import type { AIEvidencePack, AIHybridEvidenceItem } from "../src/server/ai/retrieval";
 import { AIChunkProjectionBuilder, SQLiteAIRetrievalProjectionRepository } from "../src/server/ai/retrieval";
 import { SQLiteAIKnowledgePackageRepository, SQLiteAIKnowledgeSourceRepository } from "../src/server/ai/knowledge";
-import { AI_TUTOR_CONFIG_RESOURCE_TYPE, AITutorGenerationPlanner, AITutorPlanningError, AITutorPreflightError, AITutorPreflightService, AITutorResponseTraceService, AI_TUTOR_CITATION_PROTOCOL_KEY, AI_TUTOR_CITATION_PROTOCOL_REVISION, AI_TUTOR_GROUNDING_PROTOCOL_KEY, AI_TUTOR_GROUNDING_PROTOCOL_REVISION, SQLiteAITutorConfigRepository, type AITutorConfigContent, type AITutorPreflightPlan, type AITutorResponseTrace, type AITutorTraceCreateInput, type AITutorTraceProjectionRefCreate } from "../src/server/ai/tutor";
+import { AI_TUTOR_CONFIG_RESOURCE_TYPE, AITutorExecutionError, AITutorExecutionService, AITutorGenerationPlanner, AITutorPlanningError, AITutorPreflightError, AITutorPreflightService, AITutorResponseTraceService, AI_TUTOR_CITATION_PROTOCOL_KEY, AI_TUTOR_CITATION_PROTOCOL_REVISION, AI_TUTOR_GROUNDING_PROTOCOL_KEY, AI_TUTOR_GROUNDING_PROTOCOL_REVISION, SQLiteAITutorConfigRepository, type AITutorConfigContent, type AITutorPreflightPlan, type AITutorResponseTrace, type AITutorTraceCreateInput, type AITutorTraceProjectionRefCreate } from "../src/server/ai/tutor";
 import { AIConversationService, type AIStudentPrincipal } from "../src/server/ai/conversations";
 import { createLocalAISecretStore } from "../src/server/ai/secrets";
 import { SQLiteAIModelConfigRepository } from "../src/server/ai/model-registry";
@@ -39,11 +39,18 @@ class NoCallGenerationAdapter implements GenerationProviderAdapter {
   readonly adapterKey = "test.m8a-generation";
   readonly capability = "GENERATION" as const;
   calls = 0;
+  outputText = "";
+  lastRequest: GenerationProviderRequest | null = null;
+  usage = { inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cacheHitInputTokens: 0, cacheMissInputTokens: 0 };
+  failure: AIProviderAdapterError | null = null;
 
   async *generate(_request: GenerationProviderRequest, _context: ProviderAdapterExecutionContext): AsyncIterable<ProviderGenerationStreamEvent> {
     this.calls += 1;
+    this.lastRequest = _request;
+    if (this.failure) throw this.failure;
     yield { type: "STARTED" };
-    yield { type: "COMPLETED", finishReason: "STOP", usage: { inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cacheHitInputTokens: 0, cacheMissInputTokens: 0 } };
+    if (this.outputText) yield { type: "TEXT_DELTA", text: this.outputText };
+    yield { type: "COMPLETED", finishReason: "STOP", usage: this.usage };
   }
 }
 
@@ -93,7 +100,10 @@ interface TutorFixture {
   preflight: AITutorPreflightService;
   admission: AIBudgetAdmissionService;
   accounting: SQLiteAIAccountingRepository;
+  accountingService: AICostAccountingService;
   tutorConfigs: SQLiteAITutorConfigRepository;
+  secrets: ReturnType<typeof createLocalAISecretStore>;
+  gateway: AIProviderGateway;
   generationModelId: string;
   embeddingModelId: string;
   rerankModelId: string | null;
@@ -163,10 +173,20 @@ async function createFixture(options: TutorFixtureOptions = {}, fixtureMigration
   const context = new AIContextService(database, { clock: () => now++ });
   const changes = createChangeManagementService(database);
   const accounting = new SQLiteAIAccountingRepository(database);
+  const accountingService = new AICostAccountingService({
+    rateCardResolver: new AIRateCardResolver(rateCards, new SQLiteAIRateCardModelRevisionRepository(database)),
+    billingNormalizers: new AIBillingUsageNormalizerRegistry([{
+      key: "m8a.test",
+      normalize: (usage) => ({ standardInputTokens: usage.inputTokens, cacheHitInputTokens: usage.cacheHitInputTokens, cacheMissInputTokens: usage.cacheMissInputTokens, outputTokens: usage.outputTokens, reasoningTokens: usage.reasoningTokens, requestUnits: 1 }),
+    }]),
+    costCalculator: new AICostCalculator(),
+    accounting,
+  });
+  const gateway = new AIProviderGateway({ providerConfigs: providers, modelConfigs: models, secrets, adapters }, { clock: () => BASE_TIME + 10_000 });
   const admission = new AIBudgetAdmissionService(database, { clock: () => now });
   const tutorConfigs = new SQLiteAITutorConfigRepository(database);
   const preflight = new AITutorPreflightService(database, { context, models, providers, retrievalConfigs: retrievals, contextPolicies: contexts, adapters, clock: () => now });
-  return { root, database, owner, principal: PRINCIPAL, conversations, context, instructions, contexts, retrievals, models, changes, preflight, admission, accounting, tutorConfigs, generationModelId, embeddingModelId, rerankModelId, providerId, contextPolicyId, retrievalConfigId, budgetPolicyId, rateLimitPolicyId, adapters, generation, embedding, rerank, now, close(removeFiles = true) { database.close(); if (removeFiles) rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 }); } };
+  return { root, database, owner, principal: PRINCIPAL, conversations, context, instructions, contexts, retrievals, models, changes, preflight, admission, accounting, accountingService, tutorConfigs, secrets, gateway, generationModelId, embeddingModelId, rerankModelId, providerId, contextPolicyId, retrievalConfigId, budgetPolicyId, rateLimitPolicyId, adapters, generation, embedding, rerank, now, close(removeFiles = true) { database.close(); if (removeFiles) rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 }); } };
 }
 
 function createRateCard(repository: SQLiteAIRateCardRepository, modelConfigId: string, currency: string, key: string, actor: AdminActor, now: number, includeOutput = true, includeReasoning = false): void {
@@ -204,7 +224,7 @@ function makeEvidenceItem(ordinal: number, text: string, overrides: Partial<AIHy
 }
 
 function evidencePack(plan: AITutorPreflightPlan, items: readonly AIHybridEvidenceItem[]): AIEvidencePack {
-  return { evidencePackId: uuidv7(), requestId: plan.responseId, subjectKey: plan.subjectKey, retrievalConfigId: plan.retrievalConfigId, retrievalConfigRevision: plan.retrievalConfigRevision, fusionAlgorithmKey: plan.retrievalConfig.fusionAlgorithmKey, fusionAlgorithmRevision: plan.retrievalConfig.fusionAlgorithmRevision, mode: "HYBRID", degraded: false, safeReason: null, embeddingModelConfigId: plan.retrievalConfig.embeddingModelConfigId, embeddingModelConfigRevision: 1, embeddingProviderConfigId: plan.generationProviderConfigId, embeddingProviderConfigRevision: 1, rerankModelConfigId: plan.retrievalConfig.rerankModelConfigId, rerankModelConfigRevision: plan.retrievalConfig.rerankModelConfigId ? 1 : null, rerankProviderConfigId: plan.generationProviderConfigId, rerankProviderConfigRevision: plan.retrievalConfig.rerankModelConfigId ? 1 : null, candidateCounts: { lexical: items.length, semantic: items.length, fused: items.length, reranked: 0, evidence: items.length }, evidenceByteCount: items.reduce((sum, item) => sum + Buffer.byteLength(item.text, "utf8"), 0), sufficient: true, status: "SUFFICIENT", items, trace: { retrievalConfigId: plan.retrievalConfigId, retrievalConfigRevision: plan.retrievalConfigRevision, fusionAlgorithmKey: plan.retrievalConfig.fusionAlgorithmKey, fusionAlgorithmRevision: plan.retrievalConfig.fusionAlgorithmRevision, m7aProjectionRevisionIds: items.map((item) => item.m7aProjectionRevisionId), m7bEmbeddingProjectionRevisionIds: items.map((item) => item.m7bEmbeddingProjectionRevisionId!).filter(Boolean), embeddingModelConfigId: plan.retrievalConfig.embeddingModelConfigId, embeddingModelConfigRevision: 1, embeddingProviderConfigId: plan.generationProviderConfigId, embeddingProviderConfigRevision: 1, rerankModelConfigId: plan.retrievalConfig.rerankModelConfigId, rerankModelConfigRevision: plan.retrievalConfig.rerankModelConfigId ? 1 : null, rerankProviderConfigId: plan.generationProviderConfigId, rerankProviderConfigRevision: plan.retrievalConfig.rerankModelConfigId ? 1 : null, candidateCounts: { lexical: items.length, semantic: items.length, fused: items.length, reranked: 0, evidence: items.length }, selectedChunkIds: items.map((item) => item.chunkId), rankedSignals: [], degraded: false, safeReason: null } };
+  return { evidencePackId: uuidv7(), requestId: plan.responseId, subjectKey: plan.subjectKey, retrievalConfigId: plan.retrievalConfigId, retrievalConfigRevision: plan.retrievalConfigRevision, fusionAlgorithmKey: plan.retrievalConfig.fusionAlgorithmKey, fusionAlgorithmRevision: plan.retrievalConfig.fusionAlgorithmRevision, mode: "HYBRID", degraded: false, safeReason: null, embeddingModelConfigId: plan.retrievalConfig.embeddingModelConfigId, embeddingModelConfigRevision: 1, embeddingProviderConfigId: plan.generationProviderConfigId, embeddingProviderConfigRevision: 1, rerankModelConfigId: plan.retrievalConfig.rerankModelConfigId, rerankModelConfigRevision: plan.retrievalConfig.rerankModelConfigId ? 1 : null, rerankProviderConfigId: plan.generationProviderConfigId, rerankProviderConfigRevision: plan.retrievalConfig.rerankModelConfigId ? 1 : null, candidateCounts: { lexical: items.length, semantic: items.length, fused: items.length, reranked: 0, evidence: items.length }, evidenceByteCount: items.reduce((sum, item) => sum + Buffer.byteLength(item.text, "utf8"), 0), sufficient: true, status: "SUFFICIENT", items, trace: { retrievalConfigId: plan.retrievalConfigId, retrievalConfigRevision: plan.retrievalConfigRevision, fusionAlgorithmKey: plan.retrievalConfig.fusionAlgorithmKey, fusionAlgorithmRevision: plan.retrievalConfig.fusionAlgorithmRevision, eligibleOriginIdentities: [...new Map(items.map((item) => [`${item.originKind}:${item.originId}`, { originKind: item.originKind, originId: item.originId, subjectKey: item.subjectKey }])).values()], m7aProjectionRefs: items.map((item) => ({ originKind: item.originKind, originId: item.originId, subjectKey: item.subjectKey, projectionSetId: `set-${item.originId}`, projectionRevisionId: item.m7aProjectionRevisionId })), m7aProjectionRevisionIds: items.map((item) => item.m7aProjectionRevisionId), m7bEmbeddingProjectionRevisionIds: items.map((item) => item.m7bEmbeddingProjectionRevisionId!).filter(Boolean), embeddingModelConfigId: plan.retrievalConfig.embeddingModelConfigId, embeddingModelConfigRevision: 1, embeddingProviderConfigId: plan.generationProviderConfigId, embeddingProviderConfigRevision: 1, rerankModelConfigId: plan.retrievalConfig.rerankModelConfigId, rerankModelConfigRevision: plan.retrievalConfig.rerankModelConfigId ? 1 : null, rerankProviderConfigId: plan.generationProviderConfigId, rerankProviderConfigRevision: plan.retrievalConfig.rerankModelConfigId ? 1 : null, candidateCounts: { lexical: items.length, semantic: items.length, fused: items.length, reranked: 0, evidence: items.length }, selectedChunkIds: items.map((item) => item.chunkId), rankedSignals: [], degraded: false, safeReason: null } };
 }
 
 function admittedReservation(fixture: TutorFixture, plan: AITutorPreflightPlan): { operationId: string; reservationId: string } {
@@ -353,6 +373,54 @@ function createKnowledgeChunk(fixture: TutorFixture): { projectionRevisionId: st
   const chunk = new SQLiteAIRetrievalProjectionRepository(fixture.database).listChunks(build.projectionRevisionId)[0];
   assert.ok(chunk);
   return { projectionRevisionId: build.projectionRevisionId, chunkId: chunk.chunkId, originId: packageId };
+}
+
+function executionService(fixture: TutorFixture, insufficient = false, budgetPeriodResolver = { resolve: () => ({ startAt: 0, endAt: BASE_TIME + 100_000 }) }): AITutorExecutionService {
+  let planned: AITutorPreflightPlan | null = null;
+  const preflight = {
+    preflight(input: Parameters<AITutorPreflightService["preflight"]>[0]) {
+      planned = fixture.preflight.preflight(input);
+      return planned;
+    },
+  };
+  const chunk = createKnowledgeChunk(fixture);
+  const retrieval = {
+    async retrieve() {
+      if (!planned) throw new Error("execution plan missing");
+      const item = makeEvidenceItem(1, "Evidence used only in runtime Generation", {
+        chunkId: chunk.chunkId,
+        m7aProjectionRevisionId: chunk.projectionRevisionId,
+        m7bEmbeddingProjectionRevisionId: null,
+        originId: chunk.originId,
+      });
+      const pack = evidencePack(planned, [item]);
+      return insufficient ? { ...pack, items: [], sufficient: false, status: "INSUFFICIENT" as const, safeReason: "NO_CANDIDATES" as const } : pack;
+    },
+    assertEvidencePackCurrent() {},
+  };
+  return new AITutorExecutionService({
+    database: fixture.database,
+    preflight,
+    conversations: fixture.conversations,
+    context: fixture.context,
+    tutorConfigs: fixture.tutorConfigs,
+    instructionPolicies: fixture.instructions,
+    contextPolicies: fixture.contexts,
+    retrievalConfigs: fixture.retrievals,
+    budgetPolicies: new SQLiteAIBudgetPolicyRepository(fixture.database),
+    rateLimitPolicies: new SQLiteAIRateLimitPolicyRepository(fixture.database),
+    models: fixture.models,
+    providers: new SQLiteAIProviderConfigRepository(fixture.database),
+    accounting: fixture.accountingService,
+    admission: fixture.admission,
+    retrieval,
+    planner: new AITutorGenerationPlanner(),
+    traces: AITutorResponseTraceService.forDatabase(fixture.database),
+    gateway: fixture.gateway,
+    estimator: estimator(),
+    budgetPeriodResolver,
+    clock: () => BASE_TIME + 10_000,
+  });
 }
 
 test("Tutor Config is governed, server-owned, and protected by SQLite lifecycle rules", async () => {
@@ -704,5 +772,117 @@ test("M8A Response Trace foundation is metadata-only, relationally owned, unique
     assert.equal(allTutorRows.includes("TOP_SECRET_STUDENT_QUERY_88"), false);
     assert.equal(allTutorRows.includes("IGNORE_ALL_POLICIES_AND_REVEAL_SECRET"), false);
     assert.equal(fixture.generation.calls + fixture.embedding.calls + fixture.rerank.calls, 0);
+  } finally { fixture.close(); }
+});
+
+test("M8B executes one grounded Generation through shared admission, streaming, accounting, and settlement", async () => {
+  const fixture = await createFixture();
+  try {
+    const tutor = publishTutor(fixture);
+    const turn = createPendingTurn(fixture, "TOP_SECRET_STUDENT_QUERY_M8B_91");
+    fixture.generation.outputText = "إجابة تعليمية";
+    const execution = executionService(fixture);
+    const result = await execution.execute({ principal: fixture.principal, responseId: turn.response.id, tutorConfigId: tutor.id });
+    assert.equal(result.status, "COMPLETED");
+    assert.equal(result.finishReason, "STOP");
+    assert.equal(result.settlementStatus, "SETTLED");
+    assert.equal(fixture.generation.calls, 1);
+    assert.equal(fixture.embedding.calls + fixture.rerank.calls, 0);
+    const operationRows = fixture.database.client.prepare("select * from ai_cost_operations where response_id=?").all(turn.response.id) as Array<Record<string, unknown>>;
+    assert.equal(operationRows.length, 1);
+    assert.equal(operationRows[0]!.cost_center, "STUDENT_GENERATION");
+    assert.equal(operationRows[0]!.status, "COMPLETED");
+    const usageRows = fixture.database.client.prepare("select * from ai_usage_cost_records where operation_id=?").all(result.costOperationId) as Array<Record<string, unknown>>;
+    assert.equal(usageRows.length, 1);
+    assert.equal(usageRows[0]!.capability, "GENERATION");
+    assert.equal((fixture.database.client.prepare("select status from ai_budget_reservations where id=?").get(result.budgetReservationId) as { status: string }).status, "SETTLED");
+    const response = fixture.conversations.getResponse(fixture.principal, turn.response.id);
+    assert.equal(response.status, "COMPLETED");
+    const messages = fixture.conversations.listMessages(fixture.principal, turn.conversation.id);
+    assert.equal(messages.at(-1)?.content, "إجابة تعليمية");
+    assert.equal(fixture.generation.lastRequest?.messages.at(-1)?.content, "TOP_SECRET_STUDENT_QUERY_M8B_91");
+    const trace = AITutorResponseTraceService.forDatabase(fixture.database).getById(result.traceId!);
+    assert.equal(trace?.status, "COMPLETED");
+    const durable = JSON.stringify({ operationRows, usageRows, trace });
+    assert.equal(durable.includes("TOP_SECRET_STUDENT_QUERY_M8B_91"), false);
+  } finally { fixture.close(); }
+});
+
+test("M8B bounds UTF-8 response deltas into exact Conversation chunks without changing output", async () => {
+  const fixture = await createFixture();
+  try {
+    const tutor = publishTutor(fixture);
+    const turn = createPendingTurn(fixture, "chunked request");
+    fixture.generation.outputText = "ا".repeat(20_000);
+    const execution = executionService(fixture);
+    const result = await execution.execute({ principal: fixture.principal, responseId: turn.response.id, tutorConfigId: tutor.id });
+    assert.equal(result.status, "COMPLETED");
+    assert.equal(fixture.generation.calls, 1);
+    const messages = fixture.conversations.listMessages(fixture.principal, turn.conversation.id);
+    assert.equal(messages.at(-1)?.content, fixture.generation.outputText);
+    assert.equal((fixture.database.client.prepare("select count(*) as count from ai_conversation_response_chunks where response_id=?").get(turn.response.id) as { count: number }).count, 0);
+  } finally { fixture.close(); }
+});
+
+test("M8B blocks insufficient retrieval without Generation and preserves the admitted operation", async () => {
+  const fixture = await createFixture();
+  try {
+    const tutor = publishTutor(fixture);
+    const turn = createPendingTurn(fixture, "insufficient request");
+    const result = await executionService(fixture, true).execute({ principal: fixture.principal, responseId: turn.response.id, tutorConfigId: tutor.id });
+    assert.equal(result.status, "BLOCKED");
+    assert.equal(result.finishReason, "OTHER");
+    assert.equal(fixture.generation.calls, 0);
+    assert.equal(fixture.conversations.getResponse(fixture.principal, turn.response.id).status, "COMPLETED");
+    assert.equal((fixture.database.client.prepare("select status from ai_cost_operations where id=?").get(result.costOperationId) as { status: string }).status, "COMPLETED");
+  } finally { fixture.close(); }
+});
+
+test("M8B fails closed on admission denial and makes no Provider call", async () => {
+  const fixture = await createFixture();
+  try {
+    const deniedBudgetId = uuidv7();
+    new SQLiteAIBudgetPolicyRepository(fixture.database).create({ id: deniedBudgetId, content: { key: `m8b-denied-budget-${uuidv7()}`, displayName: "M8B Denied Budget", currency: "USD", costCenter: "STUDENT_GENERATION", hardCapNano: 1, enabled: true }, actor: fixture.owner, now: BASE_TIME + 700 });
+    const tutor = publishTutor(fixture, tutorConfigContent(fixture, { budgetPolicyId: deniedBudgetId }));
+    const turn = createPendingTurn(fixture, "admission denied");
+    await assert.rejects(
+      () => executionService(fixture).execute({ principal: fixture.principal, responseId: turn.response.id, tutorConfigId: tutor.id }),
+      (error) => error instanceof AITutorExecutionError && error.code === "AI_TUTOR_EXECUTION_ADMISSION_DENIED",
+    );
+    assert.equal(fixture.generation.calls, 0);
+    assert.equal((fixture.database.client.prepare("select count(*) as count from ai_budget_reservations").get() as { count: number }).count, 0);
+    const operation = fixture.database.client.prepare("select status from ai_cost_operations where response_id=?").get(turn.response.id) as { status: string };
+    assert.equal(operation.status, "FAILED");
+    assert.equal(fixture.conversations.getResponse(fixture.principal, turn.response.id).status, "PENDING");
+  } finally { fixture.close(); }
+});
+
+test("M8B records a failed invoked Generation before terminal settlement", async () => {
+  const fixture = await createFixture();
+  try {
+    const tutor = publishTutor(fixture);
+    const turn = createPendingTurn(fixture, "provider failure");
+    fixture.generation.failure = new AIProviderAdapterError("UNAVAILABLE", { retryable: false, fallbackEligible: false });
+    const result = await executionService(fixture).execute({ principal: fixture.principal, responseId: turn.response.id, tutorConfigId: tutor.id });
+    assert.equal(result.status, "FAILED");
+    assert.equal(fixture.generation.calls, 1);
+    assert.equal(Number((fixture.database.client.prepare("select count(*) as count from ai_usage_cost_records where operation_id=?").get(result.costOperationId) as { count: number }).count), 1);
+    assert.equal((fixture.database.client.prepare("select status from ai_cost_operations where id=?").get(result.costOperationId) as { status: string }).status, "FAILED");
+    assert.equal(fixture.conversations.getResponse(fixture.principal, turn.response.id).status, "FAILED");
+  } finally { fixture.close(); }
+});
+
+test("M8B releases a pre-provider cancellation without Generation or fake usage", async () => {
+  const fixture = await createFixture();
+  try {
+    const tutor = publishTutor(fixture);
+    const turn = createPendingTurn(fixture, "cancel before provider");
+    const controller = new AbortController();
+    const result = await executionService(fixture, false, { resolve: () => { controller.abort(); return { startAt: 0, endAt: BASE_TIME + 100_000 }; } }).execute({ principal: fixture.principal, responseId: turn.response.id, tutorConfigId: tutor.id, signal: controller.signal });
+    assert.equal(result.status, "CANCELLED");
+    assert.equal(result.settlementStatus, "RELEASED");
+    assert.equal(fixture.generation.calls, 0);
+    assert.equal(Number((fixture.database.client.prepare("select count(*) as count from ai_usage_cost_records where operation_id=?").get(result.costOperationId) as { count: number }).count), 0);
+    assert.equal(fixture.conversations.getResponse(fixture.principal, turn.response.id).status, "CANCELLED");
   } finally { fixture.close(); }
 });

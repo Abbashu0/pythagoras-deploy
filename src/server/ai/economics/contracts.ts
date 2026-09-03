@@ -286,6 +286,8 @@ export interface AIAccountingRepository {
     content: AICostOperationContent;
   }): AICostOperation;
   getOperation(id: string): AICostOperation | null;
+  getOperationByResponseId(responseId: string): AICostOperation | null;
+  getOperationByIdempotencyKey(idempotencyKey: string): AICostOperation | null;
   updateOperationStatus(input: {
     id: string;
     expectedStatus: AICostOperationStatus;

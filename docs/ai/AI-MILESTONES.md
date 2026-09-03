@@ -95,11 +95,11 @@ AI milestones are future delivery boundaries. Each milestone is one coherent com
 
 ## AI-M8 — Grounded Tutor
 
-**Status:** Refined into independently reviewed checkpoints; AI-M8A is implemented pending independent review, while AI-M8B and AI-M8C are not started. AI-M8 overall remains incomplete.
+**Status:** Refined into independently reviewed checkpoints; AI-M8A is approved, AI-M8B is implemented pending independent review, and AI-M8C is not started. AI-M8 overall remains incomplete.
 
 ### AI-M8A — Tutor Configuration, Preflight, Grounded Generation Plan & Response Trace Foundation
 
-**Status:** Implemented; pending independent review.
+**Status:** Implemented and approved.
 **Delivered boundary:** Governed `ai.tutor-config` identities/revisions through Change Sets and OWNER publication; server-owned `evidence-grounded-v1@1` and `evidence-ref-v1@1` protocols; canonical Conversation/M5 Context preflight; exact current Retrieval/Model/Provider/Budget/Rate Limit revision pinning; conservative integer nano-currency preflight cost estimates for QUERY embedding, optional reranking, and Generation including reasoning-capable output bounds; trusted internal request-bound EvidencePack validation and deterministic one-model/no-fallback Generation request planning over detached immutable runtime values; and metadata-only Response Trace tables with ownership/lifecycle protections and atomically sealed child references through migrations `0028_yellow_the_fury` and `0029_massive_rick_jones`.
 **Explicit boundary:** M8A makes zero Generation, Embedding, or Rerank calls; it does not execute Hybrid Retrieval, create admission/reservations, settle cost, stream Conversation responses, validate generated citations, expose a Student API/UI, add tools/Web Search, persist prompts/content, or select a production Provider. M8B owns execution and M8C owns grounding/citation validation and replay hardening.
 
@@ -107,8 +107,8 @@ Migration `0030_require-unsealed-tutor-trace-creation` completes the M8A Trace c
 
 ### AI-M8B — Grounded Generation Execution
 
-**Status:** Not started.
-**Boundary:** Future end-to-end orchestration from M7C EvidencePack through Gateway Generation, Conversation streaming, usage accounting, terminal response lifecycle, and admission settlement.
+**Status:** Implemented; pending independent review.
+**Boundary:** One server-owned execution boundary from M8A preflight through one M7C EvidencePack, one admitted `STUDENT_GENERATION` operation/reservation, exact-pinned Gateway Generation, UTF-8-safe Conversation streaming, cumulative Generation usage accounting, metadata-only sealed Response Trace terminalization, and budget settlement. M8B permits only deterministic test Providers; no production Provider or vendor SDK is selected.
 
 ### AI-M8C — Grounding/Citation Validation & Integration Hardening
 

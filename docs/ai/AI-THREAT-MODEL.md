@@ -46,6 +46,8 @@ Restricted: secrets, raw private data, operational controls
 
 M8A is a no-execution boundary: preflight and planning do not call Generation, Embedding, Rerank, admission, or settlement. Tutor Config owns only governed routing references and bounded output; Instruction Policies own product instructions. The planner accepts EvidencePack only from a trusted internal M7C-to-M8B boundary, places Evidence in an explicitly labelled user/data envelope, and never puts Evidence or Student text into trusted instructions. Response Trace persists only revision/ownership metadata and immutable references, so prompt injection remains data and cannot become stored authority.
 
+M8B adds the first execution boundary without weakening those controls: only the server-owned `{ principal, responseId, tutorConfigId, signal? }` input is accepted; one response-bound Cost Operation and Budget Reservation cover M7C plus one exact-pinned Generation; M7C's final fence is re-run before Generation; and the Gateway receives no credential reference, secret version, provenance, or database handle. Cumulative usage is recorded before terminal status/settlement, output is bounded through M4's UTF-8-safe stream, and Provider output is retained only in the scoped Assistant Message. No production Provider, tools, Web Search, or Student API is part of M8B.
+
 ## 4. Security requirements for provider calls
 
 - Provider adapters receive only the minimum context required for the operation.

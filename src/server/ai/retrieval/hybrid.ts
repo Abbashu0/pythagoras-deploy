@@ -30,6 +30,8 @@ import type {
   AIHybridEvidenceItem,
   AIHybridFusedCandidate,
   AIHybridLexicalScopedAdapter,
+  AIHybridM7AProjectionRef,
+  AIHybridOriginIdentity,
   AIHybridProviderExecutionContext,
   AIHybridRetrievalRequest,
   AIHybridRetrievalTrace,
@@ -48,7 +50,7 @@ const MAX_RERANK_INPUT_BYTES = 64 * 1024;
 const MAX_PROVENANCE_BYTES = 16 * 1024;
 
 interface M7ASelection {
-  origin: { originKind: "KNOWLEDGE_PACKAGE" | "QUESTION_PACKAGE"; originId: string; subjectKey: string };
+  origin: AIHybridOriginIdentity;
   projectionSetId: string;
   projectionRevisionId: string;
 }
@@ -93,6 +95,74 @@ export class HybridRetrievalService {
 
   constructor(private readonly dependencies: AIHybridRetrievalServiceDependencies) {
     this.idFactory = dependencies.idFactory ?? uuidv7;
+  }
+
+  /**
+   * Re-run the provider-free final eligibility fence for a runtime EvidencePack.
+   * M8B calls this immediately before Generation; the pack never becomes a
+   * durable authority merely because it was produced earlier in the request.
+   */
+  assertEvidencePackCurrent(pack: AIEvidencePack): void {
+    if (!pack || typeof pack !== "object" || !pack.trace || !Array.isArray(pack.trace.eligibleOriginIdentities) || !Array.isArray(pack.trace.m7aProjectionRefs) || !Array.isArray(pack.trace.m7aProjectionRevisionIds) || !Array.isArray(pack.trace.m7bEmbeddingProjectionRevisionIds) || pack.status !== "SUFFICIENT" || !pack.sufficient) {
+      throw new AIHybridRetrievalError("AI_HYBRID_FINAL_FENCE_FAILED", "The EvidencePack is not sufficient for execution.", { reason: "NO_CANDIDATES" });
+    }
+    if (
+      !pack.trace.eligibleOriginIdentities.length ||
+      !pack.trace.m7aProjectionRefs.length ||
+      pack.trace.retrievalConfigId !== pack.retrievalConfigId ||
+      pack.trace.retrievalConfigRevision !== pack.retrievalConfigRevision ||
+      pack.trace.fusionAlgorithmKey !== pack.fusionAlgorithmKey ||
+      pack.trace.fusionAlgorithmRevision !== pack.fusionAlgorithmRevision
+    ) {
+      throw new AIHybridRetrievalError("AI_HYBRID_FINAL_FENCE_FAILED", "The EvidencePack identity is invalid.", { reason: "RETRIEVAL_CONFIG_CHANGED" });
+    }
+    const originKeys = new Set<string>();
+    for (const origin of pack.trace.eligibleOriginIdentities) {
+      if (origin.subjectKey !== pack.subjectKey) throw new AIHybridRetrievalError("AI_HYBRID_FINAL_FENCE_FAILED", "The EvidencePack origin scope is invalid.", { reason: "RETRIEVAL_SCOPE_CHANGED" });
+      const key = `${origin.originKind}\u0000${origin.subjectKey}\u0000${origin.originId}`;
+      if (originKeys.has(key)) throw new AIHybridRetrievalError("AI_HYBRID_FINAL_FENCE_FAILED", "The EvidencePack origin scope is duplicated.", { reason: "RETRIEVAL_SCOPE_CHANGED" });
+      originKeys.add(key);
+    }
+    if (pack.trace.m7aProjectionRefs.length !== pack.trace.m7aProjectionRevisionIds.length || pack.trace.m7aProjectionRefs.some((ref, index) => ref.projectionRevisionId !== pack.trace.m7aProjectionRevisionIds[index])) {
+      throw new AIHybridRetrievalError("AI_HYBRID_FINAL_FENCE_FAILED", "The EvidencePack projection identity is invalid.", { reason: "PROJECTION_CHANGED" });
+    }
+    const config = this.dependencies.configs.getRevision(pack.retrievalConfigId, pack.retrievalConfigRevision);
+    const currentConfig = this.dependencies.configs.getById(pack.retrievalConfigId);
+    if (!config || !currentConfig || currentConfig.currentRevision !== pack.retrievalConfigRevision) {
+      throw new AIHybridRetrievalError("AI_HYBRID_FINAL_FENCE_FAILED", "The EvidencePack Retrieval Config is no longer current.", { reason: "RETRIEVAL_CONFIG_CHANGED" });
+    }
+    const m7a = pack.trace.m7aProjectionRefs.map((ref): M7ASelection => ({
+      origin: { originKind: ref.originKind, originId: ref.originId, subjectKey: ref.subjectKey },
+      projectionSetId: ref.projectionSetId,
+      projectionRevisionId: ref.projectionRevisionId,
+    }));
+    const m7b = pack.trace.m7bEmbeddingProjectionRevisionIds
+      .map((id) => this.dependencies.embeddings.getRevision(id))
+      .filter((revision): revision is AIEmbeddingProjectionRevision => revision !== null);
+    if (m7b.length !== pack.trace.m7bEmbeddingProjectionRevisionIds.length) {
+      throw new AIHybridRetrievalError("AI_HYBRID_FINAL_FENCE_FAILED", "The EvidencePack embedding projection is no longer available.", { reason: "PROJECTION_CHANGED" });
+    }
+    let rerank: RerankSpace | null = null;
+    if (pack.trace.rerankModelConfigId !== null) {
+      if (pack.trace.rerankProviderConfigId === null || pack.trace.rerankProviderConfigRevision === null || pack.trace.rerankModelConfigRevision === null) {
+        throw new AIHybridRetrievalError("AI_HYBRID_FINAL_FENCE_FAILED", "The EvidencePack rerank identity is incomplete.", { reason: "MODEL_SPACE_CHANGED" });
+      }
+      const model = this.dependencies.models.getById(pack.trace.rerankModelConfigId);
+      if (!model) throw new AIHybridRetrievalError("AI_HYBRID_FINAL_FENCE_FAILED", "The EvidencePack rerank Model is unavailable.", { reason: "MODEL_SPACE_CHANGED" });
+      rerank = { model, providerConfigId: pack.trace.rerankProviderConfigId, providerConfigRevision: pack.trace.rerankProviderConfigRevision };
+    }
+    const result = this.finalFence(
+      { subjectKey: pack.subjectKey },
+      config,
+      originSetFingerprint(pack.trace.eligibleOriginIdentities),
+      m7a,
+      m7b,
+      rerank,
+      pack.items,
+    );
+    if (!result.ok) {
+      throw new AIHybridRetrievalError("AI_HYBRID_FINAL_FENCE_FAILED", "The EvidencePack is no longer current.", { reason: result.reason });
+    }
   }
 
   async retrieve(request: AIHybridRetrievalRequest): Promise<AIEvidencePack> {
@@ -152,7 +222,9 @@ export class HybridRetrievalService {
           mode: "LEXICAL_ONLY",
           degraded: true,
           safeReason: "QUERY_EMBEDDING_FAILED",
+          eligibleOriginIdentities: origins,
           m7aRevisionIds: m7a.selections.map((selection) => selection.projectionRevisionId),
+          m7aSelections: m7a.selections,
           m7bRevisions: semantic.revisions,
           lexical,
           semantic: [],
@@ -184,7 +256,9 @@ export class HybridRetrievalService {
         mode: "HYBRID",
         degraded: false,
         safeReason,
+        eligibleOriginIdentities: origins,
         m7aRevisionIds: m7a.selections.map((selection) => selection.projectionRevisionId),
+        m7aSelections: m7a.selections,
         m7bRevisions: semantic.revisions,
         lexical,
         semantic: semanticCandidates,
@@ -205,7 +279,9 @@ export class HybridRetrievalService {
           mode: "HYBRID",
           degraded: true,
           safeReason: "RERANK_FAILED",
+          eligibleOriginIdentities: origins,
           m7aRevisionIds: m7a.selections.map((selection) => selection.projectionRevisionId),
+          m7aSelections: m7a.selections,
           m7bRevisions: semantic.revisions,
           lexical,
           semantic: semanticCandidates,
@@ -227,7 +303,9 @@ export class HybridRetrievalService {
       mode: "HYBRID",
       degraded: false,
       safeReason: null,
+      eligibleOriginIdentities: origins,
       m7aRevisionIds: m7a.selections.map((selection) => selection.projectionRevisionId),
+      m7aSelections: m7a.selections,
       m7bRevisions: semantic.revisions,
       lexical,
       semantic: semanticCandidates,
@@ -433,7 +511,7 @@ export class HybridRetrievalService {
     }
   }
 
-  private finalFence(request: AIHybridRetrievalRequest, config: AIRetrievalConfigRevision, initialOriginSet: readonly string[], m7a: readonly M7ASelection[], m7b: readonly AIEmbeddingProjectionRevision[], rerank: RerankSpace | null, candidates: readonly AIHybridFusedCandidate[]): { ok: true } | { ok: false; reason: AIHybridSafeReason } {
+  private finalFence(request: Pick<AIHybridRetrievalRequest, "subjectKey">, config: AIRetrievalConfigRevision, initialOriginSet: readonly string[], m7a: readonly M7ASelection[], m7b: readonly AIEmbeddingProjectionRevision[], rerank: RerankSpace | null, candidates: readonly AIHybridFusedCandidate[]): { ok: true } | { ok: false; reason: AIHybridSafeReason } {
     let currentOrigins: M7ASelection["origin"][];
     try {
       currentOrigins = this.listEligibleOrigins(request.subjectKey);
@@ -505,6 +583,8 @@ export class HybridRetrievalService {
     mode: "HYBRID" | "LEXICAL_ONLY";
     degraded: boolean;
     safeReason: AIHybridSafeReason | null;
+    eligibleOriginIdentities?: readonly AIHybridOriginIdentity[];
+    m7aSelections?: readonly M7ASelection[];
     m7aRevisionIds: readonly string[];
     m7bRevisions: readonly AIEmbeddingProjectionRevision[];
     lexical: readonly AIHybridLexicalRankedCandidate[];
@@ -521,6 +601,8 @@ export class HybridRetrievalService {
       request: input.request,
       config: input.config,
       m7aRevisionIds: input.m7aRevisionIds,
+      eligibleOriginIdentities: input.eligibleOriginIdentities ?? [],
+      m7aSelections: input.m7aSelections ?? [],
       m7bRevisions: input.m7bRevisions,
       lexical: input.lexical,
       semantic: input.semantic,
@@ -578,6 +660,8 @@ export class HybridRetrievalService {
     items: readonly AIHybridEvidenceItem[];
     degraded: boolean;
     safeReason: AIHybridSafeReason | null;
+    eligibleOriginIdentities?: readonly AIHybridOriginIdentity[];
+    m7aSelections?: readonly M7ASelection[];
     rerankSpace: RerankSpace | null;
     candidateCounts?: Partial<AIHybridRetrievalTrace["candidateCounts"]>;
   }): AIHybridRetrievalTrace {
@@ -587,6 +671,12 @@ export class HybridRetrievalService {
       fusionAlgorithmKey: input.config.fusionAlgorithmKey,
       fusionAlgorithmRevision: input.config.fusionAlgorithmRevision,
       m7aProjectionRevisionIds: [...input.m7aRevisionIds],
+      eligibleOriginIdentities: (input.eligibleOriginIdentities ?? []).map((origin) => ({ ...origin })),
+      m7aProjectionRefs: (input.m7aSelections ?? []).map((selection): AIHybridM7AProjectionRef => ({
+        ...selection.origin,
+        projectionSetId: selection.projectionSetId,
+        projectionRevisionId: selection.projectionRevisionId,
+      })),
       m7bEmbeddingProjectionRevisionIds: input.m7bRevisions.map((revision) => revision.id),
       embeddingModelConfigId: input.config.embeddingModelConfigId,
       embeddingModelConfigRevision: input.m7bRevisions[0]?.modelConfigRevision ?? null,

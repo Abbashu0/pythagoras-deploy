@@ -118,9 +118,11 @@ Canonical content remains SQLite-first in the current architecture. AI-M0 does n
 
 Existing Question FTS5 is a Product Question Search projection. It may be an input to a future lexical retrieval adapter, but its placement-scoped public search contract and health gate are not silently changed into AI RAG.
 
-## 8. M8A Tutor boundary
+## 8. M8A/M8B Tutor boundary
 
-M8A does not execute retrieval. A future M8B orchestrator must obtain the EvidencePack directly from approved M7C and pass it across the trusted internal boundary. `AITutorGenerationPlanner` requires sufficient, subject-matching Evidence with the exact Retrieval Config and fusion identity; it consumes whole items under the M5 evidence budget, emits deterministic `[E#]` labels, and sends only labels plus exact Evidence text as user/data messages. Provenance remains in the runtime citation map and metadata-only Response Trace references; it is not sent to Generation. An insufficient or mismatched EvidencePack produces no Generation plan and no Provider call.
+M8A does not execute retrieval and is approved. M8B obtains the EvidencePack directly from approved M7C and passes it across the trusted internal boundary. `AITutorGenerationPlanner` requires sufficient, subject-matching Evidence with the exact Response request ID, Retrieval Config revision, and fusion identity; it consumes whole items under the M5 evidence budget, emits deterministic `[E#]` labels, and sends only labels plus exact Evidence text as user/data messages. Provenance remains in the runtime citation map and metadata-only Response Trace references; it is not sent to Generation. An insufficient or mismatched EvidencePack produces no Generation plan and no Provider call.
+
+M8B is implemented pending independent review. Its server-only execution service creates one response-bound `STUDENT_GENERATION` Cost Operation, resolves the Product-owned budget period, admits one reservation, invokes M7C with that operation/reservation, re-runs M7C's provider-free final eligibility fence, and calls the Gateway once with the exact planned Generation Model/Provider identity. Provider deltas are persisted only through M4's bounded Conversation stream after deterministic UTF-8-safe splitting; cumulative Generation usage is recorded before terminal operation status and reservation settlement. The sealed M8A Trace contains only safe revision/ownership and selected projection/Evidence references. No generated citation checking, Web Search, tools, or M8C replay hardening is included.
 
 ## 7. Grounding contract
 

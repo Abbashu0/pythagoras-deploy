@@ -74,7 +74,7 @@ export class AIBoundedTutorCostEstimator implements AITutorCostEstimator {
     return {
       currency,
       maxCostNano: Number(maxCostNano),
-      estimateBasis: "Provider-neutral maximum: one UTF-8 byte is at most one input token; QUERY embedding, optional bounded reranking, and grounded Generation are each charged once, with reasoning bounded by the Generation output ceiling when supported.",
+      estimateBasis: "provider-neutral-max-v1: QUERY+rerank+Generation; reasoning=output-ceiling",
       queryEmbedding: toPublicComponent(queryEmbedding),
       rerank: rerank ? toPublicComponent(rerank) : null,
       generation: toPublicComponent(generation),

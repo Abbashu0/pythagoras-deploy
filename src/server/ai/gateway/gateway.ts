@@ -11,6 +11,7 @@ import {
 import type {
   AIProviderAdapter,
   AIProviderAttemptTrace,
+  AIProviderAttemptIdentity,
   AIProviderGatewayDependencies,
   AIProviderGatewayOperationOptions,
   AIProviderGatewayOptions,
@@ -91,6 +92,13 @@ class GatewayAbortError extends Error {
   constructor() {
     super("The provider operation was interrupted.");
     this.name = "GatewayAbortError";
+  }
+}
+
+class GatewayTimeoutError extends Error {
+  constructor() {
+    super("The provider operation timed out.");
+    this.name = "GatewayTimeoutError";
   }
 }
 
@@ -287,6 +295,7 @@ export class AIProviderGateway {
               })();
           let started = false;
           let terminal = false;
+          let latestUsage: NormalizedProviderUsage | null = null;
           try {
             while (true) {
               const next = await nextWithAbort(iterator, control.signal);
@@ -303,11 +312,16 @@ export class AIProviderGateway {
               } else if (providerEvent.type === "TEXT_DELTA") {
                 partialOutput = true;
               } else if (providerEvent.type === "COMPLETED") {
+                assertCumulativeUsage(latestUsage, providerEvent.usage, true);
+                latestUsage = mergeCumulativeUsage(latestUsage, providerEvent.usage);
+                attemptHadUsage = true;
                 terminal = true;
                 if (providerEvent.providerRequestId) {
                   trace.providerRequestId = providerEvent.providerRequestId;
                 }
               } else if (providerEvent.type === "USAGE") {
+                assertCumulativeUsage(latestUsage, providerEvent.usage, false);
+                latestUsage = mergeCumulativeUsage(latestUsage, providerEvent.usage);
                 attemptHadUsage = true;
               }
               if (providerEvent.type === "STARTED") {
@@ -558,6 +572,7 @@ export class AIProviderGateway {
     for (let handshakeIndex = 0; handshakeIndex < MAX_SECRET_HANDSHAKE_RETRIES; handshakeIndex += 1) {
       const prepared = this.prepareAttempt(plan, modelConfigId, trace);
       validatePrepared?.(prepared);
+      this.assertExpectedIdentity(prepared, options.expectedIdentity);
       const circuitDecision = this.acquireCircuitPermit(prepared, options);
       if (circuitDecision?.kind === "DENIED") {
         const metadata = this.dependencies.secrets.getMetadata(prepared.provider.credentialRef!);
@@ -582,8 +597,10 @@ export class AIProviderGateway {
         if (control.signal.aborted) throw new GatewayAbortError();
         return { kind: "GRANTED", prepared, credential, control, circuitPermit };
       } catch (error) {
+        const timedOut = control.timedOut();
         control.cleanup();
         if (circuitPermit) this.recordCircuitNeutral(circuitPermit);
+        if (timedOut) throw new GatewayTimeoutError();
         if (isAISecretVersionChanged(error)) {
           if (handshakeIndex + 1 < MAX_SECRET_HANDSHAKE_RETRIES) continue;
           throw this.gatewayError("SECRET_UNAVAILABLE");
@@ -618,6 +635,23 @@ export class AIProviderGateway {
     } catch (error) {
       if (isAICircuitBreakerError(error)) throw this.gatewayError("CONFIGURATION");
       throw error;
+    }
+  }
+
+  private assertExpectedIdentity(
+    prepared: PreparedAttempt,
+    expected: Readonly<AIProviderAttemptIdentity> | undefined,
+  ): void {
+    if (!expected) return;
+    if (
+      expected.modelConfigId !== prepared.model.id ||
+      expected.modelConfigRevision !== prepared.model.revision ||
+      expected.providerConfigId !== prepared.provider.id ||
+      expected.providerConfigRevision !== prepared.provider.revision ||
+      expected.providerModelId !== prepared.model.providerModelId ||
+      expected.adapterKey !== prepared.model.adapterKey
+    ) {
+      throw this.gatewayError("CONFIGURATION");
     }
   }
 
@@ -973,6 +1007,44 @@ function normalizeUsage(value: unknown): NormalizedProviderUsage {
   };
 }
 
+/** Provider stream usage is a cumulative/best-known snapshot, never a delta. */
+function assertCumulativeUsage(
+  previous: NormalizedProviderUsage | null,
+  current: NormalizedProviderUsage,
+  final: boolean,
+): void {
+  if (!previous) return;
+  for (const field of [
+    "inputTokens",
+    "outputTokens",
+    "reasoningTokens",
+    "cacheHitInputTokens",
+    "cacheMissInputTokens",
+  ] as const) {
+    const before = previous[field];
+    const after = current[field];
+    if (before !== null && (after === null || after < before)) {
+      // A final snapshot must preserve every previously trustworthy field;
+      // intermediate snapshots may omit a field only when it was not known.
+      if (final || after !== null) throw new GatewayProtocolError();
+    }
+  }
+}
+
+function mergeCumulativeUsage(
+  previous: NormalizedProviderUsage | null,
+  current: NormalizedProviderUsage,
+): NormalizedProviderUsage {
+  if (!previous) return current;
+  return {
+    inputTokens: current.inputTokens ?? previous.inputTokens,
+    outputTokens: current.outputTokens ?? previous.outputTokens,
+    reasoningTokens: current.reasoningTokens ?? previous.reasoningTokens,
+    cacheHitInputTokens: current.cacheHitInputTokens ?? previous.cacheHitInputTokens,
+    cacheMissInputTokens: current.cacheMissInputTokens ?? previous.cacheMissInputTokens,
+  };
+}
+
 function nullableNonNegativeInteger(value: unknown): number | null {
   if (value === undefined || value === null) return null;
   if (!Number.isSafeInteger(value) || (value as number) < 0) throw new GatewayProtocolError();
@@ -996,6 +1068,13 @@ function normalizeFailure(
       code: "CANCELLED",
       retryable: false,
       fallbackEligible: false,
+    };
+  }
+  if (error instanceof GatewayTimeoutError) {
+    return {
+      code: "TIMEOUT",
+      retryable: true,
+      fallbackEligible: true,
     };
   }
   if (isAIProviderAdapterError(error)) {

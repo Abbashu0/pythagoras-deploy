@@ -23,6 +23,14 @@ export class AICostAccountingService {
     return this.dependencies.accounting.getOperation(id);
   }
 
+  getOperationByResponseId(responseId: string): AICostOperation | null {
+    return this.dependencies.accounting.getOperationByResponseId(responseId);
+  }
+
+  getOperationByIdempotencyKey(idempotencyKey: string): AICostOperation | null {
+    return this.dependencies.accounting.getOperationByIdempotencyKey(idempotencyKey);
+  }
+
   createOperation(content: AICostOperationContent, id = uuidv7()): AICostOperation {
     return this.dependencies.accounting.createOperation({
       id,

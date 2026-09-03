@@ -50,6 +50,16 @@ export class SQLiteAIAccountingRepository implements AIAccountingRepository {
     return row ? operationFromRow(row) : null;
   }
 
+  getOperationByResponseId(responseId: string): AICostOperation | null {
+    const row = this.database.db.select().from(aiCostOperations).where(eq(aiCostOperations.responseId, responseId)).get();
+    return row ? operationFromRow(row) : null;
+  }
+
+  getOperationByIdempotencyKey(idempotencyKey: string): AICostOperation | null {
+    const row = this.database.db.select().from(aiCostOperations).where(eq(aiCostOperations.idempotencyKey, idempotencyKey)).get();
+    return row ? operationFromRow(row) : null;
+  }
+
   updateOperationStatus(input: {
     id: string;
     expectedStatus: AICostOperation["status"];
