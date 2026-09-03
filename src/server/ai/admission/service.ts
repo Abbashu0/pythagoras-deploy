@@ -17,6 +17,7 @@ import type {
   AIBudgetAccountingReader,
   AIOperationCostObservation,
 } from "./contracts";
+import { AI_EVALS_ADMISSION_PRINCIPAL_REF } from "./contracts";
 import { normalizeAIAdmissionPlan } from "./validation";
 import type { AIBudgetLedgerEventType } from "../budget";
 import { SQLiteAIBudgetRuntimeRepository } from "../budget/sqlite-runtime-repository";
@@ -538,7 +539,13 @@ export class AIBudgetAdmissionService {
 
   private validateOperation(plan: AIAdmissionPlan, operation: ReturnType<AIBudgetAccountingReader["getOperation"]>, costCenter: string): asserts operation is NonNullable<typeof operation> {
     if (!operation) throw new AIAdmissionError("AI_ADMISSION_INVALID", "The Cost Operation was not found.");
-    if (operation.opaquePrincipalRef !== plan.principalRef) throw new AIAdmissionError("AI_ADMISSION_INVALID", "The Cost Operation principal does not match the Admission Plan.");
+    if (costCenter === "EVALS") {
+      if (plan.principalRef !== AI_EVALS_ADMISSION_PRINCIPAL_REF || operation.opaquePrincipalRef !== null) {
+        throw new AIAdmissionError("AI_ADMISSION_INVALID", "The EVALS Cost Operation must use the code-owned system admission scope.");
+      }
+    } else if (operation.opaquePrincipalRef !== plan.principalRef) {
+      throw new AIAdmissionError("AI_ADMISSION_INVALID", "The Cost Operation principal does not match the Admission Plan.");
+    }
     if (operation.costCenter !== costCenter) throw new AIAdmissionError("AI_ADMISSION_INVALID", "The Cost Operation cost center does not match the Budget Policy.");
     if (operation.startedAt < plan.budgetPeriod.startAt || operation.startedAt >= plan.budgetPeriod.endAt) throw new AIAdmissionError("AI_ADMISSION_INVALID", "The Cost Operation is outside the supplied Budget period.");
     if (operation.status !== "OPEN") throw new AIAdmissionError("AI_ADMISSION_INVALID", "Only an OPEN Cost Operation can be admitted.");

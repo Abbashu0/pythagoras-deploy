@@ -123,12 +123,12 @@ test("controlled OWNER publication activates canonical Student content and draft
 test("0005 applies to fresh and existing 0004 databases without altering earlier migrations", () => {
   const freshRoot = temp("pythagoras-m7-fresh-"); const oldRoot = temp("pythagoras-m7-old-"); const oldMigrations = temp("pythagoras-m7-migrations-");
   try {
-    const fresh = openContentDatabase({ dataDirectory: freshRoot, migrationsDirectory }); assert.equal((fresh.client.prepare("select count(*) count from __drizzle_migrations").get() as { count: number }).count, 34); fresh.close();
+    const fresh = openContentDatabase({ dataDirectory: freshRoot, migrationsDirectory }); assert.equal((fresh.client.prepare("select count(*) count from __drizzle_migrations").get() as { count: number }).count, 35); fresh.close();
     mkdirSync(path.join(oldMigrations, "meta"), { recursive: true });
     for (const name of ["0000_content-foundation.sql", "0001_admin-identity.sql", "0002_assets.sql", "0003_change-management.sql", "0004_legacy-migration.sql"]) copyFileSync(path.join(migrationsDirectory, name), path.join(oldMigrations, name));
     const journal = JSON.parse(readFileSync(path.join(migrationsDirectory, "meta", "_journal.json"), "utf8")); journal.entries = journal.entries.slice(0, 5); writeFileSync(path.join(oldMigrations, "meta", "_journal.json"), JSON.stringify(journal));
     const before = openContentDatabase({ dataDirectory: oldRoot, migrationsDirectory: oldMigrations }); before.close();
-    const upgraded = openContentDatabase({ dataDirectory: oldRoot, migrationsDirectory }); assert.equal((upgraded.client.prepare("select count(*) count from __drizzle_migrations").get() as { count: number }).count, 34); assert.ok(upgraded.client.prepare("select name from sqlite_master where name='canonical_banners'").get()); upgraded.close();
+    const upgraded = openContentDatabase({ dataDirectory: oldRoot, migrationsDirectory }); assert.equal((upgraded.client.prepare("select count(*) count from __drizzle_migrations").get() as { count: number }).count, 35); assert.ok(upgraded.client.prepare("select name from sqlite_master where name='canonical_banners'").get()); upgraded.close();
   } finally { for (const target of [freshRoot, oldRoot, oldMigrations]) try { rmSync(target, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }); } catch { /* best-effort test fixture cleanup */ } }
 });
 

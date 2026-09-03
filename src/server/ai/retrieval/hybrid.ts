@@ -549,7 +549,8 @@ export class HybridRetrievalService {
   private assertExecutionContext(context: AIHybridProviderExecutionContext): void {
     const operation = this.dependencies.accounting.getOperation(context.costOperationId);
     const reservation = this.dependencies.admission.getReservation(context.budgetReservationId);
-    if (!operation || operation.costCenter !== "STUDENT_GENERATION" || operation.status !== "OPEN" || !reservation || reservation.operationId !== context.costOperationId || reservation.status !== "EXECUTING") throw new AIHybridRetrievalError("AI_HYBRID_EXECUTION_CONTEXT_INVALID", "The caller Cost Operation and Budget Reservation are not executable.");
+    const expectedCostCenter = context.executionScope === "EVAL_TARGET" ? "EVALS" : "STUDENT_GENERATION";
+    if (!operation || operation.costCenter !== expectedCostCenter || operation.status !== "OPEN" || !reservation || reservation.operationId !== context.costOperationId || reservation.status !== "EXECUTING") throw new AIHybridRetrievalError("AI_HYBRID_EXECUTION_CONTEXT_INVALID", "The caller Cost Operation and Budget Reservation are not executable.");
   }
 
   private recordAttempts(operationId: string, attempts: readonly AIProviderAttemptTrace[], usage: NormalizedProviderUsage): void {

@@ -23,6 +23,8 @@ export type AIHybridSafeReason = (typeof AI_HYBRID_SAFE_REASONS)[number];
 export interface AIHybridProviderExecutionContext {
   costOperationId: string;
   budgetReservationId: string;
+  /** Internal code-owned scope; omitted callers remain Student Generation. */
+  executionScope?: "STUDENT" | "EVAL_TARGET";
   signal?: AbortSignal;
   timeoutMs?: number;
   circuitPolicy?: { policyId: string; policyRevision: number };

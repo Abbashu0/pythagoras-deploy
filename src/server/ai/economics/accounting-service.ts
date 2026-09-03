@@ -31,6 +31,10 @@ export class AICostAccountingService {
     return this.dependencies.accounting.getOperationByIdempotencyKey(idempotencyKey);
   }
 
+  listUsageCostRecords(operationId: string): AIUsageCostRecord[] {
+    return this.dependencies.accounting.listUsageCostRecords(operationId);
+  }
+
   createOperation(content: AICostOperationContent, id = uuidv7()): AICostOperation {
     return this.dependencies.accounting.createOperation({
       id,

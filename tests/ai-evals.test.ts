@@ -254,7 +254,7 @@ test("M9A migration is present and exposes no Provider execution path", () => {
   const fixture = createFixture();
   try {
     const count = Number((fixture.database.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count);
-    assert.equal(count, 34);
+    assert.equal(count, 35);
     assert.equal(fixture.database.client.prepare("select 1 from sqlite_master where type='table' and name='ai_eval_suites'").get() !== undefined, true);
     assert.equal(fixture.database.client.prepare("select 1 from sqlite_master where type='table' and name='ai_eval_runs'").get() !== undefined, true);
   } finally { fixture.close(); }
@@ -312,7 +312,7 @@ test("populated 0032 database upgrades to 0033 without rewriting Eval history", 
     oldDatabase.close(); oldDatabase = null;
 
     upgraded = openContentDatabase({ dataDirectory: root, migrationsDirectory });
-    assert.equal(Number((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count), 34);
+    assert.equal(Number((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count), 35);
     assert.deepEqual(upgraded.client.prepare("select key, subject_key, current_revision from ai_eval_suites where id=?").get(suiteId), { key: suiteIdentity.key, subject_key: "biology", current_revision: 2 });
     const historicalAfter = upgraded.client.prepare("select id, suite_id, revision, display_name, enabled, required_dimensions, grader_configs, gate_config, permitted_regression_deltas, baseline_mode, supplementary_judge_config, created_at, created_by from ai_eval_suite_revisions where suite_id=? order by revision").all(suiteId) as Array<Record<string, unknown>>;
     assert.deepEqual(historicalAfter, historicalBefore);

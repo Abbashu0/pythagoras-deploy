@@ -7,6 +7,7 @@ import {
   aiEvalDimensionAggregates,
   aiEvalGateResults,
   aiEvalGraderResults,
+  aiEvalRunExecutionBindings,
   aiEvalRuns,
   aiEvalSuiteCaseRefs,
   aiEvalSuiteRevisions,
@@ -25,6 +26,7 @@ import type {
   AIEvalRun,
   AIEvalRunRepository,
   AIEvalRunStatus,
+  AIEvalRunExecutionBinding,
 } from "./contracts";
 import { AIEvalError } from "./errors";
 import { fingerprintAIEvalCandidate, fingerprintAIEvalManifest, normalizeAIEvalAccountingBasis, normalizeAIEvalCandidateSnapshot } from "./validation";
@@ -46,6 +48,26 @@ export class SQLiteAIEvalRunRepository implements AIEvalRunRepository {
   getById(id: string): AIEvalRun | null {
     const row = this.database.db.select().from(aiEvalRuns).where(eq(aiEvalRuns.id, id)).get();
     return row ? runFromRow(row) : null;
+  }
+
+  getExecutionBinding(runId: string): AIEvalRunExecutionBinding | null {
+    const row = this.database.db.select().from(aiEvalRunExecutionBindings).where(eq(aiEvalRunExecutionBindings.runId, runId)).get();
+    return row ? { runId: row.runId, executionConfigId: row.executionConfigId, executionConfigRevision: row.executionConfigRevision, executionConfigFingerprint: row.executionConfigFingerprint, createdAt: row.createdAt, createdBy: row.createdBy } : null;
+  }
+
+  bindExecutionConfig(input: AIEvalRunExecutionBinding): AIEvalRunExecutionBinding {
+    if (!isSha256(input.executionConfigFingerprint) || !Number.isSafeInteger(input.executionConfigRevision) || input.executionConfigRevision < 1 || !Number.isSafeInteger(input.createdAt) || input.createdAt < 0) throw new AIEvalError("AI_EVAL_RUN_INVALID", "The Eval Execution Config binding is invalid.");
+    const run = this.getById(input.runId);
+    if (!run || run.status !== "CREATED") throw new AIEvalError("AI_EVAL_RUN_INVALID", "An Eval Execution Config can only be pinned before a Run starts.");
+    const existing = this.getExecutionBinding(input.runId);
+    if (existing) {
+      if (existing.executionConfigId !== input.executionConfigId || existing.executionConfigRevision !== input.executionConfigRevision || existing.executionConfigFingerprint !== input.executionConfigFingerprint) throw new AIEvalError("AI_EVAL_RUN_INVALID", "The Eval Run is already pinned to a different Execution Config.");
+      return existing;
+    }
+    try {
+      const row = this.database.db.insert(aiEvalRunExecutionBindings).values(input).returning().get();
+      return { runId: row.runId, executionConfigId: row.executionConfigId, executionConfigRevision: row.executionConfigRevision, executionConfigFingerprint: row.executionConfigFingerprint, createdAt: row.createdAt, createdBy: row.createdBy };
+    } catch (error) { throw new AIEvalError("AI_EVAL_RUN_INVALID", "The Eval Run Execution Config could not be pinned.", {}, error); }
   }
 
   create(input: {

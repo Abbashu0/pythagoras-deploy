@@ -6,6 +6,9 @@ import type {
 } from "../budget";
 import type { AIRateLimitPolicyRevision } from "../rate-limits";
 
+/** Code-owned scope used to account Eval target executions without a Student identity. */
+export const AI_EVALS_ADMISSION_PRINCIPAL_REF = "system-evals" as const;
+
 export interface AIAdmissionCostEstimate {
   currency: string;
   maxCostNano: number;

@@ -6,3 +6,8 @@ export * from "./change-adapter";
 export * from "./graders";
 export * from "./runs";
 export * from "./service";
+export * from "./execution-config";
+export * from "./execution-change-adapter";
+export * from "./case-executions";
+export * from "./target-execution";
+export * from "./orchestration";

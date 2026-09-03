@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { and, asc, eq, gte, lt } from "drizzle-orm";
+import { and, asc, eq, gte, isNull, lt } from "drizzle-orm";
 
 import type { ContentDatabase } from "../../content/database";
 import {
@@ -10,7 +10,7 @@ import {
 } from "../../content/schema";
 import type { AICostCenter, AICostOperation } from "../economics";
 import { SQLiteAIAccountingRepository } from "../economics";
-import type { AIBudgetAccountingReader, AIOperationCostObservation } from "./contracts";
+import { AI_EVALS_ADMISSION_PRINCIPAL_REF, type AIBudgetAccountingReader, type AIOperationCostObservation } from "./contracts";
 
 export class SQLiteAIBudgetAccountingReader implements AIBudgetAccountingReader {
   private readonly accounting: SQLiteAIAccountingRepository;
@@ -77,8 +77,11 @@ export class SQLiteAIBudgetAccountingReader implements AIBudgetAccountingReader 
     periodEnd: number;
     currency: string;
   }): bigint {
+    const principalScope = input.costCenter === "EVALS" && input.principalRef === AI_EVALS_ADMISSION_PRINCIPAL_REF
+      ? isNull(aiCostOperations.opaquePrincipalRef)
+      : eq(aiCostOperations.opaquePrincipalRef, input.principalRef);
     const operations = this.database.db.select({ id: aiCostOperations.id }).from(aiCostOperations).where(and(
-      eq(aiCostOperations.opaquePrincipalRef, input.principalRef),
+      principalScope,
       eq(aiCostOperations.costCenter, input.costCenter),
       gte(aiCostOperations.startedAt, input.periodStart),
       lt(aiCostOperations.startedAt, input.periodEnd),

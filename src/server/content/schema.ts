@@ -105,6 +105,7 @@ import type {
   AIEvalAccountingBasis,
   AIEvalCandidateSnapshot,
   AIEvalCaseOrigin,
+  AIEvalCaseExecutionStatus,
   AIEvalDeidentificationProof,
   AIEvalDimension,
   AIEvalDimensionRequirement,
@@ -116,6 +117,7 @@ import type {
   AIEvalObservedStatus,
   AIEvalPrivacyClass,
   AIEvalRecommendation,
+  AIEvalProviderInvocationState,
   AIEvalRegressionDelta,
   AIEvalResultVerdict,
   AIEvalRunStatus,
@@ -3592,6 +3594,143 @@ export const aiEvalGateResults = sqliteTable(
   ],
 );
 
+/** Stable governed target-execution policy; target behavior is revisioned below. */
+export const aiEvalExecutionConfigs = sqliteTable(
+  "ai_eval_execution_configs",
+  {
+    id: text("id").primaryKey(),
+    key: text("key").notNull(),
+    subjectKey: text("subject_key").notNull().references(() => canonicalMaterials.subjectKey, { onDelete: "restrict" }),
+    currentRevision: integer("current_revision").notNull().default(1),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    createdBy: text("created_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+    updatedBy: text("updated_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+  },
+  (table) => [
+    uniqueIndex("ai_eval_execution_configs_key_unique").on(table.key),
+    index("ai_eval_execution_configs_subject_index").on(table.subjectKey),
+    check("ai_eval_execution_configs_key_valid", sql`length(trim(${table.key})) between 1 and 120 and ${table.key} not glob '*[^a-z0-9.-]*'`),
+    check("ai_eval_execution_configs_subject_valid", sql`length(trim(${table.subjectKey})) between 1 and 80 and ${table.subjectKey} not glob '*[^a-z0-9-]*'`),
+    check("ai_eval_execution_configs_revision_positive", sql`${table.currentRevision} >= 1`),
+    check("ai_eval_execution_configs_created_nonnegative", sql`${table.createdAt} >= 0`),
+    check("ai_eval_execution_configs_timestamps_ordered", sql`${table.updatedAt} >= ${table.createdAt}`),
+  ],
+);
+
+/** Immutable governed target-execution revision. It contains no prompt or case content. */
+export const aiEvalExecutionConfigRevisions = sqliteTable(
+  "ai_eval_execution_config_revisions",
+  {
+    id: text("id").primaryKey(),
+    executionConfigId: text("execution_config_id").notNull().references(() => aiEvalExecutionConfigs.id, { onDelete: "restrict" }),
+    revision: integer("revision").notNull(),
+    displayName: text("display_name").notNull(),
+    enabled: integer("enabled", { mode: "boolean" }).notNull(),
+    budgetPolicyId: text("budget_policy_id").notNull().references(() => aiBudgetPolicies.id, { onDelete: "restrict" }),
+    budgetPolicyRevision: integer("budget_policy_revision").notNull(),
+    rateLimitPolicyId: text("rate_limit_policy_id").notNull().references(() => aiRateLimitPolicies.id, { onDelete: "restrict" }),
+    rateLimitPolicyRevision: integer("rate_limit_policy_revision").notNull(),
+    protocolKey: text("protocol_key").notNull(),
+    protocolRevision: integer("protocol_revision").notNull(),
+    targetTimeoutMs: integer("target_timeout_ms").notNull(),
+    maxConcurrency: integer("max_concurrency").notNull(),
+    cleanupProtocolKey: text("cleanup_protocol_key").notNull(),
+    cleanupProtocolRevision: integer("cleanup_protocol_revision").notNull(),
+    createdAt: integer("created_at").notNull(),
+    createdBy: text("created_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+  },
+  (table) => [
+    uniqueIndex("ai_eval_execution_config_revisions_identity_unique").on(table.executionConfigId, table.revision),
+    index("ai_eval_execution_config_revisions_config_index").on(table.executionConfigId, table.revision),
+    check("ai_eval_execution_config_revisions_revision_positive", sql`${table.revision} >= 1`),
+    check("ai_eval_execution_config_revisions_display_name_valid", sql`length(trim(${table.displayName})) between 1 and 200`),
+    check("ai_eval_execution_config_revisions_enabled_boolean", sql`${table.enabled} in (0,1)`),
+    check("ai_eval_execution_config_revisions_policy_revision_valid", sql`${table.budgetPolicyRevision} >= 1 and ${table.rateLimitPolicyRevision} >= 1`),
+    check("ai_eval_execution_config_revisions_protocol_valid", sql`length(trim(${table.protocolKey})) between 1 and 120 and ${table.protocolKey} not glob '*[^a-z0-9.-]*' and ${table.protocolRevision} >= 1 and length(trim(${table.cleanupProtocolKey})) between 1 and 120 and ${table.cleanupProtocolKey} not glob '*[^a-z0-9.-]*' and ${table.cleanupProtocolRevision} >= 1`),
+    check("ai_eval_execution_config_revisions_bounds_valid", sql`${table.targetTimeoutMs} between 100 and 86400000 and ${table.maxConcurrency} between 1 and 100`),
+    check("ai_eval_execution_config_revisions_created_nonnegative", sql`${table.createdAt} >= 0`),
+  ],
+);
+
+/** Immutable binding of an Eval Run to the exact execution policy revision. */
+export const aiEvalRunExecutionBindings = sqliteTable(
+  "ai_eval_run_execution_bindings",
+  {
+    runId: text("run_id").primaryKey().references(() => aiEvalRuns.id, { onDelete: "restrict" }),
+    executionConfigId: text("execution_config_id").notNull().references(() => aiEvalExecutionConfigs.id, { onDelete: "restrict" }),
+    executionConfigRevision: integer("execution_config_revision").notNull(),
+    executionConfigFingerprint: text("execution_config_fingerprint").notNull(),
+    createdAt: integer("created_at").notNull(),
+    createdBy: text("created_by").notNull(),
+  },
+  (table) => [
+    index("ai_eval_run_execution_bindings_config_index").on(table.executionConfigId, table.executionConfigRevision),
+    check("ai_eval_run_execution_bindings_revision_valid", sql`${table.executionConfigRevision} >= 1`),
+    check("ai_eval_run_execution_bindings_fingerprint_valid", sql`length(${table.executionConfigFingerprint}) = 64 and ${table.executionConfigFingerprint} not glob '*[^0-9a-f]*'`),
+    check("ai_eval_run_execution_bindings_created_nonnegative", sql`${table.createdAt} >= 0`),
+    check("ai_eval_run_execution_bindings_actor_valid", sql`length(trim(${table.createdBy})) between 1 and 200`),
+  ],
+);
+
+/** Durable, safe metadata for one exact Eval target Case execution. */
+export const aiEvalCaseExecutions = sqliteTable(
+  "ai_eval_case_executions",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id").notNull().references(() => aiEvalRuns.id, { onDelete: "restrict" }),
+    caseId: text("case_id").notNull().references(() => aiEvalCases.id, { onDelete: "restrict" }),
+    caseRevision: integer("case_revision").notNull(),
+    ordinal: integer("ordinal").notNull(),
+    subjectKey: text("subject_key").notNull().references(() => canonicalMaterials.subjectKey, { onDelete: "restrict" }),
+    executionConfigId: text("execution_config_id").notNull().references(() => aiEvalExecutionConfigs.id, { onDelete: "restrict" }),
+    executionConfigRevision: integer("execution_config_revision").notNull(),
+    executionConfigFingerprint: text("execution_config_fingerprint").notNull(),
+    executionProtocolKey: text("execution_protocol_key").notNull(),
+    executionProtocolRevision: integer("execution_protocol_revision").notNull(),
+    cleanupProtocolKey: text("cleanup_protocol_key").notNull(),
+    cleanupProtocolRevision: integer("cleanup_protocol_revision").notNull(),
+    targetCostOperationId: text("target_cost_operation_id").references(() => aiCostOperations.id, { onDelete: "restrict" }),
+    budgetReservationId: text("budget_reservation_id").references(() => aiBudgetReservations.id, { onDelete: "restrict" }),
+    jobId: text("job_id").references(() => aiJobs.id, { onDelete: "restrict" }),
+    status: text("status").$type<AIEvalCaseExecutionStatus>().notNull(),
+    providerInvocationState: text("provider_invocation_state").$type<AIEvalProviderInvocationState>().notNull(),
+    providerInvoked: integer("provider_invoked", { mode: "boolean" }).notNull().default(false),
+    outputSha256: text("output_sha256"),
+    outputByteSize: integer("output_byte_size"),
+    finishReason: text("finish_reason").$type<AIConversationFinishReason | null>(),
+    retrievalStatus: text("retrieval_status"),
+    candidateFingerprint: text("candidate_fingerprint").notNull(),
+    planFingerprint: text("plan_fingerprint"),
+    safeFailureCode: text("safe_failure_code"),
+    createdAt: integer("created_at").notNull(),
+    startedAt: integer("started_at"),
+    completedAt: integer("completed_at"),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("ai_eval_case_executions_run_case_unique").on(table.runId, table.caseId, table.caseRevision),
+    uniqueIndex("ai_eval_case_executions_run_ordinal_unique").on(table.runId, table.ordinal),
+    uniqueIndex("ai_eval_case_executions_job_unique").on(table.jobId).where(sql`${table.jobId} is not null`),
+    uniqueIndex("ai_eval_case_executions_operation_unique").on(table.targetCostOperationId).where(sql`${table.targetCostOperationId} is not null`),
+    index("ai_eval_case_executions_status_index").on(table.status, table.updatedAt),
+    index("ai_eval_case_executions_run_index").on(table.runId, table.ordinal),
+    index("ai_eval_case_executions_job_index").on(table.jobId, table.status),
+    check("ai_eval_case_executions_case_revision_valid", sql`${table.caseRevision} >= 1 and ${table.ordinal} between 1 and 10000`),
+    check("ai_eval_case_executions_subject_valid", sql`length(trim(${table.subjectKey})) between 1 and 80`),
+    check("ai_eval_case_executions_config_revision_valid", sql`${table.executionConfigRevision} >= 1`),
+    check("ai_eval_case_executions_fingerprints_valid", sql`length(${table.executionConfigFingerprint}) = 64 and ${table.executionConfigFingerprint} not glob '*[^0-9a-f]*' and length(${table.candidateFingerprint}) = 64 and ${table.candidateFingerprint} not glob '*[^0-9a-f]*' and (${table.planFingerprint} is null or (length(${table.planFingerprint}) = 64 and ${table.planFingerprint} not glob '*[^0-9a-f]*'))`),
+    check("ai_eval_case_executions_status_valid", sql`${table.status} in ('PENDING','RUNNING','COMPLETED','BLOCKED','FAILED','CANCELLED','AMBIGUOUS')`),
+    check("ai_eval_case_executions_invocation_state_valid", sql`${table.providerInvocationState} in ('NOT_INVOKED','INVOKING','INVOKED_WITH_ACCOUNTING','AMBIGUOUS')`),
+    check("ai_eval_case_executions_output_valid", sql`${table.outputSha256} is null or (length(${table.outputSha256}) = 64 and ${table.outputSha256} not glob '*[^0-9a-f]*')`),
+    check("ai_eval_case_executions_output_size_valid", sql`${table.outputByteSize} is null or ${table.outputByteSize} between 0 and 524288`),
+    check("ai_eval_case_executions_finish_valid", sql`${table.finishReason} is null or ${table.finishReason} in ('STOP','LENGTH','CONTENT_FILTER','OTHER','FAILED','CANCELLED')`),
+    check("ai_eval_case_executions_retrieval_valid", sql`${table.retrievalStatus} is null or ${table.retrievalStatus} in ('SUFFICIENT','INSUFFICIENT','NOT_APPLICABLE')`),
+    check("ai_eval_case_executions_protocol_valid", sql`length(trim(${table.executionProtocolKey})) between 1 and 120 and ${table.executionProtocolRevision} >= 1 and length(trim(${table.cleanupProtocolKey})) between 1 and 120 and ${table.cleanupProtocolRevision} >= 1`),
+    check("ai_eval_case_executions_timestamps_valid", sql`${table.createdAt} >= 0 and ${table.updatedAt} >= ${table.createdAt} and (${table.startedAt} is null or ${table.startedAt} >= ${table.createdAt}) and (${table.completedAt} is null or ${table.completedAt} >= ${table.createdAt})`),
+  ],
+);
+
 export type ChangeSetRow = typeof changeSets.$inferSelect;
 export type ChangeSetItemRow = typeof changeSetItems.$inferSelect;
 export type ChangeSetEventRow = typeof changeSetEvents.$inferSelect;
@@ -3661,3 +3800,7 @@ export type AIEvalCaseResultRow = typeof aiEvalCaseResults.$inferSelect;
 export type AIEvalGraderResultRow = typeof aiEvalGraderResults.$inferSelect;
 export type AIEvalDimensionAggregateRow = typeof aiEvalDimensionAggregates.$inferSelect;
 export type AIEvalGateResultRow = typeof aiEvalGateResults.$inferSelect;
+export type AIEvalExecutionConfigRow = typeof aiEvalExecutionConfigs.$inferSelect;
+export type AIEvalExecutionConfigRevisionRow = typeof aiEvalExecutionConfigRevisions.$inferSelect;
+export type AIEvalRunExecutionBindingRow = typeof aiEvalRunExecutionBindings.$inferSelect;
+export type AIEvalCaseExecutionRow = typeof aiEvalCaseExecutions.$inferSelect;

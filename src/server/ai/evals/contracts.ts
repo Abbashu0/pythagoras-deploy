@@ -4,6 +4,15 @@ import type { AITutorCitationMapItem } from "../tutor/preflight/contracts";
 
 export const AI_EVAL_SUITE_RESOURCE_TYPE = "ai.eval-suite" as const;
 export const AI_EVAL_CASE_RESOURCE_TYPE = "ai.eval-case" as const;
+export const AI_EVAL_EXECUTION_CONFIG_RESOURCE_TYPE = "ai.eval-execution-config" as const;
+
+/** Server-owned M9B1 target protocol identities. */
+export const AI_EVAL_TARGET_PROTOCOL_KEY = "eval-target-v1" as const;
+export const AI_EVAL_TARGET_PROTOCOL_REVISION = 1 as const;
+export const AI_EVAL_CLEANUP_PROTOCOL_KEY = "synthetic-c4-cleanup-v1" as const;
+export const AI_EVAL_CLEANUP_PROTOCOL_REVISION = 1 as const;
+export const AI_EVAL_TARGET_JOB_KIND = "ai.eval.target-execution" as const;
+export const AI_EVAL_TARGET_JOB_PAYLOAD_VERSION = 1 as const;
 
 export const AI_EVAL_DIMENSIONS = [
   "CORRECTNESS",
@@ -244,6 +253,122 @@ export interface AIEvalRun {
   updatedAt: number;
 }
 
+export interface AIEvalExecutionConfigContent {
+  key: string;
+  subjectKey: string;
+  displayName: string;
+  enabled: boolean;
+  budgetPolicyId: string;
+  budgetPolicyRevision: number;
+  rateLimitPolicyId: string;
+  rateLimitPolicyRevision: number;
+  protocolKey: typeof AI_EVAL_TARGET_PROTOCOL_KEY;
+  protocolRevision: typeof AI_EVAL_TARGET_PROTOCOL_REVISION;
+  targetTimeoutMs: number;
+  maxConcurrency: number;
+  cleanupProtocolKey: typeof AI_EVAL_CLEANUP_PROTOCOL_KEY;
+  cleanupProtocolRevision: typeof AI_EVAL_CLEANUP_PROTOCOL_REVISION;
+}
+
+export interface AIEvalExecutionConfigRevision extends AIEvalExecutionConfigContent {
+  executionConfigId: string;
+  revisionId: string;
+  revision: number;
+  createdAt: number;
+  createdBy: string;
+}
+
+export interface AIEvalExecutionConfig extends AIEvalExecutionConfigRevision {
+  id: string;
+  currentRevision: number;
+  currentRevisionId: string;
+  createdAt: number;
+  updatedAt: number;
+  createdBy: string;
+  updatedBy: string;
+}
+
+export interface AIEvalExecutionConfigRepository {
+  getById(id: string): AIEvalExecutionConfig | null;
+  getByKey(key: string): AIEvalExecutionConfig | null;
+  getCurrentRevision(id: string): AIEvalExecutionConfigRevision | null;
+  getRevision(id: string, revision: number): AIEvalExecutionConfigRevision | null;
+  list(): AIEvalExecutionConfig[];
+  create(input: { id: string; content: AIEvalExecutionConfigContent; actor: AdminActor; now: number }): AIEvalExecutionConfigRevision;
+  appendRevision(input: { id: string; expectedRevision: number; content: AIEvalExecutionConfigContent; actor: AdminActor; now: number }): AIEvalExecutionConfigRevision;
+}
+
+export interface AIEvalRunExecutionBinding {
+  runId: string;
+  executionConfigId: string;
+  executionConfigRevision: number;
+  executionConfigFingerprint: string;
+  createdAt: number;
+  createdBy: string;
+}
+
+export const AI_EVAL_CASE_EXECUTION_STATUSES = ["PENDING", "RUNNING", "COMPLETED", "BLOCKED", "FAILED", "CANCELLED", "AMBIGUOUS"] as const;
+export type AIEvalCaseExecutionStatus = (typeof AI_EVAL_CASE_EXECUTION_STATUSES)[number];
+export const AI_EVAL_PROVIDER_INVOCATION_STATES = ["NOT_INVOKED", "INVOKING", "INVOKED_WITH_ACCOUNTING", "AMBIGUOUS"] as const;
+export type AIEvalProviderInvocationState = (typeof AI_EVAL_PROVIDER_INVOCATION_STATES)[number];
+
+/** Durable target-execution metadata. It never stores prompts, output, or Evidence text. */
+export interface AIEvalCaseExecution {
+  id: string;
+  /** Durable technical idempotency identity derived from the immutable execution id. */
+  readonly idempotencyKey: string;
+  runId: string;
+  caseId: string;
+  caseRevision: number;
+  ordinal: number;
+  subjectKey: string;
+  executionConfigId: string;
+  executionConfigRevision: number;
+  executionConfigFingerprint: string;
+  executionProtocolKey: string;
+  executionProtocolRevision: number;
+  cleanupProtocolKey: string;
+  cleanupProtocolRevision: number;
+  targetCostOperationId: string | null;
+  budgetReservationId: string | null;
+  jobId: string | null;
+  status: AIEvalCaseExecutionStatus;
+  providerInvocationState: AIEvalProviderInvocationState;
+  providerInvoked: boolean;
+  outputSha256: string | null;
+  outputByteSize: number | null;
+  finishReason: AIConversationFinishReason | null;
+  retrievalStatus: "SUFFICIENT" | "INSUFFICIENT" | "NOT_APPLICABLE" | null;
+  candidateFingerprint: string;
+  planFingerprint: string | null;
+  safeFailureCode: string | null;
+  createdAt: number;
+  startedAt: number | null;
+  completedAt: number | null;
+  updatedAt: number;
+}
+
+export interface AIEvalCaseExecutionRepository {
+  getById(id: string): AIEvalCaseExecution | null;
+  getForTarget(input: { runId: string; caseId: string; caseRevision: number }): AIEvalCaseExecution | null;
+  getByJob(jobId: string): AIEvalCaseExecution | null;
+  listForRun(runId: string): AIEvalCaseExecution[];
+  create(input: Omit<AIEvalCaseExecution, "id" | "idempotencyKey"> & { id?: string }): AIEvalCaseExecution;
+  bindJob(id: string, jobId: string, now: number): AIEvalCaseExecution;
+  bindOperation(id: string, targetCostOperationId: string, now: number): AIEvalCaseExecution;
+  bindAdmission(id: string, input: { targetCostOperationId: string; budgetReservationId: string }, now: number): AIEvalCaseExecution;
+  markRunning(id: string, now: number, maxConcurrency?: number): AIEvalCaseExecution;
+  markInvoking(id: string, now: number): AIEvalCaseExecution;
+  markNotInvoked(id: string, now: number): AIEvalCaseExecution;
+  markInvokedWithAccounting(id: string, now: number): AIEvalCaseExecution;
+  complete(input: { id: string; providerInvoked: boolean; outputSha256: string; outputByteSize: number; finishReason: AIConversationFinishReason; retrievalStatus: "SUFFICIENT" | "NOT_APPLICABLE"; planFingerprint: string; now: number }): AIEvalCaseExecution;
+  block(input: { id: string; retrievalStatus: "INSUFFICIENT"; safeFailureCode: string; now: number }): AIEvalCaseExecution;
+  fail(input: { id: string; providerInvoked: boolean; outputSha256?: string | null; outputByteSize?: number | null; finishReason?: AIConversationFinishReason | null; retrievalStatus?: AIEvalCaseExecution["retrievalStatus"]; safeFailureCode: string; now: number }): AIEvalCaseExecution;
+  cancel(input: { id: string; providerInvoked: boolean; safeFailureCode: string; now: number }): AIEvalCaseExecution;
+  ambiguous(input: { id: string; safeFailureCode: string; now: number }): AIEvalCaseExecution;
+  listPendingTerminalReconciliation(limit: number): AIEvalCaseExecution[];
+}
+
 export interface AIEvalCaseResult {
   id: string;
   runId: string;
@@ -388,6 +513,8 @@ export interface AIEvalCaseRepository {
 export interface AIEvalRunRepository {
   getById(id: string): AIEvalRun | null;
   create(input: { id: string; suiteId: string; suiteRevision: number; manifestFingerprint: string; candidateSnapshot: AIEvalCandidateSnapshot; candidateFingerprint: string; baselineRunId: string | null; createdAt: number }): AIEvalRun;
+  getExecutionBinding(runId: string): AIEvalRunExecutionBinding | null;
+  bindExecutionConfig(input: AIEvalRunExecutionBinding): AIEvalRunExecutionBinding;
   transition(input: { id: string; expectedStatus: AIEvalRunStatus; status: AIEvalRunStatus; recommendation?: AIEvalRecommendation | null; safeFailureCode?: string | null; startedAt?: number | null; scoredAt?: number | null; completedAt?: number | null; updatedAt: number }): AIEvalRun;
   insertCaseResult(input: Omit<AIEvalCaseResult, "id"> & { id?: string }): AIEvalCaseResult;
   listCaseResults(runId: string): AIEvalCaseResult[];

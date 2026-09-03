@@ -12,6 +12,8 @@ Provider Usage Cost Records belong to the active `OPEN` Cost Operation lifecycle
 
 AI-M7B uses the existing `KNOWLEDGE_INDEXING` cost center for document embedding Jobs. It creates one cost operation per embedding projection Job, reserves a conservative integer nano-cost before the first Provider call, accounts every Gateway attempt where usage identity permits, and settles actual cost or preserves the existing reconciliation state when usage is incomplete. It does not introduce a Student-facing cost counter.
 
+AI-M9B1 adds a governed Eval Execution Config and executes one exact target Case with one `EVALS` Cost Operation and Budget Reservation. Its code-owned `system-evals` admission scope keeps `opaquePrincipalRef` null on the operation while including EVALS spend in the normal M3 Budget/Rate Limit calculations. M7C QUERY Embedding, optional Rerank, and one Generation attempt all record against that operation; terminal operation status follows Provider accounting, and an uncertain invocation settles to the existing reconciliation path rather than a fabricated zero. M9B1 does not add supplementary Judge accounting or production Provider execution.
+
 ## 1. Cost centers
 
 AI-M7C query embedding and optional reranking are variable-cost work in the caller's existing `STUDENT_GENERATION` operation. M7C requires the matching reservation to be `EXECUTING`, records each actual Gateway attempt through M3A accounting, and leaves operation completion and reservation settlement to the owning orchestration milestone. M7C never charges query work to `KNOWLEDGE_INDEXING` and does not create a second admission.

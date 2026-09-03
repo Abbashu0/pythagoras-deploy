@@ -1,4 +1,5 @@
 export {
+  AI_EVALS_ADMISSION_PRINCIPAL_REF,
   type AIAdmissionCostEstimate,
   type AIAdmissionPlan,
   type AIAdmissionRequestFingerprintInput,

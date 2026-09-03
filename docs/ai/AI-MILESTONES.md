@@ -121,7 +121,7 @@ AI-M8A, AI-M8B, and AI-M8C are approved; AI-M8 Grounded Tutor is complete at `e7
 
 ## AI-M9 — Evals V1
 
-**Status:** Split into review checkpoints; AI-M9A is implemented with the deterministic-scoring and accounting-basis corrections pending independent review, AI-M9 overall is incomplete, and AI-M9B is not started.
+**Status:** Split into review checkpoints; AI-M9A remains implemented pending independent review, AI-M9B1 is implemented pending independent review, AI-M9B2 is not started, and AI-M9 overall is incomplete.
 
 ### AI-M9A — Eval Domain, Versioned Suites, Deterministic Graders & Promotion Gates
 
@@ -131,8 +131,8 @@ AI-M8A, AI-M8B, and AI-M8C are approved; AI-M8 Grounded Tutor is complete at `e7
 
 ### AI-M9B — Eval Execution & EVALS Economics
 
-**Status:** Not started.
-**Boundary:** Future target execution, EVALS admission/accounting, supplementary judge integration, and bounded benchmark orchestration after independent M9A review.
+**Status:** Split into M9B1/M9B2; M9B1 is implemented pending independent review and M9B2 is not started.
+**Boundary:** M9B1 executes exact Eval targets through the existing M7C/M8A/Gateway boundaries using one EVALS Cost Operation and Budget Reservation per target, synthetic server-owned Conversation cleanup, reference-only durable Jobs, bounded orchestration, and ambiguity-safe recovery. It makes no supplementary Judge call; M9B2 owns that later boundary.
 
 ## Remaining future milestones
 
