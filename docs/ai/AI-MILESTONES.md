@@ -121,11 +121,11 @@ AI-M8A, AI-M8B, and AI-M8C are approved; AI-M8 Grounded Tutor is complete at `e7
 
 ## AI-M9 — Evals V1
 
-**Status:** Split into review checkpoints; AI-M9A remains implemented pending independent review, AI-M9B1 is implemented pending independent review, AI-M9B2 is not started, and AI-M9 overall is incomplete.
+**Status:** Split into review checkpoints; AI-M9A is approved/complete at `860b474bd146abb944c15f774afa88578b463a80`, AI-M9B1 is implemented pending independent review, AI-M9B2 is not started, and AI-M9 overall is incomplete.
 
 ### AI-M9A — Eval Domain, Versioned Suites, Deterministic Graders & Promotion Gates
 
-**Status:** Implemented with the deterministic-scoring and accounting-basis corrections, pending independent review.
+**Status:** Approved/complete at `860b474bd146abb944c15f774afa88578b463a80`, including the deterministic-scoring and accounting-basis corrections.
 **Delivered boundary:** Governed subject-bound `ai.eval-suite` and `ai.eval-case` identities with append-only revisions; exact ordered Case-revision manifests; explicit synthetic/curated/de-identified privacy classification; code-owned deterministic graders reusing M8C citation validation; fixed-point result/aggregate/gate records; immutable candidate/manifest fingerprints; bounded baseline/regression comparison; and recommendation-only outcomes. Migration `0031_nosy_roxanne_simpson` adds Eval storage and SQLite lifecycle/ownership protections; correction migration `0032_eval-scoring-boundary` pins result rows to deterministic Suite graders, freezes Case/Grader inputs at `SCORING`, requires complete manifests for recommendation, and keeps final cost gates conservative; correction migration `0033_eval-accounting-basis` seals post-terminal Usage and persists a safe immutable accounting basis for cost gates while preserving append-only Corrections.
 **Explicit boundary:** Zero Generation, Embedding, Rerank, judge, Provider, network, Student/Admin/Mobile UI, automatic publication, production failure import, raw Student persistence, or chain-of-thought persistence.
 
