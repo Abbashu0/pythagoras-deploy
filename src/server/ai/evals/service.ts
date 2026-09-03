@@ -1,5 +1,5 @@
 import type { ContentDatabase } from "../../content/database";
-import { SQLiteAIAccountingRepository, type AICostOperation, type AIOperationCostSummary } from "../economics";
+import { isAIAccountingError, SQLiteAIAccountingRepository, type AICostOperation, type AIOperationCostSummary, type AIUsageCostRecord } from "../economics";
 import type {
   AIEvalBaselineComparison,
   AIEvalCaseResult,
@@ -40,6 +40,7 @@ export interface AIEvalRunServiceDependencies {
 export interface AIEvalAccountingReader {
   getOperation(id: string): AICostOperation | null;
   getOperationCostSummary(id: string): AIOperationCostSummary;
+  listUsageCostRecords(operationId: string): AIUsageCostRecord[];
 }
 
 /** M9A orchestration for deterministic observations and gates. It has no Provider execution path. */
@@ -169,13 +170,17 @@ export class AIEvalRunService {
     ]);
     return [...dimensions].sort().map((dimension) => {
       const requirement = suite.requiredDimensions.find((candidate) => candidate.dimension === dimension);
+      if (requirement?.mode === "JUDGE_REQUIRED") {
+        return { runId: run.id, dimension, applicableCaseCount: 0, passedCaseCount: 0, failedCaseCount: 0, scoreUnits: null, blockingFailureCount: 0 };
+      }
       const requiredGraders = suite.graderConfigs.filter((config) => config.dimension === dimension && config.required);
+      const configuredGraderIdentities = new Set(suite.graderConfigs.filter((config) => config.dimension === dimension).map((config) => `${config.graderKey}@${config.graderRevision}`));
       const caseScores: number[] = [];
       let passedCaseCount = 0;
       let failedCaseCount = 0;
       let blockingFailureCount = 0;
       for (const result of results) {
-        const graderResults = this.runs.listGraderResults(result.id).filter((grader) => grader.dimension === dimension);
+        const graderResults = this.runs.listGraderResults(result.id).filter((grader) => grader.dimension === dimension && configuredGraderIdentities.has(`${grader.graderKey}@${grader.graderRevision}`));
         blockingFailureCount += graderResults.filter((grader) => grader.blocking && grader.verdict === "FAIL").length;
         const relevant = requiredGraders.length === 0
           ? graderResults
@@ -193,6 +198,9 @@ export class AIEvalRunService {
 
   private buildAbsoluteGates(run: AIEvalRun, suite: AIEvalSuiteRevision, results: readonly AIEvalCaseResult[], aggregates: readonly AIEvalDimensionAggregate[]): AIEvalGateResult[] {
     const gates: AIEvalGateResult[] = [];
+    const manifestComplete = results.length === suite.caseManifest.length
+      && suite.caseManifest.every((entry) => results.some((result) => result.caseId === entry.caseId && result.caseRevision === entry.caseRevision && result.ordinal === entry.ordinal));
+    gates.push({ runId: run.id, gateKey: "MANIFEST_RESULTS_COMPLETE", verdict: manifestComplete ? "PASS" : "INCOMPLETE", observedValue: results.length, thresholdValue: suite.caseManifest.length, safeReasonCode: manifestComplete ? "MANIFEST_COMPLETE" : "MANIFEST_RESULT_MISSING" });
     for (const requirement of suite.requiredDimensions) {
       if (requirement.mode === "NOT_APPLICABLE") continue;
       const aggregate = aggregates.find((candidate) => candidate.dimension === requirement.dimension);
@@ -254,8 +262,17 @@ export class AIEvalRunService {
   private resolveCanonicalCost(run: AIEvalRun, costOperationId: string | null): number | null {
     if (costOperationId === null) return null;
     const operation = this.accounting.getOperation(costOperationId);
-    if (!operation || operation.costCenter !== "EVALS" || operation.evalRunId !== run.id || operation.opaquePrincipalRef !== null || operation.conversationId !== null || operation.responseId !== null || operation.jobId !== null) throw new AIEvalError("AI_EVAL_RUN_INVALID", "The Eval observation cost operation is not owned by this Eval Run.");
-    return this.costSummary(costOperationId);
+    const suite = this.requireSuiteRevision(run.suiteId, run.suiteRevision);
+    if (!operation || operation.costCenter !== "EVALS" || operation.evalRunId !== run.id || operation.opaquePrincipalRef !== null || operation.conversationId !== null || operation.responseId !== null || operation.jobId !== null || operation.idempotencyKey !== null || operation.subjectKey !== suite.subjectKey) throw new AIEvalError("AI_EVAL_RUN_INVALID", "The Eval observation cost operation is not owned by this Eval Run.");
+    if (operation.status === "OPEN" || operation.completedAt === null) return null;
+    try {
+      const records = this.accounting.listUsageCostRecords(costOperationId);
+      if (records.length === 0 || records.some((record) => record.operationId !== costOperationId || record.costCompleteness !== "COMPLETE" || record.completedAt === null)) return null;
+      return this.costSummary(costOperationId);
+    } catch (error) {
+      if (isAIAccountingError(error)) return null;
+      throw error;
+    }
   }
 
   private resolveRunCost(run: AIEvalRun, results: readonly AIEvalCaseResult[]): number | null {
@@ -267,13 +284,13 @@ export class AIEvalRunService {
       if (value === null) return null;
       total += BigInt(value);
     }
-    if (total < BigInt(0) || total > BigInt(Number.MAX_SAFE_INTEGER)) throw new AIEvalError("AI_EVAL_RUN_INVALID", "The Eval Run cost exceeds the safe fixed-point range.");
+    if (total < BigInt(0) || total > BigInt(Number.MAX_SAFE_INTEGER)) return null;
     return Number(total);
   }
 
   private costSummary(operationId: string): number | null {
     const totals = this.accounting.getOperationCostSummary(operationId).totals;
-    if (totals.length !== 1 || totals[0] === undefined || totals[0].totalNano < 0) return null;
+    if (totals.length !== 1 || totals[0] === undefined || !Number.isSafeInteger(totals[0].totalNano) || totals[0].totalNano < 0) return null;
     return totals[0].totalNano;
   }
 

@@ -126,7 +126,7 @@ M3B uncertain reservations are recovered without duplicating settlement arithmet
 
 ### AI-M9A Eval economics boundary
 
-AI-M9A does not execute targets or supplementary judges and does not create admission reservations. Its durable Eval Runs may reference the existing `ai_cost_operations.eval_run_id` and `EVALS` cost center so M9B can bind live evaluation work to the canonical accounting ledger. Deterministic cost gates read canonical operation totals in integer nano-currency; they do not trust caller-supplied dollar values or create a competing Eval ledger. `PASS_RECOMMENDED` remains advisory and cannot publish a configuration.
+AI-M9A does not execute targets or supplementary judges and does not create admission reservations. Its durable Eval Runs may reference the existing `ai_cost_operations.eval_run_id` and `EVALS` cost center so M9B can bind live evaluation work to the canonical accounting ledger. Deterministic cost gates require a terminal EVALS operation with complete usage records, exact Run/subject ownership, and one safe currency total; open, empty, partial, unknown, multi-currency, or unsafe accounting remains unavailable rather than becoming zero. A terminal operation with no usage record is not treated as provable zero. They do not trust caller-supplied dollar values or create a competing Eval ledger. `PASS_RECOMMENDED` remains advisory and cannot publish a configuration.
 
 ## 6. Expensive background work
 

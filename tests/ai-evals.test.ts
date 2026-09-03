@@ -11,6 +11,7 @@ import { createCanonicalContentRepository } from "../src/server/canonical-conten
 import {
   AIEvalCaseChangeAdapter,
   AIEvalError,
+  type AIEvalAccountingReader,
   AIEvalRunService,
   AIEvalSuiteChangeAdapter,
   AI_EVAL_CASE_RESOURCE_TYPE,
@@ -30,6 +31,7 @@ import {
   normalizeAIEvalCandidateSnapshot,
   normalizeAIEvalCaseContent,
   normalizeAIEvalObservation,
+  normalizeAIEvalSuiteContent,
 } from "../src/server/ai/evals";
 import {
   AI_TUTOR_CITATION_PROTOCOL_KEY,
@@ -37,7 +39,7 @@ import {
   AI_TUTOR_GROUNDING_PROTOCOL_KEY,
   AI_TUTOR_GROUNDING_PROTOCOL_REVISION,
 } from "../src/server/ai/tutor";
-import { SQLiteAIAccountingRepository } from "../src/server/ai/economics";
+import { SQLiteAIAccountingRepository, type AICostOperationContent, type AIUsageCostRecord } from "../src/server/ai/economics";
 import { createChangeManagementService } from "../src/server/change-management";
 import { openContentDatabase, type ContentDatabase } from "../src/server/content";
 
@@ -71,6 +73,60 @@ function createFixture(): Fixture {
     runs: new SQLiteAIEvalRunRepository(database),
     close() { database.close(); rmSync(root, { recursive: true, force: true }); },
   };
+}
+
+function createMigrationDirectory(prefix: string, count: number): string {
+  const directory = mkdtempSync(path.join(os.tmpdir(), prefix));
+  mkdirSync(path.join(directory, "meta"), { recursive: true });
+  const journal = JSON.parse(readFileSync(path.join(migrationsDirectory, "meta", "_journal.json"), "utf8")) as { entries: Array<{ idx: number; tag: string }>; [key: string]: unknown };
+  const entries = journal.entries.slice(0, count);
+  for (const entry of entries) {
+    copyFileSync(path.join(migrationsDirectory, `${entry.tag}.sql`), path.join(directory, `${entry.tag}.sql`));
+    const snapshotName = `${entry.idx.toString().padStart(4, "0")}_snapshot.json`;
+    if (existsSync(path.join(migrationsDirectory, "meta", snapshotName))) copyFileSync(path.join(migrationsDirectory, "meta", snapshotName), path.join(directory, "meta", snapshotName));
+  }
+  writeFileSync(path.join(directory, "meta", "_journal.json"), JSON.stringify({ ...journal, entries }));
+  return directory;
+}
+
+function fakeUsageRecord(operationId: string, costCompleteness: "COMPLETE" | "PARTIAL"): AIUsageCostRecord {
+  return { id: uuidv7(), operationId, costCompleteness, completedAt: BASE_TIME + 1 } as AIUsageCostRecord;
+}
+
+function evalAccountingReader(
+  accounting: SQLiteAIAccountingRepository,
+  records: readonly AIUsageCostRecord[],
+  totalNano: number,
+): AIEvalAccountingReader {
+  return {
+    getOperation: (id) => accounting.getOperation(id),
+    getOperationCostSummary: (id) => ({ operationId: id, totals: [{ currency: "USD", totalNano }] }),
+    listUsageCostRecords: () => [...records],
+  };
+}
+
+function createEvalOperation(database: ContentDatabase, evalRunId: string, overrides: Partial<AICostOperationContent> = {}): { accounting: SQLiteAIAccountingRepository; id: string } {
+  const accounting = new SQLiteAIAccountingRepository(database);
+  const id = uuidv7();
+  accounting.createOperation({
+    id,
+    content: {
+      costCenter: "EVALS",
+      idempotencyKey: null,
+      opaquePrincipalRef: null,
+      subjectKey: "biology",
+      conversationId: null,
+      responseId: null,
+      jobId: null,
+      evalRunId,
+      knowledgeRevision: null,
+      status: "OPEN",
+      startedAt: BASE_TIME,
+      completedAt: null,
+      ...overrides,
+    },
+  });
+  return { accounting, id };
 }
 
 function publishChange(fixture: Fixture, input: Parameters<Fixture["changes"]["createChangeSet"]>[0]): void {
@@ -195,7 +251,7 @@ test("M9A migration is present and exposes no Provider execution path", () => {
   const fixture = createFixture();
   try {
     const count = Number((fixture.database.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count);
-    assert.equal(count, 32);
+    assert.equal(count, 33);
     assert.equal(fixture.database.client.prepare("select 1 from sqlite_master where type='table' and name='ai_eval_suites'").get() !== undefined, true);
     assert.equal(fixture.database.client.prepare("select 1 from sqlite_master where type='table' and name='ai_eval_runs'").get() !== undefined, true);
   } finally { fixture.close(); }
@@ -203,30 +259,75 @@ test("M9A migration is present and exposes no Provider execution path", () => {
 
 test("0030 to 0031 upgrade keeps the existing database and installs Eval tables", () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "pythagoras-m9a-upgrade-"));
-  const oldMigrations = mkdtempSync(path.join(os.tmpdir(), "pythagoras-m9a-old-migrations-"));
+  const oldMigrations = createMigrationDirectory("pythagoras-m9a-old-migrations-", 31);
+  const migrationsThrough0031 = createMigrationDirectory("pythagoras-m9a-0031-migrations-", 32);
   let oldDatabase: ContentDatabase | null = null;
   let upgraded: ContentDatabase | null = null;
   try {
-    mkdirSync(path.join(oldMigrations, "meta"), { recursive: true });
-    const journal = JSON.parse(readFileSync(path.join(migrationsDirectory, "meta", "_journal.json"), "utf8")) as { entries: Array<{ idx: number; tag: string }>; [key: string]: unknown };
-    const preEvalEntries = journal.entries.slice(0, 31);
-    for (const entry of preEvalEntries) {
-      copyFileSync(path.join(migrationsDirectory, `${entry.tag}.sql`), path.join(oldMigrations, `${entry.tag}.sql`));
-      const snapshotName = `${entry.idx.toString().padStart(4, "0")}_snapshot.json`;
-      if (existsSync(path.join(migrationsDirectory, "meta", snapshotName))) copyFileSync(path.join(migrationsDirectory, "meta", snapshotName), path.join(oldMigrations, "meta", snapshotName));
-    }
-    writeFileSync(path.join(oldMigrations, "meta", "_journal.json"), JSON.stringify({ ...journal, entries: preEvalEntries }));
     oldDatabase = openContentDatabase({ dataDirectory: root, migrationsDirectory: oldMigrations });
     assert.equal(Number((oldDatabase.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count), 31);
     createCanonicalContentRepository(oldDatabase).bootstrap();
     oldDatabase.close(); oldDatabase = null;
-    upgraded = openContentDatabase({ dataDirectory: root, migrationsDirectory });
+    upgraded = openContentDatabase({ dataDirectory: root, migrationsDirectory: migrationsThrough0031 });
     assert.equal(Number((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count), 32);
     for (const table of ["ai_eval_suites", "ai_eval_suite_revisions", "ai_eval_suite_case_refs", "ai_eval_cases", "ai_eval_case_revisions", "ai_eval_runs", "ai_eval_case_results", "ai_eval_grader_results", "ai_eval_dimension_aggregates", "ai_eval_gate_results"]) assert.ok(upgraded.client.prepare("select name from sqlite_master where type='table' and name=?").get(table));
     assert.ok(upgraded.client.prepare("select name from sqlite_master where type='trigger' and name='ai_eval_suites_identity_immutable'").get());
     assert.ok(upgraded.client.prepare("select subject_key from canonical_materials where subject_key='biology'").get());
   } finally {
-    oldDatabase?.close(); upgraded?.close(); rmSync(root, { recursive: true, force: true }); rmSync(oldMigrations, { recursive: true, force: true });
+    oldDatabase?.close(); upgraded?.close(); rmSync(root, { recursive: true, force: true }); rmSync(oldMigrations, { recursive: true, force: true }); rmSync(migrationsThrough0031, { recursive: true, force: true });
+  }
+});
+
+test("populated 0031 database upgrades to 0032 without rewriting Eval history", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "pythagoras-m9a-populated-upgrade-"));
+  const migrationsThrough0031 = createMigrationDirectory("pythagoras-m9a-populated-0031-", 32);
+  let oldDatabase: ContentDatabase | null = null;
+  let upgraded: ContentDatabase | null = null;
+  try {
+    oldDatabase = openContentDatabase({ dataDirectory: root, migrationsDirectory: migrationsThrough0031 });
+    createCanonicalContentRepository(oldDatabase).bootstrap();
+    const identities = new SQLiteAdminIdentityRepository(oldDatabase);
+    const owner = identities.createInitialOwner({ id: uuidv7(), email: `owner-${uuidv7()}@m9a-upgrade.test`, displayName: "M9A Upgrade Owner", passwordHash: "fixture", createdAt: BASE_TIME });
+    const actor: AdminActor = { actorUserId: owner.id, actorRole: "OWNER" };
+    const cases = new SQLiteAIEvalCaseRepository(oldDatabase);
+    const suites = new SQLiteAIEvalSuiteRepository(oldDatabase);
+    const caseId = uuidv7();
+    cases.create({ id: caseId, content: normalizeAIEvalCaseContent(caseContent(`m9a.upgrade.case.${uuidv7()}`)), actor, now: BASE_TIME + 1 });
+    const suiteId = uuidv7();
+    const firstSuiteContent = normalizeAIEvalSuiteContent(suiteContent(caseId));
+    suites.create({ id: suiteId, content: firstSuiteContent, actor, now: BASE_TIME + 2 });
+    const suiteIdentity = suites.getById(suiteId)!;
+    suites.appendRevision({ id: suiteId, expectedRevision: 1, content: { ...firstSuiteContent, displayName: "Populated revision two", key: suiteIdentity.key, subjectKey: suiteIdentity.subjectKey }, actor, now: BASE_TIME + 3 });
+    const runService = new AIEvalRunService(oldDatabase);
+    const run = runService.createRun({ id: uuidv7(), suiteId, suiteRevision: 2, candidateSnapshot: candidateSnapshot(), createdAt: BASE_TIME + 4 });
+    runService.startRun(run.id, BASE_TIME + 5);
+    runService.recordObservationAndGrade(observation(run.id, caseId), BASE_TIME + 6);
+    runService.beginScoring(run.id, BASE_TIME + 7);
+    assert.equal(runService.completeRun(run.id, BASE_TIME + 8).run.recommendation, "PASS_RECOMMENDED");
+    const historicalBefore = oldDatabase.client.prepare("select id, suite_id, revision, display_name, enabled, required_dimensions, grader_configs, gate_config, permitted_regression_deltas, baseline_mode, supplementary_judge_config, created_at, created_by from ai_eval_suite_revisions where suite_id=? order by revision").all(suiteId) as Array<Record<string, unknown>>;
+    assert.equal(historicalBefore.length, 2);
+    oldDatabase.close(); oldDatabase = null;
+
+    upgraded = openContentDatabase({ dataDirectory: root, migrationsDirectory });
+    assert.equal(Number((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count), 33);
+    assert.deepEqual(upgraded.client.prepare("select key, subject_key, current_revision from ai_eval_suites where id=?").get(suiteId), { key: suiteIdentity.key, subject_key: "biology", current_revision: 2 });
+    const historicalAfter = upgraded.client.prepare("select id, suite_id, revision, display_name, enabled, required_dimensions, grader_configs, gate_config, permitted_regression_deltas, baseline_mode, supplementary_judge_config, created_at, created_by from ai_eval_suite_revisions where suite_id=? order by revision").all(suiteId) as Array<Record<string, unknown>>;
+    assert.deepEqual(historicalAfter, historicalBefore);
+    assert.equal((upgraded.client.prepare("select status, suite_id, suite_revision from ai_eval_runs where id=?").get(run.id) as { status: string; suite_id: string; suite_revision: number }).status, "COMPLETED");
+    assert.ok(upgraded.client.prepare("select name from sqlite_master where type='trigger' and name='ai_eval_case_results_insert_valid'").get());
+    assert.ok(upgraded.client.prepare("select name from sqlite_master where type='trigger' and name='ai_eval_grader_results_insert_valid'").get());
+    const revisionOneId = historicalBefore[0]?.id as string;
+    assert.throws(() => upgraded!.client.prepare("update ai_eval_suite_revisions set display_name='mutated' where id=?").run(revisionOneId), /immutable/i);
+    assert.throws(() => upgraded!.client.prepare("delete from ai_eval_suite_revisions where id=?").run(revisionOneId), /append-only|history/i);
+    assert.throws(() => upgraded!.client.prepare("update ai_eval_suites set current_revision=1 where id=?").run(suiteId), /advance|revision/i);
+    assert.throws(() => upgraded!.client.prepare("update ai_eval_suites set current_revision=4 where id=?").run(suiteId), /advance|revision/i);
+    const upgradedSuites = new SQLiteAIEvalSuiteRepository(upgraded);
+    const current = upgradedSuites.getById(suiteId)!;
+    assert.equal(upgradedSuites.appendRevision({ id: suiteId, expectedRevision: 2, content: { ...firstSuiteContent, displayName: "Populated revision three", key: current.key, subjectKey: current.subjectKey }, actor, now: BASE_TIME + 9 }).revision, 3);
+    const historicalAfterAppend = upgraded.client.prepare("select id, suite_id, revision, display_name, enabled, required_dimensions, grader_configs, gate_config, permitted_regression_deltas, baseline_mode, supplementary_judge_config, created_at, created_by from ai_eval_suite_revisions where suite_id=? and revision <= 2 order by revision").all(suiteId) as Array<Record<string, unknown>>;
+    assert.deepEqual(historicalAfterAppend, historicalBefore);
+  } finally {
+    oldDatabase?.close(); upgraded?.close(); rmSync(root, { recursive: true, force: true }); rmSync(migrationsThrough0031, { recursive: true, force: true });
   }
 });
 
@@ -306,6 +407,83 @@ test("direct SQL cannot mutate or delete Eval definitions or published Run truth
   } finally { fixture.close(); }
 });
 
+test("deterministic grader rows cannot impersonate a JUDGE_REQUIRED dimension", () => {
+  const fixture = createFixture();
+  try {
+    const caseId = createPublishedCase(fixture);
+    const suiteId = createPublishedSuite(fixture, caseId, suiteContent(caseId, 1, {
+      requiredDimensions: [{ dimension: "ARABIC_QUALITY", mode: "JUDGE_REQUIRED" }],
+      graderConfigs: [],
+      baselineMode: "OPTIONAL",
+    }));
+    const runService = new AIEvalRunService(fixture.database);
+    const run = runService.createRun({ id: uuidv7(), suiteId, suiteRevision: 1, candidateSnapshot: candidateSnapshot(), createdAt: BASE_TIME + 90 });
+    runService.startRun(run.id, BASE_TIME + 91);
+    const result = runService.recordObservation(observation(run.id, caseId, { citationMap: [] }), BASE_TIME + 92);
+    const fake = { caseResultId: result.id, dimension: "ARABIC_QUALITY" as const, graderKey: "fake-judge", graderRevision: 1, verdict: "PASS" as const, scoreUnits: AI_EVAL_SCORE_SCALE, safeReasonCode: "FAKE_PASS", blocking: false, createdAt: BASE_TIME + 93 };
+    assert.throws(() => fixture.runs.insertGraderResult(fake), /grader|deterministic|configured|unsupported/i);
+    assert.throws(() => fixture.database.client.prepare("insert into ai_eval_grader_results (id,case_result_id,dimension,grader_key,grader_revision,verdict,score_units,safe_reason_code,blocking,created_at) values (?,?,?,?,?,?,?,?,?,?)").run(uuidv7(), result.id, fake.dimension, fake.graderKey, fake.graderRevision, fake.verdict, fake.scoreUnits, fake.safeReasonCode, 0, fake.createdAt), /grader|deterministic|configured|unsupported/i);
+    runService.beginScoring(run.id, BASE_TIME + 94);
+    const complete = runService.completeRun(run.id, BASE_TIME + 95);
+    assert.equal(complete.report.gates.find((gate) => gate.gateKey === "MANIFEST_RESULTS_COMPLETE")?.verdict, "PASS");
+    assert.equal(complete.report.gates.find((gate) => gate.gateKey === "REQUIRED_ARABIC_QUALITY")?.verdict, "INCOMPLETE");
+    assert.equal(complete.run.recommendation, "INCOMPLETE");
+  } finally { fixture.close(); }
+});
+
+test("unconfigured and dimension-mismatched deterministic graders are rejected at both boundaries", () => {
+  const fixture = createFixture();
+  try {
+    const caseId = createPublishedCase(fixture);
+    const suiteId = createPublishedSuite(fixture, caseId);
+    const runService = new AIEvalRunService(fixture.database);
+    const run = runService.createRun({ id: uuidv7(), suiteId, suiteRevision: 1, candidateSnapshot: candidateSnapshot(), createdAt: BASE_TIME + 100 });
+    runService.startRun(run.id, BASE_TIME + 101);
+    const result = runService.recordObservation(observation(run.id, caseId), BASE_TIME + 102);
+    const mismatched = { caseResultId: result.id, dimension: "GROUNDEDNESS" as const, graderKey: AI_EVAL_GRADER_KEYS.STATUS_MATCH, graderRevision: 1, verdict: "PASS" as const, scoreUnits: AI_EVAL_SCORE_SCALE, safeReasonCode: "MISMATCHED_DIMENSION", blocking: false, createdAt: BASE_TIME + 103 };
+    assert.throws(() => fixture.runs.insertGraderResult(mismatched), /grader|deterministic|configured|unsupported/i);
+    assert.throws(() => fixture.database.client.prepare("insert into ai_eval_grader_results (id,case_result_id,dimension,grader_key,grader_revision,verdict,score_units,safe_reason_code,blocking,created_at) values (?,?,?,?,?,?,?,?,?,?)").run(uuidv7(), result.id, mismatched.dimension, mismatched.graderKey, mismatched.graderRevision, mismatched.verdict, mismatched.scoreUnits, mismatched.safeReasonCode, 0, mismatched.createdAt), /grader|deterministic|configured|unsupported/i);
+  } finally { fixture.close(); }
+});
+
+test("SCORING freezes Case and deterministic Grader inputs while allowing final completion", () => {
+  const fixture = createFixture();
+  try {
+    const firstCaseId = createPublishedCase(fixture);
+    const secondCaseId = createPublishedCase(fixture, caseContent(`m9a.freeze.second.${uuidv7()}`));
+    const suiteId = createPublishedSuite(fixture, firstCaseId, suiteContent(firstCaseId, 1, { caseManifest: [{ ordinal: 1, caseId: firstCaseId, caseRevision: 1 }, { ordinal: 2, caseId: secondCaseId, caseRevision: 1 }] }));
+    const runService = new AIEvalRunService(fixture.database);
+    const run = runService.createRun({ id: uuidv7(), suiteId, suiteRevision: 1, candidateSnapshot: candidateSnapshot(), createdAt: BASE_TIME + 110 });
+    runService.startRun(run.id, BASE_TIME + 111);
+    const first = runService.recordObservationAndGrade(observation(run.id, firstCaseId), BASE_TIME + 112);
+    runService.beginScoring(run.id, BASE_TIME + 113);
+    const secondResult = { runId: run.id, caseId: secondCaseId, caseRevision: 1, ordinal: 2, observedSubjectKey: "biology", observedStatus: "COMPLETED" as const, finishReason: "STOP" as const, outputSha256: hashEvalOutput("safe answer [E1]"), outputByteSize: Buffer.byteLength("safe answer [E1]", "utf8"), evidence: [], retrievalStatus: "NOT_APPLICABLE" as const, elapsedLatencyMs: 4, costOperationId: null, privacyClass: "SYNTHETIC_PUBLIC_SAFE" as const, createdAt: BASE_TIME + 114 };
+    assert.throws(() => fixture.runs.insertCaseResult(secondResult), /RUNNING|scor/i);
+    assert.throws(() => fixture.database.client.prepare("insert into ai_eval_case_results (id,run_id,case_id,case_revision,ordinal,observed_subject_key,observed_status,finish_reason,output_sha256,output_byte_size,evidence,retrieval_status,elapsed_latency_ms,cost_operation_id,privacy_class,created_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(uuidv7(), secondResult.runId, secondResult.caseId, secondResult.caseRevision, secondResult.ordinal, secondResult.observedSubjectKey, secondResult.observedStatus, secondResult.finishReason, secondResult.outputSha256, secondResult.outputByteSize, "[]", secondResult.retrievalStatus, secondResult.elapsedLatencyMs, null, secondResult.privacyClass, secondResult.createdAt), /RUNNING|manifest|active/i);
+    const extraGrader = { caseResultId: first.result.id, dimension: "CORRECTNESS" as const, graderKey: AI_EVAL_GRADER_KEYS.STATUS_MATCH, graderRevision: 1, verdict: "PASS" as const, scoreUnits: AI_EVAL_SCORE_SCALE, safeReasonCode: "EXTRA", blocking: false, createdAt: BASE_TIME + 115 };
+    assert.throws(() => fixture.runs.insertGraderResult(extraGrader), /RUNNING|scor/i);
+    assert.throws(() => fixture.database.client.prepare("insert into ai_eval_grader_results (id,case_result_id,dimension,grader_key,grader_revision,verdict,score_units,safe_reason_code,blocking,created_at) values (?,?,?,?,?,?,?,?,?,?)").run(uuidv7(), extraGrader.caseResultId, extraGrader.dimension, extraGrader.graderKey, extraGrader.graderRevision, extraGrader.verdict, extraGrader.scoreUnits, extraGrader.safeReasonCode, 0, extraGrader.createdAt), /RUNNING|active|grader/i);
+    const complete = runService.completeRun(run.id, BASE_TIME + 116);
+    assert.equal(complete.run.status, "COMPLETED");
+    assert.equal(complete.report.gates.find((gate) => gate.gateKey === "MANIFEST_RESULTS_COMPLETE")?.verdict, "INCOMPLETE");
+  } finally { fixture.close(); }
+});
+
+test("MANIFEST_RESULTS_COMPLETE blocks an all-NOT_APPLICABLE suite with no observations", () => {
+  const fixture = createFixture();
+  try {
+    const caseId = createPublishedCase(fixture);
+    const suiteId = createPublishedSuite(fixture, caseId, suiteContent(caseId, 1, { requiredDimensions: [{ dimension: "RELEVANCE", mode: "NOT_APPLICABLE" }], graderConfigs: [], gateConfig: { minimumScores: [], maximumCostNano: null, maximumLatencyMs: null, requireSecurityPass: false } }));
+    const runService = new AIEvalRunService(fixture.database);
+    const run = runService.createRun({ id: uuidv7(), suiteId, suiteRevision: 1, candidateSnapshot: candidateSnapshot(), createdAt: BASE_TIME + 120 });
+    runService.startRun(run.id, BASE_TIME + 121);
+    runService.beginScoring(run.id, BASE_TIME + 122);
+    const complete = runService.completeRun(run.id, BASE_TIME + 123);
+    assert.equal(complete.report.gates.find((gate) => gate.gateKey === "MANIFEST_RESULTS_COMPLETE")?.verdict, "INCOMPLETE");
+    assert.equal(complete.run.recommendation, "INCOMPLETE");
+  } finally { fixture.close(); }
+});
+
 test("deterministic graders cover status, citations, evidence, literals, security, output, cost, and latency", () => {
   const registry = createDefaultAIEvalGraderRegistry();
   assert.equal(AI_EVAL_GRADER_REGISTRY_KEY, "deterministic-evals-v1");
@@ -340,7 +518,9 @@ test("fixed-point gates recommend, block security/cost/latency, and never publis
     runService.startRun(run.id, BASE_TIME + 21);
     runService.recordObservationAndGrade(observation(run.id, caseId), BASE_TIME + 22);
     runService.beginScoring(run.id, BASE_TIME + 23);
-    assert.equal(runService.completeRun(run.id, BASE_TIME + 24).run.recommendation, "PASS_RECOMMENDED");
+    const passingReport = runService.completeRun(run.id, BASE_TIME + 24);
+    assert.equal(passingReport.run.recommendation, "PASS_RECOMMENDED");
+    assert.equal(passingReport.report.gates.find((gate) => gate.gateKey === "MANIFEST_RESULTS_COMPLETE")?.verdict, "PASS");
     const blockedRun = runService.createRun({ id: uuidv7(), suiteId, suiteRevision: 1, candidateSnapshot: candidateSnapshot(), createdAt: BASE_TIME + 30 });
     runService.startRun(blockedRun.id, BASE_TIME + 31);
     runService.recordObservationAndGrade(observation(blockedRun.id, caseId, { outputText: "safe TOP_SECRET_REAL_STUDENT_M9A_73 [E1]" }), BASE_TIME + 32);
@@ -351,13 +531,67 @@ test("fixed-point gates recommend, block security/cost/latency, and never publis
     const expensiveRun = runService.createRun({ id: uuidv7(), suiteId: costSuiteId, suiteRevision: 1, candidateSnapshot: candidateSnapshot(), createdAt: BASE_TIME + 35 });
     const costOperationId = uuidv7();
     accounting.createOperation({ id: costOperationId, content: { costCenter: "EVALS", idempotencyKey: null, opaquePrincipalRef: null, subjectKey: "biology", conversationId: null, responseId: null, jobId: null, evalRunId: expensiveRun.id, knowledgeRevision: null, status: "OPEN", startedAt: BASE_TIME + 35, completedAt: null } });
-    const costAware = new AIEvalRunService(fixture.database, { accounting: { getOperation: (id) => accounting.getOperation(id), getOperationCostSummary: (id) => ({ operationId: id, totals: [{ currency: "USD", totalNano: 999 }] }) } });
+    const costAware = new AIEvalRunService(fixture.database, { accounting: { getOperation: (id) => accounting.getOperation(id), getOperationCostSummary: (id) => ({ operationId: id, totals: [{ currency: "USD", totalNano: 999 }] }), listUsageCostRecords: () => [] } });
     costAware.startRun(expensiveRun.id, BASE_TIME + 36);
     costAware.recordObservationAndGrade(observation(expensiveRun.id, caseId, { costOperationId }), BASE_TIME + 37);
     costAware.beginScoring(expensiveRun.id, BASE_TIME + 38);
     const expensiveResult = costAware.completeRun(expensiveRun.id, BASE_TIME + 39);
-    assert.equal(expensiveResult.report.gates.some((gate) => gate.gateKey === "MAX_COST_NANO" && gate.verdict === "BLOCKED"), true);
+    assert.equal(expensiveResult.report.gates.some((gate) => gate.gateKey === "MAX_COST_NANO" && gate.verdict === "INCOMPLETE"), true);
     assert.equal(fixture.database.client.prepare("select count(*) as count from publications").get() !== undefined, true);
+  } finally { fixture.close(); }
+});
+
+test("EVALS cost gates require a terminal operation with complete canonical usage", () => {
+  const fixture = createFixture();
+  try {
+    const caseId = createPublishedCase(fixture);
+    const suiteId = createPublishedSuite(fixture, caseId, suiteContent(caseId, 1, { gateConfig: { minimumScores: [], maximumCostNano: 10, maximumLatencyMs: null, requireSecurityPass: true } }));
+    const score = (runService: AIEvalRunService, runId: string, costOperationId: string, start: number) => {
+      runService.startRun(runId, start);
+      runService.recordObservationAndGrade(observation(runId, caseId, { costOperationId }), start + 1);
+      runService.beginScoring(runId, start + 2);
+      return runService.completeRun(runId, start + 3);
+    };
+
+    const openRun = new AIEvalRunService(fixture.database).createRun({ id: uuidv7(), suiteId, suiteRevision: 1, candidateSnapshot: candidateSnapshot(), createdAt: BASE_TIME + 130 });
+    const open = createEvalOperation(fixture.database, openRun.id);
+    const openResult = score(new AIEvalRunService(fixture.database, { accounting: evalAccountingReader(open.accounting, [], 999) }), openRun.id, open.id, BASE_TIME + 131);
+    assert.equal(openResult.report.gates.find((gate) => gate.gateKey === "MAX_COST_NANO")?.verdict, "INCOMPLETE");
+    assert.equal(openResult.report.gates.find((gate) => gate.gateKey === "MAX_COST_NANO")?.observedValue, null);
+
+    const partialRun = new AIEvalRunService(fixture.database).createRun({ id: uuidv7(), suiteId, suiteRevision: 1, candidateSnapshot: candidateSnapshot(), createdAt: BASE_TIME + 140 });
+    const partial = createEvalOperation(fixture.database, partialRun.id, { status: "COMPLETED", completedAt: BASE_TIME + 141 });
+    const partialResult = score(new AIEvalRunService(fixture.database, { accounting: evalAccountingReader(partial.accounting, [fakeUsageRecord(partial.id, "PARTIAL")], 5) }), partialRun.id, partial.id, BASE_TIME + 142);
+    assert.equal(partialResult.report.gates.find((gate) => gate.gateKey === "MAX_COST_NANO")?.verdict, "INCOMPLETE");
+
+    const underRun = new AIEvalRunService(fixture.database).createRun({ id: uuidv7(), suiteId, suiteRevision: 1, candidateSnapshot: candidateSnapshot(), createdAt: BASE_TIME + 150 });
+    const under = createEvalOperation(fixture.database, underRun.id, { status: "COMPLETED", completedAt: BASE_TIME + 151 });
+    const underResult = score(new AIEvalRunService(fixture.database, { accounting: evalAccountingReader(under.accounting, [fakeUsageRecord(under.id, "COMPLETE")], 5) }), underRun.id, under.id, BASE_TIME + 152);
+    assert.equal(underResult.report.gates.find((gate) => gate.gateKey === "MAX_COST_NANO")?.verdict, "PASS");
+    assert.equal(underResult.report.gates.find((gate) => gate.gateKey === "MAX_COST_NANO")?.observedValue, 5);
+
+    const overRun = new AIEvalRunService(fixture.database).createRun({ id: uuidv7(), suiteId, suiteRevision: 1, candidateSnapshot: candidateSnapshot(), createdAt: BASE_TIME + 160 });
+    const over = createEvalOperation(fixture.database, overRun.id, { status: "COMPLETED", completedAt: BASE_TIME + 161 });
+    const overResult = score(new AIEvalRunService(fixture.database, { accounting: evalAccountingReader(over.accounting, [fakeUsageRecord(over.id, "COMPLETE")], 999) }), overRun.id, over.id, BASE_TIME + 162);
+    assert.equal(overResult.report.gates.find((gate) => gate.gateKey === "MAX_COST_NANO")?.verdict, "BLOCKED");
+  } finally { fixture.close(); }
+});
+
+test("Eval cost ownership rejects wrong Run, private identity, and Suite subject", () => {
+  const fixture = createFixture();
+  try {
+    const caseId = createPublishedCase(fixture);
+    const suiteId = createPublishedSuite(fixture, caseId);
+    const runService = new AIEvalRunService(fixture.database);
+    const run = runService.createRun({ id: uuidv7(), suiteId, suiteRevision: 1, candidateSnapshot: candidateSnapshot(), createdAt: BASE_TIME + 170 });
+    runService.startRun(run.id, BASE_TIME + 171);
+    const wrongRun = createEvalOperation(fixture.database, uuidv7());
+    assert.throws(() => runService.recordObservationAndGrade(observation(run.id, caseId, { costOperationId: wrongRun.id }), BASE_TIME + 172), (error) => error instanceof AIEvalError && error.code === "AI_EVAL_RUN_INVALID");
+    const privateOperation = createEvalOperation(fixture.database, run.id, { opaquePrincipalRef: "student-X", conversationId: "conversation-X", responseId: "response-X", jobId: "job-X", idempotencyKey: "idempotency-X" });
+    assert.throws(() => runService.recordObservationAndGrade(observation(run.id, caseId, { costOperationId: privateOperation.id }), BASE_TIME + 173), (error) => error instanceof AIEvalError && error.code === "AI_EVAL_RUN_INVALID");
+    const wrongSubject = createEvalOperation(fixture.database, run.id, { subjectKey: "physics" });
+    assert.throws(() => runService.recordObservationAndGrade(observation(run.id, caseId, { costOperationId: wrongSubject.id }), BASE_TIME + 174), (error) => error instanceof AIEvalError && error.code === "AI_EVAL_RUN_INVALID");
+    assert.equal((fixture.database.client.prepare("select count(*) as count from ai_eval_case_results where run_id=?").get(run.id) as { count: number }).count, 0);
   } finally { fixture.close(); }
 });
 

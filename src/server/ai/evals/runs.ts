@@ -134,6 +134,8 @@ export class SQLiteAIEvalRunRepository implements AIEvalRunRepository {
   insertCaseResult(input: Omit<AIEvalCaseResult, "id"> & { id?: string }): AIEvalCaseResult {
     const id = input.id ?? uuidv7();
     if (!isSha256(input.outputSha256) || !Number.isSafeInteger(input.outputByteSize) || input.outputByteSize < 0 || input.outputByteSize > 524_288) throw new AIEvalError("AI_EVAL_RUN_INVALID", "The Eval Case result output metadata is invalid.");
+    const run = this.database.db.select({ status: aiEvalRuns.status }).from(aiEvalRuns).where(eq(aiEvalRuns.id, input.runId)).get();
+    if (!run || run.status !== "RUNNING") throw new AIEvalError("AI_EVAL_RUN_NOT_SCORABLE", "Eval Case results can only be inserted while a Run is RUNNING.");
     try {
       this.database.db.insert(aiEvalCaseResults).values({
         id,
@@ -168,6 +170,17 @@ export class SQLiteAIEvalRunRepository implements AIEvalRunRepository {
   insertGraderResult(input: Omit<AIEvalGraderResult, "id"> & { id?: string }): AIEvalGraderResult {
     const id = input.id ?? uuidv7();
     if (!Number.isSafeInteger(input.scoreUnits) || input.scoreUnits < 0 || input.scoreUnits > 1_000_000) throw new AIEvalError("AI_EVAL_RUN_INVALID", "The Eval grader score is invalid.");
+    const parent = this.database.db.select({ runId: aiEvalCaseResults.runId, runStatus: aiEvalRuns.status, suiteId: aiEvalRuns.suiteId, suiteRevision: aiEvalRuns.suiteRevision })
+      .from(aiEvalCaseResults)
+      .innerJoin(aiEvalRuns, eq(aiEvalCaseResults.runId, aiEvalRuns.id))
+      .where(eq(aiEvalCaseResults.id, input.caseResultId))
+      .get();
+    if (!parent || parent.runStatus !== "RUNNING") throw new AIEvalError("AI_EVAL_RUN_NOT_SCORABLE", "Deterministic Eval graders can only be inserted while a Run is RUNNING.");
+    const suiteRevision = this.database.db.select({ graderConfigs: aiEvalSuiteRevisions.graderConfigs, requiredDimensions: aiEvalSuiteRevisions.requiredDimensions })
+      .from(aiEvalSuiteRevisions)
+      .where(and(eq(aiEvalSuiteRevisions.suiteId, parent.suiteId), eq(aiEvalSuiteRevisions.revision, parent.suiteRevision)))
+      .get();
+    if (!suiteRevision || !isConfiguredDeterministicGrader(suiteRevision.graderConfigs, suiteRevision.requiredDimensions, input)) throw new AIEvalError("AI_EVAL_GRADER_UNSUPPORTED", "The deterministic Eval grader is not configured for the pinned Suite dimension.");
     try {
       this.database.db.insert(aiEvalGraderResults).values({ ...input, id }).run();
     } catch (error) {
@@ -268,4 +281,24 @@ function isSha256(value: string): boolean {
 
 function assertTimestamp(value: number, field: string): void {
   if (!Number.isSafeInteger(value) || value < 0) throw new AIEvalError("AI_EVAL_RUN_INVALID", `The Eval Run ${field} timestamp is invalid.`);
+}
+
+function isConfiguredDeterministicGrader(
+  graderConfigs: unknown,
+  requiredDimensions: unknown,
+  input: Pick<AIEvalGraderResult, "dimension" | "graderKey" | "graderRevision">,
+): boolean {
+  if (!Array.isArray(graderConfigs) || !Array.isArray(requiredDimensions)) return false;
+  const configured = graderConfigs.some((config) => isRecord(config)
+    && config.graderKey === input.graderKey
+    && config.graderRevision === input.graderRevision
+    && config.dimension === input.dimension);
+  const deterministic = requiredDimensions.some((requirement) => isRecord(requirement)
+    && requirement.dimension === input.dimension
+    && requirement.mode === "DETERMINISTICALLY_GRADED");
+  return configured && deterministic;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
