@@ -25,7 +25,7 @@ For appropriate system controls, prefer `@expo/ui` or other Expo/native platform
 
 ### Current M9A/M9B1 status
 
-AI-M0 through AI-M9A are approved/complete, with AI-M9A approved at `860b474bd146abb944c15f774afa88578b463a80`. AI-M9B1 is implemented pending independent review through migrations `0034_eval-target-execution` and `0035_eval-target-orchestration-hardening`: it adds governed Eval Execution Config, bounded exact Case Execution/target Job orchestration, EVALS admission/accounting, durable metadata-only synthetic M4 cleanup ownership, and real internal M7C/M8A/M8C target composition using test adapters only. AI-M9 overall remains incomplete; M9B2 and M10 are not started. No production Provider, supplementary Judge, Student/Admin/Mobile AI UI, or automatic publication is available.
+AI-M0 through AI-M9A are approved/complete, with AI-M9A approved at `860b474bd146abb944c15f774afa88578b463a80`. AI-M9B1 is implemented pending independent review through migrations `0034_eval-target-execution`, `0035_eval-target-orchestration-hardening`, and `0036_eval-retry-lifecycle`: it adds governed Eval Execution Config, bounded exact Case Execution/target Job orchestration, EVALS admission/accounting, durable metadata-only synthetic M4 cleanup ownership, and real internal M7C/M8A/M8C target composition using test adapters only. AI-M9 overall remains incomplete; M9B2 and M10 are not started. No production Provider, supplementary Judge, Student/Admin/Mobile AI UI, or automatic publication is available.
 
 ### Historical M7C context
 

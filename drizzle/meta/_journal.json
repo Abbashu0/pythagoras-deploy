@@ -253,6 +253,13 @@
       "when": 1788468936908,
       "tag": "0035_eval-target-orchestration-hardening",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1788472742539,
+      "tag": "0036_eval-retry-lifecycle",
+      "breakpoints": true
     }
   ]
 }

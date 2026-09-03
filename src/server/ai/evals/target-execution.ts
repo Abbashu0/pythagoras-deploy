@@ -155,7 +155,7 @@ export class AIEvalTargetExecutionService {
     const config = this.requireExecutionConfig(target.binding);
     const admissionRetry = execution.status === "PENDING" && execution.safeFailureCode === "EVAL_ADMISSION_RETRYABLE";
     if (execution.status === "PENDING" && !admissionRetry && !this.cleanup.cleanupForExecution(execution.id, this.safeNow())) throw new AIEvalError("AI_EVAL_TARGET_ADMISSION_RETRYABLE", "The previous synthetic Eval Conversation cleanup is still pending.");
-    execution = execution.status === "PENDING" ? this.executions.markRunning(execution.id, now, config.maxConcurrency) : execution;
+    execution = execution.status === "PENDING" ? this.executions.markRunning(execution.id, now, config.maxConcurrency, admissionRetry) : execution;
     let operation: AICostOperation | null = null;
     let reservationId: string | null = execution.budgetReservationId;
     let providerInvoked = execution.providerInvoked;

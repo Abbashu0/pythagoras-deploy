@@ -132,7 +132,7 @@ AI-M8A, AI-M8B, and AI-M8C are approved; AI-M8 Grounded Tutor is complete at `e7
 ### AI-M9B — Eval Execution & EVALS Economics
 
 **Status:** Split into M9B1/M9B2; M9B1 is implemented pending independent review and M9B2 is not started.
-**Boundary:** M9B1 executes exact Eval targets through the existing M7C/M8A/Gateway boundaries using one EVALS Cost Operation and Budget Reservation per target, durable metadata-only synthetic Conversation cleanup ownership, bounded manifest scheduling and recovery, target latency observations, and ambiguity-safe recovery. Operational rate/concurrency denials remain retryable without candidate results, and the exact embedding space is fenced before Provider work. It makes no supplementary Judge call; M9B2 owns that later boundary.
+**Boundary:** M9B1 executes exact Eval targets through the existing M7C/M8A/Gateway boundaries using one EVALS Cost Operation and Budget Reservation per target, durable metadata-only synthetic Conversation cleanup ownership, bounded manifest scheduling and recovery, target latency observations, and ambiguity-safe recovery. Operational rate/concurrency denials remain retryable without candidate results; each retry has a durable monotonic admission generation and a fresh latency boundary, while bounded cleanup recovery uses fair retry position so one failed binding cannot starve later cleanup. The exact embedding space is fenced before Provider work. It makes no supplementary Judge call; M9B2 owns that later boundary.
 
 ## Remaining future milestones
 

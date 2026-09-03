@@ -3743,6 +3743,7 @@ export const aiEvalTargetCleanups = sqliteTable(
     syntheticConversationId: text("synthetic_conversation_id").notNull().references(() => aiConversations.id, { onDelete: "restrict" }),
     status: text("status").$type<AIEvalTargetCleanupStatus>().notNull(),
     safeFailureCode: text("safe_failure_code"),
+    retryCount: integer("retry_count").notNull().default(0),
     createdAt: integer("created_at").notNull(),
     cleanedAt: integer("cleaned_at"),
     updatedAt: integer("updated_at").notNull(),

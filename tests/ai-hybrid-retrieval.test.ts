@@ -601,7 +601,7 @@ test("M7C Retrieval Config tables are bounded and contain no query or provider s
   const fixtureValue = await fixture();
   try {
     const migrationCount = Number((fixtureValue.database.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count);
-    assert.equal(migrationCount, 36);
+    assert.equal(migrationCount, 37);
     for (const table of ["ai_retrieval_configs", "ai_retrieval_config_revisions"]) {
       assert.ok(fixtureValue.database.client.prepare("select name from sqlite_master where type='table' and name=?").get(table));
       const columns = fixtureValue.database.client.prepare(`pragma table_info(${table})`).all() as Array<{ name: string }>;
@@ -689,7 +689,7 @@ test("0027 upgrades a populated 0026 database with Retrieval Config immutability
 
     const upgradedDatabase = openContentDatabase({ dataDirectory: root, migrationsDirectory });
     upgraded = upgradedDatabase;
-    assert.equal(Number((upgradedDatabase.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count), 36);
+    assert.equal(Number((upgradedDatabase.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count), 37);
     assert.ok(upgradedDatabase.client.prepare("select name from sqlite_master where name='ai_retrieval_configs'").get());
     assert.ok(upgradedDatabase.client.prepare("select name from pragma_table_info('ai_retrieval_config_revisions') where name='fusion_algorithm_key'").get());
     assert.ok(upgradedDatabase.client.prepare("select name from pragma_table_info('ai_retrieval_config_revisions') where name='fusion_algorithm_revision'").get());

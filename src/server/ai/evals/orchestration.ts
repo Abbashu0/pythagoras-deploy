@@ -130,6 +130,7 @@ export class AIEvalTargetOrchestrator {
           }
           continue;
         }
+        if (scheduledThisBatch >= AI_EVAL_TARGET_SCHEDULING_BATCH_SIZE) break;
         const job = this.dependencies.jobs.enqueueInTransaction({
           kind: AI_EVAL_TARGET_JOB_KIND,
           payloadVersion: AI_EVAL_TARGET_JOB_PAYLOAD_VERSION,

@@ -84,6 +84,9 @@ export class AIConversationService {
     principal: AIStudentPrincipal,
     input: { conversationId: string; subjectKey: string; createdAt: number },
   ): AIConversation {
+    if (!this.database.client.inTransaction) {
+      throw new AIConversationError("AI_CONVERSATION_INVALID", "This Conversation creation helper requires an active transaction.");
+    }
     const activePrincipal = assertActiveStudentPrincipal(principal);
     const subject = this.requireSubject(input.subjectKey);
     const conversationId = normalizeConversationId(input.conversationId);

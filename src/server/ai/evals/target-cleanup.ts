@@ -35,7 +35,7 @@ export class SQLiteAIEvalTargetCleanupRepository implements AIEvalTargetCleanupR
   listByCaseExecutionId(caseExecutionId: string): AIEvalTargetCleanup[] {
     return this.database.db.select().from(aiEvalTargetCleanups)
       .where(eq(aiEvalTargetCleanups.caseExecutionId, caseExecutionId))
-      .orderBy(asc(aiEvalTargetCleanups.createdAt), asc(aiEvalTargetCleanups.id))
+      .orderBy(asc(aiEvalTargetCleanups.retryCount), asc(aiEvalTargetCleanups.updatedAt), asc(aiEvalTargetCleanups.createdAt), asc(aiEvalTargetCleanups.id))
       .all().map(fromRow);
   }
 
@@ -53,7 +53,7 @@ export class SQLiteAIEvalTargetCleanupRepository implements AIEvalTargetCleanupR
         ),
         input.runId === undefined ? undefined : eq(aiEvalCaseExecutions.runId, input.runId),
       ))
-      .orderBy(asc(aiEvalTargetCleanups.createdAt), asc(aiEvalTargetCleanups.id))
+      .orderBy(asc(aiEvalTargetCleanups.retryCount), asc(aiEvalTargetCleanups.updatedAt), asc(aiEvalTargetCleanups.createdAt), asc(aiEvalTargetCleanups.id))
       .limit(input.limit)
       .all();
     return rows.map((row) => fromRow(row.cleanup));
@@ -75,6 +75,7 @@ export class SQLiteAIEvalTargetCleanupRepository implements AIEvalTargetCleanupR
         syntheticConversationId: input.syntheticConversationId,
         status: "PENDING",
         safeFailureCode: null,
+        retryCount: 0,
         createdAt: input.createdAt,
         cleanedAt: null,
         updatedAt: input.createdAt,
@@ -88,16 +89,17 @@ export class SQLiteAIEvalTargetCleanupRepository implements AIEvalTargetCleanupR
   markPendingFailure(id: string, safeFailureCode: string, updatedAt: number): AIEvalTargetCleanup {
     assertTimestamp(updatedAt, "updatedAt");
     if (!/^[A-Z0-9_.-]{1,120}$/u.test(safeFailureCode)) throw new AIEvalError("AI_EVAL_TARGET_INVALID", "The Eval target cleanup error code is invalid.");
+    const existing = this.database.db.select().from(aiEvalTargetCleanups).where(eq(aiEvalTargetCleanups.id, id)).get();
+    if (!existing) throw new AIEvalError("AI_EVAL_TARGET_INVALID", "The Eval target cleanup binding was not found.");
+    if (existing.status === "CLEANED") return fromRow(existing);
+    if (existing.retryCount >= 2_147_483_647) throw new AIEvalError("AI_EVAL_TARGET_INVALID", "The Eval target cleanup retry count is exhausted.");
     const row = this.database.db.update(aiEvalTargetCleanups).set({
       status: "PENDING",
       safeFailureCode,
+      retryCount: existing.retryCount + 1,
       updatedAt,
     }).where(and(eq(aiEvalTargetCleanups.id, id), eq(aiEvalTargetCleanups.status, "PENDING"))).returning().get();
-    if (!row) {
-      const existing = this.database.db.select().from(aiEvalTargetCleanups).where(eq(aiEvalTargetCleanups.id, id)).get();
-      if (existing) return fromRow(existing);
-      throw new AIEvalError("AI_EVAL_TARGET_INVALID", "The Eval target cleanup binding was not found.");
-    }
+    if (!row) throw new AIEvalError("AI_EVAL_TARGET_INVALID", "The Eval target cleanup binding changed before retry metadata was recorded.");
     return fromRow(row);
   }
 
@@ -198,6 +200,7 @@ function fromRow(row: AIEvalTargetCleanupRow): AIEvalTargetCleanup {
     syntheticConversationId: row.syntheticConversationId,
     status: row.status,
     safeFailureCode: row.safeFailureCode,
+    retryCount: row.retryCount,
     createdAt: row.createdAt,
     cleanedAt: row.cleanedAt,
     updatedAt: row.updatedAt,

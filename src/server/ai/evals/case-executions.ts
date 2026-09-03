@@ -54,16 +54,18 @@ export class SQLiteAIEvalCaseExecutionRepository implements AIEvalCaseExecutionR
 
   bindAdmission(id: string, input: { targetCostOperationId: string; budgetReservationId: string }, now: number): AIEvalCaseExecution { return this.update(id, { ...input, updatedAt: now }); }
 
-  markRunning(id: string, now: number, maxConcurrency?: number): AIEvalCaseExecution {
+  markRunning(id: string, now: number, maxConcurrency?: number, resetLatency = false): AIEvalCaseExecution {
+    assertTimestamp(now, "startedAt");
     if (maxConcurrency !== undefined && (!Number.isSafeInteger(maxConcurrency) || maxConcurrency < 1 || maxConcurrency > 100)) throw new AIEvalError("AI_EVAL_TARGET_INVALID", "The Eval target concurrency limit is invalid.");
     const current = this.getById(id);
     if (!current) throw new AIEvalError("AI_EVAL_TARGET_INVALID", "The Eval Case Execution was not found.");
+    if (resetLatency && current.startedAt !== null && now < current.startedAt) throw new AIEvalError("AI_EVAL_TARGET_INVALID", "The Eval target retry timestamp cannot move backward.");
     const run = () => {
       if (maxConcurrency !== undefined) {
         const row = this.database.client.prepare("select count(*) as count from ai_eval_case_executions where run_id=(select run_id from ai_eval_case_executions where id=?) and status='RUNNING'").get(id) as { count: number };
         if (row.count >= maxConcurrency) throw new AIEvalError("AI_EVAL_TARGET_CONCURRENCY_LIMITED", "The Eval target concurrency limit is currently reached.");
       }
-      return this.update(id, { status: "RUNNING", startedAt: current.startedAt ?? now, updatedAt: now });
+      return this.update(id, { status: "RUNNING", startedAt: resetLatency ? now : current.startedAt ?? now, safeFailureCode: resetLatency ? null : current.safeFailureCode, updatedAt: now });
     };
     return (this.database.client.inTransaction ? run() : this.database.client.transaction(run).immediate());
   }

@@ -361,7 +361,7 @@ export interface AIEvalCaseExecutionRepository {
   bindJob(id: string, jobId: string, now: number): AIEvalCaseExecution;
   bindOperation(id: string, targetCostOperationId: string, now: number): AIEvalCaseExecution;
   bindAdmission(id: string, input: { targetCostOperationId: string; budgetReservationId: string }, now: number): AIEvalCaseExecution;
-  markRunning(id: string, now: number, maxConcurrency?: number): AIEvalCaseExecution;
+  markRunning(id: string, now: number, maxConcurrency?: number, resetLatency?: boolean): AIEvalCaseExecution;
   markInvoking(id: string, now: number): AIEvalCaseExecution;
   markNotInvoked(id: string, now: number): AIEvalCaseExecution;
   markInvokedWithAccounting(id: string, now: number): AIEvalCaseExecution;
@@ -380,6 +380,7 @@ export interface AIEvalTargetCleanup {
   syntheticConversationId: string;
   status: AIEvalTargetCleanupStatus;
   safeFailureCode: string | null;
+  retryCount: number;
   createdAt: number;
   cleanedAt: number | null;
   updatedAt: number;

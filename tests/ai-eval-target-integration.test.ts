@@ -653,6 +653,42 @@ test("M9B1 cleanup ownership is recoverable by a new service after a crash windo
   } finally { f.close(); }
 });
 
+test("M9B1 cleanup recovery rotates a permanently failing binding so later bindings are not starved", async () => {
+    const f = await createTargetFixture();
+  try {
+    const executions = new SQLiteAIEvalCaseExecutionRepository(f.database);
+    const cleanupConversations = new AIConversationService(f.database, { clock: () => BASE_TIME + 100 });
+    const cleanup = new AIEvalTargetCleanupService({ database: f.database, executions, conversations: cleanupConversations, clock: () => BASE_TIME + 100 });
+    const executionIds: string[] = [];
+    const conversationIds: string[] = [];
+    for (let index = 0; index < 3; index += 1) {
+      const { run } = createTargetRun(f);
+      const { scheduled } = scheduleTarget(f, run.id);
+      const execution = executions.markRunning(executions.getByJob(scheduled.jobIds[0]!)!.id, BASE_TIME + 30 + index);
+      executionIds.push(execution.id);
+      f.database.client.transaction(() => {
+        const conversation = f.conversations.createConversationInTransaction(syntheticPrincipal(execution.id), { conversationId: uuidv7(), subjectKey: "biology", createdAt: BASE_TIME + 30 + index });
+        conversationIds.push(conversation.id);
+        cleanup.bindInTransaction({ caseExecutionId: execution.id, syntheticConversationId: conversation.id, createdAt: BASE_TIME + 30 + index });
+      }).immediate();
+      executions.fail({ id: execution.id, providerInvoked: false, safeFailureCode: "EVAL_TARGET_CLEANUP_TEST", now: BASE_TIME + 40 + index });
+    }
+    const failingConversationId = conversationIds[0]!;
+    const originalDelete = cleanupConversations.deleteConversation.bind(cleanupConversations);
+    cleanupConversations.deleteConversation = ((principal: Parameters<AIConversationService["deleteConversation"]>[0], conversationId: string) => {
+      if (conversationId === failingConversationId) throw new Error("permanent controlled cleanup failure");
+      return originalDelete(principal, conversationId);
+    }) as AIConversationService["deleteConversation"];
+    for (let index = 0; index < 5; index += 1) cleanup.reconcilePending({ limit: 1, now: BASE_TIME + 100 + index });
+    assert.equal((f.database.client.prepare("select status from ai_eval_target_cleanups where case_execution_id=?").get(executionIds[0]) as { status: string }).status, "PENDING");
+    assert.equal((f.database.client.prepare("select status from ai_eval_target_cleanups where case_execution_id=?").get(executionIds[1]) as { status: string }).status, "CLEANED");
+    assert.equal((f.database.client.prepare("select status from ai_eval_target_cleanups where case_execution_id=?").get(executionIds[2]) as { status: string }).status, "CLEANED");
+    assert.equal(f.embedding.calls, 0);
+    assert.equal(f.generation.calls, 0);
+    assert.equal(JSON.stringify(f.database.client.prepare("select * from ai_eval_target_cleanups").all()).includes("TOP_SECRET"), false);
+  } finally { f.close(); }
+});
+
 test("M9B1 persists bounded target latency for successful, blocked, failed, and cancelled outcomes", async () => {
   const successful = await createTargetFixture();
   try {
@@ -748,14 +784,18 @@ test("M9B1 treats transient rate/concurrency admission denials as retryable infr
   const rate = await createTargetFixture({ evalRateLimit: { maxRequests: 1, maxConcurrentRequests: 100 } });
   try {
     createEvalDummyAdmission(rate);
-    const { run, caseId } = createTargetRun(rate);
+    const { run, caseId } = createTargetRun(rate, QUERY_MARKER, "COMPLETED", 1_000);
     scheduleTarget(rate, run.id);
     let now = BASE_TIME + 22;
+    rate.generation.onCall = () => { now = BASE_TIME + 61_100; };
     const target = createTargetService(rate, rate.hybrid, () => now, new AIBudgetAdmissionService(rate.database, { clock: () => now }));
     const denied = await target.execute({ runId: run.id, caseId, caseRevision: 1 });
     assert.equal(denied.status, "PENDING");
     assert.equal(Number((rate.database.client.prepare("select count(*) as count from ai_eval_case_results where run_id=?").get(run.id) as { count: number }).count), 0);
     assert.equal((rate.database.client.prepare("select status from ai_cost_operations where id=?").get(denied.costOperationId) as { status: string }).status, "OPEN");
+    assert.throws(() => rate.database.client.prepare("update ai_eval_case_executions set admission_attempt=99 where id=?").run(denied.executionId), /admission attempt|retry/i);
+    assert.throws(() => rate.database.client.prepare("update ai_eval_case_executions set admission_attempt=0 where id=?").run(denied.executionId), /admission attempt|retry/i);
+    assert.throws(() => rate.database.client.prepare("update ai_eval_case_executions set started_at=? where id=?").run(BASE_TIME + 23, denied.executionId), /identity|immutable/i);
     now = BASE_TIME + 61_000;
     const retried = await target.execute({ runId: run.id, caseId, caseRevision: 1 });
     assert.equal(retried.status, "COMPLETED");
@@ -763,15 +803,19 @@ test("M9B1 treats transient rate/concurrency admission denials as retryable infr
     assert.equal(Number((rate.database.client.prepare("select count(*) as count from ai_cost_operations where eval_run_id=?").get(run.id) as { count: number }).count), 1);
     assert.equal(Number((rate.database.client.prepare("select count(*) as count from ai_eval_case_results where run_id=?").get(run.id) as { count: number }).count), 1);
     assert.equal((rate.database.client.prepare("select admission_attempt from ai_eval_case_executions where id=?").get(retried.executionId) as { admission_attempt: number }).admission_attempt, 1);
+    assert.equal((rate.database.client.prepare("select safe_failure_code, started_at from ai_eval_case_executions where id=?").get(retried.executionId) as { safe_failure_code: string | null; started_at: number }).safe_failure_code, null);
+    assert.equal((rate.database.client.prepare("select elapsed_latency_ms from ai_eval_case_results where run_id=?").get(run.id) as { elapsed_latency_ms: number }).elapsed_latency_ms, 100);
+    assert.equal(rate.evalRuns.completeRun(rate.evalRuns.beginScoring(run.id, BASE_TIME + 62_000).id, BASE_TIME + 62_001).report.gates.find((gate) => gate.gateKey === "MAX_LATENCY_MS")?.verdict, "PASS");
   } finally { rate.close(); }
 
   const concurrency = await createTargetFixture({ evalRateLimit: { maxRequests: 100, maxConcurrentRequests: 1 } });
   try {
     const dummyOperationId = createEvalDummyAdmission(concurrency);
     const dummyReservation = concurrency.admission.getReservationByOperationId(dummyOperationId)!;
-    const { run, caseId } = createTargetRun(concurrency);
+    const { run, caseId } = createTargetRun(concurrency, QUERY_MARKER, "COMPLETED", 1_000);
     scheduleTarget(concurrency, run.id);
     let now = BASE_TIME + 22;
+    concurrency.generation.onCall = () => { now = BASE_TIME + 131; };
     const target = createTargetService(concurrency, concurrency.hybrid, () => now, new AIBudgetAdmissionService(concurrency.database, { clock: () => now }));
     const denied = await target.execute({ runId: run.id, caseId, caseRevision: 1 });
     assert.equal(denied.status, "PENDING");
@@ -782,5 +826,20 @@ test("M9B1 treats transient rate/concurrency admission denials as retryable infr
     assert.equal(retried.status, "COMPLETED");
     assert.equal(concurrency.generation.calls, 1);
     assert.equal(Number((concurrency.database.client.prepare("select count(*) as count from ai_eval_case_results where run_id=?").get(run.id) as { count: number }).count), 1);
+    assert.equal((concurrency.database.client.prepare("select safe_failure_code from ai_eval_case_executions where id=?").get(retried.executionId) as { safe_failure_code: string | null }).safe_failure_code, null);
+    assert.equal((concurrency.database.client.prepare("select elapsed_latency_ms from ai_eval_case_results where run_id=?").get(run.id) as { elapsed_latency_ms: number }).elapsed_latency_ms, 100);
+    assert.equal(concurrency.evalRuns.completeRun(concurrency.evalRuns.beginScoring(run.id, BASE_TIME + 32_000).id, BASE_TIME + 32_001).report.gates.find((gate) => gate.gateKey === "MAX_LATENCY_MS")?.verdict, "PASS");
   } finally { concurrency.close(); }
+});
+
+test("M9B1 transaction-only Conversation creation helper fails closed outside a transaction", async () => {
+  const f = await createTargetFixture();
+  try {
+    const principal = { principalRef: `eval-target-${uuidv7().replace(/-/gu, "")}`, status: "ACTIVE" as const };
+    const conversationId = uuidv7();
+    assert.throws(() => f.conversations.createConversationInTransaction(principal, { conversationId, subjectKey: "biology", createdAt: BASE_TIME + 22 }), /transaction/i);
+    const conversation = f.database.client.transaction(() => f.conversations.createConversationInTransaction(principal, { conversationId, subjectKey: "biology", createdAt: BASE_TIME + 22 }))();
+    assert.equal(conversation.id, conversationId);
+    f.conversations.deleteConversation(principal, conversationId);
+  } finally { f.close(); }
 });
