@@ -150,7 +150,8 @@ export class AITutorExecutionService {
         return this.result(plan, cancelled ? "CANCELLED" : "FAILED", cancelled ? "CANCELLED" : "FAILED", trace.id, operationContext.operation.id, reservation.id, settlement, plan.conversationId);
       }
 
-      return this.runGeneration(plan, generationPlan, activeTrace, operationContext.operation, reservation.id, linked);
+      const result = await this.runGeneration(plan, generationPlan, activeTrace, operationContext.operation, reservation.id, linked);
+      return result;
     } catch (error) {
       if (error instanceof AITutorExecutionError) throw error;
       throw mapExecutionError(error);
