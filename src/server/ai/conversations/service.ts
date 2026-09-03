@@ -66,14 +66,36 @@ export class AIConversationService {
 
   createConversation(principal: AIStudentPrincipal, subjectKey: string): AIConversation {
     const activePrincipal = assertActiveStudentPrincipal(principal);
-    const subject = this.requireSubject(subjectKey);
     const now = this.safeNow();
-    return this.database.client.transaction(() => this.repository.insertConversation({
-      id: this.idFactory(),
-      principalRef: activePrincipal.principalRef,
-      subjectKey: subject.subjectKey,
+    return this.database.client.transaction(() => this.createConversationInTransaction(activePrincipal, {
+      conversationId: this.idFactory(),
+      subjectKey,
       createdAt: now,
     }))();
+  }
+
+  /**
+   * Creates a Conversation without opening a nested transaction. Callers must
+   * use this only inside their own transaction when they need to bind another
+   * durable owner atomically. The same principal/subject validation as the
+   * normal creation path is always applied.
+   */
+  createConversationInTransaction(
+    principal: AIStudentPrincipal,
+    input: { conversationId: string; subjectKey: string; createdAt: number },
+  ): AIConversation {
+    const activePrincipal = assertActiveStudentPrincipal(principal);
+    const subject = this.requireSubject(input.subjectKey);
+    const conversationId = normalizeConversationId(input.conversationId);
+    if (!Number.isSafeInteger(input.createdAt) || input.createdAt < 0) {
+      throw new AIConversationError("AI_CONVERSATION_INVALID", "The Conversation timestamp is invalid.");
+    }
+    return this.repository.insertConversation({
+      id: conversationId,
+      principalRef: activePrincipal.principalRef,
+      subjectKey: subject.subjectKey,
+      createdAt: input.createdAt,
+    });
   }
 
   beginTurn(principal: AIStudentPrincipal, input: AIBeginTurnInput): AIBeginTurnResult {

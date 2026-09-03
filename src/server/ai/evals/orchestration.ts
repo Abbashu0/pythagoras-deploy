@@ -11,9 +11,11 @@ import { SQLiteAIEvalExecutionConfigRepository, fingerprintAIEvalExecutionConfig
 import { SQLiteAIEvalRunRepository } from "./runs";
 import { SQLiteAIEvalSuiteRepository } from "./configuration";
 import type { AIEvalTargetExecutionService } from "./target-execution";
+import { AIEvalTargetCleanupService } from "./target-cleanup";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const MAX_TIMESTAMP = 8_640_000_000_000_000;
+export const AI_EVAL_TARGET_SCHEDULING_BATCH_SIZE = 100;
 
 export interface AIEvalTargetScheduleResult {
   runId: string;
@@ -22,6 +24,11 @@ export interface AIEvalTargetScheduleResult {
   maxConcurrency: number;
   executionIds: readonly string[];
   jobIds: readonly string[];
+  scheduledThisBatch: number;
+  totalExpected: number;
+  totalScheduled: number;
+  remaining: number;
+  schedulingComplete: boolean;
 }
 
 export interface AIEvalTargetCoverage {
@@ -75,9 +82,13 @@ export class AIEvalTargetOrchestrator {
       }
       const executionIds: string[] = [];
       const jobIds: string[] = [];
+      let scheduledThisBatch = 0;
+      const knownExecutions = new Map<string, AIEvalCaseExecution>(this.executions.listForRun(run.id).map((execution) => [`${execution.caseId}\u0000${execution.caseRevision}`, execution]));
       for (const entry of suite.caseManifest) {
-        let execution = this.executions.getForTarget({ runId: run.id, caseId: entry.caseId, caseRevision: entry.caseRevision });
+        const executionKey = `${entry.caseId}\u0000${entry.caseRevision}`;
+        let execution = knownExecutions.get(executionKey) ?? null;
         if (!execution) {
+          if (scheduledThisBatch >= AI_EVAL_TARGET_SCHEDULING_BATCH_SIZE) break;
           execution = this.executions.create({
             runId: run.id,
             caseId: entry.caseId,
@@ -91,6 +102,7 @@ export class AIEvalTargetOrchestrator {
             executionProtocolRevision: config.protocolRevision,
             cleanupProtocolKey: config.cleanupProtocolKey,
             cleanupProtocolRevision: config.cleanupProtocolRevision,
+            admissionAttempt: 0,
             targetCostOperationId: null,
             budgetReservationId: null,
             jobId: null,
@@ -109,9 +121,15 @@ export class AIEvalTargetOrchestrator {
             completedAt: null,
             updatedAt: now,
           });
+          knownExecutions.set(executionKey, execution);
         }
-        executionIds.push(execution.id);
-        if (execution.jobId) { jobIds.push(execution.jobId); continue; }
+        if (execution.jobId) {
+          if (scheduledThisBatch === 0 && executionIds.length < AI_EVAL_TARGET_SCHEDULING_BATCH_SIZE) {
+            executionIds.push(execution.id);
+            jobIds.push(execution.jobId);
+          }
+          continue;
+        }
         const job = this.dependencies.jobs.enqueueInTransaction({
           kind: AI_EVAL_TARGET_JOB_KIND,
           payloadVersion: AI_EVAL_TARGET_JOB_PAYLOAD_VERSION,
@@ -128,9 +146,18 @@ export class AIEvalTargetOrchestrator {
           scheduledAt: now,
         }, now);
         execution = this.executions.bindJob(execution.id, job.id, now);
+        knownExecutions.set(executionKey, execution);
+        if (scheduledThisBatch === 0) {
+          executionIds.length = 0;
+          jobIds.length = 0;
+        }
+        executionIds.push(execution.id);
         jobIds.push(job.id);
+        scheduledThisBatch += 1;
       }
-      return { runId: run.id, executionConfigId: config.executionConfigId, executionConfigRevision: config.revision, maxConcurrency: config.maxConcurrency, executionIds, jobIds };
+      const totalExpected = suite.caseManifest.length;
+      const totalScheduled = [...knownExecutions.values()].filter((candidate) => candidate.jobId !== null).length;
+      return { runId: run.id, executionConfigId: config.executionConfigId, executionConfigRevision: config.revision, maxConcurrency: config.maxConcurrency, executionIds, jobIds, scheduledThisBatch, totalExpected, totalScheduled, remaining: totalExpected - totalScheduled, schedulingComplete: totalScheduled === totalExpected };
     }).immediate();
   }
 
@@ -144,7 +171,8 @@ export class AIEvalTargetOrchestrator {
     const terminal = executions.filter((execution) => ["COMPLETED", "BLOCKED", "FAILED", "CANCELLED", "AMBIGUOUS"].includes(execution.status)).length;
     const nonAmbiguous = executions.filter((execution) => execution.status !== "AMBIGUOUS" && ["COMPLETED", "BLOCKED", "FAILED", "CANCELLED"].includes(execution.status)).length;
     const observed = results.filter((result) => suite.caseManifest.some((entry) => entry.caseId === result.caseId && entry.caseRevision === result.caseRevision && entry.ordinal === result.ordinal)).length;
-    const complete = executions.length === suite.caseManifest.length && nonAmbiguous === suite.caseManifest.length && observed === suite.caseManifest.length && suite.caseManifest.every((entry) => executions.some((execution) => execution.caseId === entry.caseId && execution.caseRevision === entry.caseRevision && execution.ordinal === entry.ordinal) && results.some((result) => result.caseId === entry.caseId && result.caseRevision === entry.caseRevision && result.ordinal === entry.ordinal));
+    const pendingCleanup = new AIEvalTargetCleanupService({ database: this.dependencies.database, executions: this.executions }).pendingCountForRun(runId);
+    const complete = executions.length === suite.caseManifest.length && nonAmbiguous === suite.caseManifest.length && observed === suite.caseManifest.length && pendingCleanup === 0 && suite.caseManifest.every((entry) => executions.some((execution) => execution.caseId === entry.caseId && execution.caseRevision === entry.caseRevision && execution.ordinal === entry.ordinal && execution.jobId !== null) && results.some((result) => result.caseId === entry.caseId && result.caseRevision === entry.caseRevision && result.ordinal === entry.ordinal));
     return { runId, expected: suite.caseManifest.length, terminal, nonAmbiguous, observed, complete };
   }
 }
@@ -165,9 +193,10 @@ export function createAIEvalTargetExecutionJobHandler(executor: Pick<AIEvalTarge
       context.checkLease();
       if (context.signal.aborted) throw new AIJobExecutionError("AI_JOB_CANCELLED", false);
       try {
-        await executor.execute({ runId: payload.runId as string, caseId: payload.caseId as string, executionConfigId: payload.executionConfigId as string, executionConfigRevision: payload.executionConfigRevision as number, caseRevision: payload.caseRevision as number, signal: context.signal, checkLease: context.checkLease });
+        const result = await executor.execute({ runId: payload.runId as string, caseId: payload.caseId as string, executionConfigId: payload.executionConfigId as string, executionConfigRevision: payload.executionConfigRevision as number, caseRevision: payload.caseRevision as number, signal: context.signal, checkLease: context.checkLease });
+        if (result.status === "PENDING") throw new AIJobExecutionError("AI_EVAL_TARGET_ADMISSION_RETRYABLE", true);
       } catch (error) {
-        if (error instanceof AIEvalError && error.code === "AI_EVAL_TARGET_CONCURRENCY_LIMITED") throw new AIJobExecutionError("AI_EVAL_TARGET_CONCURRENCY_LIMITED", true);
+        if (error instanceof AIEvalError && (error.code === "AI_EVAL_TARGET_CONCURRENCY_LIMITED" || error.code === "AI_EVAL_TARGET_ADMISSION_RETRYABLE")) throw new AIJobExecutionError(error.code, true);
         throw error;
       }
     },
@@ -181,6 +210,7 @@ export function registerAIEvalTargetExecutionHandler(registry: AIJobHandlerRegis
 /** Terminal recovery reads Case Execution ownership, never the Job payload. */
 export class AIEvalTargetTerminalReconciler {
   private readonly executions: AIEvalCaseExecutionRepository;
+  private readonly cleanup: AIEvalTargetCleanupService;
 
   constructor(
     private readonly dependencies: {
@@ -191,25 +221,32 @@ export class AIEvalTargetTerminalReconciler {
       admission: Pick<AIBudgetAdmissionService, "getReservation" | "releaseBeforeExecution" | "settle">;
       evalRuns?: import("./service").AIEvalRunService;
       cases?: import("./configuration").SQLiteAIEvalCaseRepository;
+      cleanup?: AIEvalTargetCleanupService;
       clock?: () => number;
     },
-  ) { this.executions = dependencies.executions ?? new SQLiteAIEvalCaseExecutionRepository(dependencies.database); }
+  ) {
+    this.executions = dependencies.executions ?? new SQLiteAIEvalCaseExecutionRepository(dependencies.database);
+    this.cleanup = dependencies.cleanup ?? new AIEvalTargetCleanupService({ database: dependencies.database, executions: this.executions, clock: dependencies.clock });
+  }
 
   reconcile(job: import("../operations/jobs").AIJob, now: number): void {
     if (job.kind !== AI_EVAL_TARGET_JOB_KIND || job.payloadVersion !== AI_EVAL_TARGET_JOB_PAYLOAD_VERSION || job.costOperationId !== null || !["DEAD_LETTER", "CANCELLED"].includes(job.status)) return;
     const execution = this.executions.getByJob(job.id);
     if (!execution || ["COMPLETED", "BLOCKED", "FAILED", "CANCELLED", "AMBIGUOUS"].includes(execution.status)) return;
     const mayHaveInvoked = execution.providerInvoked || execution.providerInvocationState !== "NOT_INVOKED";
+    const operationalAdmissionRetry = execution.safeFailureCode === "EVAL_ADMISSION_RETRYABLE";
     this.reconcileFinancials(execution, now);
     const updated = mayHaveInvoked
       ? this.executions.ambiguous({ id: execution.id, safeFailureCode: "EVAL_TARGET_PROVIDER_AMBIGUOUS", now })
       : job.status === "CANCELLED"
         ? this.executions.cancel({ id: execution.id, providerInvoked: false, safeFailureCode: "EVAL_TARGET_JOB_CANCELLED", now })
         : this.executions.fail({ id: execution.id, providerInvoked: false, safeFailureCode: "EVAL_TARGET_JOB_DEAD_LETTER", now });
-    this.recordRecoveryObservation(updated);
+    if (!operationalAdmissionRetry) this.recordRecoveryObservation(updated, now);
+    this.cleanup.cleanupForExecution(updated.id, now);
   }
 
   reconcilePending(input: { limit: number; now: number }): { scanned: number; reconciled: number; skipped: number } {
+    const cleanupResult = this.cleanup.reconcilePending(input);
     const pending = this.executions.listPendingTerminalReconciliation(input.limit);
     let reconciled = 0;
     let skipped = 0;
@@ -219,7 +256,7 @@ export class AIEvalTargetTerminalReconciler {
       if (!job || (job.status !== "DEAD_LETTER" && job.status !== "CANCELLED")) { skipped += 1; continue; }
       try { this.reconcile(job, input.now); reconciled += 1; } catch { skipped += 1; }
     }
-    return { scanned: pending.length, reconciled, skipped };
+    return { scanned: cleanupResult.scanned + pending.length, reconciled: cleanupResult.reconciled + reconciled, skipped: cleanupResult.skipped + skipped };
   }
 
   private reconcileFinancials(execution: AIEvalCaseExecution, now: number): void {
@@ -234,10 +271,11 @@ export class AIEvalTargetTerminalReconciler {
     }
   }
 
-  private recordRecoveryObservation(execution: AIEvalCaseExecution): void {
+  private recordRecoveryObservation(execution: AIEvalCaseExecution, now: number): void {
     if (!this.dependencies.evalRuns) return;
+    const elapsedLatencyMs = execution.startedAt !== null && now >= execution.startedAt && now - execution.startedAt <= 8_640_000_000_000 ? now - execution.startedAt : null;
     try {
-      this.dependencies.evalRuns.recordObservationAndGrade({ runId: execution.runId, caseId: execution.caseId, caseRevision: execution.caseRevision, observedSubjectKey: execution.subjectKey, observedStatus: execution.status === "CANCELLED" ? "CANCELLED" : execution.status === "BLOCKED" ? "BLOCKED" : "FAILED", finishReason: execution.status === "CANCELLED" ? "CANCELLED" : "FAILED", outputText: "", citationMap: [], evidence: [], retrievalStatus: "NOT_APPLICABLE", outputBytes: 0, elapsedLatencyMs: null, costOperationId: execution.targetCostOperationId, groundingProtocolKey: "evidence-grounded-v1", groundingProtocolRevision: 1, citationProtocolKey: "evidence-ref-v1", citationProtocolRevision: 1 }, this.dependencies.clock?.() ?? Date.now());
+      this.dependencies.evalRuns.recordObservationAndGrade({ runId: execution.runId, caseId: execution.caseId, caseRevision: execution.caseRevision, observedSubjectKey: execution.subjectKey, observedStatus: execution.status === "CANCELLED" ? "CANCELLED" : execution.status === "BLOCKED" ? "BLOCKED" : "FAILED", finishReason: execution.status === "CANCELLED" ? "CANCELLED" : "FAILED", outputText: "", citationMap: [], evidence: [], retrievalStatus: "NOT_APPLICABLE", outputBytes: 0, elapsedLatencyMs, costOperationId: execution.targetCostOperationId, groundingProtocolKey: "evidence-grounded-v1", groundingProtocolRevision: 1, citationProtocolKey: "evidence-ref-v1", citationProtocolRevision: 1 }, now);
     } catch { /* duplicate/terminal Run state is a safe idempotent no-op */ }
   }
 }

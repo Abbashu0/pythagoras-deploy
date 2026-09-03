@@ -13,6 +13,7 @@ import {
   AIEvalRunService,
   AIEvalTargetOrchestrator,
   AIEvalTargetTerminalReconciler,
+  AI_EVAL_TARGET_SCHEDULING_BATCH_SIZE,
   AI_EVAL_EXECUTION_CONFIG_RESOURCE_TYPE,
   AI_EVAL_TARGET_JOB_KIND,
   AI_EVAL_TARGET_JOB_PAYLOAD_VERSION,
@@ -23,6 +24,7 @@ import {
   type AIEvalCaseContent,
   SQLiteAIEvalRunRepository,
   normalizeAIEvalCandidateSnapshot,
+  fingerprintAIEvalExecutionConfig,
 } from "../src/server/ai/evals";
 import { SQLiteAIRateLimitPolicyRepository } from "../src/server/ai/rate-limits";
 import { SQLiteAIAccountingRepository } from "../src/server/ai/economics";
@@ -205,8 +207,10 @@ test("M9B1 bounded terminal recovery drains a backlog larger than one batch", ()
     const handlers = new AIJobHandlerRegistry();
     handlers.register({ kind: AI_EVAL_TARGET_JOB_KIND, payloadVersion: AI_EVAL_TARGET_JOB_PAYLOAD_VERSION, validatePayload: (value) => value as Record<string, unknown>, execute: () => undefined });
     const jobs = new AIJobQueueService(f.database, handlers, { clock: () => BASE_TIME + 202 });
-    const scheduled = new AIEvalTargetOrchestrator({ database: f.database, jobs, clock: () => BASE_TIME + 202 }).scheduleRun({ runId: run.id, executionConfigId: createExecutionConfig(f), executionConfigRevision: 1, createdBy: f.owner.actorUserId, now: BASE_TIME + 202 });
-    f.database.client.prepare("update ai_jobs set status='DEAD_LETTER', last_error_code='AI_JOB_TIMEOUT' where id=?").run(scheduled.jobIds[0]);
+    const orchestrator = new AIEvalTargetOrchestrator({ database: f.database, jobs, clock: () => BASE_TIME + 202 });
+    const executionConfigId = createExecutionConfig(f);
+    let scheduled = orchestrator.scheduleRun({ runId: run.id, executionConfigId, executionConfigRevision: 1, createdBy: f.owner.actorUserId, now: BASE_TIME + 202 });
+    while (!scheduled.schedulingComplete) scheduled = orchestrator.scheduleRun({ runId: run.id, executionConfigId, executionConfigRevision: 1, createdBy: f.owner.actorUserId, now: BASE_TIME + 202 });
     f.database.client.prepare("update ai_jobs set status='DEAD_LETTER', last_error_code='AI_JOB_TIMEOUT' where kind=?").run(AI_EVAL_TARGET_JOB_KIND);
     const accounting = new SQLiteAIAccountingRepository(f.database);
     const reconciler = new AIEvalTargetTerminalReconciler({ database: f.database, jobs, executions: new SQLiteAIEvalCaseExecutionRepository(f.database), accounting: { getOperation: (id) => accounting.getOperation(id), completeOperation: (id, expectedStatus, status, completedAt) => accounting.updateOperationStatus({ id, expectedStatus, status, completedAt }) }, admission: new AIBudgetAdmissionService(f.database, { clock: () => BASE_TIME + 203 }), evalRuns: new AIEvalRunService(f.database), clock: () => BASE_TIME + 203 });
@@ -220,9 +224,9 @@ test("M9B1 bounded terminal recovery drains a backlog larger than one batch", ()
   } finally { f.close(); }
 });
 
-test("0033 to 0034 preserves populated M9A data and installs target tables", () => {
+test("0034 to 0035 preserves populated M9B1 data and installs durable cleanup/retry state", () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "pythagoras-ai-m9b1-upgrade-"));
-  const previous = createMigrationDirectory("pythagoras-ai-m9b1-0033-", 34);
+    const previous = createMigrationDirectory("pythagoras-ai-m9b1-0034-", 35);
   let oldDatabase: ContentDatabase | null = null;
   let upgraded: ContentDatabase | null = null;
   try {
@@ -235,15 +239,64 @@ test("0033 to 0034 preserves populated M9A data and installs target tables", () 
     new SQLiteAIEvalCaseRepository(oldDatabase).create({ id: caseId, content: caseContent("m9b1.upgrade.case"), actor, now: BASE_TIME + 1 });
     const suiteId = uuidv7();
     new SQLiteAIEvalSuiteRepository(oldDatabase).create({ id: suiteId, content: { key: "m9b1.upgrade.suite", subjectKey: "biology", displayName: "Upgrade suite", enabled: true, caseManifest: [{ ordinal: 1, caseId, caseRevision: 1 }], requiredDimensions: [{ dimension: "RELEVANCE", mode: "NOT_APPLICABLE" }], graderConfigs: [], gateConfig: { minimumScores: [], maximumCostNano: null, maximumLatencyMs: null, requireSecurityPass: false }, permittedRegressionDeltas: [], baselineMode: "OPTIONAL", supplementaryJudgeConfig: null }, actor, now: BASE_TIME + 2 });
-    assert.equal(Number((oldDatabase.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count), 34);
+    const budgetPolicyId = uuidv7();
+    new SQLiteAIBudgetPolicyRepository(oldDatabase).create({ id: budgetPolicyId, content: { key: `m9b1.upgrade.budget.${uuidv7()}`, displayName: "Upgrade budget", currency: "USD", costCenter: "EVALS", hardCapNano: 10_000_000, enabled: true }, actor, now: BASE_TIME + 3 });
+    const rateLimitPolicyId = uuidv7();
+    new SQLiteAIRateLimitPolicyRepository(oldDatabase).create({ id: rateLimitPolicyId, content: { key: `m9b1.upgrade.rate.${uuidv7()}`, displayName: "Upgrade rate", windowMs: 60_000, maxRequests: 100, maxConcurrentRequests: 100, enabled: true }, actor, now: BASE_TIME + 3 });
+    const executionConfigId = uuidv7();
+    const executionConfig = new SQLiteAIEvalExecutionConfigRepository(oldDatabase).create({ id: executionConfigId, content: { key: `m9b1.upgrade.config.${uuidv7()}`, subjectKey: "biology", displayName: "Upgrade execution config", enabled: true, budgetPolicyId, budgetPolicyRevision: 1, rateLimitPolicyId, rateLimitPolicyRevision: 1, protocolKey: "eval-target-v1", protocolRevision: 1, targetTimeoutMs: 30_000, maxConcurrency: 1, cleanupProtocolKey: "synthetic-c4-cleanup-v1", cleanupProtocolRevision: 1 }, actor, now: BASE_TIME + 4 });
+    const run = new AIEvalRunService(oldDatabase).createRun({ id: uuidv7(), suiteId, suiteRevision: 1, candidateSnapshot: candidateSnapshot(), createdAt: BASE_TIME + 5 });
+    const runRepository = new SQLiteAIEvalRunRepository(oldDatabase);
+    runRepository.bindExecutionConfig({ runId: run.id, executionConfigId, executionConfigRevision: 1, executionConfigFingerprint: fingerprintAIEvalExecutionConfig(executionConfig), createdAt: BASE_TIME + 5, createdBy: actor.actorUserId });
+    runRepository.transition({ id: run.id, expectedStatus: "CREATED", status: "RUNNING", startedAt: BASE_TIME + 5, updatedAt: BASE_TIME + 5 });
+    const executionId = uuidv7();
+    oldDatabase.client.prepare("insert into ai_eval_case_executions (id,run_id,case_id,case_revision,ordinal,subject_key,execution_config_id,execution_config_revision,execution_config_fingerprint,execution_protocol_key,execution_protocol_revision,cleanup_protocol_key,cleanup_protocol_revision,target_cost_operation_id,budget_reservation_id,job_id,status,provider_invocation_state,provider_invoked,output_sha256,output_byte_size,finish_reason,retrieval_status,candidate_fingerprint,plan_fingerprint,safe_failure_code,created_at,started_at,completed_at,updated_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(executionId, run.id, caseId, 1, 1, "biology", executionConfigId, 1, fingerprintAIEvalExecutionConfig(executionConfig), executionConfig.protocolKey, executionConfig.protocolRevision, executionConfig.cleanupProtocolKey, executionConfig.cleanupProtocolRevision, null, null, null, "PENDING", "NOT_INVOKED", 0, null, null, null, null, run.candidateFingerprint, null, null, BASE_TIME + 6, null, null, BASE_TIME + 6);
+    assert.equal(Number((oldDatabase.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count), 35);
     oldDatabase.close(); oldDatabase = null;
     upgraded = openContentDatabase({ dataDirectory: root, migrationsDirectory });
-    assert.equal(Number((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count), 35);
+    assert.equal(Number((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count), 36);
     assert.ok(upgraded.client.prepare("select id from ai_eval_cases where id=?").get(caseId));
     assert.ok(upgraded.client.prepare("select id from ai_eval_suites where id=?").get(suiteId));
-    for (const table of ["ai_eval_execution_configs", "ai_eval_execution_config_revisions", "ai_eval_run_execution_bindings", "ai_eval_case_executions"]) assert.ok(upgraded.client.prepare("select name from sqlite_master where type='table' and name=?").get(table));
+    assert.deepEqual(upgraded.client.prepare("select status, admission_attempt, execution_config_id, execution_config_revision, case_id, ordinal from ai_eval_case_executions where id=?").get(executionId), { status: "PENDING", admission_attempt: 0, execution_config_id: executionConfigId, execution_config_revision: 1, case_id: caseId, ordinal: 1 });
+    for (const table of ["ai_eval_execution_configs", "ai_eval_execution_config_revisions", "ai_eval_run_execution_bindings", "ai_eval_case_executions", "ai_eval_target_cleanups"]) assert.ok(upgraded.client.prepare("select name from sqlite_master where type='table' and name=?").get(table));
+    assert.equal((upgraded.client.prepare("pragma table_info(ai_eval_case_executions)").all() as Array<{ name: string }>).some((column) => column.name === "admission_attempt"), true);
     assert.ok(upgraded.client.prepare("select name from sqlite_master where type='trigger' and name='ai_eval_case_executions_insert_valid'").get());
   } finally { oldDatabase?.close(); upgraded?.close(); rmSync(root, { recursive: true, force: true }); rmSync(previous, { recursive: true, force: true }); }
+});
+
+test("M9B1 schedules a 10,000-case manifest in bounded deterministic batches", () => {
+  const f = fixture();
+  try {
+    const cases = new SQLiteAIEvalCaseRepository(f.database);
+    const suites = new SQLiteAIEvalSuiteRepository(f.database);
+    const manifest = Array.from({ length: 10_000 }, (_, index) => {
+      const caseId = uuidv7();
+      cases.create({ id: caseId, content: { ...caseContent(`m9b1.schedule.case.${index}.${uuidv7()}`), inputText: `bounded target ${index}` }, actor: f.owner, now: BASE_TIME + index });
+      return { ordinal: index + 1, caseId, caseRevision: 1 };
+    });
+    const suiteId = uuidv7();
+    suites.create({ id: suiteId, content: { key: `m9b1.schedule.suite.${uuidv7()}`, subjectKey: "biology", displayName: "Bounded schedule suite", enabled: true, caseManifest: manifest, requiredDimensions: [{ dimension: "RELEVANCE", mode: "NOT_APPLICABLE" }], graderConfigs: [], gateConfig: { minimumScores: [], maximumCostNano: null, maximumLatencyMs: null, requireSecurityPass: false }, permittedRegressionDeltas: [], baselineMode: "OPTIONAL", supplementaryJudgeConfig: null }, actor: f.owner, now: BASE_TIME + 10_001 });
+    const run = new AIEvalRunService(f.database).createRun({ id: uuidv7(), suiteId, suiteRevision: 1, candidateSnapshot: candidateSnapshot(), createdAt: BASE_TIME + 10_002 });
+    const configId = createExecutionConfig(f);
+    const handlers = new AIJobHandlerRegistry();
+    handlers.register({ kind: AI_EVAL_TARGET_JOB_KIND, payloadVersion: AI_EVAL_TARGET_JOB_PAYLOAD_VERSION, validatePayload: (value) => value as Record<string, unknown>, execute: () => undefined });
+    const jobs = new AIJobQueueService(f.database, handlers, { clock: () => BASE_TIME + 10_003 });
+    const orchestrator = new AIEvalTargetOrchestrator({ database: f.database, jobs, clock: () => BASE_TIME + 10_003 });
+    let progress = orchestrator.scheduleRun({ runId: run.id, executionConfigId: configId, executionConfigRevision: 1, createdBy: f.owner.actorUserId, now: BASE_TIME + 10_003 });
+    assert.ok(progress.scheduledThisBatch <= AI_EVAL_TARGET_SCHEDULING_BATCH_SIZE);
+    assert.equal(Number((f.database.client.prepare("select count(*) as count from ai_eval_case_executions where run_id=?").get(run.id) as { count: number }).count), AI_EVAL_TARGET_SCHEDULING_BATCH_SIZE);
+    assert.equal(Number((f.database.client.prepare("select count(*) as count from ai_jobs where kind=?").get(AI_EVAL_TARGET_JOB_KIND) as { count: number }).count), AI_EVAL_TARGET_SCHEDULING_BATCH_SIZE);
+    while (!progress.schedulingComplete) progress = orchestrator.scheduleRun({ runId: run.id, executionConfigId: configId, executionConfigRevision: 1, createdBy: f.owner.actorUserId, now: BASE_TIME + 10_003 });
+    assert.equal(progress.totalScheduled, 10_000);
+    assert.equal(progress.remaining, 0);
+    assert.equal(Number((f.database.client.prepare("select count(*) as count from ai_eval_case_executions where run_id=?").get(run.id) as { count: number }).count), 10_000);
+    assert.equal(Number((f.database.client.prepare("select count(*) as count from ai_jobs where kind=?").get(AI_EVAL_TARGET_JOB_KIND) as { count: number }).count), 10_000);
+    assert.equal(Number((f.database.client.prepare("select count(*) as count from ai_eval_case_executions where run_id=? and ordinal between 1 and 10000").get(run.id) as { count: number }).count), 10_000);
+    const rerun = orchestrator.scheduleRun({ runId: run.id, executionConfigId: configId, executionConfigRevision: 1, createdBy: f.owner.actorUserId, now: BASE_TIME + 10_004 });
+    assert.equal(rerun.scheduledThisBatch, 0);
+    assert.equal(rerun.schedulingComplete, true);
+    assert.equal(Number((f.database.client.prepare("select count(*) as count from ai_jobs where kind=?").get(AI_EVAL_TARGET_JOB_KIND) as { count: number }).count), 10_000);
+  } finally { f.close(); }
 });
 
 function createMigrationDirectory(prefix: string, count: number): string {

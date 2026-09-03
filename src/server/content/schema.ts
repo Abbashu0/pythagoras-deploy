@@ -122,6 +122,7 @@ import type {
   AIEvalResultVerdict,
   AIEvalRunStatus,
   AIEvalSourceRevisionReference,
+  AIEvalTargetCleanupStatus,
 } from "../ai/evals/contracts";
 import {
   AI_RETRIEVAL_FUSION_ALGORITHM_KEY,
@@ -3690,6 +3691,7 @@ export const aiEvalCaseExecutions = sqliteTable(
     executionProtocolRevision: integer("execution_protocol_revision").notNull(),
     cleanupProtocolKey: text("cleanup_protocol_key").notNull(),
     cleanupProtocolRevision: integer("cleanup_protocol_revision").notNull(),
+    admissionAttempt: integer("admission_attempt").notNull().default(0),
     targetCostOperationId: text("target_cost_operation_id").references(() => aiCostOperations.id, { onDelete: "restrict" }),
     budgetReservationId: text("budget_reservation_id").references(() => aiBudgetReservations.id, { onDelete: "restrict" }),
     jobId: text("job_id").references(() => aiJobs.id, { onDelete: "restrict" }),
@@ -3719,6 +3721,7 @@ export const aiEvalCaseExecutions = sqliteTable(
     check("ai_eval_case_executions_case_revision_valid", sql`${table.caseRevision} >= 1 and ${table.ordinal} between 1 and 10000`),
     check("ai_eval_case_executions_subject_valid", sql`length(trim(${table.subjectKey})) between 1 and 80`),
     check("ai_eval_case_executions_config_revision_valid", sql`${table.executionConfigRevision} >= 1`),
+    check("ai_eval_case_executions_admission_attempt_valid", sql`${table.admissionAttempt} between 0 and 100`),
     check("ai_eval_case_executions_fingerprints_valid", sql`length(${table.executionConfigFingerprint}) = 64 and ${table.executionConfigFingerprint} not glob '*[^0-9a-f]*' and length(${table.candidateFingerprint}) = 64 and ${table.candidateFingerprint} not glob '*[^0-9a-f]*' and (${table.planFingerprint} is null or (length(${table.planFingerprint}) = 64 and ${table.planFingerprint} not glob '*[^0-9a-f]*'))`),
     check("ai_eval_case_executions_status_valid", sql`${table.status} in ('PENDING','RUNNING','COMPLETED','BLOCKED','FAILED','CANCELLED','AMBIGUOUS')`),
     check("ai_eval_case_executions_invocation_state_valid", sql`${table.providerInvocationState} in ('NOT_INVOKED','INVOKING','INVOKED_WITH_ACCOUNTING','AMBIGUOUS')`),
@@ -3728,6 +3731,29 @@ export const aiEvalCaseExecutions = sqliteTable(
     check("ai_eval_case_executions_retrieval_valid", sql`${table.retrievalStatus} is null or ${table.retrievalStatus} in ('SUFFICIENT','INSUFFICIENT','NOT_APPLICABLE')`),
     check("ai_eval_case_executions_protocol_valid", sql`length(trim(${table.executionProtocolKey})) between 1 and 120 and ${table.executionProtocolRevision} >= 1 and length(trim(${table.cleanupProtocolKey})) between 1 and 120 and ${table.cleanupProtocolRevision} >= 1`),
     check("ai_eval_case_executions_timestamps_valid", sql`${table.createdAt} >= 0 and ${table.updatedAt} >= ${table.createdAt} and (${table.startedAt} is null or ${table.startedAt} >= ${table.createdAt}) and (${table.completedAt} is null or ${table.completedAt} >= ${table.createdAt})`),
+  ],
+);
+
+/** Durable ownership binding for the server-owned synthetic M4 Conversation. */
+export const aiEvalTargetCleanups = sqliteTable(
+  "ai_eval_target_cleanups",
+  {
+    id: text("id").primaryKey(),
+    caseExecutionId: text("case_execution_id").notNull().references(() => aiEvalCaseExecutions.id, { onDelete: "restrict" }),
+    syntheticConversationId: text("synthetic_conversation_id").notNull().references(() => aiConversations.id, { onDelete: "restrict" }),
+    status: text("status").$type<AIEvalTargetCleanupStatus>().notNull(),
+    safeFailureCode: text("safe_failure_code"),
+    createdAt: integer("created_at").notNull(),
+    cleanedAt: integer("cleaned_at"),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    index("ai_eval_target_cleanups_execution_index").on(table.caseExecutionId),
+    uniqueIndex("ai_eval_target_cleanups_conversation_unique").on(table.syntheticConversationId),
+    index("ai_eval_target_cleanups_status_index").on(table.status, table.updatedAt),
+    check("ai_eval_target_cleanups_status_valid", sql`${table.status} in ('PENDING','CLEANED')`),
+    check("ai_eval_target_cleanups_timestamps_valid", sql`${table.createdAt} >= 0 and ${table.updatedAt} >= ${table.createdAt} and (${table.cleanedAt} is null or ${table.cleanedAt} >= ${table.createdAt})`),
+    check("ai_eval_target_cleanups_error_valid", sql`${table.safeFailureCode} is null or (length(trim(${table.safeFailureCode})) between 1 and 120 and ${table.safeFailureCode} not glob '*[^A-Z0-9_.-]*')`),
   ],
 );
 
@@ -3804,3 +3830,4 @@ export type AIEvalExecutionConfigRow = typeof aiEvalExecutionConfigs.$inferSelec
 export type AIEvalExecutionConfigRevisionRow = typeof aiEvalExecutionConfigRevisions.$inferSelect;
 export type AIEvalRunExecutionBindingRow = typeof aiEvalRunExecutionBindings.$inferSelect;
 export type AIEvalCaseExecutionRow = typeof aiEvalCaseExecutions.$inferSelect;
+export type AIEvalTargetCleanupRow = typeof aiEvalTargetCleanups.$inferSelect;

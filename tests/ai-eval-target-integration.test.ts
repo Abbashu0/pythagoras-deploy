@@ -35,6 +35,9 @@ import {
 import {
   AIEvalRunService,
   AIEvalTargetExecutionService,
+  AIEvalTargetCleanupService,
+  SQLiteAIEvalTargetCleanupRepository,
+  syntheticPrincipal,
   AIEvalTargetOrchestrator,
   createAIEvalTargetExecutionJobHandler,
   AI_EVAL_GRADER_KEYS,
@@ -43,6 +46,7 @@ import {
   AI_EVAL_SUITE_RESOURCE_TYPE,
   normalizeAIEvalCandidateSnapshot,
   SQLiteAIEvalExecutionConfigRepository,
+  SQLiteAIEvalCaseExecutionRepository,
   SQLiteAIEvalRunRepository,
 } from "../src/server/ai/evals";
 import { SQLiteAIKnowledgePackageRepository, SQLiteAIKnowledgeSourceRepository, type AIKnowledgeSourceContent } from "../src/server/ai/knowledge";
@@ -82,11 +86,13 @@ class TargetGenerationAdapter implements GenerationProviderAdapter {
   usageEvents: NormalizedProviderUsage[] = [];
   finalUsage = usage(18, 3);
   failure: "UNAVAILABLE" | "TIMEOUT" | "AUTHENTICATION" | null = null;
+  onCall: (() => void) | null = null;
   private startedResolver: (() => void) | null = null;
   readonly started = new Promise<void>((resolve) => { this.startedResolver = resolve; });
   async *generate(request: GenerationProviderRequest, _context: ProviderAdapterExecutionContext): AsyncIterable<ProviderGenerationStreamEvent> {
     this.calls += 1;
     this.requests.push(request);
+    this.onCall?.();
     this.startedResolver?.();
     yield { type: "STARTED", providerRequestId: `m9b1-generation-${this.calls}` };
     for (const delta of this.deltas) yield { type: "TEXT_DELTA", text: delta };
@@ -273,17 +279,19 @@ function candidateForFixture(f: TargetFixture) {
   return normalizeAIEvalCandidateSnapshot({ tutorConfig: { id: tutor.id, revision: tutor.currentRevision }, globalPolicy: { id: global.id, revision: global.currentRevision }, subjectPolicy: { id: subject.id, revision: subject.currentRevision }, contextPolicy: { id: context.id, revision: context.currentRevision }, retrievalConfig: { id: retrieval.id, revision: retrieval.currentRevision }, generationModel: { id: model.id, revision: model.revision }, generationProvider: { id: provider.id, revision: provider.revision }, embeddingSpace: { projectionRevisionId: f.m7bRevisionId, modelConfigId: f.embeddingModelId, modelConfigRevision: 1 }, rerank: f.rerankModelId ? { modelConfigId: f.rerankModelId, modelConfigRevision: 1, providerConfigId: f.providerId, providerConfigRevision: 1 } : null, groundingProtocol: { key: "evidence-grounded-v1", revision: 1 }, citationProtocol: { key: "evidence-ref-v1", revision: 1 } });
 }
 
-function createTargetRun(f: TargetFixture, inputText = QUERY_MARKER, expectedStatus: "COMPLETED" | "BLOCKED" | "FAILED" | "CANCELLED" = "COMPLETED"): { run: ReturnType<AIEvalRunService["createRun"]>; caseId: string } {
+function createTargetRun(f: TargetFixture, inputText = QUERY_MARKER, expectedStatus: "COMPLETED" | "BLOCKED" | "FAILED" | "CANCELLED" = "COMPLETED", maximumLatencyMs: number | null = null): { run: ReturnType<AIEvalRunService["createRun"]>; caseId: string } {
   const caseId = uuidv7();
   publishTargetDefinition(f, AI_EVAL_CASE_RESOURCE_TYPE, caseId, { key: `m9b1.target.case.${uuidv7()}`, subjectKey: "biology", displayName: "M9B1 target case", description: null, inputText, origin: "SYNTHETIC", privacyClass: "SYNTHETIC_PUBLIC_SAFE", deidentificationProof: null, expectedStatus, allowedFinishReasons: expectedStatus === "CANCELLED" ? ["OTHER"] : ["STOP"], requiredOutputLiterals: expectedStatus === "COMPLETED" ? ["safe"] : [], forbiddenOutputLiterals: [], requiredEvidenceOrigins: [], forbiddenEvidenceOrigins: [], requiredCitationLabels: expectedStatus === "COMPLETED" ? ["[E1]"] : [], minimumEvidenceItemCount: expectedStatus === "COMPLETED" ? 1 : 0, securityLeakageMarkers: [], maximumOutputBytes: 1_024, sourceRevisionReferences: [], enabled: true });
   const suiteId = uuidv7();
-  publishTargetDefinition(f, AI_EVAL_SUITE_RESOURCE_TYPE, suiteId, { key: `m9b1.target.suite.${uuidv7()}`, subjectKey: "biology", displayName: "M9B1 target suite", enabled: true, caseManifest: [{ ordinal: 1, caseId, caseRevision: 1 }], requiredDimensions: [{ dimension: "RELEVANCE", mode: "NOT_APPLICABLE" }], graderConfigs: [], gateConfig: { minimumScores: [], maximumCostNano: null, maximumLatencyMs: null, requireSecurityPass: false }, permittedRegressionDeltas: [], baselineMode: "OPTIONAL", supplementaryJudgeConfig: null });
+  publishTargetDefinition(f, AI_EVAL_SUITE_RESOURCE_TYPE, suiteId, { key: `m9b1.target.suite.${uuidv7()}`, subjectKey: "biology", displayName: "M9B1 target suite", enabled: true, caseManifest: [{ ordinal: 1, caseId, caseRevision: 1 }], requiredDimensions: [{ dimension: "RELEVANCE", mode: "NOT_APPLICABLE" }], graderConfigs: [], gateConfig: { minimumScores: [], maximumCostNano: null, maximumLatencyMs, requireSecurityPass: false }, permittedRegressionDeltas: [], baselineMode: "OPTIONAL", supplementaryJudgeConfig: null });
   const run = new AIEvalRunService(f.database).createRun({ id: uuidv7(), suiteId, suiteRevision: 1, candidateSnapshot: candidateForFixture(f), createdAt: BASE_TIME + 10 });
   return { run, caseId };
 }
 
-function createTargetService(f: TargetFixture, retrieval = f.hybrid): AIEvalTargetExecutionService {
-  return new AIEvalTargetExecutionService({ database: f.database, conversations: f.conversations, preflight: f.preflight, planner: new AITutorGenerationPlanner(), retrieval, gateway: f.gateway, accounting: f.accounting, admission: f.admission, estimator: { estimatorKey: "m9b1.integration", estimate: (text: string) => text.trim() ? 1 : 0 }, budgetPeriodResolver: { resolve: () => ({ startAt: 0, endAt: BASE_TIME + 100_000 }) }, clock: () => BASE_TIME + 22 });
+function createTargetService(f: TargetFixture, retrieval: Pick<HybridRetrievalService, "retrieve" | "assertEvidencePackCurrent"> = f.hybrid, clock?: () => number, admission = f.admission): AIEvalTargetExecutionService {
+  const targetClock = clock ?? (() => BASE_TIME + 22);
+  const conversations = clock === undefined ? f.conversations : new AIConversationService(f.database, { clock });
+  return new AIEvalTargetExecutionService({ database: f.database, conversations, preflight: f.preflight, planner: new AITutorGenerationPlanner(), retrieval, gateway: f.gateway, accounting: f.accounting, admission, estimator: { estimatorKey: "m9b1.integration", estimate: (text: string) => text.trim() ? 1 : 0 }, budgetPeriodResolver: { resolve: () => ({ startAt: 0, endAt: BASE_TIME + 100_000 }) }, clock: targetClock });
 }
 
 function scheduleTarget(f: TargetFixture, runId: string) {
@@ -363,6 +371,7 @@ test("M9B1 executes one real M7C target through one EVALS operation and cleans s
     assert.equal((f.database.client.prepare("select idempotency_key from ai_cost_operations where id=?").get(result.costOperationId) as { idempotency_key: string | null }).idempotency_key, null);
     assert.equal(Number((f.database.client.prepare("select count(*) as count from ai_usage_cost_records where operation_id=?").get(result.costOperationId) as { count: number }).count), 2);
     assert.equal(Number((f.database.client.prepare("select count(*) as count from ai_tutor_response_traces").get() as { count: number }).count), 0);
+    assert.equal((f.database.client.prepare("select status from ai_eval_target_cleanups where case_execution_id=?").get(result.executionId) as { status: string }).status, "CLEANED");
     assert.equal(f.database.client.prepare("select 1 from ai_conversation_messages where content like ?").get(`%${QUERY_MARKER}%`) === undefined, true);
     assert.equal(f.database.client.prepare("select 1 from ai_conversation_response_chunks where text like ?").get(`%${EVIDENCE_MARKER}%`) === undefined, true);
     assert.equal(f.database.client.prepare("select 1 from ai_eval_case_executions where id=? and (output_sha256 is not null) and output_sha256 like ?").get(result.executionId, `%${EVIDENCE_MARKER}%`) === undefined, true);
@@ -387,6 +396,7 @@ test("M9B1 blocks an insufficient real Retrieval result before Generation", asyn
     assert.equal(f.embedding.calls, 0);
     assert.equal(f.generation.calls, 0);
     assert.equal((f.database.client.prepare("select observed_status from ai_eval_case_results where run_id=?").get(run.id) as { observed_status: string }).observed_status, "BLOCKED");
+    assert.equal((f.database.client.prepare("select status from ai_eval_target_cleanups where case_execution_id=?").get(result.executionId) as { status: string }).status, "CLEANED");
     assert.equal((f.database.client.prepare("select status from ai_cost_operations where id=?").get(result.costOperationId) as { status: string }).status, "COMPLETED");
   } finally { f.close(); }
 });
@@ -478,6 +488,7 @@ test("M9B1 cancellation during the single Generation target propagates promptly 
     assert.equal((f.database.client.prepare("select status from ai_cost_operations where id=?").get(result.costOperationId) as { status: string }).status, "CANCELLED");
     assert.equal(Number((f.database.client.prepare("select count(*) as count from ai_usage_cost_records where operation_id=?").get(result.costOperationId) as { count: number }).count), 2);
     assert.equal((f.database.client.prepare("select status from ai_eval_case_executions where id=?").get(result.executionId) as { status: string }).status, "CANCELLED");
+    assert.equal((f.database.client.prepare("select status from ai_eval_target_cleanups where case_execution_id=?").get(result.executionId) as { status: string }).status, "CLEANED");
   } finally { f.close(); }
 });
 
@@ -550,6 +561,7 @@ test("M9B1 fails response overflow without truncation or retry", async () => {
     assert.equal(f.generation.calls, 1);
     const stored = f.database.client.prepare("select output_byte_size from ai_eval_case_executions where id=?").get(result.executionId) as { output_byte_size: number | null };
     assert.ok(stored.output_byte_size === null || stored.output_byte_size <= 524_288);
+    assert.equal((f.database.client.prepare("select status from ai_eval_target_cleanups where case_execution_id=?").get(result.executionId) as { status: string }).status, "CLEANED");
   } finally { f.close(); }
 });
 
@@ -560,6 +572,7 @@ test("M9B1 denies EVALS budget/rate/concurrency before M7C Provider work", async
     scheduleTarget(budget, run.id);
     const result = await createTargetService(budget).execute({ runId: run.id, caseId, caseRevision: 1 });
     assert.equal(result.status, "FAILED");
+    assert.equal(Number((budget.database.client.prepare("select count(*) as count from ai_eval_case_results where run_id=?").get(run.id) as { count: number }).count), 0);
     assert.equal(budget.embedding.calls, 0);
     assert.equal(budget.generation.calls, 0);
   } finally { budget.close(); }
@@ -570,7 +583,9 @@ test("M9B1 denies EVALS budget/rate/concurrency before M7C Provider work", async
     const { run, caseId } = createTargetRun(rate);
     scheduleTarget(rate, run.id);
     const result = await createTargetService(rate).execute({ runId: run.id, caseId, caseRevision: 1 });
-    assert.equal(result.status, "FAILED");
+    assert.equal(result.status, "PENDING");
+    assert.equal(Number((rate.database.client.prepare("select count(*) as count from ai_eval_case_results where run_id=?").get(run.id) as { count: number }).count), 0);
+    assert.equal((rate.database.client.prepare("select status from ai_cost_operations where id=?").get(result.costOperationId) as { status: string }).status, "OPEN");
     assert.equal(rate.embedding.calls, 0);
     assert.equal(rate.generation.calls, 0);
   } finally { rate.close(); }
@@ -581,8 +596,191 @@ test("M9B1 denies EVALS budget/rate/concurrency before M7C Provider work", async
     const { run, caseId } = createTargetRun(concurrency);
     scheduleTarget(concurrency, run.id);
     const result = await createTargetService(concurrency).execute({ runId: run.id, caseId, caseRevision: 1 });
-    assert.equal(result.status, "FAILED");
+    assert.equal(result.status, "PENDING");
+    assert.equal(Number((concurrency.database.client.prepare("select count(*) as count from ai_eval_case_results where run_id=?").get(run.id) as { count: number }).count), 0);
     assert.equal(concurrency.embedding.calls, 0);
     assert.equal(concurrency.generation.calls, 0);
+  } finally { concurrency.close(); }
+});
+
+test("M9B1 cleanup binding survives a forced deletion failure and is recovered without Provider retry", async () => {
+  const f = await createTargetFixture();
+  try {
+    const { run, caseId } = createTargetRun(f);
+    const { target, jobs } = scheduleTarget(f, run.id);
+    const originalDelete = f.conversations.deleteConversation.bind(f.conversations);
+    let failOnce = true;
+    f.conversations.deleteConversation = ((principal: Parameters<AIConversationService["deleteConversation"]>[0], conversationId: string) => {
+      if (failOnce) { failOnce = false; throw new Error("controlled cleanup failure"); }
+      return originalDelete(principal, conversationId);
+    }) as AIConversationService["deleteConversation"];
+    const result = await target.execute({ runId: run.id, caseId, caseRevision: 1 });
+    assert.equal(result.status, "COMPLETED");
+    assert.equal(f.generation.calls, 1);
+    const cleanupRow = f.database.client.prepare("select id,status from ai_eval_target_cleanups where case_execution_id=? order by created_at desc limit 1").get(result.executionId) as { id: string; status: string };
+    assert.equal(cleanupRow.status, "PENDING");
+    assert.throws(() => f.database.client.prepare("update ai_eval_target_cleanups set status='CLEANED', cleaned_at=?, updated_at=? where id=?").run(BASE_TIME + 40, BASE_TIME + 40, cleanupRow.id), /cleanup|lifecycle/i);
+    assert.throws(() => f.database.client.prepare("delete from ai_eval_target_cleanups where id=?").run(cleanupRow.id), /append-only|history/i);
+    assert.equal(new AIEvalTargetOrchestrator({ database: f.database, jobs }).getCoverage(run.id).complete, false);
+    assert.deepEqual(target.reconcilePendingCleanup({ limit: 1, now: BASE_TIME + 40 }), { scanned: 1, reconciled: 1, skipped: 0 });
+    assert.equal((f.database.client.prepare("select status from ai_eval_target_cleanups where case_execution_id=?").get(result.executionId) as { status: string }).status, "CLEANED");
+    assert.equal(new AIEvalTargetOrchestrator({ database: f.database, jobs }).getCoverage(run.id).complete, true);
+    assert.throws(() => f.database.client.prepare("update ai_eval_target_cleanups set safe_failure_code='X' where id=?").run(cleanupRow.id), /cleanup|lifecycle/i);
+    assert.equal((f.database.client.prepare("select status from ai_conversations where principal_ref like 'eval-target-%'").get() as { status: string }).status, "DELETED");
+    assert.equal(f.generation.calls, 1);
+  } finally { f.close(); }
+});
+
+test("M9B1 cleanup ownership is recoverable by a new service after a crash window", async () => {
+  const f = await createTargetFixture();
+  try {
+    const { run, caseId } = createTargetRun(f);
+    const { scheduled } = scheduleTarget(f, run.id);
+    const executions = new SQLiteAIEvalCaseExecutionRepository(f.database);
+    const execution = executions.markRunning(executions.getByJob(scheduled.jobIds[0]!)!.id, BASE_TIME + 22);
+    const cleanup = new AIEvalTargetCleanupService({ database: f.database, executions, conversations: f.conversations, repository: new SQLiteAIEvalTargetCleanupRepository(f.database), clock: () => BASE_TIME + 30 });
+    f.database.client.transaction(() => {
+      const conversation = f.conversations.createConversationInTransaction(syntheticPrincipal(execution.id), { conversationId: uuidv7(), subjectKey: "biology", createdAt: BASE_TIME + 30 });
+      cleanup.bindInTransaction({ caseExecutionId: execution.id, syntheticConversationId: conversation.id, createdAt: BASE_TIME + 30 });
+    }).immediate();
+    executions.fail({ id: execution.id, providerInvoked: false, safeFailureCode: "EVAL_TARGET_PROCESS_LOST", now: BASE_TIME + 30 });
+    const restarted = new AIEvalTargetCleanupService({ database: f.database, executions: new SQLiteAIEvalCaseExecutionRepository(f.database), conversations: new AIConversationService(f.database, { clock: () => BASE_TIME + 31 }), clock: () => BASE_TIME + 31 });
+    assert.deepEqual(restarted.reconcilePending({ limit: 1, now: BASE_TIME + 31 }), { scanned: 1, reconciled: 1, skipped: 0 });
+    assert.equal((f.database.client.prepare("select status from ai_eval_target_cleanups where case_execution_id=?").get(execution.id) as { status: string }).status, "CLEANED");
+    assert.equal((f.database.client.prepare("select status from ai_conversations where id=(select synthetic_conversation_id from ai_eval_target_cleanups where case_execution_id=?)").get(execution.id) as { status: string }).status, "DELETED");
+    assert.equal(f.embedding.calls, 0);
+    assert.equal(f.generation.calls, 0);
+  } finally { f.close(); }
+});
+
+test("M9B1 persists bounded target latency for successful, blocked, failed, and cancelled outcomes", async () => {
+  const successful = await createTargetFixture();
+  try {
+    let now = BASE_TIME + 22;
+    successful.generation.onCall = () => { now = BASE_TIME + 32; };
+    const { run, caseId } = createTargetRun(successful, QUERY_MARKER, "COMPLETED", 20);
+    scheduleTarget(successful, run.id);
+    const result = await createTargetService(successful, successful.hybrid, () => now).execute({ runId: run.id, caseId, caseRevision: 1 });
+    const latency = (successful.database.client.prepare("select elapsed_latency_ms as value from ai_eval_case_results where run_id=?").get(run.id) as { value: number }).value;
+    assert.equal(result.status, "COMPLETED");
+    assert.equal(latency, 10);
+    assert.equal(Number.isSafeInteger(latency), true);
+    const scored = successful.evalRuns.completeRun(successful.evalRuns.beginScoring(run.id, BASE_TIME + 40).id, BASE_TIME + 41);
+    assert.equal(scored.report.gates.find((gate) => gate.gateKey === "MAX_LATENCY_MS")?.verdict, "PASS");
+  } finally { successful.close(); }
+
+  const blocked = await createTargetFixture();
+  try {
+    const source = blocked.sources.getById(blocked.sourceId)!;
+    blocked.sources.appendRevision({ id: source.id, expectedRevision: source.currentRevision, content: { key: source.key, subjectKey: source.subjectKey, sourceType: source.sourceType, displayName: source.displayName, language: source.language, edition: source.edition, authorityName: source.authorityName, authorityType: source.authorityType, trustTier: source.trustTier, rightsStatus: "RESTRICTED", rightsBasis: null, licenseName: source.licenseName, attribution: source.attribution, rightsNotes: source.rightsNotes, sourceUrl: source.sourceUrl, sourceAssetId: source.sourceAssetId, enabled: source.enabled, preparationMethod: source.preparationMethod, producerKey: source.producerKey, producerRevision: source.producerRevision }, actor: blocked.owner, now: BASE_TIME + 23 });
+    let now = BASE_TIME + 22;
+    const retrieval = { retrieve: async (request: AIHybridRetrievalRequest) => { const pack = await blocked.hybrid.retrieve(request); now = BASE_TIME + 32; return pack; }, assertEvidencePackCurrent: (pack: Parameters<HybridRetrievalService["assertEvidencePackCurrent"]>[0]) => blocked.hybrid.assertEvidencePackCurrent(pack) };
+    const { run, caseId } = createTargetRun(blocked, QUERY_MARKER, "BLOCKED", 5);
+    scheduleTarget(blocked, run.id);
+    const result = await createTargetService(blocked, retrieval, () => now).execute({ runId: run.id, caseId, caseRevision: 1 });
+    assert.equal(result.status, "BLOCKED");
+    assert.equal((blocked.database.client.prepare("select elapsed_latency_ms as value from ai_eval_case_results where run_id=?").get(run.id) as { value: number }).value, 10);
+    assert.equal(blocked.generation.calls, 0);
+    const scored = blocked.evalRuns.completeRun(blocked.evalRuns.beginScoring(run.id, BASE_TIME + 40).id, BASE_TIME + 41);
+    assert.equal(scored.report.gates.find((gate) => gate.gateKey === "MAX_LATENCY_MS")?.verdict, "BLOCKED");
+  } finally { blocked.close(); }
+
+  const failed = await createTargetFixture();
+  try {
+    let now = BASE_TIME + 22;
+    failed.generation.failure = "UNAVAILABLE";
+    failed.generation.onCall = () => { now = BASE_TIME + 32; };
+    const { run, caseId } = createTargetRun(failed, QUERY_MARKER, "FAILED", 20);
+    scheduleTarget(failed, run.id);
+    const result = await createTargetService(failed, failed.hybrid, () => now).execute({ runId: run.id, caseId, caseRevision: 1 });
+    assert.equal(result.status, "FAILED");
+    assert.equal((failed.database.client.prepare("select elapsed_latency_ms as value from ai_eval_case_results where run_id=?").get(run.id) as { value: number }).value, 10);
+  } finally { failed.close(); }
+
+  const cancelled = await createTargetFixture();
+  try {
+    let now = BASE_TIME + 22;
+    cancelled.generation.waitForAbort = true;
+    cancelled.generation.onCall = () => { now = BASE_TIME + 32; };
+    const { run, caseId } = createTargetRun(cancelled, QUERY_MARKER, "CANCELLED");
+    scheduleTarget(cancelled, run.id);
+    const controller = new AbortController();
+    const pending = createTargetService(cancelled, cancelled.hybrid, () => now).execute({ runId: run.id, caseId, caseRevision: 1, signal: controller.signal });
+    await cancelled.generation.started;
+    controller.abort();
+    const result = await pending;
+    assert.equal(result.status, "CANCELLED");
+    assert.equal((cancelled.database.client.prepare("select elapsed_latency_ms as value from ai_eval_case_results where run_id=?").get(run.id) as { value: number }).value, 10);
+  } finally { cancelled.close(); }
+
+  const overflow = await createTargetFixture();
+  try {
+    let now = BASE_TIME + 22;
+    overflow.generation.onCall = () => { now = BASE_TIME + 8_640_000_000_100; };
+    const { run, caseId } = createTargetRun(overflow);
+    scheduleTarget(overflow, run.id);
+    const result = await createTargetService(overflow, overflow.hybrid, () => now).execute({ runId: run.id, caseId, caseRevision: 1 });
+    assert.equal(result.status, "FAILED");
+    assert.equal((overflow.database.client.prepare("select safe_failure_code, elapsed_latency_ms from ai_eval_case_executions join ai_eval_case_results on ai_eval_case_results.run_id=(select run_id from ai_eval_case_executions where id=?) where ai_eval_case_executions.id=?").get(result.executionId, result.executionId) as { safe_failure_code: string; elapsed_latency_ms: number | null }).safe_failure_code, "EVAL_TARGET_LATENCY_INVALID");
+    assert.equal((overflow.database.client.prepare("select elapsed_latency_ms from ai_eval_case_results where run_id=?").get(run.id) as { elapsed_latency_ms: number | null }).elapsed_latency_ms, null);
+    assert.equal(overflow.generation.calls, 1);
+  } finally { overflow.close(); }
+});
+
+test("M9B1 rejects an embedding-space Model revision change before any Provider", async () => {
+  const f = await createTargetFixture();
+  try {
+    const { run, caseId } = createTargetRun(f);
+    scheduleTarget(f, run.id);
+    const models = new SQLiteAIModelConfigRepository(f.database);
+    const model = models.getById(f.embeddingModelId)!;
+    models.update({ id: model.id, expectedRevision: model.revision, actor: f.owner, now: BASE_TIME + 23, content: { key: model.key, displayName: "Changed embedding space", providerConfigId: model.providerConfigId, providerModelId: model.providerModelId, capability: model.capability, adapterKey: model.adapterKey, enabled: model.enabled, contextWindowTokens: model.contextWindowTokens, maxOutputTokens: model.maxOutputTokens, embeddingDimensions: model.embeddingDimensions, supportsStreaming: model.supportsStreaming, supportsReasoning: model.supportsReasoning, supportsStructuredOutput: model.supportsStructuredOutput } });
+    const result = await createTargetService(f).execute({ runId: run.id, caseId, caseRevision: 1 });
+    assert.equal(result.status, "FAILED");
+    assert.equal((f.database.client.prepare("select safe_failure_code from ai_eval_case_executions where id=?").get(result.executionId) as { safe_failure_code: string }).safe_failure_code, "EVAL_CANDIDATE_STALE");
+    assert.equal(f.embedding.calls, 0);
+    assert.equal(f.reranker.calls, 0);
+    assert.equal(f.generation.calls, 0);
+  } finally { f.close(); }
+});
+
+test("M9B1 treats transient rate/concurrency admission denials as retryable infrastructure state", async () => {
+  const rate = await createTargetFixture({ evalRateLimit: { maxRequests: 1, maxConcurrentRequests: 100 } });
+  try {
+    createEvalDummyAdmission(rate);
+    const { run, caseId } = createTargetRun(rate);
+    scheduleTarget(rate, run.id);
+    let now = BASE_TIME + 22;
+    const target = createTargetService(rate, rate.hybrid, () => now, new AIBudgetAdmissionService(rate.database, { clock: () => now }));
+    const denied = await target.execute({ runId: run.id, caseId, caseRevision: 1 });
+    assert.equal(denied.status, "PENDING");
+    assert.equal(Number((rate.database.client.prepare("select count(*) as count from ai_eval_case_results where run_id=?").get(run.id) as { count: number }).count), 0);
+    assert.equal((rate.database.client.prepare("select status from ai_cost_operations where id=?").get(denied.costOperationId) as { status: string }).status, "OPEN");
+    now = BASE_TIME + 61_000;
+    const retried = await target.execute({ runId: run.id, caseId, caseRevision: 1 });
+    assert.equal(retried.status, "COMPLETED");
+    assert.equal(rate.generation.calls, 1);
+    assert.equal(Number((rate.database.client.prepare("select count(*) as count from ai_cost_operations where eval_run_id=?").get(run.id) as { count: number }).count), 1);
+    assert.equal(Number((rate.database.client.prepare("select count(*) as count from ai_eval_case_results where run_id=?").get(run.id) as { count: number }).count), 1);
+    assert.equal((rate.database.client.prepare("select admission_attempt from ai_eval_case_executions where id=?").get(retried.executionId) as { admission_attempt: number }).admission_attempt, 1);
+  } finally { rate.close(); }
+
+  const concurrency = await createTargetFixture({ evalRateLimit: { maxRequests: 100, maxConcurrentRequests: 1 } });
+  try {
+    const dummyOperationId = createEvalDummyAdmission(concurrency);
+    const dummyReservation = concurrency.admission.getReservationByOperationId(dummyOperationId)!;
+    const { run, caseId } = createTargetRun(concurrency);
+    scheduleTarget(concurrency, run.id);
+    let now = BASE_TIME + 22;
+    const target = createTargetService(concurrency, concurrency.hybrid, () => now, new AIBudgetAdmissionService(concurrency.database, { clock: () => now }));
+    const denied = await target.execute({ runId: run.id, caseId, caseRevision: 1 });
+    assert.equal(denied.status, "PENDING");
+    assert.equal(Number((concurrency.database.client.prepare("select count(*) as count from ai_eval_case_results where run_id=?").get(run.id) as { count: number }).count), 0);
+    concurrency.admission.releaseBeforeExecution(dummyReservation.id, BASE_TIME + 30);
+    now = BASE_TIME + 31;
+    const retried = await target.execute({ runId: run.id, caseId, caseRevision: 1 });
+    assert.equal(retried.status, "COMPLETED");
+    assert.equal(concurrency.generation.calls, 1);
+    assert.equal(Number((concurrency.database.client.prepare("select count(*) as count from ai_eval_case_results where run_id=?").get(run.id) as { count: number }).count), 1);
   } finally { concurrency.close(); }
 });

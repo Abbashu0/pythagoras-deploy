@@ -1,9 +1,9 @@
 # AI architecture lock
 
 **Milestone:** AI-M0 — Architecture Lock & Backend Readiness Specification
-**Status:** AI-M0 through AI-M9A are approved/complete, with AI-M9A approved at `860b474bd146abb944c15f774afa88578b463a80`. AI-M9B1 is implemented pending independent review through migration `0034_eval-target-execution`; M9B2 and M10 are not started. AI-M9 overall is incomplete and no production provider is selected.
+**Status:** AI-M0 through AI-M9A are approved/complete, with AI-M9A approved at `860b474bd146abb944c15f774afa88578b463a80`. AI-M9B1 is implemented pending independent review through migrations `0034_eval-target-execution` and `0035_eval-target-orchestration-hardening`; M9B2 and M10 are not started. AI-M9 overall is incomplete and no production provider is selected.
 
-Current reviewed status: AI-M8A, AI-M8B, and AI-M8C are approved; AI-M8 is complete at `e73d6dc5ba4ae18c1bf4dd614b093b605849d179`. AI-M9A is approved/complete at `860b474bd146abb944c15f774afa88578b463a80`; AI-M9B1 is implemented pending independent review through `0034_eval-target-execution`, while M9B2 and M10 are not started. M9A creates governed Eval Suite/Case truth and deterministic recommendation gates only, with zero target or judge Provider execution.
+Current reviewed status: AI-M8A, AI-M8B, and AI-M8C are approved; AI-M8 is complete at `e73d6dc5ba4ae18c1bf4dd614b093b605849d179`. AI-M9A is approved/complete at `860b474bd146abb944c15f774afa88578b463a80`; AI-M9B1 is implemented pending independent review through `0034_eval-target-execution` and `0035_eval-target-orchestration-hardening`, while M9B2 and M10 are not started. M9A creates governed Eval Suite/Case truth and deterministic recommendation gates only, with zero target or judge Provider execution.
 
 ## 1. Architectural position
 

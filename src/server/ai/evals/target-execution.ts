@@ -1,9 +1,11 @@
 import { createHash } from "node:crypto";
+import { v7 as uuidv7 } from "uuid";
 
 import type { ContentDatabase } from "../../content/database";
 import { AIJobError } from "../operations/jobs";
 import {
   AIBudgetAdmissionService,
+  AIAdmissionError,
   AI_EVALS_ADMISSION_PRINCIPAL_REF,
   createAIAdmissionRequestFingerprint,
   type AIAdmissionCostEstimate,
@@ -52,6 +54,9 @@ import { SQLiteAIEvalExecutionConfigRepository, fingerprintAIEvalExecutionConfig
 import { SQLiteAIEvalRunRepository } from "./runs";
 import { AIEvalRunService } from "./service";
 import type { HybridRetrievalService, AIEvidencePack } from "../retrieval";
+import type { AIEmbeddingProjectionRepository } from "../embedding";
+import { SQLiteAIEmbeddingProjectionRepository } from "../embedding";
+import { AIEvalTargetCleanupService, syntheticPrincipal as deriveSyntheticPrincipal } from "./target-cleanup";
 
 const MAX_TIMESTAMP = 8_640_000_000_000_000;
 const MAX_OUTPUT_BYTES = 524_288;
@@ -80,6 +85,8 @@ export interface AIEvalTargetExecutionDependencies {
   retrievalConfigs?: AIRetrievalConfigRepository;
   models?: AIModelConfigRepository;
   providers?: AIProviderConfigRepository;
+  embeddingProjections?: AIEmbeddingProjectionRepository;
+  cleanup?: AIEvalTargetCleanupService;
   budgetPeriodResolver: AIEvalTargetBudgetPeriodResolver;
   clock?: () => number;
 }
@@ -109,6 +116,8 @@ export class AIEvalTargetExecutionService {
   private readonly retrievalConfigs: AIRetrievalConfigRepository;
   private readonly models: AIModelConfigRepository;
   private readonly providers: AIProviderConfigRepository;
+  private readonly embeddingProjections: AIEmbeddingProjectionRepository;
+  private readonly cleanup: AIEvalTargetCleanupService;
   private readonly outputValidator = new AITutorOutputValidator();
   private readonly clock: () => number;
 
@@ -119,12 +128,14 @@ export class AIEvalTargetExecutionService {
     this.executions = dependencies.executions ?? new SQLiteAIEvalCaseExecutionRepository(dependencies.database);
     this.executionConfigs = dependencies.executionConfigs ?? new SQLiteAIEvalExecutionConfigRepository(dependencies.database);
     this.evalRuns = dependencies.evalRuns ?? new AIEvalRunService(dependencies.database);
-    this.conversations = dependencies.conversations ?? new AIConversationService(dependencies.database);
+    this.clock = dependencies.clock ?? Date.now;
+    this.conversations = dependencies.conversations ?? new AIConversationService(dependencies.database, { clock: this.clock });
     this.tutorConfigs = dependencies.tutorConfigs ?? new SQLiteAITutorConfigRepository(dependencies.database);
     this.retrievalConfigs = dependencies.retrievalConfigs ?? new SQLiteAIRetrievalConfigRepository(dependencies.database);
     this.models = dependencies.models ?? new SQLiteAIModelConfigRepository(dependencies.database);
     this.providers = dependencies.providers ?? new SQLiteAIProviderConfigRepository(dependencies.database);
-    this.clock = dependencies.clock ?? Date.now;
+    this.embeddingProjections = dependencies.embeddingProjections ?? new SQLiteAIEmbeddingProjectionRepository(dependencies.database);
+    this.cleanup = dependencies.cleanup ?? new AIEvalTargetCleanupService({ database: dependencies.database, executions: this.executions, conversations: this.conversations, clock: this.clock });
   }
 
   async execute(input: { runId: string; caseId: string; caseRevision: number; executionConfigId?: string; executionConfigRevision?: number; signal?: AbortSignal; checkLease?: () => void }): Promise<AIEvalTargetExecutionResult> {
@@ -132,15 +143,31 @@ export class AIEvalTargetExecutionService {
     const target = this.validateTarget(input);
     if ((input.executionConfigId !== undefined && input.executionConfigId !== target.binding.executionConfigId) || (input.executionConfigRevision !== undefined && input.executionConfigRevision !== target.binding.executionConfigRevision)) throw new AIEvalError("AI_EVAL_TARGET_INVALID", "The Eval target Job does not match the Run Execution Config binding.");
     let execution = target.execution;
-    if (execution.status === "COMPLETED" || execution.status === "BLOCKED" || execution.status === "FAILED" || execution.status === "CANCELLED" || execution.status === "AMBIGUOUS") return this.result(execution, null);
-    if (execution.status === "RUNNING" && (execution.providerInvocationState !== "NOT_INVOKED" || (execution.targetCostOperationId !== null && this.dependencies.accounting.listUsageCostRecords(execution.targetCostOperationId).length > 0))) return await this.finishAmbiguous(target, execution, input.checkLease);
+    if (execution.status === "COMPLETED" || execution.status === "BLOCKED" || execution.status === "FAILED" || execution.status === "CANCELLED" || execution.status === "AMBIGUOUS") {
+      this.cleanup.cleanupForExecution(execution.id, this.safeNow());
+      return this.result(execution, null);
+    }
+    if (execution.status === "RUNNING" && (execution.providerInvocationState !== "NOT_INVOKED" || (execution.targetCostOperationId !== null && this.dependencies.accounting.listUsageCostRecords(execution.targetCostOperationId).length > 0))) {
+      const result = await this.finishAmbiguous(target, execution, input.checkLease);
+      this.cleanup.cleanupForExecution(execution.id, this.safeNow());
+      return result;
+    }
     const config = this.requireExecutionConfig(target.binding);
+    const admissionRetry = execution.status === "PENDING" && execution.safeFailureCode === "EVAL_ADMISSION_RETRYABLE";
+    if (execution.status === "PENDING" && !admissionRetry && !this.cleanup.cleanupForExecution(execution.id, this.safeNow())) throw new AIEvalError("AI_EVAL_TARGET_ADMISSION_RETRYABLE", "The previous synthetic Eval Conversation cleanup is still pending.");
     execution = execution.status === "PENDING" ? this.executions.markRunning(execution.id, now, config.maxConcurrency) : execution;
     let operation: AICostOperation | null = null;
     let reservationId: string | null = execution.budgetReservationId;
     let providerInvoked = execution.providerInvoked;
     let syntheticPrincipal: AIStudentPrincipal | null = null;
     let syntheticConversationId: string | null = null;
+    let syntheticTurnIdempotencyKey: string | null = null;
+    const previousCleanup = this.cleanup.getByCaseExecutionId(execution.id);
+    if (previousCleanup?.status === "PENDING") {
+      syntheticPrincipal = deriveSyntheticPrincipal(execution.id);
+      syntheticConversationId = previousCleanup.syntheticConversationId;
+      syntheticTurnIdempotencyKey = syntheticTurnKey(execution.id, previousCleanup.id);
+    }
     try {
       operation = execution.targetCostOperationId ? this.dependencies.accounting.getOperation(execution.targetCostOperationId) : null;
       if (!operation) {
@@ -165,10 +192,18 @@ export class AIEvalTargetExecutionService {
       if (input.signal?.aborted) return await this.finishWithoutProvider(target, execution, "CANCELLED", "EVAL_TARGET_CANCELLED", operation, null, false, input.checkLease);
       input.checkLease?.();
       this.assertCandidateCurrent(target.run, target.suite.subjectKey);
-      syntheticPrincipal = { principalRef: `eval-target-${execution.id.replace(/-/gu, "")}`, status: "ACTIVE" };
-      const conversation = this.conversations.createConversation(syntheticPrincipal, target.suite.subjectKey);
-      syntheticConversationId = conversation.id;
-      const turn = this.conversations.beginTurn(syntheticPrincipal, { conversationId: conversation.id, idempotencyKey: `eval-${execution.id}`, userContent: target.caseRevision.inputText });
+      this.assertCandidateEmbeddingCurrent(target.run, target.suite.subjectKey);
+      syntheticPrincipal ??= deriveSyntheticPrincipal(execution.id);
+      if (!syntheticConversationId) {
+        const conversation = this.dependencies.database.client.transaction(() => {
+          const created = this.conversations.createConversationInTransaction(syntheticPrincipal!, { conversationId: uuidv7(), subjectKey: target.suite.subjectKey, createdAt: this.safeNow() });
+          const binding = this.cleanup.bindInTransaction({ caseExecutionId: execution.id, syntheticConversationId: created.id, createdAt: created.createdAt });
+          syntheticTurnIdempotencyKey = syntheticTurnKey(execution.id, binding.id);
+          return created;
+        }).immediate();
+        syntheticConversationId = conversation.id;
+      }
+      const turn = this.conversations.beginTurn(syntheticPrincipal, { conversationId: syntheticConversationId!, idempotencyKey: syntheticTurnIdempotencyKey!, userContent: target.caseRevision.inputText });
       const preflight = this.dependencies.preflight.preflight({ principal: syntheticPrincipal, responseId: turn.response.id, tutorConfigId: target.run.candidateSnapshot.tutorConfig.id, estimator: this.dependencies.estimator });
       this.assertPreflightCandidate(target.run, preflight);
       const admission = await this.admit(target, config, operation, preflight, input.signal);
@@ -238,16 +273,25 @@ export class AIEvalTargetExecutionService {
       if (!operation) throw safe;
       const current = this.executions.getById(execution.id) ?? execution;
       const invoked = providerInvoked || current.providerInvoked || current.providerInvocationState === "INVOKING" || current.providerInvocationState === "INVOKED_WITH_ACCOUNTING" || this.dependencies.accounting.listUsageCostRecords(operation.id).length > 0;
+      if (error instanceof AIAdmissionError && !invoked) {
+        if (error.code === "AI_RATE_LIMITED" || error.code === "AI_ADMISSION_CONCURRENCY_LIMITED") {
+          return await this.finishAdmissionRetry(current, reservationId, input.checkLease);
+        }
+        return await this.finishAdmissionFailure(current, operation, reservationId, `EVAL_ADMISSION_${error.code}`, input.checkLease);
+      }
       if (invoked && !current.providerInvoked && current.providerInvocationState === "NOT_INVOKED") this.executions.markInvokedWithAccounting(current.id, this.safeNow());
       return await this.finishWithoutProvider(target, current, input.signal?.aborted ? "CANCELLED" : "FAILED", safe.code === "AI_EVAL_TARGET_STALE" ? "EVAL_CANDIDATE_STALE" : "EVAL_TARGET_FAILED", operation, reservationId, invoked, input.checkLease);
     } finally {
-      if (syntheticPrincipal && syntheticConversationId) {
-        try { this.conversations.deleteConversation(syntheticPrincipal, syntheticConversationId); } catch { /* cleanup is best effort; no raw data is copied into Eval state */ }
-      }
+      const current = this.executions.getById(execution.id);
+      if (!(current?.status === "PENDING" && current.safeFailureCode === "EVAL_ADMISSION_RETRYABLE") && syntheticPrincipal && syntheticConversationId) this.cleanup.cleanupForExecution(execution.id, this.safeNow());
     }
   }
 
   executeCase(input: { runId: string; caseId: string; caseRevision: number; signal?: AbortSignal }): Promise<AIEvalTargetExecutionResult> { return this.execute(input); }
+
+  reconcilePendingCleanup(input: { limit: number; now: number }): { scanned: number; reconciled: number; skipped: number } {
+    return this.cleanup.reconcilePending(input);
+  }
 
   private validateTarget(input: { runId: string; caseId: string; caseRevision: number }): { run: AIEvalRun; suite: AIEvalSuiteRevision; caseRevision: AIEvalCaseRevision; execution: AIEvalCaseExecution; binding: ReturnType<SQLiteAIEvalRunRepository["getExecutionBinding"]> & object } {
     const run = this.runs.getById(input.runId);
@@ -311,55 +355,103 @@ export class AIEvalTargetExecutionService {
     if (plan.generationModelConfigId !== run.candidateSnapshot.generationModel.id || plan.generationModelConfigRevision !== run.candidateSnapshot.generationModel.revision || plan.generationProviderConfigId !== run.candidateSnapshot.generationProvider.id || plan.generationProviderConfigRevision !== run.candidateSnapshot.generationProvider.revision) throw new AIEvalError("AI_EVAL_TARGET_STALE", "The Generation identity does not match the Eval candidate.");
   }
 
+  private assertCandidateEmbeddingCurrent(run: AIEvalRun, subjectKey: string): void {
+    const candidate = run.candidateSnapshot;
+    const retrievalRevision = this.retrievalConfigs.getCurrentRevision(candidate.retrievalConfig.id);
+    const space = candidate.embeddingSpace;
+    if (!retrievalRevision || (retrievalRevision.embeddingModelConfigId !== null) !== (space !== null) || (space !== null && retrievalRevision.embeddingModelConfigId !== space.modelConfigId)) {
+      throw new AIEvalError("AI_EVAL_TARGET_STALE", "The Eval embedding space no longer matches the pinned Retrieval Config.");
+    }
+    if (!space) return;
+    const revision = this.embeddingProjections.getRevision(space.projectionRevisionId);
+    const model = this.models.getById(space.modelConfigId);
+    const provider = revision ? this.providers.getById(revision.providerConfigId) : null;
+    if (!revision || revision.subjectKey !== subjectKey || revision.modelConfigId !== space.modelConfigId || revision.modelConfigRevision !== space.modelConfigRevision || revision.status !== "READY" || !revision.isCurrent || !model || model.revision !== space.modelConfigRevision || model.capability !== "EMBEDDING" || !model.enabled || model.providerConfigId !== revision.providerConfigId || model.providerModelId !== revision.providerModelId || model.adapterKey !== revision.embeddingAdapterKey || model.embeddingDimensions !== revision.dimensions || !provider || !provider.enabled || provider.revision !== revision.providerConfigRevision) throw new AIEvalError("AI_EVAL_TARGET_STALE", "The Eval embedding projection is no longer pinned to the candidate space.");
+  }
+
   private recordAttempts(operationId: string, attempts: readonly AIProviderAttemptTrace[], usage: NormalizedProviderUsage): void {
     for (const attempt of attempts) this.dependencies.accounting.recordAttempt({ operationId, attempt, normalizedUsage: usage, capability: attempt.capability, providerModelId: attempt.providerModelId ?? "unknown", at: attempt.startedAt, latencyMs: attempt.latencyMs });
   }
 
   private async finishObserved(target: ReturnType<AIEvalTargetExecutionService["validateTarget"]>, execution: AIEvalCaseExecution, operation: AICostOperation, reservationId: string, status: "COMPLETED" | "BLOCKED" | "FAILED" | "CANCELLED", safeFailureCode: string | null, pack: AIEvidencePack, output: string, citationMap: readonly import("../tutor/preflight/contracts").AITutorCitationMapItem[], finishReason: "STOP" | "LENGTH" | "CONTENT_FILTER" | "OTHER" | "FAILED" | "CANCELLED", providerInvoked: boolean, planFingerprint: string | null): Promise<AIEvalTargetExecutionResult> {
-    this.completeOperation(operation.id, status === "COMPLETED" || status === "BLOCKED" ? "COMPLETED" : status === "CANCELLED" ? "CANCELLED" : "FAILED");
-    const settlement = this.settle(reservationId);
+    const completedAt = this.safeNow();
+    const elapsedLatencyMs = this.elapsedLatency(execution, completedAt);
+    const finalStatus = elapsedLatencyMs === null ? "FAILED" : status;
+    const finalFailureCode = elapsedLatencyMs === null ? "EVAL_TARGET_LATENCY_INVALID" : safeFailureCode;
+    const finalFinishReason = elapsedLatencyMs === null ? "FAILED" : finishReason;
+    this.completeOperation(operation.id, finalStatus === "COMPLETED" || finalStatus === "BLOCKED" ? "COMPLETED" : finalStatus === "CANCELLED" ? "CANCELLED" : "FAILED", completedAt);
+    const settlement = this.settle(reservationId, completedAt);
     try {
-      this.evalRuns.recordObservationAndGrade({ runId: target.run.id, caseId: target.caseRevision.caseId, caseRevision: target.caseRevision.revision, observedSubjectKey: target.suite.subjectKey, observedStatus: status === "COMPLETED" ? "COMPLETED" : status, finishReason, outputText: output, citationMap, evidence: pack.items.map((item) => ({ originKind: item.originKind, originId: item.originId, subjectKey: item.subjectKey })), retrievalStatus: pack.status, outputBytes: Buffer.byteLength(output, "utf8"), elapsedLatencyMs: null, costOperationId: operation.id, groundingProtocolKey: AI_TUTOR_GROUNDING_PROTOCOL_KEY, groundingProtocolRevision: AI_TUTOR_GROUNDING_PROTOCOL_REVISION, citationProtocolKey: AI_TUTOR_CITATION_PROTOCOL_KEY, citationProtocolRevision: AI_TUTOR_CITATION_PROTOCOL_REVISION }, this.safeNow());
+      this.evalRuns.recordObservationAndGrade({ runId: target.run.id, caseId: target.caseRevision.caseId, caseRevision: target.caseRevision.revision, observedSubjectKey: target.suite.subjectKey, observedStatus: finalStatus === "COMPLETED" ? "COMPLETED" : finalStatus, finishReason: finalFinishReason, outputText: output, citationMap, evidence: pack.items.map((item) => ({ originKind: item.originKind, originId: item.originId, subjectKey: item.subjectKey })), retrievalStatus: pack.status, outputBytes: Buffer.byteLength(output, "utf8"), elapsedLatencyMs, costOperationId: operation.id, groundingProtocolKey: AI_TUTOR_GROUNDING_PROTOCOL_KEY, groundingProtocolRevision: AI_TUTOR_GROUNDING_PROTOCOL_REVISION, citationProtocolKey: AI_TUTOR_CITATION_PROTOCOL_KEY, citationProtocolRevision: AI_TUTOR_CITATION_PROTOCOL_REVISION }, completedAt);
     } catch {
       throw new AIEvalError("AI_EVAL_TARGET_INVALID", "The Eval observation could not be recorded safely.");
     }
     const hash = hashOutput(output);
-    const updated = status === "BLOCKED" ? this.executions.block({ id: execution.id, retrievalStatus: "INSUFFICIENT", safeFailureCode: safeFailureCode ?? "EVAL_TARGET_BLOCKED", now: this.safeNow() }) : status === "COMPLETED" && planFingerprint && finishReason !== "FAILED" && finishReason !== "CANCELLED" ? this.executions.complete({ id: execution.id, providerInvoked, outputSha256: hash, outputByteSize: Buffer.byteLength(output, "utf8"), finishReason, retrievalStatus: pack.status === "SUFFICIENT" ? "SUFFICIENT" : "NOT_APPLICABLE", planFingerprint, now: this.safeNow() }) : status === "CANCELLED" ? this.executions.cancel({ id: execution.id, providerInvoked, safeFailureCode: safeFailureCode ?? "EVAL_TARGET_CANCELLED", now: this.safeNow() }) : this.executions.fail({ id: execution.id, providerInvoked, outputSha256: output ? hash : null, outputByteSize: output ? Buffer.byteLength(output, "utf8") : null, finishReason: finishReason === "FAILED" || finishReason === "CANCELLED" ? finishReason : "FAILED", retrievalStatus: pack.status, safeFailureCode: safeFailureCode ?? "EVAL_TARGET_FAILED", now: this.safeNow() });
+    const outputByteSize = Buffer.byteLength(output, "utf8");
+    const updated = finalStatus === "BLOCKED" ? this.executions.block({ id: execution.id, retrievalStatus: "INSUFFICIENT", safeFailureCode: finalFailureCode ?? "EVAL_TARGET_BLOCKED", now: completedAt }) : finalStatus === "COMPLETED" && planFingerprint && finalFinishReason !== "FAILED" && finalFinishReason !== "CANCELLED" ? this.executions.complete({ id: execution.id, providerInvoked, outputSha256: hash, outputByteSize, finishReason: finalFinishReason, retrievalStatus: pack.status === "SUFFICIENT" ? "SUFFICIENT" : "NOT_APPLICABLE", planFingerprint, now: completedAt }) : finalStatus === "CANCELLED" ? this.executions.cancel({ id: execution.id, providerInvoked, safeFailureCode: finalFailureCode ?? "EVAL_TARGET_CANCELLED", now: completedAt }) : this.executions.fail({ id: execution.id, providerInvoked, outputSha256: output ? hash : null, outputByteSize: output ? outputByteSize : null, finishReason: finalFinishReason === "FAILED" || finalFinishReason === "CANCELLED" ? finalFinishReason : "FAILED", retrievalStatus: pack.status, safeFailureCode: finalFailureCode ?? "EVAL_TARGET_FAILED", now: completedAt });
     return this.result(updated, settlement);
   }
 
   private async finishAmbiguous(target: ReturnType<AIEvalTargetExecutionService["validateTarget"]>, execution: AIEvalCaseExecution, checkLease?: () => void): Promise<AIEvalTargetExecutionResult> {
     checkLease?.();
+    const completedAt = this.safeNow();
+    const elapsedLatencyMs = this.elapsedLatency(execution, completedAt);
     const operation = execution.targetCostOperationId ? this.dependencies.accounting.getOperation(execution.targetCostOperationId) : null;
     if (!operation) throw new AIEvalError("AI_EVAL_TARGET_AMBIGUOUS", "The Eval target Provider ownership is ambiguous.");
-    this.completeOperation(operation.id, "FAILED");
-    const settlement = this.settle(execution.budgetReservationId);
-    const updated = this.executions.ambiguous({ id: execution.id, safeFailureCode: "EVAL_TARGET_PROVIDER_AMBIGUOUS", now: this.safeNow() });
+    this.completeOperation(operation.id, "FAILED", completedAt);
+    const settlement = this.settle(execution.budgetReservationId, completedAt);
+    const updated = this.executions.ambiguous({ id: execution.id, safeFailureCode: "EVAL_TARGET_PROVIDER_AMBIGUOUS", now: completedAt });
     try {
-      this.evalRuns.recordObservationAndGrade({ runId: target.run.id, caseId: target.caseRevision.caseId, caseRevision: target.caseRevision.revision, observedSubjectKey: target.suite.subjectKey, observedStatus: "FAILED", finishReason: "FAILED", outputText: "", citationMap: [], evidence: [], retrievalStatus: "NOT_APPLICABLE", outputBytes: 0, elapsedLatencyMs: null, costOperationId: operation.id, groundingProtocolKey: AI_TUTOR_GROUNDING_PROTOCOL_KEY, groundingProtocolRevision: AI_TUTOR_GROUNDING_PROTOCOL_REVISION, citationProtocolKey: AI_TUTOR_CITATION_PROTOCOL_KEY, citationProtocolRevision: AI_TUTOR_CITATION_PROTOCOL_REVISION }, this.safeNow());
+      this.evalRuns.recordObservationAndGrade({ runId: target.run.id, caseId: target.caseRevision.caseId, caseRevision: target.caseRevision.revision, observedSubjectKey: target.suite.subjectKey, observedStatus: "FAILED", finishReason: "FAILED", outputText: "", citationMap: [], evidence: [], retrievalStatus: "NOT_APPLICABLE", outputBytes: 0, elapsedLatencyMs, costOperationId: operation.id, groundingProtocolKey: AI_TUTOR_GROUNDING_PROTOCOL_KEY, groundingProtocolRevision: AI_TUTOR_GROUNDING_PROTOCOL_REVISION, citationProtocolKey: AI_TUTOR_CITATION_PROTOCOL_KEY, citationProtocolRevision: AI_TUTOR_CITATION_PROTOCOL_REVISION }, completedAt);
     } catch { /* an already recorded observation is idempotent */ }
     return this.result(updated, settlement);
   }
 
   private async finishWithoutProvider(target: ReturnType<AIEvalTargetExecutionService["validateTarget"]>, execution: AIEvalCaseExecution, status: "CANCELLED" | "FAILED", safeFailureCode: string, operation: AICostOperation | null, reservationId: string | null, providerInvoked = false, checkLease?: () => void): Promise<AIEvalTargetExecutionResult> {
     checkLease?.();
-    if (operation) this.completeOperation(operation.id, status === "CANCELLED" ? "CANCELLED" : "FAILED");
-    const settlement = reservationId ? this.settle(reservationId) : null;
+    const completedAt = this.safeNow();
+    const elapsedLatencyMs = this.elapsedLatency(execution, completedAt);
+    if (operation) this.completeOperation(operation.id, status === "CANCELLED" ? "CANCELLED" : "FAILED", completedAt);
+    const settlement = reservationId ? this.settle(reservationId, completedAt) : null;
     try {
-      this.evalRuns.recordObservationAndGrade({ runId: target.run.id, caseId: target.caseRevision.caseId, caseRevision: target.caseRevision.revision, observedSubjectKey: target.suite.subjectKey, observedStatus: status, finishReason: status === "CANCELLED" ? "CANCELLED" : "FAILED", outputText: "", citationMap: [], evidence: [], retrievalStatus: "NOT_APPLICABLE", outputBytes: 0, elapsedLatencyMs: null, costOperationId: operation?.id ?? null, groundingProtocolKey: AI_TUTOR_GROUNDING_PROTOCOL_KEY, groundingProtocolRevision: AI_TUTOR_GROUNDING_PROTOCOL_REVISION, citationProtocolKey: AI_TUTOR_CITATION_PROTOCOL_KEY, citationProtocolRevision: AI_TUTOR_CITATION_PROTOCOL_REVISION }, this.safeNow());
+      this.evalRuns.recordObservationAndGrade({ runId: target.run.id, caseId: target.caseRevision.caseId, caseRevision: target.caseRevision.revision, observedSubjectKey: target.suite.subjectKey, observedStatus: status, finishReason: status === "CANCELLED" ? "CANCELLED" : "FAILED", outputText: "", citationMap: [], evidence: [], retrievalStatus: "NOT_APPLICABLE", outputBytes: 0, elapsedLatencyMs, costOperationId: operation?.id ?? null, groundingProtocolKey: AI_TUTOR_GROUNDING_PROTOCOL_KEY, groundingProtocolRevision: AI_TUTOR_GROUNDING_PROTOCOL_REVISION, citationProtocolKey: AI_TUTOR_CITATION_PROTOCOL_KEY, citationProtocolRevision: AI_TUTOR_CITATION_PROTOCOL_REVISION }, completedAt);
     } catch { /* safe terminal execution state is retained */ }
-    const updated = status === "CANCELLED" ? this.executions.cancel({ id: execution.id, providerInvoked, safeFailureCode, now: this.safeNow() }) : this.executions.fail({ id: execution.id, providerInvoked, safeFailureCode, now: this.safeNow() });
+    const updated = status === "CANCELLED" ? this.executions.cancel({ id: execution.id, providerInvoked, safeFailureCode, now: completedAt }) : this.executions.fail({ id: execution.id, providerInvoked, safeFailureCode, now: completedAt });
     if (!operation) throw new AIEvalError("AI_EVAL_TARGET_INVALID", "The Eval target Cost Operation could not be created.");
     return this.result(updated, settlement);
   }
 
-  private completeOperation(id: string, status: "COMPLETED" | "FAILED" | "CANCELLED"): void { const current = this.dependencies.accounting.getOperation(id); if (current?.status === "OPEN") this.dependencies.accounting.completeOperation(id, "OPEN", status, this.safeNow()); }
-  private settle(id: string | null): "SETTLED" | "RECONCILIATION_REQUIRED" | "RELEASED" | null { if (!id) return null; const reservation = this.dependencies.admission.getReservation(id); if (!reservation) return null; if (reservation.status === "RESERVED") { this.dependencies.admission.releaseBeforeExecution(id, this.safeNow()); return "RELEASED"; } return this.dependencies.admission.settle(id, this.safeNow()).status; }
+  private async finishAdmissionRetry(execution: AIEvalCaseExecution, reservationId: string | null, checkLease?: () => void): Promise<AIEvalTargetExecutionResult> {
+    checkLease?.();
+    const updated = this.executions.returnToPendingForAdmission(execution.id, this.safeNow());
+    return this.result(updated, reservationId ? this.settle(reservationId, this.safeNow()) : null);
+  }
+
+  private async finishAdmissionFailure(execution: AIEvalCaseExecution, operation: AICostOperation, reservationId: string | null, safeFailureCode: string, checkLease?: () => void): Promise<AIEvalTargetExecutionResult> {
+    checkLease?.();
+    const completedAt = this.safeNow();
+    this.completeOperation(operation.id, "FAILED", completedAt);
+    const settlement = reservationId ? this.settle(reservationId, completedAt) : null;
+    const updated = this.executions.fail({ id: execution.id, providerInvoked: false, safeFailureCode, now: completedAt });
+    return this.result(updated, settlement);
+  }
+
+  private completeOperation(id: string, status: "COMPLETED" | "FAILED" | "CANCELLED", at = this.safeNow()): void { const current = this.dependencies.accounting.getOperation(id); if (current?.status === "OPEN") this.dependencies.accounting.completeOperation(id, "OPEN", status, at); }
+  private settle(id: string | null, at = this.safeNow()): "SETTLED" | "RECONCILIATION_REQUIRED" | "RELEASED" | null { if (!id) return null; const reservation = this.dependencies.admission.getReservation(id); if (!reservation) return null; if (reservation.status === "RESERVED") { this.dependencies.admission.releaseBeforeExecution(id, at); return "RELEASED"; } return this.dependencies.admission.settle(id, at).status; }
   private result(execution: AIEvalCaseExecution, settlement: "SETTLED" | "RECONCILIATION_REQUIRED" | "RELEASED" | null): AIEvalTargetExecutionResult { if (!execution.targetCostOperationId) throw new AIEvalError("AI_EVAL_TARGET_INVALID", "The Eval target is missing its Cost Operation."); const reservation = execution.budgetReservationId ? this.dependencies.admission.getReservation(execution.budgetReservationId) : null; const durableSettlement = reservation?.status === "SETTLED" ? "SETTLED" : reservation?.status === "RECONCILIATION_REQUIRED" ? "RECONCILIATION_REQUIRED" : reservation?.status === "RELEASED" ? "RELEASED" : null; return { runId: execution.runId, caseId: execution.caseId, caseRevision: execution.caseRevision, executionId: execution.id, status: execution.status, providerInvoked: execution.providerInvoked, costOperationId: execution.targetCostOperationId, budgetReservationId: execution.budgetReservationId, settlementStatus: settlement ?? durableSettlement }; }
   private safeNow(): number { const value = this.clock(); if (!Number.isSafeInteger(value) || value < 0 || value > MAX_TIMESTAMP) throw new AIEvalError("AI_EVAL_TARGET_INVALID", "The Eval target timestamp is invalid."); return value; }
+  private elapsedLatency(execution: AIEvalCaseExecution, completedAt: number): number | null {
+    if (execution.startedAt === null || !Number.isSafeInteger(execution.startedAt) || completedAt < execution.startedAt) return null;
+    const elapsed = completedAt - execution.startedAt;
+    return Number.isSafeInteger(elapsed) && elapsed >= 0 && elapsed <= 8_640_000_000_000 ? elapsed : null;
+  }
 }
 
 function hashOutput(value: string): string { return createHash("sha256").update(value, "utf8").digest("hex"); }
+
+function syntheticTurnKey(executionId: string, cleanupId: string): string {
+  return `eval-${executionId}-${cleanupId}`;
+}
 
 export function createAIEvalTargetExecutionService(dependencies: AIEvalTargetExecutionDependencies): AIEvalTargetExecutionService {
   return new AIEvalTargetExecutionService(dependencies);

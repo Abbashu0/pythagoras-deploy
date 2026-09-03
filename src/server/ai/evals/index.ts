@@ -9,5 +9,6 @@ export * from "./service";
 export * from "./execution-config";
 export * from "./execution-change-adapter";
 export * from "./case-executions";
+export * from "./target-cleanup";
 export * from "./target-execution";
 export * from "./orchestration";

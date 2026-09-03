@@ -56,12 +56,14 @@ export class SQLiteAIEvalCaseExecutionRepository implements AIEvalCaseExecutionR
 
   markRunning(id: string, now: number, maxConcurrency?: number): AIEvalCaseExecution {
     if (maxConcurrency !== undefined && (!Number.isSafeInteger(maxConcurrency) || maxConcurrency < 1 || maxConcurrency > 100)) throw new AIEvalError("AI_EVAL_TARGET_INVALID", "The Eval target concurrency limit is invalid.");
+    const current = this.getById(id);
+    if (!current) throw new AIEvalError("AI_EVAL_TARGET_INVALID", "The Eval Case Execution was not found.");
     const run = () => {
       if (maxConcurrency !== undefined) {
         const row = this.database.client.prepare("select count(*) as count from ai_eval_case_executions where run_id=(select run_id from ai_eval_case_executions where id=?) and status='RUNNING'").get(id) as { count: number };
         if (row.count >= maxConcurrency) throw new AIEvalError("AI_EVAL_TARGET_CONCURRENCY_LIMITED", "The Eval target concurrency limit is currently reached.");
       }
-      return this.update(id, { status: "RUNNING", startedAt: now, updatedAt: now });
+      return this.update(id, { status: "RUNNING", startedAt: current.startedAt ?? now, updatedAt: now });
     };
     return (this.database.client.inTransaction ? run() : this.database.client.transaction(run).immediate());
   }
@@ -90,6 +92,20 @@ export class SQLiteAIEvalCaseExecutionRepository implements AIEvalCaseExecutionR
 
   ambiguous(input: { id: string; safeFailureCode: string; now: number }): AIEvalCaseExecution { return this.update(input.id, { status: "AMBIGUOUS", providerInvocationState: "AMBIGUOUS", safeFailureCode: input.safeFailureCode, completedAt: input.now, updatedAt: input.now }); }
 
+  returnToPendingForAdmission(id: string, now: number): AIEvalCaseExecution {
+    const current = this.getById(id);
+    if (!current || current.status !== "RUNNING" || current.providerInvocationState !== "NOT_INVOKED" || current.providerInvoked || current.budgetReservationId !== null || current.admissionAttempt >= 100) {
+      throw new AIEvalError("AI_EVAL_TARGET_INVALID", "The Eval target cannot be returned for another admission attempt.");
+    }
+    assertTimestamp(now, "admission retry");
+    return this.update(id, {
+      status: "PENDING",
+      admissionAttempt: current.admissionAttempt + 1,
+      safeFailureCode: "EVAL_ADMISSION_RETRYABLE",
+      updatedAt: now,
+    });
+  }
+
   listPendingTerminalReconciliation(limit: number): AIEvalCaseExecution[] {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) throw new AIEvalError("AI_EVAL_TARGET_INVALID", "The Eval target recovery limit is invalid.");
     const rows = this.database.db.select({ execution: aiEvalCaseExecutions })
@@ -112,7 +128,11 @@ export class SQLiteAIEvalCaseExecutionRepository implements AIEvalCaseExecutionR
 }
 
 function fromRow(row: AIEvalCaseExecutionRow): AIEvalCaseExecution {
-  return { id: row.id, idempotencyKey: `eval-target-${row.id}`, runId: row.runId, caseId: row.caseId, caseRevision: row.caseRevision, ordinal: row.ordinal, subjectKey: row.subjectKey, executionConfigId: row.executionConfigId, executionConfigRevision: row.executionConfigRevision, executionConfigFingerprint: row.executionConfigFingerprint, executionProtocolKey: row.executionProtocolKey, executionProtocolRevision: row.executionProtocolRevision, cleanupProtocolKey: row.cleanupProtocolKey, cleanupProtocolRevision: row.cleanupProtocolRevision, targetCostOperationId: row.targetCostOperationId, budgetReservationId: row.budgetReservationId, jobId: row.jobId, status: row.status as AIEvalCaseExecutionStatus, providerInvocationState: row.providerInvocationState as AIEvalProviderInvocationState, providerInvoked: row.providerInvoked, outputSha256: row.outputSha256, outputByteSize: row.outputByteSize, finishReason: row.finishReason, retrievalStatus: row.retrievalStatus as AIEvalCaseExecution["retrievalStatus"], candidateFingerprint: row.candidateFingerprint, planFingerprint: row.planFingerprint, safeFailureCode: row.safeFailureCode, createdAt: row.createdAt, startedAt: row.startedAt, completedAt: row.completedAt, updatedAt: row.updatedAt };
+  return { id: row.id, idempotencyKey: admissionIdempotencyKey(row.id, row.admissionAttempt), runId: row.runId, caseId: row.caseId, caseRevision: row.caseRevision, ordinal: row.ordinal, subjectKey: row.subjectKey, executionConfigId: row.executionConfigId, executionConfigRevision: row.executionConfigRevision, executionConfigFingerprint: row.executionConfigFingerprint, executionProtocolKey: row.executionProtocolKey, executionProtocolRevision: row.executionProtocolRevision, cleanupProtocolKey: row.cleanupProtocolKey, cleanupProtocolRevision: row.cleanupProtocolRevision, admissionAttempt: row.admissionAttempt, targetCostOperationId: row.targetCostOperationId, budgetReservationId: row.budgetReservationId, jobId: row.jobId, status: row.status as AIEvalCaseExecutionStatus, providerInvocationState: row.providerInvocationState as AIEvalProviderInvocationState, providerInvoked: row.providerInvoked, outputSha256: row.outputSha256, outputByteSize: row.outputByteSize, finishReason: row.finishReason, retrievalStatus: row.retrievalStatus as AIEvalCaseExecution["retrievalStatus"], candidateFingerprint: row.candidateFingerprint, planFingerprint: row.planFingerprint, safeFailureCode: row.safeFailureCode, createdAt: row.createdAt, startedAt: row.startedAt, completedAt: row.completedAt, updatedAt: row.updatedAt };
+}
+
+function admissionIdempotencyKey(id: string, attempt: number): string {
+  return attempt === 0 ? `eval-target-${id}` : `eval-target-${id}-${attempt}`;
 }
 
 function assertTimestamp(value: number, field: string): void { if (!Number.isSafeInteger(value) || value < 0 || value > MAX_TIMESTAMP) throw new AIEvalError("AI_EVAL_TARGET_INVALID", `Eval target ${field} timestamp is invalid.`); }

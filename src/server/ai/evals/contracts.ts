@@ -311,6 +311,8 @@ export const AI_EVAL_CASE_EXECUTION_STATUSES = ["PENDING", "RUNNING", "COMPLETED
 export type AIEvalCaseExecutionStatus = (typeof AI_EVAL_CASE_EXECUTION_STATUSES)[number];
 export const AI_EVAL_PROVIDER_INVOCATION_STATES = ["NOT_INVOKED", "INVOKING", "INVOKED_WITH_ACCOUNTING", "AMBIGUOUS"] as const;
 export type AIEvalProviderInvocationState = (typeof AI_EVAL_PROVIDER_INVOCATION_STATES)[number];
+export const AI_EVAL_TARGET_CLEANUP_STATUSES = ["PENDING", "CLEANED"] as const;
+export type AIEvalTargetCleanupStatus = (typeof AI_EVAL_TARGET_CLEANUP_STATUSES)[number];
 
 /** Durable target-execution metadata. It never stores prompts, output, or Evidence text. */
 export interface AIEvalCaseExecution {
@@ -329,6 +331,8 @@ export interface AIEvalCaseExecution {
   executionProtocolRevision: number;
   cleanupProtocolKey: string;
   cleanupProtocolRevision: number;
+  /** Durable retry generation for transient admission denials. */
+  admissionAttempt: number;
   targetCostOperationId: string | null;
   budgetReservationId: string | null;
   jobId: string | null;
@@ -366,7 +370,29 @@ export interface AIEvalCaseExecutionRepository {
   fail(input: { id: string; providerInvoked: boolean; outputSha256?: string | null; outputByteSize?: number | null; finishReason?: AIConversationFinishReason | null; retrievalStatus?: AIEvalCaseExecution["retrievalStatus"]; safeFailureCode: string; now: number }): AIEvalCaseExecution;
   cancel(input: { id: string; providerInvoked: boolean; safeFailureCode: string; now: number }): AIEvalCaseExecution;
   ambiguous(input: { id: string; safeFailureCode: string; now: number }): AIEvalCaseExecution;
+  returnToPendingForAdmission(id: string, now: number): AIEvalCaseExecution;
   listPendingTerminalReconciliation(limit: number): AIEvalCaseExecution[];
+}
+
+export interface AIEvalTargetCleanup {
+  id: string;
+  caseExecutionId: string;
+  syntheticConversationId: string;
+  status: AIEvalTargetCleanupStatus;
+  safeFailureCode: string | null;
+  createdAt: number;
+  cleanedAt: number | null;
+  updatedAt: number;
+}
+
+export interface AIEvalTargetCleanupRepository {
+  getByCaseExecutionId(caseExecutionId: string): AIEvalTargetCleanup | null;
+  listByCaseExecutionId(caseExecutionId: string): AIEvalTargetCleanup[];
+  listPending(input: { runId?: string; limit: number }): AIEvalTargetCleanup[];
+  countPending(runId: string): number;
+  createInTransaction(input: { id: string; caseExecutionId: string; syntheticConversationId: string; createdAt: number }): AIEvalTargetCleanup;
+  markPendingFailure(id: string, safeFailureCode: string, updatedAt: number): AIEvalTargetCleanup;
+  markCleaned(id: string, cleanedAt: number): AIEvalTargetCleanup;
 }
 
 export interface AIEvalCaseResult {
