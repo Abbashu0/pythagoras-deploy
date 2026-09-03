@@ -18,6 +18,7 @@ import { AIKnowledgeSourceChangeAdapter } from "../ai/knowledge/source-change-ad
 import { AIKnowledgePackageChangeAdapter } from "../ai/knowledge/package-change-adapter";
 import { AIRetrievalConfigChangeAdapter } from "../ai/retrieval-config";
 import { AITutorConfigChangeAdapter } from "../ai/tutor";
+import { AIEvalCaseChangeAdapter, AIEvalSuiteChangeAdapter } from "../ai/evals";
 
 export class ChangeResourceAdapterRegistry {
   private readonly adapters = new Map<string, ChangeResourceAdapter>();
@@ -88,6 +89,8 @@ export function createDefaultChangeResourceRegistry(): ChangeResourceAdapterRegi
       new AIKnowledgePackageChangeAdapter(),
       new AIRetrievalConfigChangeAdapter(),
       new AITutorConfigChangeAdapter(),
+      new AIEvalCaseChangeAdapter(),
+      new AIEvalSuiteChangeAdapter(),
     ],
     [new QuestionChangeSetCoordinator(), new MaterialQuestionBankChangeSetCoordinator()],
   );

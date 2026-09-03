@@ -95,7 +95,7 @@ AI milestones are future delivery boundaries. Each milestone is one coherent com
 
 ## AI-M8 — Grounded Tutor
 
-**Status:** Refined into independently reviewed checkpoints; AI-M8A and AI-M8B are approved, AI-M8C is implemented pending independent review, and AI-M8 overall remains incomplete.
+**Status:** Complete; AI-M8A, AI-M8B, and AI-M8C are approved.
 
 ### AI-M8A — Tutor Configuration, Preflight, Grounded Generation Plan & Response Trace Foundation
 
@@ -112,8 +112,27 @@ Migration `0030_require-unsealed-tutor-trace-creation` completes the M8A Trace c
 
 ### AI-M8C — Grounding/Citation Validation & Integration Hardening
 
-**Status:** Implemented; pending independent review.
+**Status:** Implemented and approved.
 **Boundary:** Runtime-only deterministic validation of the fixed `evidence-ref-v1@1` citation protocol against the exact selected Evidence map; post-Generation M7C/M8A currentness fences; preservation of Provider usage on invalid output or races; exclusion of partial Assistant output from later Context; coherent terminal replay; fail-closed ambiguous in-flight replay; and final real M7→M8 integration coverage. No migration or second Provider/judge call.
+
+## AI-M8 current review status
+
+AI-M8A, AI-M8B, and AI-M8C are approved; AI-M8 Grounded Tutor is complete at `e73d6dc5ba4ae18c1bf4dd614b093b605849d179`.
+
+## AI-M9 — Evals V1
+
+**Status:** Split into review checkpoints; AI-M9A is implemented pending independent review, AI-M9 overall is incomplete, and AI-M9B is not started.
+
+### AI-M9A — Eval Domain, Versioned Suites, Deterministic Graders & Promotion Gates
+
+**Status:** Implemented pending independent review.
+**Delivered boundary:** Governed subject-bound `ai.eval-suite` and `ai.eval-case` identities with append-only revisions; exact ordered Case-revision manifests; explicit synthetic/curated/de-identified privacy classification; code-owned deterministic graders reusing M8C citation validation; fixed-point result/aggregate/gate records; immutable candidate/manifest fingerprints; bounded baseline/regression comparison; and recommendation-only outcomes. Migration `0031_nosy_roxanne_simpson` adds Eval storage and SQLite lifecycle/ownership protections.
+**Explicit boundary:** Zero Generation, Embedding, Rerank, judge, Provider, network, Student/Admin/Mobile UI, automatic publication, production failure import, raw Student persistence, or chain-of-thought persistence.
+
+### AI-M9B — Eval Execution & EVALS Economics
+
+**Status:** Not started.
+**Boundary:** Future target execution, EVALS admission/accounting, supplementary judge integration, and bounded benchmark orchestration after independent M9A review.
 
 ## Remaining future milestones
 

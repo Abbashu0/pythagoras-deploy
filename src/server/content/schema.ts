@@ -100,6 +100,26 @@ import type {
   AIRetrievalRerankerFailureBehavior,
   AIRetrievalSemanticFailureBehavior,
 } from "../ai/retrieval-config/contracts";
+import type {
+  AIEvalBaselineMode,
+  AIEvalCandidateSnapshot,
+  AIEvalCaseOrigin,
+  AIEvalDeidentificationProof,
+  AIEvalDimension,
+  AIEvalDimensionRequirement,
+  AIEvalEvidenceOriginReference,
+  AIEvalExpectedStatus,
+  AIEvalGateConfig,
+  AIEvalGateVerdict,
+  AIEvalGraderConfig,
+  AIEvalObservedStatus,
+  AIEvalPrivacyClass,
+  AIEvalRecommendation,
+  AIEvalRegressionDelta,
+  AIEvalResultVerdict,
+  AIEvalRunStatus,
+  AIEvalSourceRevisionReference,
+} from "../ai/evals/contracts";
 import {
   AI_RETRIEVAL_FUSION_ALGORITHM_KEY,
   AI_RETRIEVAL_FUSION_ALGORITHM_REVISION,
@@ -3271,6 +3291,304 @@ export const aiTutorTraceEvidenceRefs = sqliteTable(
   ],
 );
 
+/** Stable subject-bound Eval Suite identity; behavior is revisioned below. */
+export const aiEvalSuites = sqliteTable(
+  "ai_eval_suites",
+  {
+    id: text("id").primaryKey(),
+    key: text("key").notNull(),
+    subjectKey: text("subject_key").notNull().references(() => canonicalMaterials.subjectKey, { onDelete: "restrict" }),
+    currentRevision: integer("current_revision").notNull().default(1),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    createdBy: text("created_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+    updatedBy: text("updated_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+  },
+  (table) => [
+    uniqueIndex("ai_eval_suites_key_unique").on(table.key),
+    index("ai_eval_suites_subject_index").on(table.subjectKey),
+    check("ai_eval_suites_key_valid", sql`length(trim(${table.key})) between 1 and 120 and ${table.key} not glob '*[^a-z0-9.-]*'`),
+    check("ai_eval_suites_subject_valid", sql`length(trim(${table.subjectKey})) between 1 and 80 and ${table.subjectKey} not glob '*[^a-z0-9-]*'`),
+    check("ai_eval_suites_revision_positive", sql`${table.currentRevision} >= 1`),
+    check("ai_eval_suites_created_nonnegative", sql`${table.createdAt} >= 0`),
+    check("ai_eval_suites_timestamps_ordered", sql`${table.updatedAt} >= ${table.createdAt}`),
+  ],
+);
+
+/** Immutable governed Eval Suite behavior/configuration revision. */
+export const aiEvalSuiteRevisions = sqliteTable(
+  "ai_eval_suite_revisions",
+  {
+    id: text("id").primaryKey(),
+    suiteId: text("suite_id").notNull().references(() => aiEvalSuites.id, { onDelete: "restrict" }),
+    revision: integer("revision").notNull(),
+    displayName: text("display_name").notNull(),
+    enabled: integer("enabled", { mode: "boolean" }).notNull(),
+    requiredDimensions: text("required_dimensions", { mode: "json" }).$type<AIEvalDimensionRequirement[]>().notNull(),
+    graderConfigs: text("grader_configs", { mode: "json" }).$type<AIEvalGraderConfig[]>().notNull(),
+    gateConfig: text("gate_config", { mode: "json" }).$type<AIEvalGateConfig>().notNull(),
+    permittedRegressionDeltas: text("permitted_regression_deltas", { mode: "json" }).$type<AIEvalRegressionDelta[]>().notNull(),
+    baselineMode: text("baseline_mode").$type<AIEvalBaselineMode>().notNull(),
+    supplementaryJudgeConfig: text("supplementary_judge_config", { mode: "json" }).$type<{ referenceKey: string; revision: number } | null>(),
+    manifestSealed: integer("manifest_sealed", { mode: "boolean" }).notNull().default(false),
+    createdAt: integer("created_at").notNull(),
+    createdBy: text("created_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+  },
+  (table) => [
+    uniqueIndex("ai_eval_suite_revisions_identity_unique").on(table.suiteId, table.revision),
+    index("ai_eval_suite_revisions_suite_index").on(table.suiteId, table.revision),
+    check("ai_eval_suite_revisions_revision_positive", sql`${table.revision} >= 1`),
+    check("ai_eval_suite_revisions_display_name_valid", sql`length(trim(${table.displayName})) between 1 and 200`),
+    check("ai_eval_suite_revisions_enabled_boolean", sql`${table.enabled} in (0,1)`),
+    check("ai_eval_suite_revisions_dimensions_valid", sql`json_valid(${table.requiredDimensions}) and json_type(${table.requiredDimensions}) = 'array' and json_array_length(${table.requiredDimensions}) between 1 and 15`),
+    check("ai_eval_suite_revisions_graders_valid", sql`json_valid(${table.graderConfigs}) and json_type(${table.graderConfigs}) = 'array' and json_array_length(${table.graderConfigs}) between 0 and 100`),
+    check("ai_eval_suite_revisions_gate_valid", sql`json_valid(${table.gateConfig}) and json_type(${table.gateConfig}) = 'object'`),
+    check("ai_eval_suite_revisions_regression_valid", sql`json_valid(${table.permittedRegressionDeltas}) and json_type(${table.permittedRegressionDeltas}) = 'array' and json_array_length(${table.permittedRegressionDeltas}) <= 15`),
+    check("ai_eval_suite_revisions_baseline_valid", sql`${table.baselineMode} in ('OPTIONAL','REQUIRED')`),
+    check("ai_eval_suite_revisions_judge_valid", sql`${table.supplementaryJudgeConfig} is null or (json_valid(${table.supplementaryJudgeConfig}) and json_type(${table.supplementaryJudgeConfig}) = 'object')`),
+    check("ai_eval_suite_revisions_created_nonnegative", sql`${table.createdAt} >= 0`),
+  ],
+);
+
+/** Immutable exact Case ID/revision manifest for one Suite revision. */
+export const aiEvalSuiteCaseRefs = sqliteTable(
+  "ai_eval_suite_case_refs",
+  {
+    suiteRevisionId: text("suite_revision_id").notNull().references(() => aiEvalSuiteRevisions.id, { onDelete: "restrict" }),
+    ordinal: integer("ordinal").notNull(),
+    caseId: text("case_id").notNull().references(() => aiEvalCases.id, { onDelete: "restrict" }),
+    caseRevision: integer("case_revision").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.suiteRevisionId, table.ordinal] }),
+    uniqueIndex("ai_eval_suite_case_refs_case_unique").on(table.suiteRevisionId, table.caseId),
+    check("ai_eval_suite_case_refs_ordinal_valid", sql`${table.ordinal} between 1 and 10000`),
+    check("ai_eval_suite_case_refs_revision_positive", sql`${table.caseRevision} >= 1`),
+  ],
+);
+
+/** Stable subject-bound Eval Case identity; dataset content is revisioned below. */
+export const aiEvalCases = sqliteTable(
+  "ai_eval_cases",
+  {
+    id: text("id").primaryKey(),
+    key: text("key").notNull(),
+    subjectKey: text("subject_key").notNull().references(() => canonicalMaterials.subjectKey, { onDelete: "restrict" }),
+    currentRevision: integer("current_revision").notNull().default(1),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    createdBy: text("created_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+    updatedBy: text("updated_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+  },
+  (table) => [
+    uniqueIndex("ai_eval_cases_key_unique").on(table.key),
+    index("ai_eval_cases_subject_index").on(table.subjectKey),
+    check("ai_eval_cases_key_valid", sql`length(trim(${table.key})) between 1 and 160 and ${table.key} not glob '*[^a-z0-9._-]*'`),
+    check("ai_eval_cases_subject_valid", sql`length(trim(${table.subjectKey})) between 1 and 80 and ${table.subjectKey} not glob '*[^a-z0-9-]*'`),
+    check("ai_eval_cases_revision_positive", sql`${table.currentRevision} >= 1`),
+    check("ai_eval_cases_created_nonnegative", sql`${table.createdAt} >= 0`),
+    check("ai_eval_cases_timestamps_ordered", sql`${table.updatedAt} >= ${table.createdAt}`),
+  ],
+);
+
+/** Immutable canonical Eval Case dataset revision; no runtime Student identity is permitted. */
+export const aiEvalCaseRevisions = sqliteTable(
+  "ai_eval_case_revisions",
+  {
+    id: text("id").primaryKey(),
+    caseId: text("case_id").notNull().references(() => aiEvalCases.id, { onDelete: "restrict" }),
+    revision: integer("revision").notNull(),
+    displayName: text("display_name").notNull(),
+    description: text("description"),
+    subjectKey: text("subject_key").notNull().references(() => canonicalMaterials.subjectKey, { onDelete: "restrict" }),
+    inputText: text("input_text").notNull(),
+    origin: text("origin").$type<AIEvalCaseOrigin>().notNull(),
+    privacyClass: text("privacy_class").$type<AIEvalPrivacyClass>().notNull(),
+    deidentificationProof: text("deidentification_proof", { mode: "json" }).$type<AIEvalDeidentificationProof | null>(),
+    expectedStatus: text("expected_status").$type<AIEvalExpectedStatus>().notNull(),
+    allowedFinishReasons: text("allowed_finish_reasons", { mode: "json" }).$type<AIConversationFinishReason[]>().notNull(),
+    requiredOutputLiterals: text("required_output_literals", { mode: "json" }).$type<string[]>().notNull(),
+    forbiddenOutputLiterals: text("forbidden_output_literals", { mode: "json" }).$type<string[]>().notNull(),
+    requiredEvidenceOrigins: text("required_evidence_origins", { mode: "json" }).$type<AIEvalEvidenceOriginReference[]>().notNull(),
+    forbiddenEvidenceOrigins: text("forbidden_evidence_origins", { mode: "json" }).$type<AIEvalEvidenceOriginReference[]>().notNull(),
+    requiredCitationLabels: text("required_citation_labels", { mode: "json" }).$type<string[]>().notNull(),
+    minimumEvidenceItemCount: integer("minimum_evidence_item_count").notNull().default(0),
+    securityLeakageMarkers: text("security_leakage_markers", { mode: "json" }).$type<string[]>().notNull(),
+    maximumOutputBytes: integer("maximum_output_bytes"),
+    sourceRevisionReferences: text("source_revision_references", { mode: "json" }).$type<AIEvalSourceRevisionReference[]>().notNull(),
+    enabled: integer("enabled", { mode: "boolean" }).notNull(),
+    createdAt: integer("created_at").notNull(),
+    createdBy: text("created_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+  },
+  (table) => [
+    uniqueIndex("ai_eval_case_revisions_identity_unique").on(table.caseId, table.revision),
+    index("ai_eval_case_revisions_case_index").on(table.caseId, table.revision),
+    check("ai_eval_case_revisions_revision_positive", sql`${table.revision} >= 1`),
+    check("ai_eval_case_revisions_display_name_valid", sql`length(trim(${table.displayName})) between 1 and 200`),
+    check("ai_eval_case_revisions_description_valid", sql`${table.description} is null or length(${table.description}) <= 1000`),
+    check("ai_eval_case_revisions_input_valid", sql`length(cast(${table.inputText} as blob)) between 1 and 65536`),
+    check("ai_eval_case_revisions_origin_valid", sql`${table.origin} in ('CURATED','SYNTHETIC','DEIDENTIFIED_REGRESSION')`),
+    check("ai_eval_case_revisions_privacy_valid", sql`${table.privacyClass} in ('SYNTHETIC_PUBLIC_SAFE','INTERNAL_CURATED','DEIDENTIFIED_REGRESSION')`),
+    check("ai_eval_case_revisions_deidentification_valid", sql`${table.deidentificationProof} is null or (json_valid(${table.deidentificationProof}) and json_type(${table.deidentificationProof}) = 'object')`),
+    check("ai_eval_case_revisions_status_valid", sql`${table.expectedStatus} in ('COMPLETED','BLOCKED','FAILED','CANCELLED')`),
+    check("ai_eval_case_revisions_finish_reasons_valid", sql`json_valid(${table.allowedFinishReasons}) and json_type(${table.allowedFinishReasons}) = 'array'`),
+    check("ai_eval_case_revisions_literals_valid", sql`json_valid(${table.requiredOutputLiterals}) and json_type(${table.requiredOutputLiterals}) = 'array' and json_valid(${table.forbiddenOutputLiterals}) and json_type(${table.forbiddenOutputLiterals}) = 'array'`),
+    check("ai_eval_case_revisions_evidence_expectations_valid", sql`json_valid(${table.requiredEvidenceOrigins}) and json_type(${table.requiredEvidenceOrigins}) = 'array' and json_valid(${table.forbiddenEvidenceOrigins}) and json_type(${table.forbiddenEvidenceOrigins}) = 'array'`),
+    check("ai_eval_case_revisions_citations_valid", sql`json_valid(${table.requiredCitationLabels}) and json_type(${table.requiredCitationLabels}) = 'array'`),
+    check("ai_eval_case_revisions_evidence_count_valid", sql`${table.minimumEvidenceItemCount} between 0 and 50`),
+    check("ai_eval_case_revisions_security_markers_valid", sql`json_valid(${table.securityLeakageMarkers}) and json_type(${table.securityLeakageMarkers}) = 'array'`),
+    check("ai_eval_case_revisions_output_bound_valid", sql`${table.maximumOutputBytes} is null or ${table.maximumOutputBytes} between 1 and 524288`),
+    check("ai_eval_case_revisions_sources_valid", sql`json_valid(${table.sourceRevisionReferences}) and json_type(${table.sourceRevisionReferences}) = 'array'`),
+    check("ai_eval_case_revisions_enabled_boolean", sql`${table.enabled} in (0,1)`),
+    check("ai_eval_case_revisions_created_nonnegative", sql`${table.createdAt} >= 0`),
+  ],
+);
+
+/** Durable Eval Run identity and candidate/configuration pin. */
+export const aiEvalRuns = sqliteTable(
+  "ai_eval_runs",
+  {
+    id: text("id").primaryKey(),
+    suiteId: text("suite_id").notNull().references(() => aiEvalSuites.id, { onDelete: "restrict" }),
+    suiteRevision: integer("suite_revision").notNull(),
+    manifestFingerprint: text("manifest_fingerprint").notNull(),
+    candidateSnapshot: text("candidate_snapshot", { mode: "json" }).$type<AIEvalCandidateSnapshot>().notNull(),
+    candidateFingerprint: text("candidate_fingerprint").notNull(),
+    baselineRunId: text("baseline_run_id").references(() => aiEvalRuns.id, { onDelete: "restrict" }),
+    status: text("status").$type<AIEvalRunStatus>().notNull(),
+    recommendation: text("recommendation").$type<AIEvalRecommendation | null>(),
+    safeFailureCode: text("safe_failure_code"),
+    createdAt: integer("created_at").notNull(),
+    startedAt: integer("started_at"),
+    scoredAt: integer("scored_at"),
+    completedAt: integer("completed_at"),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    index("ai_eval_runs_suite_index").on(table.suiteId, table.suiteRevision),
+    index("ai_eval_runs_status_index").on(table.status, table.updatedAt),
+    index("ai_eval_runs_baseline_index").on(table.baselineRunId),
+    check("ai_eval_runs_suite_revision_positive", sql`${table.suiteRevision} >= 1`),
+    check("ai_eval_runs_manifest_fingerprint_valid", sql`length(${table.manifestFingerprint}) = 64 and ${table.manifestFingerprint} not glob '*[^0-9a-f]*'`),
+    check("ai_eval_runs_candidate_snapshot_valid", sql`json_valid(${table.candidateSnapshot}) and json_type(${table.candidateSnapshot}) = 'object'`),
+    check("ai_eval_runs_candidate_fingerprint_valid", sql`length(${table.candidateFingerprint}) = 64 and ${table.candidateFingerprint} not glob '*[^0-9a-f]*'`),
+    check("ai_eval_runs_status_valid", sql`${table.status} in ('CREATED','RUNNING','SCORING','COMPLETED','FAILED','CANCELLED')`),
+    check("ai_eval_runs_recommendation_valid", sql`${table.recommendation} is null or ${table.recommendation} in ('PASS_RECOMMENDED','BLOCKED','INCOMPLETE')`),
+    check("ai_eval_runs_failure_code_valid", sql`${table.safeFailureCode} is null or (length(trim(${table.safeFailureCode})) between 1 and 160 and ${table.safeFailureCode} not glob '*[^A-Z0-9_-]*')`),
+    check("ai_eval_runs_timestamps_valid", sql`${table.updatedAt} >= ${table.createdAt} and (${table.startedAt} is null or ${table.startedAt} >= ${table.createdAt}) and (${table.scoredAt} is null or ${table.scoredAt} >= ${table.createdAt}) and (${table.completedAt} is null or ${table.completedAt} >= ${table.createdAt})`),
+    check("ai_eval_runs_created_nonnegative", sql`${table.createdAt} >= 0`),
+  ],
+);
+
+/** One immutable observation per Run + exact manifest Case revision. Output is hash-only. */
+export const aiEvalCaseResults = sqliteTable(
+  "ai_eval_case_results",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id").notNull().references(() => aiEvalRuns.id, { onDelete: "restrict" }),
+    caseId: text("case_id").notNull().references(() => aiEvalCases.id, { onDelete: "restrict" }),
+    caseRevision: integer("case_revision").notNull(),
+    ordinal: integer("ordinal").notNull(),
+    observedSubjectKey: text("observed_subject_key").notNull().references(() => canonicalMaterials.subjectKey, { onDelete: "restrict" }),
+    observedStatus: text("observed_status").$type<AIEvalObservedStatus>().notNull(),
+    finishReason: text("finish_reason").$type<AIConversationFinishReason | null>(),
+    outputSha256: text("output_sha256").notNull(),
+    outputByteSize: integer("output_byte_size").notNull(),
+    evidence: text("evidence", { mode: "json" }).$type<AIEvalEvidenceOriginReference[]>().notNull(),
+    retrievalStatus: text("retrieval_status").notNull(),
+    elapsedLatencyMs: integer("elapsed_latency_ms"),
+    costOperationId: text("cost_operation_id").references(() => aiCostOperations.id, { onDelete: "restrict" }),
+    privacyClass: text("privacy_class").$type<AIEvalPrivacyClass>().notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("ai_eval_case_results_run_case_unique").on(table.runId, table.caseId),
+    uniqueIndex("ai_eval_case_results_run_ordinal_unique").on(table.runId, table.ordinal),
+    index("ai_eval_case_results_run_index").on(table.runId, table.ordinal),
+    check("ai_eval_case_results_case_revision_positive", sql`${table.caseRevision} >= 1`),
+    check("ai_eval_case_results_ordinal_valid", sql`${table.ordinal} between 1 and 10000`),
+    check("ai_eval_case_results_status_valid", sql`${table.observedStatus} in ('COMPLETED','BLOCKED','FAILED','CANCELLED')`),
+    check("ai_eval_case_results_finish_valid", sql`${table.finishReason} is null or ${table.finishReason} in ('STOP','LENGTH','CONTENT_FILTER','OTHER','FAILED','CANCELLED')`),
+    check("ai_eval_case_results_hash_valid", sql`length(${table.outputSha256}) = 64 and ${table.outputSha256} not glob '*[^0-9a-f]*'`),
+    check("ai_eval_case_results_output_size_valid", sql`${table.outputByteSize} between 0 and 524288`),
+    check("ai_eval_case_results_evidence_valid", sql`json_valid(${table.evidence}) and json_type(${table.evidence}) = 'array'`),
+    check("ai_eval_case_results_retrieval_valid", sql`${table.retrievalStatus} in ('SUFFICIENT','INSUFFICIENT','NOT_APPLICABLE')`),
+    check("ai_eval_case_results_latency_valid", sql`${table.elapsedLatencyMs} is null or ${table.elapsedLatencyMs} between 0 and 8640000000000`),
+    check("ai_eval_case_results_privacy_valid", sql`${table.privacyClass} in ('SYNTHETIC_PUBLIC_SAFE','INTERNAL_CURATED','DEIDENTIFIED_REGRESSION')`),
+    check("ai_eval_case_results_created_nonnegative", sql`${table.createdAt} >= 0`),
+  ],
+);
+
+/** Immutable deterministic grader result. */
+export const aiEvalGraderResults = sqliteTable(
+  "ai_eval_grader_results",
+  {
+    id: text("id").primaryKey(),
+    caseResultId: text("case_result_id").notNull().references(() => aiEvalCaseResults.id, { onDelete: "restrict" }),
+    dimension: text("dimension").$type<AIEvalDimension>().notNull(),
+    graderKey: text("grader_key").notNull(),
+    graderRevision: integer("grader_revision").notNull(),
+    verdict: text("verdict").$type<AIEvalResultVerdict>().notNull(),
+    scoreUnits: integer("score_units").notNull(),
+    safeReasonCode: text("safe_reason_code").notNull(),
+    blocking: integer("blocking", { mode: "boolean" }).notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("ai_eval_grader_results_identity_unique").on(table.caseResultId, table.graderKey, table.graderRevision),
+    index("ai_eval_grader_results_case_index").on(table.caseResultId),
+    check("ai_eval_grader_results_dimension_valid", sql`${table.dimension} in ('CORRECTNESS','CURRICULUM_FIDELITY','GROUNDEDNESS','SOURCE_FIDELITY','RELEVANCE','CONCISENESS','INSTRUCTION_FOLLOWING','ARABIC_QUALITY','IRAQI_NATURALNESS','MATHEMATICS_CORRECTNESS','OFF_TOPIC_BEHAVIOR','RETRIEVAL_QUALITY','COST','LATENCY','SECURITY')`),
+    check("ai_eval_grader_results_key_valid", sql`length(trim(${table.graderKey})) between 1 and 120 and ${table.graderKey} not glob '*[^a-z0-9.-]*'`),
+    check("ai_eval_grader_results_revision_positive", sql`${table.graderRevision} >= 1`),
+    check("ai_eval_grader_results_verdict_valid", sql`${table.verdict} in ('PASS','FAIL','NOT_APPLICABLE')`),
+    check("ai_eval_grader_results_score_valid", sql`${table.scoreUnits} between 0 and 1000000`),
+    check("ai_eval_grader_results_reason_valid", sql`length(trim(${table.safeReasonCode})) between 1 and 160 and ${table.safeReasonCode} not glob '*[^A-Z0-9_-]*'`),
+    check("ai_eval_grader_results_blocking_boolean", sql`${table.blocking} in (0,1)`),
+    check("ai_eval_grader_results_created_nonnegative", sql`${table.createdAt} >= 0`),
+  ],
+);
+
+/** Deterministic run-level dimension aggregate. */
+export const aiEvalDimensionAggregates = sqliteTable(
+  "ai_eval_dimension_aggregates",
+  {
+    runId: text("run_id").notNull().references(() => aiEvalRuns.id, { onDelete: "restrict" }),
+    dimension: text("dimension").$type<AIEvalDimension>().notNull(),
+    applicableCaseCount: integer("applicable_case_count").notNull(),
+    passedCaseCount: integer("passed_case_count").notNull(),
+    failedCaseCount: integer("failed_case_count").notNull(),
+    scoreUnits: integer("score_units"),
+    blockingFailureCount: integer("blocking_failure_count").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.runId, table.dimension] }),
+    check("ai_eval_dimension_aggregates_dimension_valid", sql`${table.dimension} in ('CORRECTNESS','CURRICULUM_FIDELITY','GROUNDEDNESS','SOURCE_FIDELITY','RELEVANCE','CONCISENESS','INSTRUCTION_FOLLOWING','ARABIC_QUALITY','IRAQI_NATURALNESS','MATHEMATICS_CORRECTNESS','OFF_TOPIC_BEHAVIOR','RETRIEVAL_QUALITY','COST','LATENCY','SECURITY')`),
+    check("ai_eval_dimension_aggregates_counts_valid", sql`${table.applicableCaseCount} >= 0 and ${table.passedCaseCount} >= 0 and ${table.failedCaseCount} >= 0 and ${table.blockingFailureCount} >= 0 and ${table.passedCaseCount} + ${table.failedCaseCount} <= ${table.applicableCaseCount}`),
+    check("ai_eval_dimension_aggregates_score_valid", sql`${table.scoreUnits} is null or ${table.scoreUnits} between 0 and 1000000`),
+  ],
+);
+
+/** Immutable absolute/regression gate evidence for a Run recommendation. */
+export const aiEvalGateResults = sqliteTable(
+  "ai_eval_gate_results",
+  {
+    runId: text("run_id").notNull().references(() => aiEvalRuns.id, { onDelete: "restrict" }),
+    gateKey: text("gate_key").notNull(),
+    verdict: text("verdict").$type<AIEvalGateVerdict>().notNull(),
+    observedValue: integer("observed_value"),
+    thresholdValue: integer("threshold_value"),
+    safeReasonCode: text("safe_reason_code").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.runId, table.gateKey] }),
+    check("ai_eval_gate_results_key_valid", sql`length(trim(${table.gateKey})) between 1 and 160 and ${table.gateKey} not glob '*[^A-Z0-9_-]*'`),
+    check("ai_eval_gate_results_verdict_valid", sql`${table.verdict} in ('PASS','BLOCKED','INCOMPLETE')`),
+    check("ai_eval_gate_results_values_valid", sql`${table.observedValue} is null or ${table.observedValue} >= 0`),
+    check("ai_eval_gate_results_threshold_valid", sql`${table.thresholdValue} is null or ${table.thresholdValue} >= 0`),
+    check("ai_eval_gate_results_reason_valid", sql`length(trim(${table.safeReasonCode})) between 1 and 160 and ${table.safeReasonCode} not glob '*[^A-Z0-9_-]*'`),
+  ],
+);
+
 export type ChangeSetRow = typeof changeSets.$inferSelect;
 export type ChangeSetItemRow = typeof changeSetItems.$inferSelect;
 export type ChangeSetEventRow = typeof changeSetEvents.$inferSelect;
@@ -3330,3 +3648,13 @@ export type AITutorConfigRevisionRow = typeof aiTutorConfigRevisions.$inferSelec
 export type AITutorResponseTraceRow = typeof aiTutorResponseTraces.$inferSelect;
 export type AITutorTraceProjectionRefRow = typeof aiTutorTraceProjectionRefs.$inferSelect;
 export type AITutorTraceEvidenceRefRow = typeof aiTutorTraceEvidenceRefs.$inferSelect;
+export type AIEvalSuiteRow = typeof aiEvalSuites.$inferSelect;
+export type AIEvalSuiteRevisionRow = typeof aiEvalSuiteRevisions.$inferSelect;
+export type AIEvalSuiteCaseRefRow = typeof aiEvalSuiteCaseRefs.$inferSelect;
+export type AIEvalCaseRow = typeof aiEvalCases.$inferSelect;
+export type AIEvalCaseRevisionRow = typeof aiEvalCaseRevisions.$inferSelect;
+export type AIEvalRunRow = typeof aiEvalRuns.$inferSelect;
+export type AIEvalCaseResultRow = typeof aiEvalCaseResults.$inferSelect;
+export type AIEvalGraderResultRow = typeof aiEvalGraderResults.$inferSelect;
+export type AIEvalDimensionAggregateRow = typeof aiEvalDimensionAggregates.$inferSelect;
+export type AIEvalGateResultRow = typeof aiEvalGateResults.$inferSelect;

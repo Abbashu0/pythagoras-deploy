@@ -15,3 +15,4 @@ export * from "./embedding";
 export * from "./retrieval";
 export * from "./retrieval-config";
 export * from "./tutor";
+export * from "./evals";

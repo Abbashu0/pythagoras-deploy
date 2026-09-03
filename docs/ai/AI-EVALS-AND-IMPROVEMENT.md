@@ -19,7 +19,8 @@ Evaluation dimensions include:
 - off-topic behavior;
 - retrieval quality;
 - cost;
-- latency.
+- latency;
+- security.
 
 Deterministic graders are preferred for IDs, scope, citations/provenance, required structure, policy outcomes, arithmetic, cost, latency, and retrieval coverage. LLM-as-judge MAY supplement these checks but MUST NOT be the sole authority for curriculum correctness, security, or publication.
 
@@ -37,6 +38,16 @@ Before a model, provider, prompt/policy revision, retrieval setting, or reranker
 6. a complete reproducible trace and reviewer decision.
 
 An Eval result recommends; Governance decides. A passing score does not grant publication authority to a model or Agent 2.
+
+## 2A. AI-M9A implementation boundary
+
+AI-M9A creates the durable evaluation truth, but does not execute an evaluation target. `ai.eval-suite` and `ai.eval-case` are governed through Change Sets and OWNER publication; their revisions are append-only, and each Suite revision pins a non-empty ordered manifest of exact Case IDs and Case revisions. Cases use closed origin/privacy classifications: synthetic cases are public-safe, curated cases are internal, and `DEIDENTIFIED_REGRESSION` requires explicit de-identification proof. No StudentPrincipal, principal reference, Conversation ID, Response ID, credential, or raw production failure may enter a Case.
+
+The code-owned `deterministic-evals-v1@1` registry supplies fixed, bounded checks for terminal behavior, M8C citation integrity, Evidence/source expectations, retrieval coverage, literal expectations, security leakage, output bounds, cost, and latency. Suite configuration references grader identities only; it cannot store JavaScript, SQL, regex programs, or executable prompt templates. Scores, thresholds, and permitted baseline regressions use integer units from 0 through 1,000,000. Missing required deterministic or future judge dimensions are `INCOMPLETE`; a blocking security failure is always `BLOCKED`.
+
+M9A Runs pin the exact Suite revision, manifest fingerprint, safe Tutor/Policy/Context/Retrieval/Model/Provider identity snapshot, and candidate SHA-256 fingerprint. Runtime observations are trusted internal inputs; durable Case results retain only bounded hash/size, status, Evidence identities, latency, privacy, and an optional canonical `EVALS` Cost Operation reference. No chain-of-thought, raw Student conversation, prompt, Provider secret, or unbounded output store is created. Run, result, aggregate, and gate history is append-only.
+
+Absolute gates are evaluated before baseline/regression gates for required dimensions, cost, latency, retrieval/source coverage, and security. Baselines must be completed, passing, same-suite, same-revision, same-manifest, and grader-comparable; self-baselines and incomplete/failed baselines are not comparable. `PASS_RECOMMENDED` is an Eval recommendation only: it never publishes or mutates Tutor, Model, Provider, Policy, Retrieval, Knowledge, Question, routing, or credentials. M9B will later bind live target execution and judge work to `EVALS` Cost Operations through `evalRunId`; M9A makes zero Generation, Embedding, Rerank, or judge calls.
 
 ## 3. Agent 2 is read-only intelligence
 

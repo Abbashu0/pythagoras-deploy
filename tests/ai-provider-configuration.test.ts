@@ -168,7 +168,7 @@ function secretFiles(root: string, credentialRef: string): string[] {
 test("AI M1 migration creates metadata tables without ciphertext or master-key columns", () => {
   const fixture = createFixture();
   try {
-    assert.equal(getContentDatabaseStatus(fixture.database).migrationsApplied, 31);
+    assert.equal(getContentDatabaseStatus(fixture.database).migrationsApplied, 32);
     for (const table of ["ai_provider_configs", "ai_secret_refs", "ai_secret_audit_events"]) {
       assert.ok(fixture.database.client.prepare("select name from sqlite_master where type='table' and name=?").get(table));
     }
