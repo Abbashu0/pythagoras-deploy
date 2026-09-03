@@ -66,7 +66,10 @@ export class ContextBudgetManager {
     }
 
     const remainingOptional = Math.max(input.contextPolicy.softInputBudgetTokens - mandatoryTokens - optionalInputTokens, 0);
-    const units = groupTurnUnits(input.previousMessages);
+    // Failed/cancelled Assistant output is retained in M4 for audit, but it
+    // is not eligible to become trusted working context for a later turn.
+    const contextEligibleMessages = input.previousMessages.filter((message) => !message.isPartial);
+    const units = groupTurnUnits(contextEligibleMessages);
     const selectedUnits: AIContextMessageUnit[] = [];
     let recentTokens = 0;
     for (let index = units.length - 1; index >= 0 && selectedUnits.length < input.contextPolicy.maxRecentTurns; index -= 1) {

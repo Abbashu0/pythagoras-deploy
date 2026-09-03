@@ -122,7 +122,7 @@ class IntegrationGenerationAdapter implements GenerationProviderAdapter {
   calls = 0;
   requests: GenerationProviderRequest[] = [];
   credentials: string[] = [];
-  behavior: GenerationBehavior = { finishReason: "STOP", deltas: ["إجابة تكاملية"], usageEvents: [], finalUsage: knownUsage(20, 3) };
+  behavior: GenerationBehavior = { finishReason: "STOP", deltas: ["إجابة تكاملية [E1]"], usageEvents: [], finalUsage: knownUsage(20, 3) };
   private startedResolver: (() => void) | null = null;
   readonly started = new Promise<void>((resolve) => { this.startedResolver = resolve; });
   private waitingResolver: (() => void) | null = null;
@@ -241,13 +241,16 @@ interface IntegrationFixture {
 
 type ExecutionOptions = {
   afterRetrieve?: (pack: AIEvidencePack) => void;
+  afterGenerationAccounting?: () => void;
   beforeGenerate?: () => void;
+  onPreflight?: (plan: TutorPreflightPlan) => void;
   onRequest?: (request: AIHybridRetrievalRequest) => void;
   accounting?: AITutorExecutionDependenciesLike["accounting"];
   admission?: AITutorExecutionDependenciesLike["admission"];
 };
 
 type AITutorExecutionDependenciesLike = ConstructorParameters<typeof AITutorExecutionService>[0];
+type TutorPreflightPlan = ReturnType<AITutorExecutionDependenciesLike["preflight"]["preflight"]>;
 
 function createTutorRepository(database: ContentDatabase): SQLiteAITutorConfigRepository {
   return new SQLiteAITutorConfigRepository(database);
@@ -359,7 +362,15 @@ async function createFixture(options: { withRerank?: boolean; rateLimit?: { maxR
         return gateway.generate(plan, request, gatewayOptions);
       },
     };
-    return new AITutorExecutionService({ database, preflight, conversations, context, tutorConfigs, instructionPolicies: instructions, contextPolicies: contexts, retrievalConfigs: retrievals, budgetPolicies: new SQLiteAIBudgetPolicyRepository(database), rateLimitPolicies: new SQLiteAIRateLimitPolicyRepository(database), models, providers, accounting: executionOptions.accounting ?? accounting, admission: executionOptions.admission ?? admission, retrieval, planner: new AITutorGenerationPlanner(), traces, gateway: executionGateway, estimator, budgetPeriodResolver: { resolve: () => ({ startAt: 0, endAt: BASE_TIME + 100_000 }) }, clock: () => BASE_TIME });
+    const executionAccounting = executionOptions.accounting ?? (executionOptions.afterGenerationAccounting ? afterGenerationAccounting(accounting, executionOptions.afterGenerationAccounting) : accounting);
+    const executionPreflight = executionOptions.onPreflight ? {
+      preflight(input: Parameters<AITutorExecutionDependenciesLike["preflight"]["preflight"]>[0]) {
+        const plan = preflight.preflight(input);
+        executionOptions.onPreflight?.(plan);
+        return plan;
+      },
+    } : preflight;
+    return new AITutorExecutionService({ database, preflight: executionPreflight, conversations, context, tutorConfigs, instructionPolicies: instructions, contextPolicies: contexts, retrievalConfigs: retrievals, budgetPolicies: new SQLiteAIBudgetPolicyRepository(database), rateLimitPolicies: new SQLiteAIRateLimitPolicyRepository(database), models, providers, accounting: executionAccounting, admission: executionOptions.admission ?? admission, retrieval, planner: new AITutorGenerationPlanner(), traces, gateway: executionGateway, estimator, budgetPeriodResolver: { resolve: () => ({ startAt: 0, endAt: BASE_TIME + 100_000 }) }, clock: () => BASE_TIME });
   };
   return { root, database, owner, principal: PRINCIPAL, secrets, providers, models, sources, packages, retrievals, tutorConfigs, instructions, contexts, conversations, context, preflight, admission, accounting, accountingRepository, gateway, hybrid, traces, execution, generation, embedding, reranker, generationModelId, embeddingModelId, rerankModelId, providerId, sourceId, packageId, m7aRevisionId: m7a.projectionRevisionId, m7bRevisionId: embeddingBuild.embeddingProjectionRevisionId, studentBudgetPolicyId, embeddingBudgetPolicyId, rateLimitPolicyId, close() { database.close(); rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 }); } };
 }
@@ -397,8 +408,17 @@ function publishChange(changes: ReturnType<typeof createChangeManagementService>
 
 function beginTurn(fixture: IntegrationFixture, content = `${QUERY_MARKER} mitochondria`): { conversationId: string; responseId: string } {
   const conversation = fixture.conversations.createConversation(fixture.principal, "biology");
-  const turn = fixture.conversations.beginTurn(fixture.principal, { conversationId: conversation.id, idempotencyKey: `m8b-turn-${uuidv7()}`, userContent: content });
-  return { conversationId: conversation.id, responseId: turn.response.id };
+  return beginTurnInConversation(fixture, conversation.id, content);
+}
+
+function beginTurnInConversation(fixture: IntegrationFixture, conversationId: string, content: string): { conversationId: string; responseId: string } {
+  const turn = fixture.conversations.beginTurn(fixture.principal, { conversationId, idempotencyKey: `m8b-turn-${uuidv7()}`, userContent: content });
+  return { conversationId, responseId: turn.response.id };
+}
+
+function durableExecutionCounts(fixture: IntegrationFixture): { operations: number; reservations: number; traces: number; usage: number; rateEvents: number } {
+  const count = (table: string) => Number((fixture.database.client.prepare(`select count(*) as count from ${table}`).get() as { count: number }).count);
+  return { operations: count("ai_cost_operations"), reservations: count("ai_budget_reservations"), traces: count("ai_tutor_response_traces"), usage: count("ai_usage_cost_records"), rateEvents: count("ai_rate_limit_events") };
 }
 
 function createDummyAdmission(fixture: IntegrationFixture): { operationId: string; reservationId: string } {
@@ -433,6 +453,7 @@ function instrumentSettlement(
   const wrappedAdmission: AITutorExecutionDependenciesLike["admission"] = {
     admit: (plan) => admission.admit(plan),
     getReservation: (reservationId) => admission.getReservation(reservationId),
+    getReservationByOperationId: (operationId) => admission.getReservationByOperationId(operationId),
     startExecution: (reservationId, at) => admission.startExecution(reservationId, at),
     releaseBeforeExecution: (reservationId, at, reasonCode) => admission.releaseBeforeExecution(reservationId, at, reasonCode),
     settle: (reservationId, at) => {
@@ -450,11 +471,30 @@ function instrumentSettlement(
   return { accounting: wrappedAccounting, admission: wrappedAdmission };
 }
 
-test("M8B real integration composes M7C QUERY retrieval and Generation under one operation", async () => {
+function afterGenerationAccounting(
+  accounting: AITutorExecutionDependenciesLike["accounting"],
+  callback: () => void,
+): AITutorExecutionDependenciesLike["accounting"] {
+  return {
+    getOperation: (id) => accounting.getOperation(id),
+    getOperationByResponseId: (responseId) => accounting.getOperationByResponseId(responseId),
+    getOperationByIdempotencyKey: (idempotencyKey) => accounting.getOperationByIdempotencyKey(idempotencyKey),
+    createOperation: (content, id) => accounting.createOperation(content, id),
+    completeOperation: (id, expectedStatus, status, completedAt) => accounting.completeOperation(id, expectedStatus, status, completedAt),
+    recordAttempt: (observation) => {
+      const result = accounting.recordAttempt(observation);
+      if (observation.capability === "GENERATION") callback();
+      return result;
+    },
+  };
+}
+
+test("M8 final grounded Tutor path composes governed M8A through real M7C and one Generation", async () => {
   const fixture = await createFixture({ withRerank: true });
   try {
     const turn = beginTurn(fixture);
     const requests: AIHybridRetrievalRequest[] = [];
+    let preflightPlan: TutorPreflightPlan | null = null;
     let firstQueryState: { operationStatus: string; reservationStatus: string; reservationOperationId: string } | null = null;
     fixture.embedding.onCall = (request) => {
       if (request.inputType !== "QUERY" || firstQueryState) return;
@@ -462,7 +502,7 @@ test("M8B real integration composes M7C QUERY retrieval and Generation under one
       const reservation = fixture.database.client.prepare("select operation_id, status from ai_budget_reservations where operation_id=?").get(operation.id) as { operation_id: string; status: string };
       firstQueryState = { operationStatus: operation.status, reservationStatus: reservation.status, reservationOperationId: reservation.operation_id };
     };
-    const result = await fixture.execution({ onRequest: (request) => requests.push(request) }).execute({ principal: fixture.principal, responseId: turn.responseId, tutorConfigId: fixture.tutorConfigs.getByKey(fixture.tutorConfigs.list()[0]!.key)!.id });
+    const result = await fixture.execution({ onPreflight: (plan) => { preflightPlan = plan; }, onRequest: (request) => requests.push(request) }).execute({ principal: fixture.principal, responseId: turn.responseId, tutorConfigId: fixture.tutorConfigs.getByKey(fixture.tutorConfigs.list()[0]!.key)!.id });
     assert.equal(result.status, "COMPLETED");
     const queryState = firstQueryState as { operationStatus: string; reservationStatus: string; reservationOperationId: string } | null;
     assert.ok(queryState);
@@ -473,6 +513,10 @@ test("M8B real integration composes M7C QUERY retrieval and Generation under one
     assert.equal(requests[0]!.requestId, turn.responseId);
     assert.equal(requests[0]!.subjectKey, "biology");
     assert.equal(requests[0]!.query, `${QUERY_MARKER} mitochondria`);
+    const pinnedPreflight = preflightPlan!;
+    assert.ok(pinnedPreflight);
+    assert.equal(requests[0]!.retrievalConfigId, pinnedPreflight.retrievalConfigId);
+    assert.equal(requests[0]!.retrievalConfigRevision, pinnedPreflight.retrievalConfigRevision);
     const usage = fixture.database.client.prepare("select capability, normalized_input_tokens, normalized_output_tokens from ai_usage_cost_records where operation_id=? order by capability").all(result.costOperationId) as Array<{ capability: string; normalized_input_tokens: number | null; normalized_output_tokens: number | null }>;
     assert.deepEqual(usage.map((row) => row.capability), ["EMBEDDING", "GENERATION", "RERANK"]);
     assert.equal(usage.filter((row) => row.capability === "EMBEDDING").length, 1);
@@ -536,10 +580,10 @@ test("M8B real integration passes exact pin and allows Secret rotation alone", a
 });
 
 test("M8B real integration preserves Provider finish reasons", async () => {
-  for (const finishReason of ["STOP", "LENGTH", "CONTENT_FILTER"] as const) {
+  for (const finishReason of ["STOP", "LENGTH", "CONTENT_FILTER", "OTHER"] as const) {
     const fixture = await createFixture();
     try {
-      fixture.generation.behavior = { finishReason, deltas: ["answer"], usageEvents: [], finalUsage: knownUsage(10, 2) };
+      fixture.generation.behavior = { finishReason, deltas: finishReason === "CONTENT_FILTER" ? [] : ["answer [E1]"], usageEvents: [], finalUsage: knownUsage(10, 2) };
       const turn = beginTurn(fixture, "finish reason");
       const result = await fixture.execution().execute({ principal: fixture.principal, responseId: turn.responseId, tutorConfigId: fixture.tutorConfigs.list()[0]!.id });
       assert.equal(result.status, "COMPLETED");
@@ -608,7 +652,7 @@ test("M8B real integration accounts partial failure, cancellation, overflow, unk
   } finally { unknown.close(); }
   const cumulative = await createFixture();
   try {
-    cumulative.generation.behavior = { finishReason: "STOP", deltas: ["answer"], usageEvents: [knownUsage(10, 2), knownUsage(20, 5)], finalUsage: knownUsage(20, 5) };
+    cumulative.generation.behavior = { finishReason: "STOP", deltas: ["answer [E1]"], usageEvents: [knownUsage(10, 2), knownUsage(20, 5)], finalUsage: knownUsage(20, 5) };
     const turn = beginTurn(cumulative);
     const result = await cumulative.execution().execute({ principal: cumulative.principal, responseId: turn.responseId, tutorConfigId: cumulative.tutorConfigs.list()[0]!.id });
     const row = cumulative.database.client.prepare("select normalized_input_tokens, normalized_output_tokens from ai_usage_cost_records where operation_id=? and capability='GENERATION'").get(result.costOperationId) as { normalized_input_tokens: number; normalized_output_tokens: number };
@@ -673,5 +717,181 @@ test("M8B real integration removes the caller cancellation bridge after executio
       reservation: fixture.database.client.prepare("select * from ai_budget_reservations where id=?").get(result.budgetReservationId),
     };
     assert.deepEqual(after, before);
+  } finally { fixture.close(); }
+});
+
+test("M8C rejects fabricated citations after accounting the successful Provider attempt", async () => {
+  const fixture = await createFixture();
+  try {
+    fixture.generation.behavior = { finishReason: "STOP", deltas: ["جواب غير موثق [E99]"], usageEvents: [], finalUsage: knownUsage(12, 4) };
+    const turn = beginTurn(fixture);
+    const result = await fixture.execution().execute({ principal: fixture.principal, responseId: turn.responseId, tutorConfigId: fixture.tutorConfigs.list()[0]!.id });
+    assert.equal(result.status, "FAILED");
+    assert.equal(fixture.generation.calls, 1);
+    const messages = fixture.conversations.listMessages(fixture.principal, turn.conversationId);
+    assert.equal(messages.at(-1)?.content, "جواب غير موثق [E99]");
+    assert.equal(messages.at(-1)?.isPartial, true);
+    assert.equal(fixture.traces.getByResponse(turn.responseId)?.status, "FAILED");
+    assert.equal((fixture.database.client.prepare("select status from ai_cost_operations where id=?").get(result.costOperationId) as { status: string }).status, "FAILED");
+    assert.equal((fixture.database.client.prepare("select count(*) as count from ai_usage_cost_records where operation_id=? and capability='GENERATION'").get(result.costOperationId) as { count: number }).count, 1);
+    const reservation = fixture.database.client.prepare("select status from ai_budget_reservations where id=?").get(result.budgetReservationId) as { status: string };
+    assert.equal(reservation.status, result.settlementStatus);
+    assert.ok(result.settlementStatus === "SETTLED" || result.settlementStatus === "RECONCILIATION_REQUIRED");
+  } finally { fixture.close(); }
+});
+
+test("M8C rejects ordinary successful output without a citation", async () => {
+  const fixture = await createFixture();
+  try {
+    fixture.generation.behavior = { finishReason: "STOP", deltas: ["جواب بلا مرجع"], usageEvents: [], finalUsage: knownUsage(12, 3) };
+    const turn = beginTurn(fixture);
+    const result = await fixture.execution().execute({ principal: fixture.principal, responseId: turn.responseId, tutorConfigId: fixture.tutorConfigs.list()[0]!.id });
+    assert.equal(result.status, "FAILED");
+    assert.equal(fixture.generation.calls, 1);
+    assert.equal(fixture.conversations.listMessages(fixture.principal, turn.conversationId).at(-1)?.isPartial, true);
+    assert.equal(fixture.traces.getByResponse(turn.responseId)?.status, "FAILED");
+    assert.equal(Number((fixture.database.client.prepare("select count(*) as count from ai_usage_cost_records where operation_id=? and capability='GENERATION'").get(result.costOperationId) as { count: number }).count), 1);
+  } finally { fixture.close(); }
+});
+
+test("M8C rejects a Source rights change after Provider usage before completion", async () => {
+  const fixture = await createFixture();
+  try {
+    const source = fixture.sources.getById(fixture.sourceId)!;
+    const turn = beginTurn(fixture);
+    const result = await fixture.execution({ afterGenerationAccounting: () => {
+      fixture.sources.appendRevision({ id: fixture.sourceId, expectedRevision: source.currentRevision, content: sourceRevisionContent(source, { rightsStatus: "RESTRICTED", rightsBasis: null }), actor: fixture.owner, now: BASE_TIME + 1 });
+    } }).execute({ principal: fixture.principal, responseId: turn.responseId, tutorConfigId: fixture.tutorConfigs.list()[0]!.id });
+    assert.equal(result.status, "FAILED");
+    assert.equal(fixture.generation.calls, 1);
+    assert.equal(fixture.traces.getByResponse(turn.responseId)?.status, "FAILED");
+    assert.equal((fixture.database.client.prepare("select status from ai_cost_operations where id=?").get(result.costOperationId) as { status: string }).status, "FAILED");
+    assert.equal(Number((fixture.database.client.prepare("select count(*) as count from ai_usage_cost_records where operation_id=?").get(result.costOperationId) as { count: number }).count), 2);
+    assert.equal((fixture.conversations.getResponse(fixture.principal, turn.responseId)).status, "FAILED");
+  } finally { fixture.close(); }
+});
+
+test("M8C rejects a governed Subject Policy change after Provider usage before completion", async () => {
+  const fixture = await createFixture();
+  try {
+    const subject = fixture.instructions.list().find((policy) => policy.scope === "SUBJECT")!;
+    const turn = beginTurn(fixture);
+    const result = await fixture.execution({ afterGenerationAccounting: () => {
+      fixture.instructions.appendRevision({ id: subject.id, expectedRevision: subject.currentRevision, content: { key: subject.key, scope: "SUBJECT", subjectKey: subject.subjectKey, displayName: subject.displayName, instructions: "Changed after Provider execution.", enabled: subject.enabled }, actor: fixture.owner, now: BASE_TIME + 1 });
+    } }).execute({ principal: fixture.principal, responseId: turn.responseId, tutorConfigId: fixture.tutorConfigs.list()[0]!.id });
+    assert.equal(result.status, "FAILED");
+    assert.equal(fixture.generation.calls, 1);
+    assert.equal(fixture.traces.getByResponse(turn.responseId)?.status, "FAILED");
+    assert.equal((fixture.database.client.prepare("select status from ai_cost_operations where id=?").get(result.costOperationId) as { status: string }).status, "FAILED");
+  } finally { fixture.close(); }
+});
+
+test("M8C excludes failed partial Assistant output from the next Context and Generation request", async () => {
+  const fixture = await createFixture();
+  try {
+    const conversation = fixture.conversations.createConversation(fixture.principal, "biology");
+    const completedTurn = beginTurnInConversation(fixture, conversation.id, "completed question");
+    fixture.generation.behavior = { finishReason: "STOP", deltas: ["SAFE_COMPLETED_CONTEXT_M8C_55 [E1]"], usageEvents: [], finalUsage: knownUsage(9, 3) };
+    const completed = await fixture.execution().execute({ principal: fixture.principal, responseId: completedTurn.responseId, tutorConfigId: fixture.tutorConfigs.list()[0]!.id });
+    assert.equal(completed.status, "COMPLETED");
+
+    const failedTurn = beginTurnInConversation(fixture, conversation.id, "first question");
+    fixture.generation.behavior = { finishReason: "STOP", deltas: ["POISONED_PARTIAL_ASSISTANT_M8C_44 [E99]"], usageEvents: [], finalUsage: knownUsage(10, 3) };
+    const failed = await fixture.execution().execute({ principal: fixture.principal, responseId: failedTurn.responseId, tutorConfigId: fixture.tutorConfigs.list()[0]!.id });
+    assert.equal(failed.status, "FAILED");
+    const history = fixture.conversations.listMessages(fixture.principal, conversation.id);
+    assert.equal(history.some((message) => message.isPartial && message.content.includes("POISONED_PARTIAL_ASSISTANT_M8C_44")), true);
+
+    const nextTurn = beginTurnInConversation(fixture, conversation.id, "second question");
+    fixture.generation.behavior = { finishReason: "STOP", deltas: ["clean answer [E1]"], usageEvents: [], finalUsage: knownUsage(11, 3) };
+    const next = await fixture.execution().execute({ principal: fixture.principal, responseId: nextTurn.responseId, tutorConfigId: fixture.tutorConfigs.list()[0]!.id });
+    assert.equal(next.status, "COMPLETED");
+    assert.equal(fixture.generation.calls, 3);
+    const secondRequest = fixture.generation.requests[2]!;
+    assert.equal(secondRequest.messages.some((message) => message.content.includes("SAFE_COMPLETED_CONTEXT_M8C_55")), true);
+    assert.equal(secondRequest.messages.some((message) => message.content.includes("POISONED_PARTIAL_ASSISTANT_M8C_44")), false);
+    const snapshot = fixture.context.getSnapshot(fixture.principal, nextTurn.responseId);
+    assert.equal(JSON.stringify(snapshot).includes("POISONED_PARTIAL_ASSISTANT_M8C_44"), false);
+  } finally { fixture.close(); }
+});
+
+test("M8C terminal replay returns the same COMPLETED result without new work", async () => {
+  const fixture = await createFixture();
+  try {
+    const turn = beginTurn(fixture);
+    const tutorConfigId = fixture.tutorConfigs.list()[0]!.id;
+    const first = await fixture.execution().execute({ principal: fixture.principal, responseId: turn.responseId, tutorConfigId });
+    assert.equal(first.status, "COMPLETED");
+    const countsBefore = durableExecutionCounts(fixture);
+    const callsBefore = { generation: fixture.generation.calls, embedding: fixture.embedding.calls, reranker: fixture.reranker.calls };
+    const replay = await fixture.execution().execute({ principal: fixture.principal, responseId: turn.responseId, tutorConfigId });
+    assert.deepEqual(replay, first);
+    assert.deepEqual(durableExecutionCounts(fixture), countsBefore);
+    assert.deepEqual({ generation: fixture.generation.calls, embedding: fixture.embedding.calls, reranker: fixture.reranker.calls }, callsBefore);
+  } finally { fixture.close(); }
+});
+
+test("M8C terminal replay returns the same BLOCKED result without new work", async () => {
+  const fixture = await createFixture();
+  try {
+    const source = fixture.sources.getById(fixture.sourceId)!;
+    fixture.sources.appendRevision({ id: fixture.sourceId, expectedRevision: source.currentRevision, content: sourceRevisionContent(source, { rightsStatus: "RESTRICTED", rightsBasis: null }), actor: fixture.owner, now: BASE_TIME + 1 });
+    const turn = beginTurn(fixture);
+    const tutorConfigId = fixture.tutorConfigs.list()[0]!.id;
+    const first = await fixture.execution().execute({ principal: fixture.principal, responseId: turn.responseId, tutorConfigId });
+    assert.equal(first.status, "BLOCKED");
+    const countsBefore = durableExecutionCounts(fixture);
+    const callsBefore = { generation: fixture.generation.calls, embedding: fixture.embedding.calls, reranker: fixture.reranker.calls };
+    const replay = await fixture.execution().execute({ principal: fixture.principal, responseId: turn.responseId, tutorConfigId });
+    assert.deepEqual(replay, first);
+    assert.deepEqual(durableExecutionCounts(fixture), countsBefore);
+    assert.deepEqual({ generation: fixture.generation.calls, embedding: fixture.embedding.calls, reranker: fixture.reranker.calls }, callsBefore);
+  } finally { fixture.close(); }
+});
+
+test("M8C rejects concurrent duplicate execution while the first Provider stream is active", async () => {
+  const fixture = await createFixture();
+  try {
+    fixture.generation.behavior = { finishReason: "STOP", deltas: ["in flight [E1]"], usageEvents: [knownUsage(8, 1)], finalUsage: knownUsage(8, 1), waitForAbort: true };
+    const turn = beginTurn(fixture);
+    const tutorConfigId = fixture.tutorConfigs.list()[0]!.id;
+    const controller = new AbortController();
+    const firstPending = fixture.execution().execute({ principal: fixture.principal, responseId: turn.responseId, tutorConfigId, signal: controller.signal });
+    await fixture.generation.waiting;
+    const countsBefore = durableExecutionCounts(fixture);
+    await assert.rejects(() => fixture.execution().execute({ principal: fixture.principal, responseId: turn.responseId, tutorConfigId }), (error) => error instanceof AITutorExecutionError && error.code === "AI_TUTOR_EXECUTION_OPERATION_CONFLICT");
+    assert.deepEqual(durableExecutionCounts(fixture), countsBefore);
+    assert.equal(fixture.generation.calls, 1);
+    controller.abort();
+    const first = await firstPending;
+    assert.equal(first.status, "CANCELLED");
+  } finally { fixture.close(); }
+});
+
+test("M8C classifies an externally cancelled Conversation as CANCELLED after Provider execution", async () => {
+  const fixture = await createFixture();
+  try {
+    const turn = beginTurn(fixture);
+    const result = await fixture.execution({ afterGenerationAccounting: () => { fixture.conversations.cancelResponse(fixture.principal, turn.responseId); } }).execute({ principal: fixture.principal, responseId: turn.responseId, tutorConfigId: fixture.tutorConfigs.list()[0]!.id });
+    assert.equal(result.status, "CANCELLED");
+    assert.equal(fixture.generation.calls, 1);
+    assert.equal(fixture.conversations.getResponse(fixture.principal, turn.responseId).status, "CANCELLED");
+    assert.equal(fixture.traces.getByResponse(turn.responseId)?.status, "CANCELLED");
+    assert.equal((fixture.database.client.prepare("select status from ai_cost_operations where id=?").get(result.costOperationId) as { status: string }).status, "CANCELLED");
+    assert.equal(Number((fixture.database.client.prepare("select count(*) as count from ai_usage_cost_records where operation_id=?").get(result.costOperationId) as { count: number }).count), 2);
+  } finally { fixture.close(); }
+});
+
+test("M8C classifies an externally deleted Conversation as CANCELLED without replaying Generation", async () => {
+  const fixture = await createFixture();
+  try {
+    const turn = beginTurn(fixture);
+    const result = await fixture.execution({ afterGenerationAccounting: () => { fixture.conversations.deleteConversation(fixture.principal, turn.conversationId); } }).execute({ principal: fixture.principal, responseId: turn.responseId, tutorConfigId: fixture.tutorConfigs.list()[0]!.id });
+    assert.equal(result.status, "CANCELLED");
+    assert.equal(result.conversationStatus, "DELETED");
+    assert.equal(fixture.generation.calls, 1);
+    assert.equal(fixture.traces.getByResponse(turn.responseId)?.status, "CANCELLED");
+    assert.equal((fixture.database.client.prepare("select status from ai_cost_operations where id=?").get(result.costOperationId) as { status: string }).status, "CANCELLED");
+    assert.equal(Number((fixture.database.client.prepare("select count(*) as count from ai_usage_cost_records where operation_id=?").get(result.costOperationId) as { count: number }).count), 2);
   } finally { fixture.close(); }
 });

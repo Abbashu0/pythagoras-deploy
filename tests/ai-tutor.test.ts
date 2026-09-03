@@ -780,7 +780,7 @@ test("M8B executes one grounded Generation through shared admission, streaming, 
   try {
     const tutor = publishTutor(fixture);
     const turn = createPendingTurn(fixture, "TOP_SECRET_STUDENT_QUERY_M8B_91");
-    fixture.generation.outputText = "إجابة تعليمية";
+    fixture.generation.outputText = "إجابة تعليمية [E1]";
     const execution = executionService(fixture);
     const result = await execution.execute({ principal: fixture.principal, responseId: turn.response.id, tutorConfigId: tutor.id });
     assert.equal(result.status, "COMPLETED");
@@ -799,7 +799,7 @@ test("M8B executes one grounded Generation through shared admission, streaming, 
     const response = fixture.conversations.getResponse(fixture.principal, turn.response.id);
     assert.equal(response.status, "COMPLETED");
     const messages = fixture.conversations.listMessages(fixture.principal, turn.conversation.id);
-    assert.equal(messages.at(-1)?.content, "إجابة تعليمية");
+    assert.equal(messages.at(-1)?.content, fixture.generation.outputText);
     assert.equal(fixture.generation.lastRequest?.messages.at(-1)?.content, "TOP_SECRET_STUDENT_QUERY_M8B_91");
     const trace = AITutorResponseTraceService.forDatabase(fixture.database).getById(result.traceId!);
     assert.equal(trace?.status, "COMPLETED");
@@ -813,7 +813,7 @@ test("M8B bounds UTF-8 response deltas into exact Conversation chunks without ch
   try {
     const tutor = publishTutor(fixture);
     const turn = createPendingTurn(fixture, "chunked request");
-    fixture.generation.outputText = "ا".repeat(20_000);
+    fixture.generation.outputText = "ا".repeat(20_000) + " [E1]";
     const execution = executionService(fixture);
     const result = await execution.execute({ principal: fixture.principal, responseId: turn.response.id, tutorConfigId: tutor.id });
     assert.equal(result.status, "COMPLETED");

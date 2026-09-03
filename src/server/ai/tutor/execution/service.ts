@@ -1,6 +1,6 @@
 import { AIAdmissionError, createAIAdmissionRequestFingerprint } from "../../admission";
 import type { AIAdmissionPlan, AIAdmissionResult } from "../../admission";
-import { AIConversationError, AI_CONVERSATION_MAX_CHUNK_BYTES, AI_CONVERSATION_MAX_RESPONSE_BYTES, type AIConversationFinishReason, type AIConversationResponse, type AIConversationStatus } from "../../conversations";
+import { AIConversationError, AI_CONVERSATION_MAX_CHUNK_BYTES, AI_CONVERSATION_MAX_RESPONSE_BYTES, hashConversationText, type AIConversationFinishReason, type AIConversationResponse, type AIConversationStatus } from "../../conversations";
 import { AIContextError } from "../../context/errors";
 import { AIPolicyError } from "../../policy/errors";
 import { AIProviderGatewayError, isAIProviderGatewayError, type AIProviderAttemptTrace } from "../../gateway";
@@ -13,6 +13,7 @@ import { AITutorPlanningError } from "../planner/errors";
 import { AITutorPreflightError } from "../preflight/errors";
 import { createEmptyTraceIdentity } from "../trace";
 import type { AITutorResponseTrace, AITutorTraceCreateInput, AITutorTraceEvidenceRefCreate, AITutorTraceProjectionRefCreate } from "../trace";
+import { AITutorOutputValidator } from "../validation";
 import type { AITutorGenerationPlan, AITutorPreflightPlan } from "../preflight/contracts";
 import type {
   AITutorExecutionAdmissionContext,
@@ -28,21 +29,25 @@ const MAX_SAFE_TIMESTAMP = 8_640_000_000_000_000;
 const OPERATION_IDEMPOTENCY_VERSION = 1;
 
 /**
- * M8B owns one server-side execution boundary. It never accepts a caller
+ * M8B/M8C own one server-side execution boundary. It never accepts a caller
  * supplied prompt, EvidencePack, model, Provider, policy, operation, or
  * reservation. All of those are resolved or created from the Response and
  * governed configuration inside this service.
  */
 export class AITutorExecutionService {
   private readonly clock: () => number;
+  private readonly outputValidator: Pick<AITutorOutputValidator, "validate">;
 
   constructor(private readonly dependencies: AITutorExecutionDependencies) {
     this.clock = dependencies.clock ?? Date.now;
+    this.outputValidator = dependencies.outputValidator ?? new AITutorOutputValidator();
     validateEstimator(dependencies.estimator);
   }
 
   async execute(input: AITutorExecutionInput): Promise<AITutorExecutionResult> {
     validateExecutionInput(input);
+    const replay = this.replayExistingExecution(input);
+    if (replay) return replay;
     const linked = createLinkedAbortController(input.signal);
     try {
       if (linked.signal.aborted) throw new AITutorExecutionError("AI_TUTOR_EXECUTION_CANCELLED", "The Tutor execution was cancelled.");
@@ -150,7 +155,7 @@ export class AITutorExecutionService {
         return this.result(plan, cancelled ? "CANCELLED" : "FAILED", cancelled ? "CANCELLED" : "FAILED", trace.id, operationContext.operation.id, reservation.id, settlement, plan.conversationId);
       }
 
-      const result = await this.runGeneration(plan, generationPlan, activeTrace, operationContext.operation, reservation.id, linked);
+      const result = await this.runGeneration(plan, generationPlan, evidencePack, activeTrace, operationContext.operation, reservation.id, linked);
       return result;
     } catch (error) {
       if (error instanceof AITutorExecutionError) throw error;
@@ -162,6 +167,108 @@ export class AITutorExecutionService {
 
   run(input: AITutorExecutionInput): Promise<AITutorExecutionResult> {
     return this.execute(input);
+  }
+
+  private replayExistingExecution(input: AITutorExecutionInput): AITutorExecutionResult | null {
+    const operation = this.dependencies.accounting.getOperationByResponseId(input.responseId);
+    if (!operation) return null;
+
+    let response: AIConversationResponse;
+    try {
+      response = this.dependencies.conversations.getResponse(input.principal, input.responseId);
+    } catch (error) {
+      if (error instanceof AIConversationError) return null;
+      throw error;
+    }
+    if (response.principalRef !== input.principal.principalRef) throw replayConflict();
+
+    if (operation.status === "OPEN") throw replayConflict();
+    if (!["COMPLETED", "FAILED", "CANCELLED"].includes(operation.status)) throw replayConflict();
+
+    const conversation = this.requireReplayConversation(input.principal, response.conversationId);
+    if (
+      operation.costCenter !== "STUDENT_GENERATION"
+      || operation.opaquePrincipalRef !== response.principalRef
+      || operation.subjectKey !== conversation.subjectKey
+      || operation.conversationId !== response.conversationId
+      || operation.responseId !== response.id
+      || typeof operation.idempotencyKey !== "string"
+      || !operation.idempotencyKey.startsWith(`tutor-generation:${OPERATION_IDEMPOTENCY_VERSION}:${response.id}:`)
+      || operation.jobId !== null
+      || operation.evalRunId !== null
+      || operation.knowledgeRevision !== null
+    ) throw replayConflict();
+
+    const trace = this.dependencies.traces.getByResponse(response.id);
+    const reservation = this.dependencies.admission.getReservationByOperationId(operation.id);
+    if (reservation && (
+      reservation.operationId !== operation.id
+      || reservation.principalRef !== response.principalRef
+      || !["SETTLED", "RECONCILIATION_REQUIRED", "RELEASED"].includes(reservation.status)
+    )) throw replayConflict();
+    if (trace && (
+      trace.responseId !== response.id
+      || trace.conversationId !== response.conversationId
+      || trace.principalRef !== response.principalRef
+      || trace.subjectKey !== conversation.subjectKey
+      || trace.tutorConfigId !== input.tutorConfigId
+      || trace.costOperationId !== operation.id
+      || !reservation
+      || trace.budgetReservationId !== reservation.id
+    )) throw replayConflict();
+
+    if (response.status === "COMPLETED") {
+      if (operation.status !== "COMPLETED" || !response.finishReason || ["FAILED", "CANCELLED"].includes(response.finishReason) || !trace || !["COMPLETED", "BLOCKED"].includes(trace.status) || !reservation || !["SETTLED", "RECONCILIATION_REQUIRED"].includes(reservation.status)) throw replayConflict();
+      const status = trace.status === "BLOCKED" ? "BLOCKED" : "COMPLETED";
+      return {
+        responseId: response.id,
+        status,
+        conversationStatus: conversation.status,
+        finishReason: response.finishReason,
+        traceId: trace.id,
+        costOperationId: operation.id,
+        budgetReservationId: reservation.id,
+        settlementStatus: reservation.status === "SETTLED" ? "SETTLED" : "RECONCILIATION_REQUIRED",
+      };
+    }
+    if (response.status === "FAILED") {
+      if (operation.status !== "FAILED" || response.finishReason !== "FAILED" || !trace || trace.status !== "FAILED" || !reservation || !["SETTLED", "RECONCILIATION_REQUIRED"].includes(reservation.status)) throw replayConflict();
+      return {
+        responseId: response.id,
+        status: "FAILED",
+        conversationStatus: conversation.status,
+        finishReason: response.finishReason,
+        traceId: trace.id,
+        costOperationId: operation.id,
+        budgetReservationId: reservation.id,
+        settlementStatus: reservation.status === "SETTLED" ? "SETTLED" : "RECONCILIATION_REQUIRED",
+      };
+    }
+    if (response.status === "CANCELLED") {
+      if (operation.status !== "CANCELLED" || response.finishReason !== "CANCELLED" || (trace && trace.status !== "CANCELLED")) throw replayConflict();
+      return {
+        responseId: response.id,
+        status: "CANCELLED",
+        conversationStatus: conversation.status,
+        finishReason: response.finishReason,
+        traceId: trace?.id ?? null,
+        costOperationId: operation.id,
+        budgetReservationId: reservation?.id ?? null,
+        settlementStatus: reservation?.status === "SETTLED" ? "SETTLED" : reservation?.status === "RECONCILIATION_REQUIRED" ? "RECONCILIATION_REQUIRED" : reservation?.status === "RELEASED" ? "RELEASED" : null,
+      };
+    }
+    throw replayConflict();
+  }
+
+  private requireReplayConversation(principal: AITutorPreflightPlan["principal"], conversationId: string) {
+    try {
+      const conversation = this.dependencies.conversations.getConversation(principal, conversationId);
+      if (conversation.status !== "ACTIVE") throw replayConflict();
+      return conversation;
+    } catch (error) {
+      if (error instanceof AITutorExecutionError) throw error;
+      throw replayConflict();
+    }
   }
 
   private buildPreflight(input: AITutorExecutionInput): AITutorPreflightPlan {
@@ -271,6 +378,7 @@ export class AITutorExecutionService {
   private async runGeneration(
     plan: AITutorPreflightPlan,
     generationPlan: AITutorGenerationPlan,
+    evidencePack: AIEvidencePack,
     trace: AITutorResponseTrace,
     operation: AICostOperation,
     reservationId: string,
@@ -303,10 +411,22 @@ export class AITutorExecutionService {
       );
       for await (const event of stream.events) {
         if (linked.signal.aborted) throw new AITutorExecutionError("AI_TUTOR_EXECUTION_CANCELLED", "The Tutor execution was cancelled.");
+        const responseState = this.readResponseExecutionState(plan);
+        if (responseState === "CANCELLED" || responseState === "MISSING") {
+          linked.controller.abort();
+          throw new AITutorExecutionError("AI_TUTOR_EXECUTION_CANCELLED", "The Tutor execution was cancelled.");
+        }
+        if (responseState !== "STREAMING") throw new AITutorExecutionError("AI_TUTOR_EXECUTION_CONFIGURATION_CHANGED", "The Tutor Response changed during execution.");
         if (event.type === "USAGE") {
           usage.observe(event.usage);
         } else if (event.type === "TEXT_DELTA") {
           for (const piece of splitUtf8(event.text, AI_CONVERSATION_MAX_CHUNK_BYTES)) {
+            const pieceResponseState = this.readResponseExecutionState(plan);
+            if (pieceResponseState === "CANCELLED" || pieceResponseState === "MISSING") {
+              linked.controller.abort();
+              throw new AITutorExecutionError("AI_TUTOR_EXECUTION_CANCELLED", "The Tutor execution was cancelled.");
+            }
+            if (pieceResponseState !== "STREAMING") throw new AITutorExecutionError("AI_TUTOR_EXECUTION_CONFIGURATION_CHANGED", "The Tutor Response changed during execution.");
             const bytes = Buffer.byteLength(piece, "utf8");
             if (responseBytes + bytes > AI_CONVERSATION_MAX_RESPONSE_BYTES) {
               overflow = true;
@@ -354,10 +474,29 @@ export class AITutorExecutionService {
       }
     }
 
-    const cancelled = linked.signal.aborted && !overflow || isCancelledError(providerError);
-    const successful = !providerError && finishReason !== null && providerInvoked && !overflow;
+    const responseStateAfterStream = this.readResponseExecutionState(plan);
+    if (responseStateAfterStream === "CANCELLED" || responseStateAfterStream === "MISSING") linked.controller.abort();
+    const cancelled = linked.signal.aborted && !overflow
+      || isCancelledError(providerError)
+      || responseStateAfterStream === "CANCELLED"
+      || responseStateAfterStream === "MISSING";
+    const successful = !providerError && !cancelled && finishReason !== null && providerInvoked && !overflow;
     if (successful) {
       try {
+        this.dependencies.retrieval.assertEvidencePackCurrent(evidencePack);
+        this.assertRuntimePlanCurrent(plan, "STREAMING");
+        this.assertOperationExecution(operation.id, reservationId);
+        const outputText = this.reconstructResponseOutput(plan);
+        const validation = this.outputValidator.validate({
+          outputText,
+          citationMap: generationPlan.citationMap,
+          finishReason: finishReason!,
+          groundingProtocolKey: generationPlan.groundingProtocolKey,
+          groundingProtocolRevision: generationPlan.groundingProtocolRevision,
+          citationProtocolKey: generationPlan.citationProtocolKey,
+          citationProtocolRevision: generationPlan.citationProtocolRevision,
+        });
+        if (validation.status !== "VALID") throw new AITutorExecutionError("AI_TUTOR_EXECUTION_OUTPUT_INVALID", "The Tutor output did not pass grounded response validation.");
         this.dependencies.conversations.completeResponse(plan.principal, plan.responseId, finishReason!);
         this.transitionTrace(trace, "COMPLETED", this.safeNow());
         const settlement = this.closeOperationAndSettle(operation.id, reservationId, "COMPLETED");
@@ -367,11 +506,16 @@ export class AITutorExecutionService {
       }
     }
 
-    const status: AITutorExecutionStatus = cancelled ? "CANCELLED" : "FAILED";
+    const responseStateBeforeTerminalization = this.readResponseExecutionState(plan);
+    const terminalCancelled = cancelled
+      || linked.signal.aborted && !overflow
+      || responseStateBeforeTerminalization === "CANCELLED"
+      || responseStateBeforeTerminalization === "MISSING";
+    const status: AITutorExecutionStatus = terminalCancelled ? "CANCELLED" : "FAILED";
     this.terminalizeConversation(plan.principal, plan.responseId, status);
     this.transitionTrace(trace, status, this.safeNow());
-    const settlement = this.closeOperationAndSettle(operation.id, reservationId, cancelled ? "CANCELLED" : "FAILED");
-    return this.result(plan, status, cancelled ? "CANCELLED" : "FAILED", trace.id, operation.id, reservationId, settlement, plan.conversationId);
+    const settlement = this.closeOperationAndSettle(operation.id, reservationId, terminalCancelled ? "CANCELLED" : "FAILED");
+    return this.result(plan, status, terminalCancelled ? "CANCELLED" : "FAILED", trace.id, operation.id, reservationId, settlement, plan.conversationId);
   }
 
   private finishBlocked(
@@ -585,6 +729,35 @@ export class AITutorExecutionService {
     return safeGetResponse(this.dependencies.conversations, principal, responseId).nextChunkSequence;
   }
 
+  private reconstructResponseOutput(plan: AITutorPreflightPlan): string {
+    const response = safeGetResponse(this.dependencies.conversations, plan.principal, plan.responseId);
+    if (response.status !== "STREAMING") throw new AITutorExecutionError("AI_TUTOR_EXECUTION_CONFIGURATION_CHANGED", "The Tutor Response changed before output validation.");
+    const chunks = this.dependencies.conversations.listResponseChunks(plan.principal, response.id);
+    if (chunks.length !== response.nextChunkSequence) throw new AITutorExecutionError("AI_TUTOR_EXECUTION_OUTPUT_INVALID", "The Tutor Response stream is incomplete.");
+    let outputBytes = 0;
+    let output = "";
+    for (const [index, chunk] of chunks.entries()) {
+      const byteLength = Buffer.byteLength(chunk.text, "utf8");
+      if (chunk.responseId !== response.id || chunk.sequence !== index || chunk.textHash !== hashConversationText(chunk.text) || chunk.byteLength !== byteLength) throw new AITutorExecutionError("AI_TUTOR_EXECUTION_OUTPUT_INVALID", "The Tutor Response stream is invalid.");
+      outputBytes += byteLength;
+      output += chunk.text;
+    }
+    if (outputBytes !== response.outputBytes || outputBytes > AI_CONVERSATION_MAX_RESPONSE_BYTES) throw new AITutorExecutionError("AI_TUTOR_EXECUTION_OUTPUT_INVALID", "The Tutor Response output size is invalid.");
+    return output;
+  }
+
+  private readResponseExecutionState(plan: AITutorPreflightPlan): ResponseExecutionState {
+    try {
+      const response = this.dependencies.conversations.getResponse(plan.principal, plan.responseId);
+      if (response.status === "STREAMING") return "STREAMING";
+      if (response.status === "CANCELLED") return "CANCELLED";
+      return "TERMINAL";
+    } catch (error) {
+      if (error instanceof AIConversationError && error.code === "AI_CONVERSATION_NOT_FOUND") return "MISSING";
+      throw error;
+    }
+  }
+
   private result(
     plan: AITutorPreflightPlan,
     status: AITutorExecutionStatus,
@@ -699,6 +872,8 @@ interface LinkedAbortController {
   cleanup(): void;
 }
 
+type ResponseExecutionState = "STREAMING" | "CANCELLED" | "TERMINAL" | "MISSING";
+
 function safeGetResponse(conversations: AITutorExecutionDependencies["conversations"], principal: AITutorPreflightPlan["principal"], responseId: string): AIConversationResponse {
   try {
     return conversations.getResponse(principal, responseId);
@@ -721,6 +896,10 @@ function validateExecutionInput(input: AITutorExecutionInput): void {
 
 function validateEstimator(value: { estimatorKey: string; estimate(text: string): number }): void {
   if (!value || typeof value.estimatorKey !== "string" || typeof value.estimate !== "function") throw new AITutorExecutionError("AI_TUTOR_EXECUTION_INVALID", "The Tutor execution estimator is invalid.");
+}
+
+function replayConflict(): AITutorExecutionError {
+  return new AITutorExecutionError("AI_TUTOR_EXECUTION_OPERATION_CONFLICT", "The Tutor request already has an active or terminal execution.");
 }
 
 function validatePeriod(value: unknown): asserts value is { startAt: number; endAt: number } {

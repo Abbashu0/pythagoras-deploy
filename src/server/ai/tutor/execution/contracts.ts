@@ -32,6 +32,7 @@ import type { AITutorGenerationPlanner } from "../planner";
 import type { AITutorPreflightPlan, AITutorCostEstimate } from "../preflight/contracts";
 import type { AITutorPreflightService } from "../preflight";
 import type { AITutorResponseTrace, AITutorResponseTraceService } from "../trace";
+import type { AITutorOutputValidator } from "../validation";
 import type { AIEvidencePack, HybridRetrievalService } from "../../retrieval";
 import type { AIContextTokenEstimator } from "../../context";
 
@@ -78,19 +79,19 @@ export type AITutorExecutionAccounting = Pick<
 
 export type AITutorExecutionAdmission = Pick<
   AIBudgetAdmissionService,
-  "admit" | "getReservation" | "startExecution" | "releaseBeforeExecution" | "settle"
+  "admit" | "getReservation" | "getReservationByOperationId" | "startExecution" | "releaseBeforeExecution" | "settle"
 >;
 
 export type AITutorExecutionGateway = Pick<AIProviderGateway, "generate">;
 
 export type AITutorExecutionConversation = Pick<
   AIConversationService,
-  "getResponse" | "getConversation" | "startResponse" | "appendResponseChunk" | "completeResponse" | "failResponse" | "cancelResponse"
+  "getResponse" | "getConversation" | "listResponseChunks" | "startResponse" | "appendResponseChunk" | "completeResponse" | "failResponse" | "cancelResponse"
 >;
 
 export type AITutorExecutionTraceService = Pick<
   AITutorResponseTraceService,
-  "create" | "transition"
+  "create" | "getByResponse" | "transition"
 >;
 
 export type AITutorExecutionRetrieval = Pick<HybridRetrievalService, "retrieve" | "assertEvidencePackCurrent">;
@@ -112,6 +113,7 @@ export interface AITutorExecutionDependencies {
   admission: AITutorExecutionAdmission;
   retrieval: AITutorExecutionRetrieval;
   planner: Pick<AITutorGenerationPlanner, "plan">;
+  outputValidator?: Pick<AITutorOutputValidator, "validate">;
   traces: AITutorExecutionTraceService;
   gateway: AITutorExecutionGateway;
   estimator: AIContextTokenEstimator;

@@ -95,7 +95,7 @@ AI milestones are future delivery boundaries. Each milestone is one coherent com
 
 ## AI-M8 — Grounded Tutor
 
-**Status:** Refined into independently reviewed checkpoints; AI-M8A is approved, AI-M8B is implemented pending independent review, and AI-M8C is not started. AI-M8 overall remains incomplete.
+**Status:** Refined into independently reviewed checkpoints; AI-M8A and AI-M8B are approved, AI-M8C is implemented pending independent review, and AI-M8 overall remains incomplete.
 
 ### AI-M8A — Tutor Configuration, Preflight, Grounded Generation Plan & Response Trace Foundation
 
@@ -107,13 +107,13 @@ Migration `0030_require-unsealed-tutor-trace-creation` completes the M8A Trace c
 
 ### AI-M8B — Grounded Generation Execution
 
-**Status:** Implemented; pending independent review.
+**Status:** Implemented and approved at `c2ac566c97764b2f129301ea9bc51a630aeb2591`.
 **Boundary:** One server-owned execution boundary from M8A preflight through one M7C EvidencePack, one admitted `STUDENT_GENERATION` operation/reservation, exact-pinned Gateway Generation, UTF-8-safe Conversation streaming, cumulative Generation usage accounting, metadata-only sealed Response Trace terminalization, and budget settlement. M8B permits only deterministic test Providers; no production Provider or vendor SDK is selected.
 
 ### AI-M8C — Grounding/Citation Validation & Integration Hardening
 
-**Status:** Not started.
-**Boundary:** Future output citation/grounding validation, cancellation/failure/replay hardening, and final M8 integration review.
+**Status:** Implemented; pending independent review.
+**Boundary:** Runtime-only deterministic validation of the fixed `evidence-ref-v1@1` citation protocol against the exact selected Evidence map; post-Generation M7C/M8A currentness fences; preservation of Provider usage on invalid output or races; exclusion of partial Assistant output from later Context; coherent terminal replay; fail-closed ambiguous in-flight replay; and final real M7→M8 integration coverage. No migration or second Provider/judge call.
 
 ## Remaining future milestones
 

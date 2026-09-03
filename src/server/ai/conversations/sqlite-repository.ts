@@ -79,6 +79,7 @@ export class SQLiteAIConversationRepository {
     beforeOrdinal: number;
     afterOrdinal: number;
     limit: number;
+    excludePartial?: boolean;
   }): AIConversationMessage[] {
     const rows = this.database.db.select({ message: aiConversationMessages }).from(aiConversationMessages)
       .innerJoin(aiConversations, eq(aiConversationMessages.conversationId, aiConversations.id))
@@ -86,6 +87,7 @@ export class SQLiteAIConversationRepository {
         eq(aiConversationMessages.conversationId, input.conversationId),
         eq(aiConversations.principalRef, input.principalRef),
         eq(aiConversations.status, "ACTIVE"),
+        input.excludePartial ? eq(aiConversationMessages.isPartial, false) : undefined,
         gt(aiConversationMessages.ordinal, input.afterOrdinal),
         lt(aiConversationMessages.ordinal, input.beforeOrdinal),
       )).orderBy(desc(aiConversationMessages.ordinal)).limit(input.limit).all();

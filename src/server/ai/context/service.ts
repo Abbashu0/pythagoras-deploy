@@ -91,6 +91,7 @@ export class AIContextService {
         beforeOrdinal: currentMessage.ordinal,
         afterOrdinal: input.summary?.coversThroughOrdinal ?? 0,
         limit: contextPolicy.maxRecentTurns * 2 + 1,
+        excludePartial: true,
       });
       const computation = this.manager.build({
         conversationId: conversation.id,
