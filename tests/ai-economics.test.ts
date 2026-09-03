@@ -401,7 +401,7 @@ function resolvedRateCard(overrides: Partial<ResolvedAIRateCard> = {}): Resolved
 test("AI M3A migration creates normalized accounting tables without raw content or secrets", () => {
   const fixture = createFixture();
   try {
-    assert.equal(getContentDatabaseStatus(fixture.database).migrationsApplied, 33);
+    assert.equal(getContentDatabaseStatus(fixture.database).migrationsApplied, 34);
     for (const table of [
       "ai_rate_cards",
       "ai_rate_card_revisions",
@@ -910,6 +910,36 @@ test("Accounting records retain immutable attempt metadata and corrections add d
     );
     service.completeOperation(operation.id, "OPEN", "COMPLETED", BASE_TIME + 40);
     assert.equal(fixture.accounting.getOperation(operation.id)?.status, "COMPLETED");
+    const lateCorrection = service.appendCorrection({
+      originalRecordId: recorded.record.id,
+      currency: "USD",
+      deltaCostNano: 20,
+      reasonCode: "LATE_RECONCILIATION",
+      actorType: "SYSTEM",
+      actorUserId: null,
+      createdAt: BASE_TIME + 41,
+    });
+    assert.equal(lateCorrection.deltaCostNano, 20);
+    assert.equal(fixture.accounting.getOperationCostSummary(operation.id).totals[0]?.totalNano, 8_000_747);
+    assert.throws(
+      () => service.recordAttempt({ operationId: operation.id, attempt, normalizedUsage: usage({ inputTokens: 1_000_001, outputTokens: 20 }), capability: "GENERATION", providerModelId: "opaque-model", at: BASE_TIME + 42 }),
+      (error) => error instanceof AIAccountingError && error.code === "AI_ACCOUNTING_CONFLICT",
+    );
+    const { id: _recordId, createdAt: _recordCreatedAt, ...lateUsageContent } = recorded.record;
+    assert.throws(
+      () => fixture.accounting.appendUsageCostRecord({ id: uuidv7(), content: lateUsageContent, createdAt: BASE_TIME + 43 }),
+      (error) => error instanceof AIAccountingError && error.code === "AI_ACCOUNTING_CONFLICT",
+    );
+    const lateUsageColumns = "id, operation_id, gateway_request_id, attempt_index, capability, model_config_id, model_config_revision, provider_config_id, provider_config_revision, provider_request_id, rate_card_id, rate_card_revision, rate_card_revision_id, resolved_pricing_rule, normalized_input_tokens, normalized_cache_hit_input_tokens, normalized_cache_miss_input_tokens, normalized_output_tokens, normalized_reasoning_tokens, billable_standard_input_tokens, billable_cache_hit_input_tokens, billable_cache_miss_input_tokens, billable_output_tokens, billable_reasoning_tokens, request_units, currency, known_cost_nano, cost_completeness, cost_basis, attempt_status, started_at, completed_at, latency_ms, created_at";
+    const lateUsageSelect = "?, operation_id, gateway_request_id, attempt_index, capability, model_config_id, model_config_revision, provider_config_id, provider_config_revision, provider_request_id, rate_card_id, rate_card_revision, rate_card_revision_id, resolved_pricing_rule, normalized_input_tokens, normalized_cache_hit_input_tokens, normalized_cache_miss_input_tokens, normalized_output_tokens, normalized_reasoning_tokens, billable_standard_input_tokens, billable_cache_hit_input_tokens, billable_cache_miss_input_tokens, billable_output_tokens, billable_reasoning_tokens, request_units, currency, known_cost_nano, cost_completeness, cost_basis, attempt_status, started_at, completed_at, latency_ms, created_at";
+    assert.throws(
+      () => fixture.database.client.prepare(`insert into ai_usage_cost_records (${lateUsageColumns}) select ${lateUsageSelect} from ai_usage_cost_records where id=?`).run(uuidv7(), recorded.record.id),
+      /OPEN|operation|usage/i,
+    );
+    assert.throws(() => fixture.database.client.prepare("update ai_usage_cost_records set known_cost_nano=1 where id=?").run(recorded.record.id), /immutable/i);
+    assert.throws(() => fixture.database.client.prepare("delete from ai_usage_cost_records where id=?").run(recorded.record.id), /append-only|immutable/i);
+    assert.throws(() => fixture.database.client.prepare("update ai_cost_corrections set delta_cost_nano=1 where id=?").run(correction.id), /immutable/i);
+    assert.throws(() => fixture.database.client.prepare("delete from ai_cost_corrections where id=?").run(correction.id), /append-only|immutable/i);
   } finally {
     fixture.close();
   }

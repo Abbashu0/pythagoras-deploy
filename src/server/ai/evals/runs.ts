@@ -27,7 +27,7 @@ import type {
   AIEvalRunStatus,
 } from "./contracts";
 import { AIEvalError } from "./errors";
-import { fingerprintAIEvalCandidate, fingerprintAIEvalManifest, normalizeAIEvalCandidateSnapshot } from "./validation";
+import { fingerprintAIEvalCandidate, fingerprintAIEvalManifest, normalizeAIEvalAccountingBasis, normalizeAIEvalCandidateSnapshot } from "./validation";
 
 const TERMINAL_RUN_STATUSES = new Set<AIEvalRunStatus>(["COMPLETED", "FAILED", "CANCELLED"]);
 const TRANSITIONS: Readonly<Record<AIEvalRunStatus, readonly AIEvalRunStatus[]>> = {
@@ -209,12 +209,22 @@ export class SQLiteAIEvalRunRepository implements AIEvalRunRepository {
   }
 
   insertGateResult(input: AIEvalGateResult): AIEvalGateResult {
+    const accountingBasis = input.accountingBasis == null ? null : normalizeAIEvalAccountingBasis(input.accountingBasis);
+    if (accountingBasis !== null && input.gateKey !== "MAX_COST_NANO") throw new AIEvalError("AI_EVAL_RUN_INVALID", "An accounting basis is permitted only on the maximum-cost gate.");
     try {
-      this.database.db.insert(aiEvalGateResults).values(input).run();
+      this.database.db.insert(aiEvalGateResults).values({
+        runId: input.runId,
+        gateKey: input.gateKey,
+        verdict: input.verdict,
+        observedValue: input.observedValue,
+        thresholdValue: input.thresholdValue,
+        safeReasonCode: input.safeReasonCode,
+        accountingBasis,
+      }).run();
     } catch (error) {
       throw new AIEvalError("AI_EVAL_DUPLICATE_RESULT", "The Eval gate result could not be appended.", {}, error);
     }
-    return input;
+    return { ...input, accountingBasis };
   }
 
   listGateResults(runId: string): AIEvalGateResult[] {
@@ -272,7 +282,7 @@ function aggregateFromRow(row: AIEvalDimensionAggregateRow): AIEvalDimensionAggr
 }
 
 function gateFromRow(row: AIEvalGateResultRow): AIEvalGateResult {
-  return { runId: row.runId, gateKey: row.gateKey, verdict: row.verdict, observedValue: row.observedValue, thresholdValue: row.thresholdValue, safeReasonCode: row.safeReasonCode };
+  return { runId: row.runId, gateKey: row.gateKey, verdict: row.verdict, observedValue: row.observedValue, thresholdValue: row.thresholdValue, safeReasonCode: row.safeReasonCode, accountingBasis: row.accountingBasis === null ? null : normalizeAIEvalAccountingBasis(row.accountingBasis) };
 }
 
 function isSha256(value: string): boolean {

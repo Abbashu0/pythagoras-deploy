@@ -317,6 +317,33 @@ export interface AIEvalDimensionAggregate {
   blockingFailureCount: number;
 }
 
+export interface AIEvalAccountingBasisRecord {
+  recordId: string;
+  correctionIds: readonly string[];
+}
+
+export interface AIEvalAccountingBasisOperation {
+  operationId: string;
+  records: readonly AIEvalAccountingBasisRecord[];
+}
+
+/** Safe, immutable evidence of the canonical accounting read used by a cost gate. */
+export interface AIEvalAccountingBasis {
+  version: 1;
+  operations: readonly AIEvalAccountingBasisOperation[];
+  currency: string;
+  totalNano: number;
+  fingerprint: string;
+}
+
+export type AIEvalAccountingBasisStatus = "CURRENT" | "STALE" | "UNAVAILABLE";
+
+export interface AIEvalAccountingBasisStatusResult {
+  status: AIEvalAccountingBasisStatus;
+  pinnedFingerprint: string | null;
+  currentFingerprint: string | null;
+}
+
 export interface AIEvalGateResult {
   runId: string;
   gateKey: string;
@@ -324,6 +351,7 @@ export interface AIEvalGateResult {
   observedValue: number | null;
   thresholdValue: number | null;
   safeReasonCode: string;
+  accountingBasis?: AIEvalAccountingBasis | null;
 }
 
 export interface AIEvalRunScoreReport {

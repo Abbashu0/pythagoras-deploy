@@ -232,6 +232,13 @@
       "when": 1788409000000,
       "tag": "0032_eval-scoring-boundary",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1788456552499,
+      "tag": "0033_eval-accounting-basis",
+      "breakpoints": true
     }
   ]
 }

@@ -21,6 +21,8 @@ import {
   AI_EVAL_PRIVACY_CLASSES,
   AI_EVAL_SOURCE_REFERENCE_KINDS,
   AI_EVAL_SCORE_SCALE,
+  type AIEvalAccountingBasis,
+  type AIEvalAccountingBasisOperation,
   type AIEvalCandidateSnapshot,
   type AIEvalCaseContent,
   type AIEvalCaseManifestEntry,
@@ -177,6 +179,67 @@ export function normalizeAIEvalObservation(value: unknown): AIEvalObservation {
 
 export function hashEvalOutput(outputText: string): string {
   return createHash("sha256").update(outputText, "utf8").digest("hex");
+}
+
+export function fingerprintAIEvalAccountingBasis(input: Omit<AIEvalAccountingBasis, "fingerprint">): string {
+  const canonical = canonicalAccountingBasis(input);
+  return createHash("sha256").update(JSON.stringify(canonical), "utf8").digest("hex");
+}
+
+export function normalizeAIEvalAccountingBasis(value: unknown): AIEvalAccountingBasis {
+  const record = plainObject(value, "Eval accounting basis");
+  exactKeys(record, ["version", "operations", "currency", "totalNano", "fingerprint"], "Eval accounting basis");
+  if (record.version !== 1) invalid("Eval accounting basis version is unsupported.");
+  if (!Array.isArray(record.operations) || record.operations.length < 1 || record.operations.length > AI_EVAL_MAX_CASE_MANIFEST_ITEMS) invalid("Eval accounting basis operations are invalid.");
+  const operationIds = new Set<string>();
+  const operations = record.operations.map((item) => {
+    const operation = plainObject(item, "Eval accounting basis operation");
+    exactKeys(operation, ["operationId", "records"], "Eval accounting basis operation");
+    const operationId = boundedNonEmptyText(operation.operationId, "Eval accounting basis operation ID", 120);
+    if (operationIds.has(operationId)) invalid("Eval accounting basis operation IDs must be unique.");
+    operationIds.add(operationId);
+    if (!Array.isArray(operation.records) || operation.records.length < 1 || operation.records.length > AI_EVAL_MAX_CASE_MANIFEST_ITEMS) invalid("Eval accounting basis records are invalid.");
+    const recordIds = new Set<string>();
+    const records = operation.records.map((item) => {
+      const usage = plainObject(item, "Eval accounting basis usage record");
+      exactKeys(usage, ["recordId", "correctionIds"], "Eval accounting basis usage record");
+      const recordId = boundedNonEmptyText(usage.recordId, "Eval accounting basis usage record ID", 120);
+      if (recordIds.has(recordId)) invalid("Eval accounting basis usage record IDs must be unique.");
+      recordIds.add(recordId);
+      if (!Array.isArray(usage.correctionIds) || usage.correctionIds.length > AI_EVAL_MAX_CASE_MANIFEST_ITEMS) invalid("Eval accounting basis corrections are invalid.");
+      const correctionIdentities = new Set<string>();
+      for (const correctionId of usage.correctionIds) {
+        if (typeof correctionId !== "string" || correctionIdentities.has(correctionId)) invalid("Eval accounting basis correction IDs must be unique.");
+        correctionIdentities.add(correctionId);
+      }
+      const correctionIds = usage.correctionIds.map((correctionId) => boundedNonEmptyText(correctionId, "Eval accounting basis correction ID", 120));
+      return { recordId, correctionIds };
+    });
+    return { operationId, records };
+  });
+  const currency = text(record.currency, "Eval accounting basis currency", /^[A-Z]{3}$/u, 3);
+  const totalNano = boundedInteger(record.totalNano, "Eval accounting basis total", 0, Number.MAX_SAFE_INTEGER);
+  const fingerprint = text(record.fingerprint, "Eval accounting basis fingerprint", /^[0-9a-f]{64}$/u, 64);
+  const normalized = { version: 1 as const, operations, currency, totalNano, fingerprint };
+  if (Buffer.byteLength(JSON.stringify(normalized), "utf8") > 1_048_576) invalid("Eval accounting basis exceeds its safe size bound.");
+  if (fingerprintAIEvalAccountingBasis({ version: 1, operations, currency, totalNano }) !== fingerprint) invalid("Eval accounting basis fingerprint is invalid.");
+  return structuredClone(normalized);
+}
+
+function canonicalAccountingBasis(input: Omit<AIEvalAccountingBasis, "fingerprint">): { version: 1; operations: AIEvalAccountingBasisOperation[]; currency: string; totalNano: number } {
+  return {
+    version: 1,
+    operations: [...input.operations]
+      .map((operation) => ({
+        operationId: operation.operationId,
+        records: [...operation.records]
+          .map((record) => ({ recordId: record.recordId, correctionIds: [...record.correctionIds].sort() }))
+          .sort((left, right) => left.recordId.localeCompare(right.recordId)),
+      }))
+      .sort((left, right) => left.operationId.localeCompare(right.operationId)),
+    currency: input.currency,
+    totalNano: input.totalNano,
+  };
 }
 
 function normalizeCaseManifest(value: unknown): AIEvalCaseManifestEntry[] {

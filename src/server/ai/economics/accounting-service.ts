@@ -65,11 +65,13 @@ export class AICostAccountingService {
         "A Gateway attempt without a Provider invocation cannot produce a usage record.",
       );
     }
+    const operation = this.dependencies.accounting.getOperation(observation.operationId);
     if (
       attempt.modelConfigRevision === null ||
       attempt.providerConfigId === null ||
       attempt.providerConfigRevision === null ||
-      !this.dependencies.accounting.getOperation(observation.operationId)
+      !operation ||
+      operation.status !== "OPEN"
     ) {
       throw new AIAccountingError(
         "AI_ACCOUNTING_CONFLICT",

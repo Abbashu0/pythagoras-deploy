@@ -1,6 +1,9 @@
 import type { ContentDatabase } from "../../content/database";
 import { isAIAccountingError, SQLiteAIAccountingRepository, type AICostOperation, type AIOperationCostSummary, type AIUsageCostRecord } from "../economics";
 import type {
+  AIEvalAccountingBasis,
+  AIEvalAccountingBasisOperation,
+  AIEvalAccountingBasisStatusResult,
   AIEvalBaselineComparison,
   AIEvalCaseResult,
   AIEvalCaseRevision,
@@ -22,6 +25,7 @@ import { SQLiteAIEvalCaseRepository, SQLiteAIEvalSuiteRepository } from "./confi
 import { SQLiteAIEvalRunRepository } from "./runs";
 import {
   fingerprintAIEvalCandidate,
+  fingerprintAIEvalAccountingBasis,
   fingerprintAIEvalManifest,
   hashEvalOutput,
   normalizeAIEvalCandidateSnapshot,
@@ -41,6 +45,7 @@ export interface AIEvalAccountingReader {
   getOperation(id: string): AICostOperation | null;
   getOperationCostSummary(id: string): AIOperationCostSummary;
   listUsageCostRecords(operationId: string): AIUsageCostRecord[];
+  listCorrections(originalRecordId: string): { id: string }[];
 }
 
 /** M9A orchestration for deterministic observations and gates. It has no Provider execution path. */
@@ -81,6 +86,16 @@ export class AIEvalRunService {
 
   beginScoring(id: string, now: number): AIEvalRun {
     return this.runs.transition({ id, expectedStatus: "RUNNING", status: "SCORING", scoredAt: null, updatedAt: now });
+  }
+
+  getAccountingBasisStatus(runId: string): AIEvalAccountingBasisStatusResult {
+    const run = this.requireRun(runId);
+    const gate = this.runs.listGateResults(runId).find((candidate) => candidate.gateKey === "MAX_COST_NANO");
+    const pinned = gate?.accountingBasis ?? null;
+    if (!pinned) return { status: "UNAVAILABLE", pinnedFingerprint: null, currentFingerprint: null };
+    const current = this.resolveRunAccountingBasis(run, this.runs.listCaseResults(runId));
+    if (!current) return { status: "STALE", pinnedFingerprint: pinned.fingerprint, currentFingerprint: null };
+    return { status: current.fingerprint === pinned.fingerprint ? "CURRENT" : "STALE", pinnedFingerprint: pinned.fingerprint, currentFingerprint: current.fingerprint };
   }
 
   recordObservationAndGrade(input: unknown, createdAt: number): { result: AIEvalCaseResult; graders: readonly AIEvalGraderResult[] } {
@@ -129,22 +144,22 @@ export class AIEvalRunService {
   }
 
   completeRun(id: string, now: number): { run: AIEvalRun; report: AIEvalRunScoreReport; baseline: AIEvalBaselineComparison | null } {
-    const current = this.requireRun(id);
-    if (current.status !== "SCORING") throw new AIEvalError("AI_EVAL_RUN_NOT_SCORABLE", "Only a SCORING Eval Run can be completed.");
-    const suite = this.requireSuiteRevision(current.suiteId, current.suiteRevision);
-    const caseResults = this.runs.listCaseResults(id);
-    const aggregates = this.buildAggregates(current, suite, caseResults);
-    const gates = this.buildAbsoluteGates(current, suite, caseResults, aggregates);
-    const baseline = this.compareBaseline(current, suite, aggregates);
-    const allGates = [...gates, ...(baseline ? this.baselineGates(current.id, baseline) : [])];
-    const recommendation = allGates.some((gate) => gate.verdict === "BLOCKED") ? "BLOCKED" : allGates.some((gate) => gate.verdict === "INCOMPLETE") ? "INCOMPLETE" : "PASS_RECOMMENDED";
-    const report: AIEvalRunScoreReport = { aggregates, gates: allGates, recommendation };
-    const run = this.database.client.transaction(() => {
+    return this.database.client.transaction(() => {
+      const current = this.requireRun(id);
+      if (current.status !== "SCORING") throw new AIEvalError("AI_EVAL_RUN_NOT_SCORABLE", "Only a SCORING Eval Run can be completed.");
+      const suite = this.requireSuiteRevision(current.suiteId, current.suiteRevision);
+      const caseResults = this.runs.listCaseResults(id);
+      const aggregates = this.buildAggregates(current, suite, caseResults);
+      const gates = this.buildAbsoluteGates(current, suite, caseResults, aggregates);
+      const baseline = this.compareBaseline(current, suite, aggregates);
+      const allGates = [...gates, ...(baseline ? this.baselineGates(current.id, baseline) : [])];
+      const recommendation = allGates.some((gate) => gate.verdict === "BLOCKED") ? "BLOCKED" : allGates.some((gate) => gate.verdict === "INCOMPLETE") ? "INCOMPLETE" : "PASS_RECOMMENDED";
+      const report: AIEvalRunScoreReport = { aggregates, gates: allGates, recommendation };
       for (const aggregate of aggregates) this.runs.insertDimensionAggregate(aggregate);
       for (const gate of allGates) this.runs.insertGateResult(gate);
-      return this.runs.transition({ id, expectedStatus: "SCORING", status: "COMPLETED", recommendation, safeFailureCode: recommendation === "PASS_RECOMMENDED" ? null : recommendation === "BLOCKED" ? "EVAL_GATE_BLOCKED" : "EVAL_RESULTS_INCOMPLETE", scoredAt: now, completedAt: now, updatedAt: now });
+      const run = this.runs.transition({ id, expectedStatus: "SCORING", status: "COMPLETED", recommendation, safeFailureCode: recommendation === "PASS_RECOMMENDED" ? null : recommendation === "BLOCKED" ? "EVAL_GATE_BLOCKED" : "EVAL_RESULTS_INCOMPLETE", scoredAt: now, completedAt: now, updatedAt: now });
+      return { run, report, baseline };
     }).immediate();
-    return { run, report, baseline };
   }
 
   failRun(id: string, now: number, safeFailureCode = "EVAL_RUN_FAILED"): AIEvalRun {
@@ -220,9 +235,10 @@ export class AIEvalRunService {
     const security = aggregates.find((candidate) => candidate.dimension === "SECURITY");
     if (security && security.blockingFailureCount > 0) gates.push({ runId: run.id, gateKey: "SECURITY_BLOCKING_FAILURE", verdict: "BLOCKED", observedValue: security.blockingFailureCount, thresholdValue: 0, safeReasonCode: "SECURITY_FAILURE" });
     if (suite.gateConfig.maximumCostNano !== null) {
-      const cost = this.resolveRunCost(run, results);
+      const accountingBasis = this.resolveRunAccountingBasis(run, results);
+      const cost = accountingBasis?.totalNano ?? null;
       const verdict = cost === null ? "INCOMPLETE" : cost > suite.gateConfig.maximumCostNano ? "BLOCKED" : "PASS";
-      gates.push({ runId: run.id, gateKey: "MAX_COST_NANO", verdict, observedValue: cost, thresholdValue: suite.gateConfig.maximumCostNano, safeReasonCode: verdict === "PASS" ? "COST_WITHIN_LIMIT" : verdict === "BLOCKED" ? "COST_LIMIT_EXCEEDED" : "COST_NOT_AVAILABLE" });
+      gates.push({ runId: run.id, gateKey: "MAX_COST_NANO", verdict, observedValue: cost, thresholdValue: suite.gateConfig.maximumCostNano, safeReasonCode: verdict === "PASS" ? "COST_WITHIN_LIMIT" : verdict === "BLOCKED" ? "COST_LIMIT_EXCEEDED" : "COST_NOT_AVAILABLE", accountingBasis });
     }
     if (suite.gateConfig.maximumLatencyMs !== null) {
       const latencyValues = results.map((result) => result.elapsedLatencyMs);
@@ -261,6 +277,29 @@ export class AIEvalRunService {
 
   private resolveCanonicalCost(run: AIEvalRun, costOperationId: string | null): number | null {
     if (costOperationId === null) return null;
+    return this.resolveCanonicalOperationBasis(run, costOperationId)?.totalNano ?? null;
+  }
+
+  private resolveRunAccountingBasis(run: AIEvalRun, results: readonly AIEvalCaseResult[]): AIEvalAccountingBasis | null {
+    const operationIds = [...new Set(results.map((result) => result.costOperationId).filter((value): value is string => value !== null))];
+    if (operationIds.length === 0) return null;
+    let currency: string | null = null;
+    let total = BigInt(0);
+    const operations: AIEvalAccountingBasisOperation[] = [];
+    for (const id of operationIds.sort()) {
+      const operation = this.resolveCanonicalOperationBasis(run, id);
+      if (!operation) return null;
+      if (currency === null) currency = operation.currency;
+      if (currency !== operation.currency) return null;
+      total += BigInt(operation.totalNano);
+      operations.push({ operationId: operation.operationId, records: operation.records });
+    }
+    if (currency === null || total < BigInt(0) || total > BigInt(Number.MAX_SAFE_INTEGER)) return null;
+    const basis = { version: 1 as const, operations, currency, totalNano: Number(total) };
+    return { ...basis, fingerprint: fingerprintAIEvalAccountingBasis(basis) };
+  }
+
+  private resolveCanonicalOperationBasis(run: AIEvalRun, costOperationId: string): (AIEvalAccountingBasisOperation & { currency: string; totalNano: number }) | null {
     const operation = this.accounting.getOperation(costOperationId);
     const suite = this.requireSuiteRevision(run.suiteId, run.suiteRevision);
     if (!operation || operation.costCenter !== "EVALS" || operation.evalRunId !== run.id || operation.opaquePrincipalRef !== null || operation.conversationId !== null || operation.responseId !== null || operation.jobId !== null || operation.idempotencyKey !== null || operation.subjectKey !== suite.subjectKey) throw new AIEvalError("AI_EVAL_RUN_INVALID", "The Eval observation cost operation is not owned by this Eval Run.");
@@ -268,30 +307,19 @@ export class AIEvalRunService {
     try {
       const records = this.accounting.listUsageCostRecords(costOperationId);
       if (records.length === 0 || records.some((record) => record.operationId !== costOperationId || record.costCompleteness !== "COMPLETE" || record.completedAt === null)) return null;
-      return this.costSummary(costOperationId);
+      const basisRecords = records.map((record) => ({ recordId: record.id, correctionIds: this.accounting.listCorrections(record.id).map((correction) => correction.id).sort() })).sort((left, right) => left.recordId.localeCompare(right.recordId));
+      const summary = this.costSummary(costOperationId);
+      return summary ? { operationId: costOperationId, records: basisRecords, currency: summary.currency, totalNano: summary.totalNano } : null;
     } catch (error) {
       if (isAIAccountingError(error)) return null;
       throw error;
     }
   }
 
-  private resolveRunCost(run: AIEvalRun, results: readonly AIEvalCaseResult[]): number | null {
-    const operationIds = [...new Set(results.map((result) => result.costOperationId).filter((value): value is string => value !== null))];
-    if (operationIds.length === 0) return null;
-    let total = BigInt(0);
-    for (const id of operationIds) {
-      const value = this.resolveCanonicalCost(run, id);
-      if (value === null) return null;
-      total += BigInt(value);
-    }
-    if (total < BigInt(0) || total > BigInt(Number.MAX_SAFE_INTEGER)) return null;
-    return Number(total);
-  }
-
-  private costSummary(operationId: string): number | null {
+  private costSummary(operationId: string): { currency: string; totalNano: number } | null {
     const totals = this.accounting.getOperationCostSummary(operationId).totals;
     if (totals.length !== 1 || totals[0] === undefined || !Number.isSafeInteger(totals[0].totalNano) || totals[0].totalNano < 0) return null;
-    return totals[0].totalNano;
+    return { currency: totals[0].currency, totalNano: totals[0].totalNano };
   }
 
   private resultInput(observation: AIEvalObservation, caseRevision: AIEvalCaseRevision, createdAt: number): Omit<AIEvalCaseResult, "id"> {

@@ -8,6 +8,8 @@ AI-M3A, AI-M3B, AI-M3C1, and AI-M3C2 are implemented as reviewed checkpoints of 
 
 Circuit health is local observation for an exact policy/route/credential-version target: `CLOSED` means Pythagoras has not tripped that target, `OPEN` suppresses it during cooldown, and `HALF_OPEN` admits one guarded real Product request. It is not a claim that a Provider is globally healthy, and no synthetic health request is generated.
 
+Provider Usage Cost Records belong to the active `OPEN` Cost Operation lifecycle. Once an operation is terminal, no new Provider Usage Record may be appended; post-terminal accounting adjustments use the existing append-only Cost Correction path. M9A cost gates persist a safe basis of the exact operation, Usage Record, and Correction identities plus currency, total, and SHA-256 fingerprint. A later Correction makes that pinned basis stale without rewriting Eval history.
+
 AI-M7B uses the existing `KNOWLEDGE_INDEXING` cost center for document embedding Jobs. It creates one cost operation per embedding projection Job, reserves a conservative integer nano-cost before the first Provider call, accounts every Gateway attempt where usage identity permits, and settles actual cost or preserves the existing reconciliation state when usage is incomplete. It does not introduce a Student-facing cost counter.
 
 ## 1. Cost centers

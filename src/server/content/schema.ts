@@ -102,6 +102,7 @@ import type {
 } from "../ai/retrieval-config/contracts";
 import type {
   AIEvalBaselineMode,
+  AIEvalAccountingBasis,
   AIEvalCandidateSnapshot,
   AIEvalCaseOrigin,
   AIEvalDeidentificationProof,
@@ -3578,6 +3579,7 @@ export const aiEvalGateResults = sqliteTable(
     observedValue: integer("observed_value"),
     thresholdValue: integer("threshold_value"),
     safeReasonCode: text("safe_reason_code").notNull(),
+    accountingBasis: text("accounting_basis", { mode: "json" }).$type<AIEvalAccountingBasis | null>(),
   },
   (table) => [
     primaryKey({ columns: [table.runId, table.gateKey] }),
@@ -3586,6 +3588,7 @@ export const aiEvalGateResults = sqliteTable(
     check("ai_eval_gate_results_values_valid", sql`${table.observedValue} is null or ${table.observedValue} >= 0`),
     check("ai_eval_gate_results_threshold_valid", sql`${table.thresholdValue} is null or ${table.thresholdValue} >= 0`),
     check("ai_eval_gate_results_reason_valid", sql`length(trim(${table.safeReasonCode})) between 1 and 160 and ${table.safeReasonCode} not glob '*[^A-Z0-9_-]*'`),
+    check("ai_eval_gate_results_accounting_basis_valid", sql`${table.accountingBasis} is null or (json_valid(${table.accountingBasis}) and json_type(${table.accountingBasis}) = 'object' and length(cast(${table.accountingBasis} as blob)) <= 1048576)`),
   ],
 );
 

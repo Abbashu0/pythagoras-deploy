@@ -11,6 +11,7 @@ import { createCanonicalContentRepository } from "../src/server/canonical-conten
 import {
   AIEvalCaseChangeAdapter,
   AIEvalError,
+  fingerprintAIEvalAccountingBasis,
   type AIEvalAccountingReader,
   AIEvalRunService,
   AIEvalSuiteChangeAdapter,
@@ -97,11 +98,13 @@ function evalAccountingReader(
   accounting: SQLiteAIAccountingRepository,
   records: readonly AIUsageCostRecord[],
   totalNano: number,
+  correctionIds: readonly string[] = [],
 ): AIEvalAccountingReader {
   return {
     getOperation: (id) => accounting.getOperation(id),
     getOperationCostSummary: (id) => ({ operationId: id, totals: [{ currency: "USD", totalNano }] }),
     listUsageCostRecords: () => [...records],
+    listCorrections: () => correctionIds.map((id) => ({ id })),
   };
 }
 
@@ -251,7 +254,7 @@ test("M9A migration is present and exposes no Provider execution path", () => {
   const fixture = createFixture();
   try {
     const count = Number((fixture.database.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count);
-    assert.equal(count, 33);
+    assert.equal(count, 34);
     assert.equal(fixture.database.client.prepare("select 1 from sqlite_master where type='table' and name='ai_eval_suites'").get() !== undefined, true);
     assert.equal(fixture.database.client.prepare("select 1 from sqlite_master where type='table' and name='ai_eval_runs'").get() !== undefined, true);
   } finally { fixture.close(); }
@@ -278,13 +281,13 @@ test("0030 to 0031 upgrade keeps the existing database and installs Eval tables"
   }
 });
 
-test("populated 0031 database upgrades to 0032 without rewriting Eval history", () => {
+test("populated 0032 database upgrades to 0033 without rewriting Eval history", () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "pythagoras-m9a-populated-upgrade-"));
-  const migrationsThrough0031 = createMigrationDirectory("pythagoras-m9a-populated-0031-", 32);
+  const migrationsThrough0032 = createMigrationDirectory("pythagoras-m9a-populated-0032-", 33);
   let oldDatabase: ContentDatabase | null = null;
   let upgraded: ContentDatabase | null = null;
   try {
-    oldDatabase = openContentDatabase({ dataDirectory: root, migrationsDirectory: migrationsThrough0031 });
+    oldDatabase = openContentDatabase({ dataDirectory: root, migrationsDirectory: migrationsThrough0032 });
     createCanonicalContentRepository(oldDatabase).bootstrap();
     const identities = new SQLiteAdminIdentityRepository(oldDatabase);
     const owner = identities.createInitialOwner({ id: uuidv7(), email: `owner-${uuidv7()}@m9a-upgrade.test`, displayName: "M9A Upgrade Owner", passwordHash: "fixture", createdAt: BASE_TIME });
@@ -303,19 +306,25 @@ test("populated 0031 database upgrades to 0032 without rewriting Eval history", 
     runService.startRun(run.id, BASE_TIME + 5);
     runService.recordObservationAndGrade(observation(run.id, caseId), BASE_TIME + 6);
     runService.beginScoring(run.id, BASE_TIME + 7);
-    assert.equal(runService.completeRun(run.id, BASE_TIME + 8).run.recommendation, "PASS_RECOMMENDED");
+    oldDatabase.client.prepare("insert into ai_eval_gate_results (run_id,gate_key,verdict,observed_value,threshold_value,safe_reason_code) values (?,?,?,?,?,?)").run(run.id, "SEEDED_GATE", "PASS", 1, 1, "SEEDED");
     const historicalBefore = oldDatabase.client.prepare("select id, suite_id, revision, display_name, enabled, required_dimensions, grader_configs, gate_config, permitted_regression_deltas, baseline_mode, supplementary_judge_config, created_at, created_by from ai_eval_suite_revisions where suite_id=? order by revision").all(suiteId) as Array<Record<string, unknown>>;
     assert.equal(historicalBefore.length, 2);
     oldDatabase.close(); oldDatabase = null;
 
     upgraded = openContentDatabase({ dataDirectory: root, migrationsDirectory });
-    assert.equal(Number((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count), 33);
+    assert.equal(Number((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count), 34);
     assert.deepEqual(upgraded.client.prepare("select key, subject_key, current_revision from ai_eval_suites where id=?").get(suiteId), { key: suiteIdentity.key, subject_key: "biology", current_revision: 2 });
     const historicalAfter = upgraded.client.prepare("select id, suite_id, revision, display_name, enabled, required_dimensions, grader_configs, gate_config, permitted_regression_deltas, baseline_mode, supplementary_judge_config, created_at, created_by from ai_eval_suite_revisions where suite_id=? order by revision").all(suiteId) as Array<Record<string, unknown>>;
     assert.deepEqual(historicalAfter, historicalBefore);
-    assert.equal((upgraded.client.prepare("select status, suite_id, suite_revision from ai_eval_runs where id=?").get(run.id) as { status: string; suite_id: string; suite_revision: number }).status, "COMPLETED");
+    assert.deepEqual(upgraded.client.prepare("select status, suite_id, suite_revision from ai_eval_runs where id=?").get(run.id), { status: "SCORING", suite_id: suiteId, suite_revision: 2 });
+    assert.equal((upgraded.client.prepare("select count(*) as count from ai_eval_case_results where run_id=?").get(run.id) as { count: number }).count, 1);
+    assert.equal((upgraded.client.prepare("select count(*) as count from ai_eval_grader_results where case_result_id=(select id from ai_eval_case_results where run_id=? )").get(run.id) as { count: number }).count, 4);
+    assert.deepEqual(upgraded.client.prepare("select verdict, accounting_basis from ai_eval_gate_results where run_id=? and gate_key='SEEDED_GATE'").get(run.id), { verdict: "PASS", accounting_basis: null });
+    assert.ok(upgraded.client.prepare("select accounting_basis from ai_eval_gate_results limit 0").columns().some((column) => column.name === "accounting_basis"));
+    assert.ok(upgraded.client.prepare("select name from sqlite_master where type='trigger' and name='ai_usage_cost_records_operation_open'").get());
     assert.ok(upgraded.client.prepare("select name from sqlite_master where type='trigger' and name='ai_eval_case_results_insert_valid'").get());
     assert.ok(upgraded.client.prepare("select name from sqlite_master where type='trigger' and name='ai_eval_grader_results_insert_valid'").get());
+    assert.ok(upgraded.client.prepare("select name from sqlite_master where type='trigger' and name='ai_eval_gate_results_update_blocked'").get());
     const revisionOneId = historicalBefore[0]?.id as string;
     assert.throws(() => upgraded!.client.prepare("update ai_eval_suite_revisions set display_name='mutated' where id=?").run(revisionOneId), /immutable/i);
     assert.throws(() => upgraded!.client.prepare("delete from ai_eval_suite_revisions where id=?").run(revisionOneId), /append-only|history/i);
@@ -327,7 +336,7 @@ test("populated 0031 database upgrades to 0032 without rewriting Eval history", 
     const historicalAfterAppend = upgraded.client.prepare("select id, suite_id, revision, display_name, enabled, required_dimensions, grader_configs, gate_config, permitted_regression_deltas, baseline_mode, supplementary_judge_config, created_at, created_by from ai_eval_suite_revisions where suite_id=? and revision <= 2 order by revision").all(suiteId) as Array<Record<string, unknown>>;
     assert.deepEqual(historicalAfterAppend, historicalBefore);
   } finally {
-    oldDatabase?.close(); upgraded?.close(); rmSync(root, { recursive: true, force: true }); rmSync(migrationsThrough0031, { recursive: true, force: true });
+    oldDatabase?.close(); upgraded?.close(); rmSync(root, { recursive: true, force: true }); rmSync(migrationsThrough0032, { recursive: true, force: true });
   }
 });
 
@@ -402,6 +411,8 @@ test("direct SQL cannot mutate or delete Eval definitions or published Run truth
     assert.equal(complete.run.recommendation, "PASS_RECOMMENDED");
     assert.throws(() => fixture.database.client.prepare("update ai_eval_runs set candidate_fingerprint=? where id=?").run("f".repeat(64), run.id), /immutable/i);
     assert.throws(() => fixture.database.client.prepare("delete from ai_eval_case_results where run_id=?").run(run.id), /append-only|immutable/i);
+    assert.throws(() => fixture.database.client.prepare("update ai_eval_gate_results set observed_value=0 where run_id=? and gate_key='MANIFEST_RESULTS_COMPLETE'").run(run.id), /immutable/i);
+    assert.throws(() => fixture.database.client.prepare("delete from ai_eval_gate_results where run_id=? and gate_key='MANIFEST_RESULTS_COMPLETE'").run(run.id), /append-only|immutable/i);
     assert.throws(() => fixture.database.client.prepare("delete from ai_eval_runs where id=?").run(run.id), /append-only|history/i);
     assert.throws(() => fixture.database.client.prepare("update ai_eval_cases set current_revision=3 where id=?").run(caseId), /advance|revision/i);
   } finally { fixture.close(); }
@@ -531,7 +542,7 @@ test("fixed-point gates recommend, block security/cost/latency, and never publis
     const expensiveRun = runService.createRun({ id: uuidv7(), suiteId: costSuiteId, suiteRevision: 1, candidateSnapshot: candidateSnapshot(), createdAt: BASE_TIME + 35 });
     const costOperationId = uuidv7();
     accounting.createOperation({ id: costOperationId, content: { costCenter: "EVALS", idempotencyKey: null, opaquePrincipalRef: null, subjectKey: "biology", conversationId: null, responseId: null, jobId: null, evalRunId: expensiveRun.id, knowledgeRevision: null, status: "OPEN", startedAt: BASE_TIME + 35, completedAt: null } });
-    const costAware = new AIEvalRunService(fixture.database, { accounting: { getOperation: (id) => accounting.getOperation(id), getOperationCostSummary: (id) => ({ operationId: id, totals: [{ currency: "USD", totalNano: 999 }] }), listUsageCostRecords: () => [] } });
+    const costAware = new AIEvalRunService(fixture.database, { accounting: { getOperation: (id) => accounting.getOperation(id), getOperationCostSummary: (id) => ({ operationId: id, totals: [{ currency: "USD", totalNano: 999 }] }), listUsageCostRecords: () => [], listCorrections: () => [] } });
     costAware.startRun(expensiveRun.id, BASE_TIME + 36);
     costAware.recordObservationAndGrade(observation(expensiveRun.id, caseId, { costOperationId }), BASE_TIME + 37);
     costAware.beginScoring(expensiveRun.id, BASE_TIME + 38);
@@ -574,6 +585,77 @@ test("EVALS cost gates require a terminal operation with complete canonical usag
     const over = createEvalOperation(fixture.database, overRun.id, { status: "COMPLETED", completedAt: BASE_TIME + 161 });
     const overResult = score(new AIEvalRunService(fixture.database, { accounting: evalAccountingReader(over.accounting, [fakeUsageRecord(over.id, "COMPLETE")], 999) }), overRun.id, over.id, BASE_TIME + 162);
     assert.equal(overResult.report.gates.find((gate) => gate.gateKey === "MAX_COST_NANO")?.verdict, "BLOCKED");
+
+    const emptyRun = new AIEvalRunService(fixture.database).createRun({ id: uuidv7(), suiteId, suiteRevision: 1, candidateSnapshot: candidateSnapshot(), createdAt: BASE_TIME + 165 });
+    const empty = createEvalOperation(fixture.database, emptyRun.id, { status: "COMPLETED", completedAt: BASE_TIME + 166 });
+    const emptyResult = score(new AIEvalRunService(fixture.database, { accounting: evalAccountingReader(empty.accounting, [], 0) }), emptyRun.id, empty.id, BASE_TIME + 167);
+    assert.equal(emptyResult.report.gates.find((gate) => gate.gateKey === "MAX_COST_NANO")?.verdict, "INCOMPLETE");
+
+    const multiRun = new AIEvalRunService(fixture.database).createRun({ id: uuidv7(), suiteId, suiteRevision: 1, candidateSnapshot: candidateSnapshot(), createdAt: BASE_TIME + 170 });
+    const multi = createEvalOperation(fixture.database, multiRun.id, { status: "COMPLETED", completedAt: BASE_TIME + 171 });
+    const multiRecord = fakeUsageRecord(multi.id, "COMPLETE");
+    const multiReader: AIEvalAccountingReader = { getOperation: (id) => multi.accounting.getOperation(id), getOperationCostSummary: (id) => ({ operationId: id, totals: [{ currency: "EUR", totalNano: 1 }, { currency: "USD", totalNano: 5 }] }), listUsageCostRecords: () => [multiRecord], listCorrections: () => [] };
+    const multiResult = score(new AIEvalRunService(fixture.database, { accounting: multiReader }), multiRun.id, multi.id, BASE_TIME + 172);
+    assert.equal(multiResult.report.gates.find((gate) => gate.gateKey === "MAX_COST_NANO")?.verdict, "INCOMPLETE");
+  } finally { fixture.close(); }
+});
+
+test("Eval cost gates persist an immutable accounting basis and detect later Corrections", () => {
+  const fixture = createFixture();
+  try {
+    const caseId = createPublishedCase(fixture);
+    const suiteId = createPublishedSuite(fixture, caseId, suiteContent(caseId, 1, { gateConfig: { minimumScores: [], maximumCostNano: 10, maximumLatencyMs: null, requireSecurityPass: true } }));
+    const run = new AIEvalRunService(fixture.database).createRun({ id: uuidv7(), suiteId, suiteRevision: 1, candidateSnapshot: candidateSnapshot(), createdAt: BASE_TIME + 180 });
+    const operation = createEvalOperation(fixture.database, run.id, { status: "COMPLETED", completedAt: BASE_TIME + 181 });
+    const usageRecord = fakeUsageRecord(operation.id, "COMPLETE");
+    const correctionIds: string[] = [];
+    let totalNano = 5;
+    const accounting: AIEvalAccountingReader = {
+      getOperation: (id) => operation.id === id ? operation.accounting.getOperation(id) : null,
+      getOperationCostSummary: (id) => ({ operationId: id, totals: [{ currency: "USD", totalNano }] }),
+      listUsageCostRecords: (id) => id === operation.id ? [usageRecord] : [],
+      listCorrections: (recordId) => recordId === usageRecord.id ? correctionIds.map((id) => ({ id })) : [],
+    };
+    const service = new AIEvalRunService(fixture.database, { accounting });
+    service.startRun(run.id, BASE_TIME + 182);
+    service.recordObservationAndGrade(observation(run.id, caseId, { costOperationId: operation.id }), BASE_TIME + 183);
+    service.beginScoring(run.id, BASE_TIME + 184);
+    const scored = service.completeRun(run.id, BASE_TIME + 185);
+    const costGate = scored.report.gates.find((gate) => gate.gateKey === "MAX_COST_NANO");
+    assert.equal(costGate?.verdict, "PASS");
+    assert.equal(costGate?.accountingBasis?.totalNano, 5);
+    assert.equal(costGate?.accountingBasis?.operations[0]?.operationId, operation.id);
+    assert.deepEqual(costGate?.accountingBasis?.operations[0]?.records[0]?.correctionIds, []);
+    const persisted = JSON.parse((fixture.database.client.prepare("select accounting_basis from ai_eval_gate_results where run_id=? and gate_key='MAX_COST_NANO'").get(run.id) as { accounting_basis: string }).accounting_basis) as { totalNano: number; fingerprint: string };
+    assert.equal(persisted.totalNano, 5);
+    assert.match(persisted.fingerprint, /^[0-9a-f]{64}$/u);
+    assert.equal(service.getAccountingBasisStatus(run.id).status, "CURRENT");
+
+    const correctionId = uuidv7();
+    correctionIds.push(correctionId);
+    totalNano = 25;
+    const freshness = service.getAccountingBasisStatus(run.id);
+    assert.equal(freshness.status, "STALE");
+    assert.equal(freshness.pinnedFingerprint, persisted.fingerprint);
+    assert.notEqual(freshness.currentFingerprint, persisted.fingerprint);
+    const semanticallySame = {
+      version: 1 as const,
+      operations: [
+        { operationId: "operation-b", records: [{ recordId: "record-b", correctionIds: ["correction-2", "correction-1"] }] },
+        { operationId: "operation-a", records: [{ recordId: "record-a", correctionIds: [] }] },
+      ],
+      currency: "USD",
+      totalNano: 25,
+    };
+    const reordered = {
+      ...semanticallySame,
+      operations: [
+        { operationId: "operation-a", records: [{ recordId: "record-a", correctionIds: [] }] },
+        { operationId: "operation-b", records: [{ recordId: "record-b", correctionIds: ["correction-1", "correction-2"] }] },
+      ],
+    };
+    assert.equal(fingerprintAIEvalAccountingBasis(semanticallySame), fingerprintAIEvalAccountingBasis(reordered));
+    assert.equal((JSON.parse((fixture.database.client.prepare("select accounting_basis from ai_eval_gate_results where run_id=? and gate_key='MAX_COST_NANO'").get(run.id) as { accounting_basis: string }).accounting_basis) as { totalNano: number }).totalNano, 5);
   } finally { fixture.close(); }
 });
 

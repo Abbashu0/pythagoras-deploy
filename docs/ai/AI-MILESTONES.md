@@ -121,12 +121,12 @@ AI-M8A, AI-M8B, and AI-M8C are approved; AI-M8 Grounded Tutor is complete at `e7
 
 ## AI-M9 — Evals V1
 
-**Status:** Split into review checkpoints; AI-M9A is implemented with the deterministic-scoring correction pending independent review, AI-M9 overall is incomplete, and AI-M9B is not started.
+**Status:** Split into review checkpoints; AI-M9A is implemented with the deterministic-scoring and accounting-basis corrections pending independent review, AI-M9 overall is incomplete, and AI-M9B is not started.
 
 ### AI-M9A — Eval Domain, Versioned Suites, Deterministic Graders & Promotion Gates
 
-**Status:** Implemented with the deterministic-scoring correction, pending independent review.
-**Delivered boundary:** Governed subject-bound `ai.eval-suite` and `ai.eval-case` identities with append-only revisions; exact ordered Case-revision manifests; explicit synthetic/curated/de-identified privacy classification; code-owned deterministic graders reusing M8C citation validation; fixed-point result/aggregate/gate records; immutable candidate/manifest fingerprints; bounded baseline/regression comparison; and recommendation-only outcomes. Migration `0031_nosy_roxanne_simpson` adds Eval storage and SQLite lifecycle/ownership protections; correction migration `0032_eval-scoring-boundary` pins result rows to deterministic Suite graders, freezes Case/Grader inputs at `SCORING`, requires complete manifests for recommendation, and keeps final cost gates conservative.
+**Status:** Implemented with the deterministic-scoring and accounting-basis corrections, pending independent review.
+**Delivered boundary:** Governed subject-bound `ai.eval-suite` and `ai.eval-case` identities with append-only revisions; exact ordered Case-revision manifests; explicit synthetic/curated/de-identified privacy classification; code-owned deterministic graders reusing M8C citation validation; fixed-point result/aggregate/gate records; immutable candidate/manifest fingerprints; bounded baseline/regression comparison; and recommendation-only outcomes. Migration `0031_nosy_roxanne_simpson` adds Eval storage and SQLite lifecycle/ownership protections; correction migration `0032_eval-scoring-boundary` pins result rows to deterministic Suite graders, freezes Case/Grader inputs at `SCORING`, requires complete manifests for recommendation, and keeps final cost gates conservative; correction migration `0033_eval-accounting-basis` seals post-terminal Usage and persists a safe immutable accounting basis for cost gates while preserving append-only Corrections.
 **Explicit boundary:** Zero Generation, Embedding, Rerank, judge, Provider, network, Student/Admin/Mobile UI, automatic publication, production failure import, raw Student persistence, or chain-of-thought persistence.
 
 ### AI-M9B — Eval Execution & EVALS Economics

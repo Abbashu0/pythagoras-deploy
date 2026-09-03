@@ -91,8 +91,12 @@ export class SQLiteAIAccountingRepository implements AIAccountingRepository {
     if (!Number.isSafeInteger(input.createdAt) || input.createdAt < 0) {
       throw new AIAccountingError("AI_ACCOUNTING_CONFLICT", "The usage record timestamp is invalid.");
     }
-    if (!this.getOperation(content.operationId)) {
+    const operation = this.getOperation(content.operationId);
+    if (!operation) {
       throw new AIAccountingError("AI_ACCOUNTING_NOT_FOUND", "The AI cost operation was not found.");
+    }
+    if (operation.status !== "OPEN") {
+      throw new AIAccountingError("AI_ACCOUNTING_CONFLICT", "Usage cost records can only be appended while the AI cost operation is OPEN.");
     }
     const rateRevision = this.database.db.select({
       rateCardId: aiRateCardRevisions.rateCardId,
