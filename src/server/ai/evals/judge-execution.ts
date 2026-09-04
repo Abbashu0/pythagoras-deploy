@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { v7 as uuidv7 } from "uuid";
 
 import type { ContentDatabase } from "../../content/database";
-import { AIJobError } from "../operations/jobs";
+import { AIJobError, AIJobExecutionError } from "../operations/jobs";
 import {
   AIBudgetAdmissionService,
   AI_EVALS_ADMISSION_PRINCIPAL_REF,
@@ -65,6 +65,10 @@ export interface AIEvalJudgeExecutionDependencies {
   calculator?: AICostCalculator;
   budgetPeriodResolver?: AIEvalTargetBudgetPeriodResolver;
   clock?: () => number;
+}
+
+function isAIJobExecutionInterruption(error: unknown): error is AIJobExecutionError {
+  return error instanceof AIJobExecutionError && (error.safeErrorCode === "AI_JOB_TIMEOUT" || error.safeErrorCode === "AI_JOB_CANCELLED");
 }
 
 export interface AIEvalJudgeExecutionInput {
@@ -214,18 +218,12 @@ export class AIEvalJudgeExecutionService {
       updatedAt: now,
     });
 
-    if (signal?.aborted) {
-      return this.judgeExecutions.cancel({
-        id: execution.id,
-        providerInvoked: false,
-        safeFailureCode: "EVAL_JUDGE_CANCELLED",
-        now: this.safeNow(),
-      });
-    }
+    if (signal?.aborted) return this.finishSignalAbort(execution, null, null, signal, false);
 
     try {
       checkLease?.();
     } catch (error) {
+      if ((signal?.aborted || isAIJobExecutionInterruption(error)) && !(error instanceof AIJobError && error.code === "AI_JOB_LEASE_LOST")) return this.finishSignalAbort(execution, null, null, signal, false, error);
       if (error instanceof AIJobError && error.code === "AI_JOB_LEASE_LOST") {
         this.judgeExecutions.fail({
           id: execution.id,
@@ -314,19 +312,12 @@ export class AIEvalJudgeExecutionService {
       execution = this.judgeExecutions.bindOperation(execution.id, operation.id, this.safeNow());
     }
 
-    if (signal?.aborted) {
-      this.completeOperation(operation.id, "CANCELLED", this.safeNow());
-      return this.judgeExecutions.cancel({
-        id: execution.id,
-        providerInvoked: false,
-        safeFailureCode: "EVAL_JUDGE_CANCELLED",
-        now: this.safeNow(),
-      });
-    }
+    if (signal?.aborted) return this.finishSignalAbort(execution, operation, null, signal, false);
 
     try {
       checkLease?.();
     } catch (error) {
+      if ((signal?.aborted || isAIJobExecutionInterruption(error)) && !(error instanceof AIJobError && error.code === "AI_JOB_LEASE_LOST")) return this.finishSignalAbort(execution, operation, null, signal, false, error);
       if (error instanceof AIJobError && error.code === "AI_JOB_LEASE_LOST") {
         this.completeOperation(operation.id, "FAILED", this.safeNow());
         this.judgeExecutions.fail({
@@ -431,20 +422,12 @@ export class AIEvalJudgeExecutionService {
       }
     }
 
-    if (signal?.aborted) {
-      this.completeOperation(operation.id, "CANCELLED", this.safeNow());
-      this.settle(reservationId, this.safeNow());
-      return this.judgeExecutions.cancel({
-        id: execution.id,
-        providerInvoked: false,
-        safeFailureCode: "EVAL_JUDGE_CANCELLED",
-        now: this.safeNow(),
-      });
-    }
+    if (signal?.aborted) return this.finishSignalAbort(execution, operation, reservationId, signal, false);
 
     try {
       checkLease?.();
     } catch (error) {
+      if ((signal?.aborted || isAIJobExecutionInterruption(error)) && !(error instanceof AIJobError && error.code === "AI_JOB_LEASE_LOST")) return this.finishSignalAbort(execution, operation, reservationId, signal, false, error);
       if (error instanceof AIJobError && error.code === "AI_JOB_LEASE_LOST") {
         this.completeOperation(operation.id, "FAILED", this.safeNow());
         this.settle(reservationId, this.safeNow());
@@ -463,9 +446,11 @@ export class AIEvalJudgeExecutionService {
     execution = this.judgeExecutions.markRunning(execution.id, this.safeNow());
     execution = this.judgeExecutions.markInvoking(execution.id, this.safeNow());
 
+    if (signal?.aborted) return this.finishSignalAbort(execution, operation, reservationId, signal, false);
     try {
       checkLease?.();
     } catch (error) {
+      if ((signal?.aborted || isAIJobExecutionInterruption(error)) && !(error instanceof AIJobError && error.code === "AI_JOB_LEASE_LOST")) return this.finishSignalAbort(execution, operation, reservationId, signal, false, error);
       if (error instanceof AIJobError && error.code === "AI_JOB_LEASE_LOST") {
         this.completeOperation(operation.id, "FAILED", this.safeNow());
         this.settle(reservationId, this.safeNow());
@@ -541,10 +526,12 @@ export class AIEvalJudgeExecutionService {
       execution = this.judgeExecutions.markInvokedWithAccounting(execution.id, this.safeNow());
     }
 
+    if (signal?.aborted) return this.finishSignalAbort(execution, operation, reservationId, signal, providerInvoked);
     let leaseLostAfterGateway = false;
     try {
       checkLease?.();
     } catch (error) {
+      if ((signal?.aborted || isAIJobExecutionInterruption(error)) && !(error instanceof AIJobError && error.code === "AI_JOB_LEASE_LOST")) return this.finishSignalAbort(execution, operation, reservationId, signal, providerInvoked, error);
       if (error instanceof AIJobError && error.code === "AI_JOB_LEASE_LOST") {
         leaseLostAfterGateway = true;
       } else {
@@ -575,8 +562,9 @@ export class AIEvalJudgeExecutionService {
     const outputSha256 = judgeOutput ? createHash("sha256").update(judgeOutput, "utf8").digest("hex") : null;
     const outputByteSize = judgeOutput ? Buffer.byteLength(judgeOutput, "utf8") : null;
 
-    // 10. Handle gateway error / cancellation
-    if (signal?.aborted || (isAIProviderGatewayError(gatewayError) && gatewayError.code === "CANCELLED")) {
+    // 10. Handle Worker interruption before accepting any Judge output.
+    if (signal?.aborted) return this.finishSignalAbort(execution, operation, reservationId, signal, providerInvoked);
+    if (isAIProviderGatewayError(gatewayError) && gatewayError.code === "CANCELLED") {
       this.completeOperation(operation.id, "CANCELLED", this.safeNow());
       this.settle(reservationId, this.safeNow());
       return this.judgeExecutions.cancel({
@@ -687,6 +675,63 @@ export class AIEvalJudgeExecutionService {
       judgeOutputByteSize: outputByteSize ?? 0,
       latencyMs,
       now: completedNow,
+    });
+  }
+
+  private finishSignalAbort(
+    execution: AIEvalJudgeExecution,
+    operation: AICostOperation | null,
+    reservationId: string | null,
+    signal: AbortSignal | undefined,
+    providerMayHaveInvoked: boolean,
+    interruption?: unknown,
+  ): AIEvalJudgeExecution {
+    const now = this.safeNow();
+    const providerInvoked = providerMayHaveInvoked
+      || execution.providerInvoked
+      || execution.providerInvocationState === "INVOKED_WITH_ACCOUNTING"
+      || Boolean(operation && this.accounting.listUsageCostRecords(operation.id).length > 0);
+    const reason = signal?.reason;
+    const leaseLost = reason === "AI_JOB_LEASE_LOST";
+    const timedOut = reason === "AI_JOB_TIMEOUT" || (interruption instanceof AIJobExecutionError && interruption.safeErrorCode === "AI_JOB_TIMEOUT");
+
+    if (operation) this.completeOperation(operation.id, providerInvoked || timedOut || leaseLost ? "FAILED" : "CANCELLED", now);
+    this.settle(reservationId, now);
+
+    if (providerInvoked) {
+      const result = this.judgeExecutions.ambiguous({
+        id: execution.id,
+        safeFailureCode: "EVAL_JUDGE_PROVIDER_AMBIGUOUS",
+        now,
+      });
+      if (leaseLost) throw new AIJobError("AI_JOB_LEASE_LOST", "The Job lease was lost during Judge execution.");
+      return result;
+    }
+
+    if (leaseLost) {
+      this.judgeExecutions.fail({
+        id: execution.id,
+        providerInvoked: false,
+        safeFailureCode: "EVAL_JUDGE_LEASE_LOST",
+        now,
+      });
+      throw new AIJobError("AI_JOB_LEASE_LOST", "The Job lease was lost before Judge Provider execution.");
+    }
+
+    if (timedOut) {
+      return this.judgeExecutions.fail({
+        id: execution.id,
+        providerInvoked: false,
+        safeFailureCode: "EVAL_JUDGE_TIMEOUT",
+        now,
+      });
+    }
+
+    return this.judgeExecutions.cancel({
+      id: execution.id,
+      providerInvoked: false,
+      safeFailureCode: "EVAL_JUDGE_CANCELLED",
+      now,
     });
   }
 

@@ -55,6 +55,8 @@ import {
   SQLiteAIEvalJudgeConfigRepository,
   SQLiteAIEvalJudgeExecutionRepository,
   SQLiteAIEvalRunRepository,
+  AI_EVAL_TARGET_ORCHESTRATION_GRACE_MS,
+  SQLiteAIEvalCaseExecutionRepository,
   normalizeAIEvalCandidateSnapshot,
 } from "../src/server/ai/evals";
 import { SQLiteAIKnowledgePackageRepository, SQLiteAIKnowledgeSourceRepository, type AIKnowledgeSourceContent } from "../src/server/ai/knowledge";
@@ -124,11 +126,22 @@ class JudgeGenerationAdapter implements GenerationProviderAdapter {
   scoresResponse: string | null = null;
   finalUsage = usage(80, 25);
   malformed = false;
+  waitForAbort = false;
+  onStarted: (() => void) | null = null;
 
-  async *generate(request: GenerationProviderRequest, _context: ProviderAdapterExecutionContext): AsyncIterable<ProviderGenerationStreamEvent> {
+  async *generate(request: GenerationProviderRequest, context: ProviderAdapterExecutionContext): AsyncIterable<ProviderGenerationStreamEvent> {
     this.calls += 1;
     this.requests.push(request);
     yield { type: "STARTED", providerRequestId: `m9b2-judge-gen-${this.calls}` };
+    this.onStarted?.();
+    if (this.waitForAbort) {
+      yield { type: "USAGE", usage: this.finalUsage };
+      await new Promise<void>((resolve) => {
+        if (context.signal.aborted) resolve();
+        else context.signal.addEventListener("abort", () => resolve(), { once: true });
+      });
+      return;
+    }
     const text = this.malformed
       ? "{ invalid json: true ..."
       : (this.scoresResponse ?? JSON.stringify({
@@ -169,6 +182,7 @@ interface JudgeIntegrationFixture {
   owner: AdminActor;
   accounting: AICostAccountingService;
   accountingRepository: SQLiteAIAccountingRepository;
+  rateCards: AIRateCardResolver;
   admission: AIBudgetAdmissionService;
   gateway: AIProviderGateway;
   hybrid: HybridRetrievalService;
@@ -732,6 +746,7 @@ async function createJudgeIntegrationFixture(): Promise<JudgeIntegrationFixture>
     owner,
     accounting,
     accountingRepository,
+    rateCards: rateCardResolver,
     admission,
     gateway,
     hybrid,
@@ -866,6 +881,67 @@ function createCase(f: JudgeIntegrationFixture, inputText = QUERY_MARKER, requir
   return caseId;
 }
 
+async function waitUntil(condition: () => boolean, message: string, attempts = 200): Promise<void> {
+  for (let index = 0; index < attempts; index += 1) {
+    if (condition()) return;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  assert.fail(message);
+}
+
+function waitForAbort(signal: AbortSignal | undefined): Promise<void> {
+  if (!signal || signal.aborted) return Promise.resolve();
+  return new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
+}
+
+function createTargetWithJudgeGateway(
+  f: JudgeIntegrationFixture,
+  judgeGateway: Pick<AIProviderGateway, "generate">,
+): AIEvalTargetExecutionService {
+  const judgeService = new AIEvalJudgeExecutionService({
+    database: f.database,
+    gateway: judgeGateway,
+    accounting: f.accounting,
+    admission: f.admission,
+    models: new SQLiteAIModelConfigRepository(f.database),
+    providers: new SQLiteAIProviderConfigRepository(f.database),
+    rateCards: f.rateCards,
+    budgetPeriodResolver: { resolve: () => ({ startAt: 0, endAt: BASE_TIME + 100_000 }) },
+    clock: f.now,
+  });
+  return new AIEvalTargetExecutionService({
+    database: f.database,
+    conversations: f.conversations,
+    preflight: f.preflight,
+    planner: new AITutorGenerationPlanner(),
+    retrieval: f.hybrid,
+    gateway: f.gateway,
+    accounting: f.accounting,
+    admission: f.admission,
+    estimator: { estimatorKey: "m9b2.worker-test", estimate: () => 1 },
+    budgetPeriodResolver: { resolve: () => ({ startAt: 0, endAt: BASE_TIME + 100_000 }) },
+    clock: f.now,
+    judgeExecution: judgeService,
+  });
+}
+
+function createJudgeRun(f: JudgeIntegrationFixture): { run: ReturnType<AIEvalRunService["createRun"]>; caseId: string; suiteId: string } {
+  const caseId = createCase(f);
+  const suiteId = createSuiteWithJudge(f, caseId);
+  const run = f.evalRuns.createRun({
+    id: uuidv7(),
+    suiteId,
+    suiteRevision: 1,
+    candidateSnapshot: candidateSnapshotForFixture(f),
+    createdAt: BASE_TIME + 20,
+  });
+  return { run, caseId, suiteId };
+}
+
+function forceJobTimeout(f: JudgeIntegrationFixture, jobId: string, timeoutMs: number): void {
+  f.database.client.prepare("update ai_jobs set timeout_ms=? where id=?").run(timeoutMs, jobId);
+}
+
 test("M9B2 End-to-End: Target execution handoff to LLM Judge, distinct EVALS accounting, strict scoring finalization, and latency purity", async () => {
   const f = await createJudgeIntegrationFixture();
   try {
@@ -982,6 +1058,203 @@ test("M9B2 End-to-End: Target execution handoff to LLM Judge, distinct EVALS acc
     const latencyGate = scored.report.gates.find((g) => g.gateKey === "MAX_LATENCY_MS")!;
     assert.ok(latencyGate);
     assert.equal(latencyGate.verdict, "PASS");
+  } finally {
+    f.close();
+  }
+});
+
+test("M9B2 real AIWorker path budgets the complete Target plus pinned Judge execution", async () => {
+  const f = await createJudgeIntegrationFixture();
+  try {
+    const { run, caseId } = createJudgeRun(f);
+    const judgeCurrent = new SQLiteAIEvalJudgeConfigRepository(f.database).getById(f.judgeConfigId)!;
+    publishResource(f, AI_EVAL_JUDGE_CONFIG_RESOURCE_TYPE, f.judgeConfigId, {
+      key: judgeCurrent.key,
+      subjectKey: judgeCurrent.subjectKey,
+      displayName: "M9B2 Qualitative Judge v2",
+      enabled: true,
+      modelConfigId: judgeCurrent.modelConfigId,
+      modelConfigRevision: judgeCurrent.modelConfigRevision,
+      providerConfigId: judgeCurrent.providerConfigId,
+      providerConfigRevision: judgeCurrent.providerConfigRevision,
+      budgetPolicyId: judgeCurrent.budgetPolicyId,
+      budgetPolicyRevision: judgeCurrent.budgetPolicyRevision,
+      rateLimitPolicyId: judgeCurrent.rateLimitPolicyId,
+      rateLimitPolicyRevision: judgeCurrent.rateLimitPolicyRevision,
+      protocolKey: judgeCurrent.protocolKey,
+      protocolRevision: judgeCurrent.protocolRevision,
+      timeoutMs: 1_000,
+      maxOutputTokens: judgeCurrent.maxOutputTokens,
+    }, 1);
+    const executionConfig = new SQLiteAIEvalExecutionConfigRepository(f.database).getById(f.executionConfigId)!;
+    const scheduled = f.orchestrator.scheduleRun({
+      runId: run.id,
+      executionConfigId: f.executionConfigId,
+      executionConfigRevision: executionConfig.currentRevision,
+      createdBy: f.owner.actorUserId,
+      now: BASE_TIME + 21,
+    });
+
+    const job = f.database.client.prepare("select timeout_ms, lease_duration_ms from ai_jobs where id=?").get(scheduled.jobIds[0]) as { timeout_ms: number; lease_duration_ms: number };
+    assert.equal(job.timeout_ms, executionConfig.targetTimeoutMs + 30_000 + AI_EVAL_TARGET_ORCHESTRATION_GRACE_MS);
+    assert.equal(job.lease_duration_ms, 120_000);
+
+    const handlers = new AIJobHandlerRegistry();
+    handlers.register(createAIEvalTargetExecutionJobHandler(f.targetService));
+    const jobs = new AIJobQueueService(f.database, handlers, { clock: () => BASE_TIME + 22 });
+    const worker = new AIWorker({ jobs, handlers, workerId: `m9b2-real-worker-${uuidv7()}`, clock: () => BASE_TIME + 22 });
+    const workerResult = await worker.runOnce(BASE_TIME + 22);
+
+    assert.equal(workerResult.claimedJobId, scheduled.jobIds[0]);
+    assert.equal(f.targetGeneration.calls, 1);
+    assert.equal(f.judgeGeneration.calls, 1);
+    assert.equal((f.database.client.prepare("select status from ai_jobs where id=?").get(scheduled.jobIds[0]) as { status: string }).status, "SUCCEEDED");
+    assert.equal(new SQLiteAIEvalJudgeExecutionRepository(f.database).getForCase({ runId: run.id, caseId, caseRevision: 1 })?.status, "COMPLETED");
+    assert.equal(new SQLiteAIEvalRunRepository(f.database).listJudgeResultsForRun(run.id).length, 2);
+  } finally {
+    f.close();
+  }
+});
+
+test("M9B2 rejects a Judge-enabled schedule whose exact phase budgets exceed the Job maximum", async () => {
+  const f = await createJudgeIntegrationFixture();
+  try {
+    const { run } = createJudgeRun(f);
+    const current = new SQLiteAIEvalExecutionConfigRepository(f.database).getById(f.executionConfigId)!;
+    const oversizedId = uuidv7();
+    new SQLiteAIEvalExecutionConfigRepository(f.database).create({
+      id: oversizedId,
+      content: {
+        key: `m9b2-oversized-${uuidv7()}`,
+        subjectKey: current.subjectKey,
+        displayName: "Oversized Target Execution",
+        enabled: true,
+        budgetPolicyId: current.budgetPolicyId,
+        budgetPolicyRevision: current.budgetPolicyRevision,
+        rateLimitPolicyId: current.rateLimitPolicyId,
+        rateLimitPolicyRevision: current.rateLimitPolicyRevision,
+        protocolKey: current.protocolKey,
+        protocolRevision: current.protocolRevision,
+        targetTimeoutMs: 86_400_000,
+        maxConcurrency: current.maxConcurrency,
+        cleanupProtocolKey: current.cleanupProtocolKey,
+        cleanupProtocolRevision: current.cleanupProtocolRevision,
+      },
+      actor: f.owner,
+      now: BASE_TIME + 21,
+    });
+
+    assert.throws(
+      () => f.orchestrator.scheduleRun({ runId: run.id, executionConfigId: oversizedId, executionConfigRevision: 1, createdBy: f.owner.actorUserId, now: BASE_TIME + 22 }),
+      /combined Eval target and Judge timeout exceeds/i,
+    );
+    assert.equal(new SQLiteAIEvalRunRepository(f.database).getById(run.id)?.status, "CREATED");
+    assert.equal((f.database.client.prepare("select count(*) as count from ai_eval_case_executions where run_id=?").get(run.id) as { count: number }).count, 0);
+    assert.equal((f.database.client.prepare("select count(*) as count from ai_jobs where kind='ai.eval.target-execution'").get() as { count: number }).count, 0);
+  } finally {
+    f.close();
+  }
+});
+
+test("M9B2 AIWorker timeout before Judge Provider invocation finalizes Judge economics without replaying Target", async () => {
+  const f = await createJudgeIntegrationFixture();
+  try {
+    const { run, caseId } = createJudgeRun(f);
+    const executionConfig = new SQLiteAIEvalExecutionConfigRepository(f.database).getById(f.executionConfigId)!;
+    const scheduled = f.orchestrator.scheduleRun({ runId: run.id, executionConfigId: f.executionConfigId, executionConfigRevision: executionConfig.currentRevision, createdBy: f.owner.actorUserId, now: BASE_TIME + 21 });
+    let judgeGatewayCalls = 0;
+    const judgeGateway: Pick<AIProviderGateway, "generate"> = {
+      generate: (_plan, _request, options) => {
+        judgeGatewayCalls += 1;
+        return {
+          events: (async function* () {
+            await waitForAbort(options?.signal);
+          })(),
+          trace: Promise.resolve([]),
+        };
+      },
+    };
+    const target = createTargetWithJudgeGateway(f, judgeGateway);
+    const handlers = new AIJobHandlerRegistry();
+    handlers.register(createAIEvalTargetExecutionJobHandler(target));
+    const jobs = new AIJobQueueService(f.database, handlers, { clock: () => BASE_TIME + 22 });
+    forceJobTimeout(f, scheduled.jobIds[0]!, 2_000);
+    const worker = new AIWorker({ jobs, handlers, workerId: `m9b2-before-judge-${uuidv7()}`, clock: () => BASE_TIME + 22 });
+    const workerPromise = worker.runOnce(BASE_TIME + 22);
+    await waitUntil(() => judgeGatewayCalls === 1, "The Judge gateway was not reached before the Worker timeout.");
+    await workerPromise;
+
+    const judgeExecutions = new SQLiteAIEvalJudgeExecutionRepository(f.database);
+    await waitUntil(() => {
+      const execution = judgeExecutions.getForCase({ runId: run.id, caseId, caseRevision: 1 });
+      return execution !== null && ["FAILED", "CANCELLED", "AMBIGUOUS"].includes(execution.status);
+    }, "The pre-provider Judge execution did not reach a terminal state.");
+    const judgeExecution = judgeExecutions.getForCase({ runId: run.id, caseId, caseRevision: 1 })!;
+    assert.equal(judgeGatewayCalls, 1);
+    assert.equal(f.judgeGeneration.calls, 0);
+    assert.equal(judgeExecution.providerInvoked, false);
+    assert.equal(judgeExecution.providerInvocationState, "NOT_INVOKED");
+    assert.equal(new SQLiteAIEvalRunRepository(f.database).listJudgeResultsForRun(run.id).length, 0);
+    const judgeOperation = f.database.client.prepare("select status from ai_cost_operations where id=?").get(judgeExecution.judgeCostOperationId) as { status: string };
+    assert.notEqual(judgeOperation.status, "OPEN");
+    const reservation = f.database.client.prepare("select status from ai_budget_reservations where id=?").get(judgeExecution.budgetReservationId) as { status: string };
+    assert.ok(["SETTLED", "RELEASED", "RECONCILIATION_REQUIRED"].includes(reservation.status));
+    assert.equal(new SQLiteAIEvalRunRepository(f.database).listCaseResults(run.id).length, 1);
+
+    const targetExecution = new SQLiteAIEvalCaseExecutionRepository(f.database).getForTarget({ runId: run.id, caseId, caseRevision: 1 });
+    assert.equal(targetExecution?.status, "COMPLETED");
+    assert.equal(f.targetGeneration.calls, 1);
+  } finally {
+    f.close();
+  }
+});
+
+test("M9B2 AIWorker timeout after Judge Provider start preserves usage, closes finance, and re-entry does not replay", async () => {
+  const f = await createJudgeIntegrationFixture();
+  try {
+    const { run, caseId } = createJudgeRun(f);
+    const executionConfig = new SQLiteAIEvalExecutionConfigRepository(f.database).getById(f.executionConfigId)!;
+    const scheduled = f.orchestrator.scheduleRun({ runId: run.id, executionConfigId: f.executionConfigId, executionConfigRevision: executionConfig.currentRevision, createdBy: f.owner.actorUserId, now: BASE_TIME + 21 });
+    f.judgeGeneration.waitForAbort = true;
+    let resolveJudgeStarted!: () => void;
+    const judgeStarted = new Promise<void>((resolve) => { resolveJudgeStarted = resolve; });
+    f.judgeGeneration.onStarted = () => resolveJudgeStarted();
+    const handlers = new AIJobHandlerRegistry();
+    handlers.register(createAIEvalTargetExecutionJobHandler(f.targetService));
+    const jobs = new AIJobQueueService(f.database, handlers, { clock: () => BASE_TIME + 22 });
+    forceJobTimeout(f, scheduled.jobIds[0]!, 2_000);
+    const worker = new AIWorker({ jobs, handlers, workerId: `m9b2-after-judge-${uuidv7()}`, clock: () => BASE_TIME + 22 });
+    const workerPromise = worker.runOnce(BASE_TIME + 22);
+    await Promise.race([
+      judgeStarted,
+      workerPromise.then(() => assert.fail("The Judge Provider did not start before the Worker timeout.")),
+    ]);
+    await workerPromise;
+
+    const judgeExecutions = new SQLiteAIEvalJudgeExecutionRepository(f.database);
+    await waitUntil(() => {
+      const execution = judgeExecutions.getForCase({ runId: run.id, caseId, caseRevision: 1 });
+      return execution !== null && ["FAILED", "CANCELLED", "AMBIGUOUS"].includes(execution.status);
+    }, "The post-provider Judge execution did not reach a terminal state.");
+    const judgeExecution = judgeExecutions.getForCase({ runId: run.id, caseId, caseRevision: 1 })!;
+    assert.equal(f.targetGeneration.calls, 1);
+    assert.equal(f.judgeGeneration.calls, 1);
+    assert.equal(judgeExecution.providerInvoked, true);
+    assert.equal(judgeExecution.status, "AMBIGUOUS");
+    assert.equal(new SQLiteAIEvalRunRepository(f.database).listJudgeResultsForRun(run.id).length, 0);
+    assert.ok(judgeExecution.judgeCostOperationId);
+    assert.ok(f.accounting.listUsageCostRecords(judgeExecution.judgeCostOperationId!).length > 0);
+    const judgeOperation = f.database.client.prepare("select status from ai_cost_operations where id=?").get(judgeExecution.judgeCostOperationId) as { status: string };
+    assert.notEqual(judgeOperation.status, "OPEN");
+    const reservation = f.database.client.prepare("select status from ai_budget_reservations where id=?").get(judgeExecution.budgetReservationId) as { status: string };
+    assert.ok(["SETTLED", "RECONCILIATION_REQUIRED"].includes(reservation.status));
+
+    const job = f.database.client.prepare("select status from ai_jobs where id=?").get(scheduled.jobIds[0]) as { status: string };
+    if (job.status === "RETRY_WAIT") f.database.client.prepare("update ai_jobs set scheduled_at=? where id=?").run(BASE_TIME + 1_000, scheduled.jobIds[0]);
+    await worker.runOnce(BASE_TIME + 1_000);
+    assert.equal(f.targetGeneration.calls, 1);
+    assert.equal(f.judgeGeneration.calls, 1);
+    assert.equal(judgeExecutions.getForCase({ runId: run.id, caseId, caseRevision: 1 })?.status, "AMBIGUOUS");
   } finally {
     f.close();
   }

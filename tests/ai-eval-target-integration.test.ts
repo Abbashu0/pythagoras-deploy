@@ -343,6 +343,8 @@ test("M9B1 executes one real M7C target through one EVALS operation and cleans s
     const orchestrator = new AIEvalTargetOrchestrator({ database: f.database, jobs, clock: () => BASE_TIME + 21 });
     const scheduled = orchestrator.scheduleRun({ runId: run.id, executionConfigId: f.executionConfigId, executionConfigRevision: executionConfig.currentRevision, createdBy: f.owner.actorUserId, now: BASE_TIME + 21 });
     const worker = new AIWorker({ jobs, handlers, workerId: `m9b1-target-worker-${uuidv7()}`, clock: () => BASE_TIME + 22 });
+    const scheduledJob = f.database.client.prepare("select timeout_ms from ai_jobs where id=?").get(scheduled.jobIds[0]) as { timeout_ms: number };
+    assert.equal(scheduledJob.timeout_ms, executionConfig.targetTimeoutMs);
     await worker.runOnce(BASE_TIME + 22);
     const result = { ...(await target.execute({ runId: run.id, caseId, caseRevision: 1 })) };
     assert.equal(result.status, "COMPLETED");

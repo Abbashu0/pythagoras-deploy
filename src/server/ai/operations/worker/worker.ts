@@ -130,14 +130,9 @@ export class AIWorker {
       if (controller.signal.aborted) return;
       try {
         this.dependencies.jobs.heartbeat(claimed.lease, this.clock());
-      } catch (error) {
-        if (error instanceof AIJobError && error.code === "AI_JOB_LEASE_LOST") {
-          leaseLost = true;
-          controller.abort();
-        } else {
-          leaseLost = true;
-          controller.abort();
-        }
+      } catch {
+        leaseLost = true;
+        controller.abort("AI_JOB_LEASE_LOST");
       }
     }, heartbeatInterval);
     let rejectTimeout: ((reason?: unknown) => void) | null = null;
@@ -146,7 +141,7 @@ export class AIWorker {
     });
     const timeoutTimer = setTimeout(() => {
       timedOut = true;
-      controller.abort();
+      controller.abort("AI_JOB_TIMEOUT");
       rejectTimeout?.(new AIJobExecutionError("AI_JOB_TIMEOUT", true));
     }, claimed.job.timeoutMs);
     const context: AIJobExecutionContext = {

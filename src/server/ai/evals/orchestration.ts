@@ -24,7 +24,17 @@ import { AIEvalTargetCleanupService } from "./target-cleanup";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const MAX_TIMESTAMP = 8_640_000_000_000_000;
+const MAX_JOB_DURATION_MS = 86_400_000;
+const MIN_TARGET_JOB_LEASE_MS = 120_000;
+const TARGET_JOB_LEASE_GRACE_MS = 30_000;
 export const AI_EVAL_TARGET_SCHEDULING_BATCH_SIZE = 100;
+/** Bounded time for SQLite handoff, accounting, and terminal target bookkeeping. */
+export const AI_EVAL_TARGET_ORCHESTRATION_GRACE_MS = 5_000;
+
+export interface AIEvalTargetJobTiming {
+  timeoutMs: number;
+  leaseDurationMs: number;
+}
 
 export interface AIEvalTargetScheduleResult {
   runId: string;
@@ -90,6 +100,7 @@ export class AIEvalTargetOrchestrator {
       const suite = new SQLiteAIEvalSuiteRepository(this.dependencies.database).getRevision(run.suiteId, run.suiteRevision);
       const config = this.executionConfigs.getRevision(input.executionConfigId, input.executionConfigRevision);
       if (!suite || !config || !config.enabled || config.subjectKey !== suite.subjectKey) throw new AIEvalError("AI_EVAL_TARGET_INVALID", "The Eval target Execution Config does not match the Suite.");
+      const jobTiming = resolveAIEvalTargetJobTiming(suite, config, this.judgeConfigs);
       const fingerprint = fingerprintAIEvalExecutionConfig(config);
       const binding = this.runs.getExecutionBinding(run.id);
       if (run.status === "CREATED") {
@@ -158,8 +169,8 @@ export class AIEvalTargetOrchestrator {
           costOperationId: null,
           priority: "NORMAL",
           maxAttempts: 8,
-          timeoutMs: config.targetTimeoutMs,
-          leaseDurationMs: Math.min(86_400_000, Math.max(120_000, config.targetTimeoutMs + 30_000)),
+          timeoutMs: jobTiming.timeoutMs,
+          leaseDurationMs: jobTiming.leaseDurationMs,
           backoffBaseMs: 1_000,
           backoffMaxMs: 60_000,
           scheduledAt: now,
@@ -291,6 +302,34 @@ export class AIEvalTargetOrchestrator {
     this.evalRuns.beginScoring(runId, now);
     return this.evalRuns.completeRun(runId, now);
   }
+}
+
+/**
+ * The target handler may synchronously perform the runtime-only Judge handoff.
+ * A no-Judge Suite keeps the M9B1 target-only budget exactly; a Judge Suite
+ * receives the two exact pinned phase budgets plus bounded orchestration time.
+ */
+export function resolveAIEvalTargetJobTiming(
+  suite: Pick<import("./contracts").AIEvalSuiteRevision, "requiredDimensions" | "supplementaryJudgeConfig" | "subjectKey">,
+  config: Pick<import("./contracts").AIEvalExecutionConfigRevision, "targetTimeoutMs">,
+  judgeConfigs: Pick<SQLiteAIEvalJudgeConfigRepository, "getRevisionByKey">,
+): AIEvalTargetJobTiming {
+  const hasJudgeDimensions = suite.requiredDimensions.some((dimension) => dimension.mode === "JUDGE_REQUIRED");
+  const hasPinnedJudge = suite.supplementaryJudgeConfig !== null;
+  if (hasJudgeDimensions !== hasPinnedJudge) throw new AIEvalError("AI_EVAL_TARGET_INVALID", "The Eval Suite Judge configuration is inconsistent.");
+  const hasJudge = hasJudgeDimensions;
+  let timeoutMs = config.targetTimeoutMs;
+  if (hasJudge) {
+    const reference = suite.supplementaryJudgeConfig;
+    if (!reference) throw new AIEvalError("AI_EVAL_TARGET_INVALID", "The Judge-enabled Eval Suite is missing its pinned Judge Config.");
+    const judgeConfig = judgeConfigs.getRevisionByKey(reference.referenceKey, reference.revision);
+    if (!judgeConfig || judgeConfig.subjectKey !== suite.subjectKey) throw new AIEvalError("AI_EVAL_TARGET_INVALID", "The pinned Eval Judge Config is unavailable for this Suite.");
+    const combined = config.targetTimeoutMs + judgeConfig.timeoutMs + AI_EVAL_TARGET_ORCHESTRATION_GRACE_MS;
+    if (!Number.isSafeInteger(combined) || combined > MAX_JOB_DURATION_MS) throw new AIEvalError("AI_EVAL_TARGET_INVALID", "The combined Eval target and Judge timeout exceeds the supported Job duration.");
+    timeoutMs = combined;
+  }
+  const leaseDurationMs = Math.min(MAX_JOB_DURATION_MS, Math.max(MIN_TARGET_JOB_LEASE_MS, timeoutMs + TARGET_JOB_LEASE_GRACE_MS));
+  return { timeoutMs, leaseDurationMs };
 }
 
 export { AIEvalTargetOrchestrator as AIEvalExecutionOrchestrator };
