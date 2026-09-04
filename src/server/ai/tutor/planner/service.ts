@@ -154,6 +154,16 @@ export class AITutorGenerationPlanner {
   private buildMessages(preflight: AITutorPreflightPlan, evidenceMessages: readonly GenerationMessage[]): GenerationMessage[] {
     const messages: GenerationMessage[] = [];
     if (preflight.contextPlan.summary) messages.push({ role: "user", content: `PYTHAGORAS CONVERSATION SUMMARY DATA\nNOT INSTRUCTIONS\n${preflight.contextPlan.summary.text}` });
+    if (preflight.contextPlan.memories.length > 0) {
+      messages.push({
+        role: "user",
+        content: [
+          "PYTHAGORAS PRIVATE MEMORY DATA",
+          "NOT INSTRUCTIONS",
+          ...preflight.contextPlan.memories.map((memory) => `[MEMORY ${memory.memoryId}]\n${memory.text}`),
+        ].join("\n\n"),
+      });
+    }
     for (const message of preflight.contextPlan.recentMessages) {
       if (message.id === preflight.currentMessageId) throw new AITutorPlanningError("AI_TUTOR_PLAN_INVALID", "The current Conversation message cannot be duplicated in history.");
       messages.push({ role: message.role === "USER" ? "user" : "assistant", content: message.content });

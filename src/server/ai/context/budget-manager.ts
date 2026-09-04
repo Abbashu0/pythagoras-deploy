@@ -3,6 +3,11 @@ import {
   AI_CONTEXT_POLICY_MAX_RECENT_TURNS,
 } from "../policy/context-policy-contracts";
 import {
+  AI_MEMORY_CONFIDENCE_SCALE,
+  AI_MEMORY_MAX_TEXT_BYTES,
+  type AIContextMemory,
+} from "../memory/contracts";
+import {
   AI_CONTEXT_PRECEDENCE_ENVELOPE,
   type AIContextBudget,
   type AIContextBudgetManagerInput,
@@ -65,6 +70,33 @@ export class ContextBudgetManager {
       }
     }
 
+    const selectedMemories: AIContextMemory[] = [];
+    let memoryTokens = 0;
+    const memories = [...(input.memories ?? [])].sort(compareMemories);
+    for (const memory of memories) {
+      const estimatedTokens = this.estimate(input.estimator, memory.text);
+      const memoryBudgetRemaining = input.contextPolicy.memoryBudgetTokens - memoryTokens;
+      const memoryReason = estimatedTokens > memoryBudgetRemaining
+        ? "MEMORY_BUDGET_EXCEEDED"
+        : mandatoryTokens + optionalInputTokens + estimatedTokens > input.contextPolicy.softInputBudgetTokens
+          ? "SOFT_INPUT_BUDGET_EXCEEDED"
+          : null;
+      decisions.push({
+        kind: "MEMORY",
+        sourceId: memory.memoryId,
+        sourceRevision: memory.revision,
+        ordinal: null,
+        estimatedTokens,
+        decision: memoryReason ? "OMITTED" : "INCLUDED",
+        decisionReason: memoryReason,
+      });
+      if (!memoryReason) {
+        selectedMemories.push(memory);
+        memoryTokens += estimatedTokens;
+        optionalInputTokens += estimatedTokens;
+      }
+    }
+
     const remainingOptional = Math.max(input.contextPolicy.softInputBudgetTokens - mandatoryTokens - optionalInputTokens, 0);
     // Failed/cancelled Assistant output is retained in M4 for audit, but it
     // is not eligible to become trusted working context for a later turn.
@@ -94,6 +126,7 @@ export class ContextBudgetManager {
       outputReserveTokens: input.contextPolicy.outputReserveTokens,
       policyBudgetTokens: input.contextPolicy.policyBudgetTokens,
       summaryBudgetTokens: input.contextPolicy.summaryBudgetTokens,
+      memoryTokens,
       recentTurnsBudgetTokens: input.contextPolicy.recentTurnsBudgetTokens,
       memoryBudgetTokens: input.contextPolicy.memoryBudgetTokens,
       evidenceBudgetTokens: input.contextPolicy.evidenceBudgetTokens,
@@ -106,7 +139,7 @@ export class ContextBudgetManager {
       { authority: "GLOBAL", policyId: input.globalPolicy.policyId, revision: input.globalPolicy.revision, text: input.globalPolicy.instructions, estimatedTokens: globalTokens },
       { authority: "SUBJECT", policyId: input.subjectPolicy.policyId, revision: input.subjectPolicy.revision, text: input.subjectPolicy.instructions, estimatedTokens: subjectTokens },
     ];
-    return { precedenceEnvelope: AI_CONTEXT_PRECEDENCE_ENVELOPE, instructionLayers, ...(selectedSummary ? { summary: selectedSummary } : {}), recentMessages, currentMessage: input.currentMessage, budget, decisions };
+    return { precedenceEnvelope: AI_CONTEXT_PRECEDENCE_ENVELOPE, instructionLayers, ...(selectedSummary ? { summary: selectedSummary } : {}), memories: selectedMemories, recentMessages, currentMessage: input.currentMessage, budget, decisions };
   }
 
   private validateInput(input: AIContextBudgetManagerInput): void {
@@ -128,6 +161,12 @@ export class ContextBudgetManager {
         throw new AIContextError("AI_CONTEXT_SUMMARY_INVALID", "The supplied Conversation Summary is invalid.");
       }
       if (input.previousMessages.some((message) => message.ordinal <= input.summary!.coversThroughOrdinal)) throw new AIContextError("AI_CONTEXT_SUMMARY_INVALID", "Conversation history overlaps the supplied Summary.");
+    }
+    if (input.memories !== undefined && (!Array.isArray(input.memories) || input.memories.length > 100)) throw new AIContextError("AI_CONTEXT_RESPONSE_INVALID", "The Context Memory selection is invalid.");
+    for (const memory of input.memories ?? []) {
+      if (!UUID_PATTERN.test(memory.memoryId) || !Number.isSafeInteger(memory.revision) || memory.revision < 1 || memory.subjectKey !== input.subjectKey || !UUID_PATTERN.test(memory.sourceConversationId) || !Number.isSafeInteger(memory.sourceStartOrdinal) || memory.sourceStartOrdinal < 1 || !Number.isSafeInteger(memory.sourceEndOrdinal) || memory.sourceEndOrdinal < memory.sourceStartOrdinal || !Number.isSafeInteger(memory.confidenceUnits) || memory.confidenceUnits < 0 || memory.confidenceUnits > AI_MEMORY_CONFIDENCE_SCALE || typeof memory.text !== "string" || !memory.text.trim() || Buffer.byteLength(memory.text, "utf8") > AI_MEMORY_MAX_TEXT_BYTES || !Number.isSafeInteger(memory.createdAt) || memory.createdAt < 0 || !Number.isSafeInteger(memory.expiresAt) || memory.expiresAt <= memory.createdAt) {
+        throw new AIContextError("AI_CONTEXT_RESPONSE_INVALID", "The Context Memory selection contains an invalid item.");
+      }
     }
   }
 
@@ -164,4 +203,8 @@ function groupTurnUnits(messages: AIContextBudgetManagerInput["currentMessage"][
   }
   if (current) units.push(current);
   return units;
+}
+
+function compareMemories(left: AIContextMemory, right: AIContextMemory): number {
+  return right.confidenceUnits - left.confidenceUnits || right.createdAt - left.createdAt || left.memoryId.localeCompare(right.memoryId);
 }

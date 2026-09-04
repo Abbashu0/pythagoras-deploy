@@ -22,6 +22,7 @@ import {
   type AIInstructionPolicyContent,
 } from "../src/server/ai/policy";
 import { AIConversationService, type AIStudentPrincipal } from "../src/server/ai/conversations";
+import { AIConversationSummaryService } from "../src/server/ai/memory";
 import { createChangeManagementService } from "../src/server/change-management";
 import { SQLiteCanonicalContentRepository } from "../src/server/canonical-content";
 import { openContentDatabase, type ContentDatabase } from "../src/server/content";
@@ -315,9 +316,10 @@ test("Optional summaries are validated, included whole when they fit, and omitte
     const conversation = fixture.conversations.createConversation(PRINCIPAL, "biology");
     const first = completeTurn(fixture, conversation.id, "old-user", "old-answer");
     const current = fixture.conversations.beginTurn(PRINCIPAL, { conversationId: conversation.id, idempotencyKey: "summary-current", userContent: "current" });
-    const summary = { summaryId: "summary-1", revision: 1, conversationId: conversation.id, subjectKey: "biology", coversThroughOrdinal: 2, text: "summary" };
-    const built = fixture.context.build(PRINCIPAL, { responseId: current.response.id, contextPolicyId: policies.context.id, estimator: estimator(), summary });
-    assert.equal(built.plan.summary?.summaryId, "summary-1");
+    const summaryRecord = new AIConversationSummaryService(fixture.database, { clock: () => BASE_TIME + 200 }).createRevision(PRINCIPAL, { conversationId: conversation.id, subjectKey: "biology", summaryText: "summary", coversThroughOrdinal: 2, now: BASE_TIME + 200 });
+    const summary = { summaryId: summaryRecord.id, revision: summaryRecord.revision, conversationId: conversation.id, subjectKey: "biology", coversThroughOrdinal: 2, text: summaryRecord.summaryText! };
+    const built = fixture.context.build(PRINCIPAL, { responseId: current.response.id, contextPolicyId: policies.context.id, estimator: estimator() });
+    assert.equal(built.plan.summary?.summaryId, summaryRecord.id);
     assert.equal(built.plan.recentMessages.some((message) => message.ordinal <= first.userMessage.ordinal + 1), false);
     assert.equal(built.plan.decisions.find((decision) => decision.kind === "CONVERSATION_SUMMARY")?.decision, "INCLUDED");
 

@@ -11,6 +11,7 @@ export * from "./circuit-breaker";
 export * from "./conversations";
 export * from "./policy";
 export * from "./context";
+export * from "./memory";
 export * from "./embedding";
 export * from "./retrieval";
 export * from "./retrieval-config";

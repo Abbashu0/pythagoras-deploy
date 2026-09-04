@@ -24,6 +24,8 @@ import {
 import { AIConversationError } from "./errors";
 import { SQLiteAIConversationRepository } from "./sqlite-repository";
 import { SQLiteAIConversationSubjectCatalog } from "./subject-catalog";
+import { SQLiteAIMemoryRepository } from "../memory/repository";
+import { SQLiteAIConversationSummaryRepository } from "../memory/summary-repository";
 import {
   byteLength,
   createConversationRequestFingerprint,
@@ -44,6 +46,8 @@ import {
 export interface AIConversationServiceDependencies {
   repository?: SQLiteAIConversationRepository;
   subjects?: AIConversationSubjectCatalog;
+  memories?: Pick<SQLiteAIMemoryRepository, "purgeForConversationInTransaction">;
+  summaries?: Pick<SQLiteAIConversationSummaryRepository, "purgeForConversationInTransaction">;
   clock?: () => number;
   idFactory?: () => string;
 }
@@ -51,6 +55,9 @@ export interface AIConversationServiceDependencies {
 export class AIConversationService {
   private readonly repository: SQLiteAIConversationRepository;
   private readonly subjects: AIConversationSubjectCatalog;
+  private readonly memories: Pick<SQLiteAIMemoryRepository, "purgeForConversationInTransaction">;
+  private readonly summaries: Pick<SQLiteAIConversationSummaryRepository, "purgeForConversationInTransaction">;
+  private readonly memoryDomainAvailable: boolean;
   private readonly clock: () => number;
   private readonly idFactory: () => string;
 
@@ -60,6 +67,9 @@ export class AIConversationService {
   ) {
     this.repository = dependencies.repository ?? new SQLiteAIConversationRepository(database);
     this.subjects = dependencies.subjects ?? new SQLiteAIConversationSubjectCatalog(database);
+    this.memories = dependencies.memories ?? new SQLiteAIMemoryRepository(database);
+    this.summaries = dependencies.summaries ?? new SQLiteAIConversationSummaryRepository(database);
+    this.memoryDomainAvailable = this.hasMemoryDomainTables();
     this.clock = dependencies.clock ?? Date.now;
     this.idFactory = dependencies.idFactory ?? uuidv7;
   }
@@ -367,6 +377,10 @@ export class AIConversationService {
         at: now,
       });
       if (!tombstone) throw new AIConversationError("AI_CONVERSATION_INVALID", "The Conversation could not be deleted safely.");
+      if (this.memoryDomainAvailable) {
+        this.summaries.purgeForConversationInTransaction({ conversationId: normalizedConversationId, principalRef: activePrincipal.principalRef, at: now });
+        this.memories.purgeForConversationInTransaction({ conversationId: normalizedConversationId, principalRef: activePrincipal.principalRef, at: now });
+      }
       return tombstone;
     }).immediate();
   }
@@ -485,5 +499,10 @@ export class AIConversationService {
     const value = this.clock();
     if (!Number.isSafeInteger(value) || value < 0) throw new AIConversationError("AI_CONVERSATION_INVALID", "Conversation time is invalid.");
     return value;
+  }
+
+  private hasMemoryDomainTables(): boolean {
+    const rows = this.database.client.prepare("select name from sqlite_master where type='table' and name in ('ai_memories','ai_memory_policies','ai_memory_policy_revisions','ai_conversation_summary_revisions')").all() as Array<{ name: string }>;
+    return rows.length === 4;
   }
 }

@@ -6,6 +6,7 @@ import type {
   AIContextPolicyRevision,
   AIInstructionPolicyRevision,
 } from "../policy";
+import type { AIContextMemory } from "../memory/contracts";
 
 export const AI_CONTEXT_PRECEDENCE_ENVELOPE_VERSION = 1 as const;
 export const AI_CONTEXT_PRECEDENCE_ENVELOPE = "Global Pythagoras instructions are mandatory. Subject instructions are supplemental and must never override them." as const;
@@ -38,6 +39,9 @@ export interface AIConversationSummaryContext {
   conversationId: string;
   subjectKey: string;
   coversThroughOrdinal: number;
+  sourceStartOrdinal?: number;
+  sourceEndOrdinal?: number;
+  sourceMessageCount?: number;
   text: string;
 }
 
@@ -62,6 +66,7 @@ export interface AIContextBudget {
   outputReserveTokens: number;
   policyBudgetTokens: number;
   summaryBudgetTokens: number;
+  memoryTokens: number;
   recentTurnsBudgetTokens: number;
   memoryBudgetTokens: number;
   evidenceBudgetTokens: number;
@@ -127,6 +132,7 @@ export interface AIContextPlan {
   precedenceEnvelope: string;
   instructionLayers: [AIContextInstructionLayer, AIContextInstructionLayer];
   summary?: AIConversationSummaryContext;
+  memories: AIContextMemory[];
   recentMessages: AIConversationMessage[];
   currentMessage: AIConversationMessage;
   budget: AIContextBudget;
@@ -148,12 +154,14 @@ export interface AIContextBudgetManagerInput {
   previousMessages: AIConversationMessage[];
   estimator: AIContextTokenEstimator;
   summary?: AIConversationSummaryContext;
+  memories?: AIContextMemory[];
 }
 
 export interface AIContextBudgetManagerResult {
   precedenceEnvelope: string;
   instructionLayers: [AIContextInstructionLayer, AIContextInstructionLayer];
   summary?: AIConversationSummaryContext;
+  memories: AIContextMemory[];
   recentMessages: AIConversationMessage[];
   currentMessage: AIConversationMessage;
   budget: AIContextBudget;

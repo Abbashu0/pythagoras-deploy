@@ -151,6 +151,7 @@ function generationInputUpperBound(input: AITutorCostEstimatorInput): number {
     input.contextPlan.precedenceEnvelope,
     ...input.contextPlan.instructionLayers.map((layer) => layer.text),
     ...(input.contextPlan.summary ? [input.contextPlan.summary.text] : []),
+    ...input.contextPlan.memories.map((memory) => memory.text),
     ...input.contextPlan.recentMessages.map((message) => message.content),
     input.contextPlan.currentMessage.content,
   ];

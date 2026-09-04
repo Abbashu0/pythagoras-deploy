@@ -11,6 +11,11 @@ import { SQLiteAIConversationRepository } from "../conversations/sqlite-reposito
 import { AIPolicyError } from "../policy/errors";
 import { SQLiteAIContextPolicyRepository } from "../policy/context-policy-repository";
 import { SQLiteAIInstructionPolicyRepository } from "../policy/instruction-repository";
+import { SQLiteAIMemoryPolicyRepository } from "../memory/policy-repository";
+import { SQLiteAIMemoryRepository } from "../memory/repository";
+import { SQLiteAIConversationSummaryRepository } from "../memory/summary-repository";
+import type { AIMemoryPolicyRepository } from "../memory/contracts";
+import type { AIConversationSummary } from "../memory/summary-contracts";
 import type {
   AIContextBuildInput,
   AIContextBuildResult,
@@ -32,6 +37,9 @@ export interface AIContextServiceDependencies {
   conversations?: SQLiteAIConversationRepository;
   instructionPolicies?: SQLiteAIInstructionPolicyRepository;
   contextPolicies?: SQLiteAIContextPolicyRepository;
+  memoryPolicies?: AIMemoryPolicyRepository;
+  memories?: SQLiteAIMemoryRepository;
+  summaries?: SQLiteAIConversationSummaryRepository;
   snapshots?: SQLiteAIContextSnapshotRepository;
   manager?: ContextBudgetManager;
   clock?: () => number;
@@ -42,7 +50,11 @@ export class AIContextService {
   private readonly conversations: SQLiteAIConversationRepository;
   private readonly instructionPolicies: SQLiteAIInstructionPolicyRepository;
   private readonly contextPolicies: SQLiteAIContextPolicyRepository;
+  private readonly memoryPolicies: AIMemoryPolicyRepository;
+  private readonly memories: SQLiteAIMemoryRepository;
+  private readonly summaries: SQLiteAIConversationSummaryRepository;
   private readonly snapshots: SQLiteAIContextSnapshotRepository;
+  private readonly memoryDomainAvailable: boolean;
   private readonly manager: ContextBudgetManager;
   private readonly clock: () => number;
   private readonly idFactory: () => string;
@@ -54,6 +66,10 @@ export class AIContextService {
     this.conversations = dependencies.conversations ?? new SQLiteAIConversationRepository(database);
     this.instructionPolicies = dependencies.instructionPolicies ?? new SQLiteAIInstructionPolicyRepository(database);
     this.contextPolicies = dependencies.contextPolicies ?? new SQLiteAIContextPolicyRepository(database);
+    this.memoryPolicies = dependencies.memoryPolicies ?? new SQLiteAIMemoryPolicyRepository(database);
+    this.memories = dependencies.memories ?? new SQLiteAIMemoryRepository(database);
+    this.summaries = dependencies.summaries ?? new SQLiteAIConversationSummaryRepository(database);
+    this.memoryDomainAvailable = this.hasMemoryDomainTables();
     this.snapshots = dependencies.snapshots ?? new SQLiteAIContextSnapshotRepository(database);
     this.manager = dependencies.manager ?? new ContextBudgetManager();
     this.clock = dependencies.clock ?? Date.now;
@@ -85,11 +101,22 @@ export class AIContextService {
       const subjectRevision = this.instructionPolicies.getCurrentRevision(subjectPolicy.id);
       const contextRevision = this.contextPolicies.getCurrentRevision(contextPolicy.id);
       if (!globalRevision || !subjectRevision || !contextRevision) throw new AIContextError("AI_CONTEXT_RESPONSE_INVALID", "A current Context Policy revision is missing.");
+      const currentSummaryRecord = this.memoryDomainAvailable
+        ? this.summaries.getCurrentForConversation({ principalRef: activePrincipal.principalRef, conversationId: conversation.id, subjectKey: conversation.subjectKey })
+        : null;
+      if (input.summary && (!currentSummaryRecord || input.summary.summaryId !== currentSummaryRecord.id || input.summary.revision !== currentSummaryRecord.revision)) {
+        throw new AIContextError("AI_CONTEXT_SUMMARY_INVALID", "Context Summary text must come from the canonical current Summary revision.");
+      }
+      const summary = currentSummaryRecord ? summaryContext(currentSummaryRecord) : undefined;
+      const memoryPolicy = this.memoryDomainAvailable ? this.memoryPolicies.getBySubjectKey(conversation.subjectKey) : null;
+      const memories = memoryPolicy?.enabled
+        ? this.memories.listEligible({ principalRef: activePrincipal.principalRef, subjectKey: conversation.subjectKey, at: this.safeNow(), limit: memoryPolicy.maxSelectedMemories })
+        : [];
       const previousMessages = this.conversations.listMessagesBefore({
         principalRef: activePrincipal.principalRef,
         conversationId: conversation.id,
         beforeOrdinal: currentMessage.ordinal,
-        afterOrdinal: input.summary?.coversThroughOrdinal ?? 0,
+        afterOrdinal: summary?.coversThroughOrdinal ?? 0,
         limit: contextPolicy.maxRecentTurns * 2 + 1,
         excludePartial: true,
       });
@@ -102,7 +129,8 @@ export class AIContextService {
         currentMessage,
         previousMessages,
         estimator: input.estimator,
-        summary: input.summary,
+        summary,
+        memories,
       });
       const fingerprint = createContextFingerprint({
         responseId: response.id,
@@ -116,7 +144,7 @@ export class AIContextService {
         estimatorKey: input.estimator.estimatorKey,
         currentMessageId: currentMessage.id,
         decisions: computation.decisions,
-        summary: input.summary,
+        summary,
         budget: computation.budget,
       });
       const existing = this.snapshots.getByResponse(activePrincipal.principalRef, response.id);
@@ -187,6 +215,7 @@ export class AIContextService {
       precedenceEnvelope: computation.precedenceEnvelope,
       instructionLayers: computation.instructionLayers,
       ...(computation.summary ? { summary: computation.summary } : {}),
+      memories: computation.memories,
       recentMessages: computation.recentMessages,
       currentMessage: computation.currentMessage,
       budget: computation.budget,
@@ -199,6 +228,26 @@ export class AIContextService {
     if (!Number.isSafeInteger(value) || value < 0) throw new AIContextError("AI_CONTEXT_RESPONSE_INVALID", "Context time is invalid.");
     return value;
   }
+
+  private hasMemoryDomainTables(): boolean {
+    const rows = this.database.client.prepare("select name from sqlite_master where type='table' and name in ('ai_memories','ai_memory_policies','ai_memory_policy_revisions','ai_conversation_summary_revisions')").all() as Array<{ name: string }>;
+    return rows.length === 4;
+  }
+}
+
+function summaryContext(summary: AIConversationSummary): NonNullable<AIContextBuildInput["summary"]> {
+  if (summary.summaryText === null || summary.status !== "ACTIVE") throw new AIContextError("AI_CONTEXT_SUMMARY_INVALID", "The canonical Conversation Summary is not active.");
+  return {
+    summaryId: summary.id,
+    revision: summary.revision,
+    conversationId: summary.conversationId,
+    subjectKey: summary.subjectKey,
+    coversThroughOrdinal: summary.coversThroughOrdinal,
+    sourceStartOrdinal: summary.sourceStartOrdinal,
+    sourceEndOrdinal: summary.sourceEndOrdinal,
+    sourceMessageCount: summary.sourceMessageCount,
+    text: summary.summaryText,
+  };
 }
 
 function validateEstimatorContract(estimator: AIContextTokenEstimator): void {

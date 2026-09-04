@@ -121,7 +121,7 @@ AI-M8A, AI-M8B, and AI-M8C are approved; AI-M8 Grounded Tutor is complete at `e7
 
 ## AI-M9 — Evals V1
 
-**Status:** Split into review checkpoints; AI-M9A is approved/complete at `860b474bd146abb944c15f774afa88578b463a80`, AI-M9B1 is approved/complete at `61d6de1276735f511712dd47797a2c6a6304fcf3`, AI-M9B2 is implemented pending independent review, and AI-M9 overall is incomplete pending independent review.
+**Status:** AI-M9A, AI-M9B1, and AI-M9B2 are approved/complete at `860b474bd146abb944c15f774afa88578b463a80`, `61d6de1276735f511712dd47797a2c6a6304fcf3`, and `815d9230dcbde77433f98d80a2d37e3b08e2faaa`; AI-M9 is complete.
 
 ### AI-M9A — Eval Domain, Versioned Suites, Deterministic Graders & Promotion Gates
 
@@ -131,7 +131,7 @@ AI-M8A, AI-M8B, and AI-M8C are approved; AI-M8 Grounded Tutor is complete at `e7
 
 ### AI-M9B — Eval Execution & EVALS Economics
 
-**Status:** Split into M9B1/M9B2; M9B1 is approved/complete at `61d6de1276735f511712dd47797a2c6a6304fcf3`, and M9B2 is implemented pending independent review.
+**Status:** Split into M9B1/M9B2; both checkpoints are approved/complete, with M9B2 at `815d9230dcbde77433f98d80a2d37e3b08e2faaa`.
 
 #### AI-M9B1 — Target Execution, Bounded Scheduling & EVALS Economics
 
@@ -141,16 +141,30 @@ AI-M8A, AI-M8B, and AI-M8C are approved; AI-M8 Grounded Tutor is complete at `e7
 
 #### AI-M9B2 — Supplementary LLM Judge, Qualitative Evaluation & Final M9 Integration
 
-**Status:** Implemented pending independent review.
+**Status:** Approved/complete at `815d9230dcbde77433f98d80a2d37e3b08e2faaa`.
 **Delivered boundary:** Governed revisioned `ai.eval-judge-config` resources through Change Sets and OWNER publication; strict code-owned `eval-judge-v1@1` protocol formatting and non-repairing JSON parser; runtime-only in-memory handoff of candidate target answers and retrieved evidence to LLM Judge; dedicated distinct `EVALS` cost operations for Judge executions; strict prevention of self-judge (candidate model revision !== judge model revision); prohibition of Judge evaluating SECURITY dimension; integer scoring on 0..1,000,000 fixed-point scale with rubric bands (EXCELLENT, PASS, MARGINAL, FAIL); deterministic security blocker overrides; baseline comparability evaluation requiring identical Judge identity; candidate latency gate purity (excluding Judge latency); zero raw target output, evidence snippets, or judge rationale persisted to DB or disk; crash/re-entry fail-closed recovery; cancellation/lease propagation; proven Provider invocation verification; and migrations `0037_eval-supplementary-judge` and `0038_eval-judge-execution-hardening`.
-**Explicit boundary:** Zero production Provider/network calls or vendor SDKs (in-process mock adapters only); no model repair loops; no automatic promotion/publication; AI-M9 overall is incomplete pending review; AI-M10 is not started.
+**Explicit boundary:** Zero production Provider/network calls or vendor SDKs (in-process mock adapters only); no model repair loops; no automatic promotion/publication.
+
+## AI-M10 — Memory & Compaction
+
+**Status:** Split into M10A/M10B; M10A is implemented pending independent review through migration `0039_glossy_sleepwalker`, M10B is not started, AI-M10 remains incomplete, and AI-M11 is not started.
+
+### AI-M10A — Memory, Conversation Summaries & Context Selection
+
+**Status:** Implemented pending independent review.
+**Delivered boundary:** Governed subject-bound `ai.memory-policy` identities and append-only revisions; private principal/subject-scoped Memory candidates with explicit review, expiry, provenance, and deletion scrubbing; append-only Conversation Summary revisions sourced only from complete non-partial M4 turns; deterministic server-owned Summary/Memory selection through M5 Context budgeting; default history cutover after a canonical Summary; and atomic Conversation deletion propagation through migration `0039_glossy_sleepwalker`.
+**Explicit boundary:** Context Snapshots retain only safe IDs, revisions, token counts, and decisions; Summary/Memory text remains runtime C4. No extraction or compaction Provider/Generation call, durable Job, Student/Admin/Mobile UI, automatic publication, analytics, RAG, or Agent 2 is added.
+
+### AI-M10B — Extraction, Compaction Jobs & Runtime Hardening
+
+**Status:** Not started. It remains a future separately reviewed boundary for extraction/compaction orchestration, any Provider/Gateway execution, economics, retries, and final product integration.
 
 ## Remaining future milestones
 
 | Milestone | Coherent boundary | Independent exit gate |
 | --- | --- | --- |
 | **AI-M9 Evals V1** | Versioned Eval Suite, deterministic graders, supplementary judge adapter, regression cases, security/cost/latency gates | Baseline suites cover all required dimensions and block an unsafe or materially regressed promotion |
-| **AI-M10 Memory & Compaction** | Student-scoped memory policy, memory extraction/review, conversation summaries, compaction revisions, deletion, and context selection | No cross-user memory; summaries are traceable; old history is preserved but not replayed by default; deletion propagates |
+| **AI-M10 Memory & Compaction** | M10A: governed private Memory/Summary foundation and Context selection; M10B: future extraction/compaction execution and runtime integration | No cross-user memory; summaries are traceable; old history is preserved but not replayed by default; deletion propagates; M10 remains incomplete until both checkpoints are reviewed |
 | **AI-M11 Intelligence Telemetry** | Retrieval traces, feedback/events, de-identified analytics, usage dashboards/data contracts, and privacy-safe operational metrics | Analytics cannot reveal raw PII by default; response/retrieval/cost traces correlate end to end |
 | **AI-M12 Agent 2 Read-only** | Deterministic event/SQL inputs, representative samples, optional clustering, structured analysis, and bounded Insight candidates | Agent 2 cannot publish, mutate truth/credentials, message students, or bypass privacy/Evals; outputs are reproducible |
 | **AI-M13 Second Brain** | Relational Insight, evidence, typed relations, QuestionCluster, Misconception, KnowledgeGap, ExplanationPattern, RetrievalProblem | Typed relationships and provenance are queryable/visualizable; insights remain separate from curriculum truth |

@@ -47,6 +47,13 @@ import type {
   AIContextSnapshotItemKind,
 } from "../ai/context/contracts";
 import type {
+  AIMemoryCreationOrigin,
+  AIMemorySafeReviewCode,
+  AIMemoryStatus,
+  AIMemoryVisibilityScope,
+} from "../ai/memory/contracts";
+import type { AIConversationSummaryStatus } from "../ai/memory/summary-contracts";
+import type {
   AIInstructionPolicyScope,
 } from "../ai/policy/instruction-contracts";
 import type { AIModelCapability } from "../ai/model-registry/contracts";
@@ -803,6 +810,134 @@ export const aiContextSnapshotItems = sqliteTable(
     check("ai_context_snapshot_items_tokens_valid", sql`${table.estimatedTokens} between 0 and 10000000`),
     check("ai_context_snapshot_items_decision_valid", sql`${table.decision} in ('INCLUDED','OMITTED')`),
     check("ai_context_snapshot_items_reason_valid", sql`${table.decisionReason} is null or length(trim(${table.decisionReason})) between 1 and 200`),
+  ],
+);
+
+/** Governed subject-bound Memory Policy identities. */
+export const aiMemoryPolicies = sqliteTable(
+  "ai_memory_policies",
+  {
+    id: text("id").primaryKey(),
+    key: text("key").notNull(),
+    subjectKey: text("subject_key").notNull().references(() => canonicalMaterials.subjectKey, { onDelete: "restrict" }),
+    currentRevision: integer("current_revision").notNull().default(1),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    createdBy: text("created_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+    updatedBy: text("updated_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+  },
+  (table) => [
+    uniqueIndex("ai_memory_policies_key_unique").on(table.key),
+    uniqueIndex("ai_memory_policies_subject_unique").on(table.subjectKey),
+    check("ai_memory_policies_key_valid", sql`length(trim(${table.key})) between 1 and 120 and ${table.key} not glob '*[^a-z0-9.-]*'`),
+    check("ai_memory_policies_subject_valid", sql`length(trim(${table.subjectKey})) between 1 and 80 and ${table.subjectKey} not glob '*[^a-z0-9-]*'`),
+    check("ai_memory_policies_revision_positive", sql`${table.currentRevision} >= 1`),
+    check("ai_memory_policies_created_nonnegative", sql`${table.createdAt} >= 0`),
+    check("ai_memory_policies_updated_ordered", sql`${table.updatedAt} >= ${table.createdAt}`),
+  ],
+);
+
+/** Append-only governed Memory Policy revisions. */
+export const aiMemoryPolicyRevisions = sqliteTable(
+  "ai_memory_policy_revisions",
+  {
+    id: text("id").primaryKey(),
+    memoryPolicyId: text("memory_policy_id").notNull().references(() => aiMemoryPolicies.id, { onDelete: "restrict" }),
+    revision: integer("revision").notNull(),
+    displayName: text("display_name").notNull(),
+    enabled: integer("enabled", { mode: "boolean" }).notNull(),
+    candidateReviewRequired: integer("candidate_review_required", { mode: "boolean" }).notNull(),
+    retentionDays: integer("retention_days").notNull(),
+    maxSelectedMemories: integer("max_selected_memories").notNull(),
+    createdAt: integer("created_at").notNull(),
+    createdBy: text("created_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+  },
+  (table) => [
+    uniqueIndex("ai_memory_policy_revisions_identity_unique").on(table.memoryPolicyId, table.revision),
+    index("ai_memory_policy_revisions_policy_index").on(table.memoryPolicyId, table.revision),
+    check("ai_memory_policy_revisions_revision_positive", sql`${table.revision} >= 1`),
+    check("ai_memory_policy_revisions_display_name_valid", sql`length(trim(${table.displayName})) between 1 and 200`),
+    check("ai_memory_policy_revisions_enabled_boolean", sql`${table.enabled} in (0,1) and ${table.candidateReviewRequired} in (0,1)`),
+    check("ai_memory_policy_revisions_retention_valid", sql`${table.retentionDays} between 1 and 3650`),
+    check("ai_memory_policy_revisions_selection_bound_valid", sql`${table.maxSelectedMemories} between 1 and 100`),
+    check("ai_memory_policy_revisions_created_nonnegative", sql`${table.createdAt} >= 0`),
+  ],
+);
+
+/** Private, principal/subject-scoped Memory candidates and approved records. */
+export const aiMemories = sqliteTable(
+  "ai_memories",
+  {
+    id: text("id").primaryKey(),
+    principalRef: text("principal_ref").notNull(),
+    subjectKey: text("subject_key").notNull().references(() => canonicalMaterials.subjectKey, { onDelete: "restrict" }),
+    memoryPolicyId: text("memory_policy_id").notNull().references(() => aiMemoryPolicies.id, { onDelete: "restrict" }),
+    memoryPolicyRevision: integer("memory_policy_revision").notNull(),
+    revision: integer("revision").notNull().default(1),
+    status: text("status").$type<AIMemoryStatus>().notNull(),
+    visibilityScope: text("visibility_scope").$type<AIMemoryVisibilityScope>().notNull(),
+    creationOrigin: text("creation_origin").$type<AIMemoryCreationOrigin>().notNull(),
+    sourceConversationId: text("source_conversation_id").notNull().references(() => aiConversations.id, { onDelete: "restrict" }),
+    sourceStartOrdinal: integer("source_start_ordinal").notNull(),
+    sourceEndOrdinal: integer("source_end_ordinal").notNull(),
+    memoryText: text("memory_text"),
+    confidenceUnits: integer("confidence_units").notNull(),
+    createdAt: integer("created_at").notNull(),
+    reviewedAt: integer("reviewed_at"),
+    deletedAt: integer("deleted_at"),
+    expiresAt: integer("expires_at").notNull(),
+    safeReviewCode: text("safe_review_code").$type<AIMemorySafeReviewCode>(),
+  },
+  (table) => [
+    index("ai_memories_principal_subject_index").on(table.principalRef, table.subjectKey, table.status, table.expiresAt),
+    index("ai_memories_source_conversation_index").on(table.sourceConversationId, table.status),
+    check("ai_memories_principal_valid", sql`length(trim(${table.principalRef})) between 1 and 200 and ${table.principalRef} not glob '*[^A-Za-z0-9_-]*'`),
+    check("ai_memories_subject_valid", sql`length(trim(${table.subjectKey})) between 1 and 80 and ${table.subjectKey} not glob '*[^a-z0-9-]*'`),
+    check("ai_memories_policy_revision_valid", sql`${table.memoryPolicyRevision} >= 1`),
+    check("ai_memories_revision_valid", sql`${table.revision} >= 1`),
+    check("ai_memories_status_valid", sql`${table.status} in ('CANDIDATE','APPROVED','REJECTED','DELETED')`),
+    check("ai_memories_visibility_valid", sql`${table.visibilityScope} = 'PRINCIPAL_SUBJECT'`),
+    check("ai_memories_origin_valid", sql`${table.creationOrigin} = 'CONVERSATION'`),
+    check("ai_memories_source_range_valid", sql`${table.sourceStartOrdinal} >= 1 and ${table.sourceEndOrdinal} >= ${table.sourceStartOrdinal} and ${table.sourceEndOrdinal} - ${table.sourceStartOrdinal} + 1 <= 10000`),
+    check("ai_memories_text_valid", sql`(${table.status} = 'DELETED' and ${table.memoryText} is null) or (${table.status} <> 'DELETED' and ${table.memoryText} is not null and length(cast(${table.memoryText} as blob)) between 1 and 131072)`),
+    check("ai_memories_confidence_valid", sql`${table.confidenceUnits} between 0 and 1000000`),
+    check("ai_memories_created_nonnegative", sql`${table.createdAt} >= 0`),
+    check("ai_memories_reviewed_consistent", sql`(${table.status} = 'CANDIDATE' and ${table.reviewedAt} is null and ${table.safeReviewCode} is null) or (${table.status} = 'APPROVED' and ${table.reviewedAt} is not null and ${table.safeReviewCode} = 'STUDENT_APPROVED') or (${table.status} = 'REJECTED' and ${table.reviewedAt} is not null and ${table.safeReviewCode} = 'STUDENT_REJECTED') or (${table.status} = 'DELETED' and ${table.deletedAt} is not null and ${table.safeReviewCode} = 'CONVERSATION_DELETED')`),
+    check("ai_memories_deleted_timestamp_valid", sql`${table.deletedAt} is null or ${table.deletedAt} >= ${table.createdAt}`),
+    check("ai_memories_expiry_valid", sql`${table.expiresAt} > ${table.createdAt}`),
+  ],
+);
+
+/** Append-only private Conversation Summary revisions; text is scrubbed on deletion. */
+export const aiConversationSummaryRevisions = sqliteTable(
+  "ai_conversation_summary_revisions",
+  {
+    id: text("id").primaryKey(),
+    conversationId: text("conversation_id").notNull().references(() => aiConversations.id, { onDelete: "restrict" }),
+    principalRef: text("principal_ref").notNull(),
+    subjectKey: text("subject_key").notNull().references(() => canonicalMaterials.subjectKey, { onDelete: "restrict" }),
+    revision: integer("revision").notNull(),
+    status: text("status").$type<AIConversationSummaryStatus>().notNull(),
+    summaryText: text("summary_text"),
+    coversThroughOrdinal: integer("covers_through_ordinal").notNull(),
+    sourceStartOrdinal: integer("source_start_ordinal").notNull(),
+    sourceEndOrdinal: integer("source_end_ordinal").notNull(),
+    sourceMessageCount: integer("source_message_count").notNull(),
+    createdAt: integer("created_at").notNull(),
+    deletedAt: integer("deleted_at"),
+  },
+  (table) => [
+    uniqueIndex("ai_conversation_summary_revisions_identity_unique").on(table.conversationId, table.revision),
+    index("ai_conversation_summary_revisions_conversation_index").on(table.conversationId, table.revision),
+    index("ai_conversation_summary_revisions_principal_subject_index").on(table.principalRef, table.subjectKey, table.status),
+    check("ai_conversation_summary_revisions_principal_valid", sql`length(trim(${table.principalRef})) between 1 and 200 and ${table.principalRef} not glob '*[^A-Za-z0-9_-]*'`),
+    check("ai_conversation_summary_revisions_subject_valid", sql`length(trim(${table.subjectKey})) between 1 and 80 and ${table.subjectKey} not glob '*[^a-z0-9-]*'`),
+    check("ai_conversation_summary_revisions_revision_positive", sql`${table.revision} >= 1`),
+    check("ai_conversation_summary_revisions_status_valid", sql`${table.status} in ('ACTIVE','DELETED')`),
+    check("ai_conversation_summary_revisions_text_valid", sql`(${table.status} = 'DELETED' and ${table.summaryText} is null) or (${table.status} = 'ACTIVE' and ${table.summaryText} is not null and length(cast(${table.summaryText} as blob)) between 1 and 131072)`),
+    check("ai_conversation_summary_revisions_coverage_valid", sql`${table.coversThroughOrdinal} >= 1 and ${table.sourceStartOrdinal} = 1 and ${table.sourceEndOrdinal} = ${table.coversThroughOrdinal} and ${table.sourceMessageCount} = ${table.coversThroughOrdinal}`),
+    check("ai_conversation_summary_revisions_created_nonnegative", sql`${table.createdAt} >= 0`),
+    check("ai_conversation_summary_revisions_deleted_timestamp_valid", sql`${table.deletedAt} is null or ${table.deletedAt} >= ${table.createdAt}`),
   ],
 );
 
@@ -3990,3 +4125,7 @@ export type AIEvalJudgeConfigRow = typeof aiEvalJudgeConfigs.$inferSelect;
 export type AIEvalJudgeConfigRevisionRow = typeof aiEvalJudgeConfigRevisions.$inferSelect;
 export type AIEvalJudgeExecutionRow = typeof aiEvalJudgeExecutions.$inferSelect;
 export type AIEvalJudgeResultRow = typeof aiEvalJudgeResults.$inferSelect;
+export type AIMemoryPolicyRow = typeof aiMemoryPolicies.$inferSelect;
+export type AIMemoryPolicyRevisionRow = typeof aiMemoryPolicyRevisions.$inferSelect;
+export type AIMemoryRow = typeof aiMemories.$inferSelect;
+export type AIConversationSummaryRevisionRow = typeof aiConversationSummaryRevisions.$inferSelect;
