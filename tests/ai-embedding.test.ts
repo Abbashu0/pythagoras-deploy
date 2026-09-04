@@ -1410,7 +1410,7 @@ test("0025 upgrades an existing 0024 database and installs M7B tables, indexes, 
     assert.equal((before.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 25);
     before.close();
     upgraded = openContentDatabase({ dataDirectory: root, migrationsDirectory });
-    assert.equal((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 42);
+    assert.equal((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 43);
     for (const table of ["ai_embedding_projection_sets", "ai_embedding_projection_revisions", "ai_embedding_vectors"]) {
       assert.ok(upgraded.client.prepare("select name from sqlite_master where type='table' and name=?").get(table));
     }

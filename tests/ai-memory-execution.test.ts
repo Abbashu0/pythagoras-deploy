@@ -27,6 +27,7 @@ import { createLocalAISecretStore } from "../src/server/ai/secrets";
 import { SQLiteAIContextPolicyRepository, SQLiteAIInstructionPolicyRepository } from "../src/server/ai/policy";
 import { SQLiteAIRateLimitPolicyRepository } from "../src/server/ai/rate-limits";
 import { createAIMemoryExecutionJobHandlers, createAIMemoryExecutionOutboxRouters, createAIMemoryExecutionService, createAIMemoryOrchestrator, AIBoundedMemoryGenerationCostEstimator, AIMemoryService, AIMemoryExecutionError, AI_MEMORY_EXECUTION_CONFIG_RESOURCE_TYPE, SQLiteAIMemoryExecutionConfigRepository, SQLiteAIMemoryExecutionRepository, SQLiteAIMemoryPolicyRepository, SQLiteAIConversationSummaryRepository, parseAIMemoryExtractionOutput, type AIMemoryExecutionConfigContent } from "../src/server/ai/memory";
+import { createAIAdmissionRequestFingerprint } from "../src/server/ai/admission";
 import { AIJobHandlerRegistry, AIJobQueueService } from "../src/server/ai/operations/jobs";
 import { AIOutboxRouterRegistry, AIOutboxService } from "../src/server/ai/operations/outbox";
 import { AIWorker } from "../src/server/ai/operations/worker";
@@ -63,6 +64,8 @@ interface Fixture {
   memories: AIMemoryService;
   executions: SQLiteAIMemoryExecutionRepository;
   executionService: ReturnType<typeof createAIMemoryExecutionService>;
+  admission: AIBudgetAdmissionService;
+  accountingService: AICostAccountingService;
   orchestrator: ReturnType<typeof createAIMemoryOrchestrator>;
   worker: AIWorker;
   outbox: AIOutboxService;
@@ -127,7 +130,7 @@ async function createFixture(candidateReviewRequired = false): Promise<Fixture> 
   const outbox = new AIOutboxService(database, routers, { jobQueue: jobs, clock: () => BASE_TIME + 100 });
   const orchestrator = createAIMemoryOrchestrator({ database, outbox, executions, configs, memoryPolicies, conversations: conversationRepository, clock: () => BASE_TIME + 100 });
   const worker = new AIWorker({ jobs, handlers, outbox, terminalReconciler: executionService, workerId: `memory-worker-${uuidv7()}`, clock: () => BASE_TIME + 100 });
-  return { root, database, owner, conversations, configs, memoryPolicies, memories: memoryService, executions, executionService, orchestrator, worker, outbox, adapter, generationModelId, providerId, memoryPolicyId, executionConfigId, close() { database.close(); try { rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 }); } catch { /* Windows may hold a WAL handle briefly. */ } } };
+  return { root, database, owner, conversations, configs, memoryPolicies, memories: memoryService, executions, executionService, admission, accountingService, orchestrator, worker, outbox, adapter, generationModelId, providerId, memoryPolicyId, executionConfigId, close() { database.close(); try { rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 }); } catch { /* Windows may hold a WAL handle briefly. */ } } };
 }
 
 function publishChange(changes: ReturnType<typeof createChangeManagementService>, owner: AdminActor, item: { resourceType: string; resourceId: string; expectedRevision: number; operation: "CREATE" | "UPDATE"; desired: unknown }): void {
@@ -224,6 +227,38 @@ test("M10B strict extraction parser rejects unknown kinds, duplicate candidates,
   assert.throws(() => parseAIMemoryExtractionOutput(JSON.stringify({ candidates: [{ kind: "STUDY_GOAL", text: "x", confidenceUnits: 1, rationale: "no" }] }), 5), (error: unknown) => error instanceof AIMemoryExecutionError && error.code === "AI_MEMORY_EXECUTION_PROTOCOL_INVALID");
 });
 
+test("M10B deterministic extraction privacy gate covers Arabic and English personal-sensitive phrasing", () => {
+  const rejected = [
+    "أنا مصاب بمرض السكري",
+    "تم تشخيصي باضطراب القلق",
+    "ديانتي خاصة بي",
+    "أنا أنتمي إلى حزب سياسي",
+    "رقم بطاقتي هو 1234",
+    "كلمة المرور الخاصة بي هي secret",
+    "أسكن في العنوان المذكور",
+    "اليوم أكره الأحياء",
+    "I am diabetic",
+    "I was diagnosed with anxiety",
+    "My religion is private",
+    "I belong to a political party",
+    "My credit card number is private",
+    "My password is secret",
+    "I live in a private address",
+    "Today I hate biology",
+  ];
+  for (const text of rejected) assert.throws(() => parseAIMemoryExtractionOutput(JSON.stringify({ candidates: [{ kind: "LEARNING_DIFFICULTY", text, confidenceUnits: 950_000 }] }), 5), (error: unknown) => error instanceof AIMemoryExecutionError && error.code === "AI_MEMORY_EXECUTION_PROTOCOL_INVALID");
+  const accepted = [
+    "أفضل أن يبدأ شرح الرياضيات بمثال",
+    "أخلط بين الطور الاستوائي والطور الانفصالي",
+    "أواجه صعوبة في فهم موضوع مرض السكري في الأحياء",
+    "I prefer an example before the rule",
+    "I confuse metaphase and anaphase",
+    "I struggle understanding diabetes in biology",
+    "My study goal is to review cells weekly",
+  ];
+  for (const text of accepted) assert.equal(parseAIMemoryExtractionOutput(JSON.stringify({ candidates: [{ kind: "LEARNING_DIFFICULTY", text, confidenceUnits: 950_000 }] }), 5).candidates.length, 1);
+});
+
 test("M10B compaction uses an exact bounded cutoff and preserves M4 history", async () => {
   const fixture = await createFixture(false);
   try {
@@ -253,7 +288,32 @@ test("M10B SYSTEM_AUTO_APPROVED is rejected for an exact Policy revision requiri
     const scheduled = fixture.orchestrator.scheduleForCompletedResponse(PRINCIPAL, response.id);
     await fixture.worker.runOnce(BASE_TIME + 100);
     const link = fixture.executions.listExtractionResults(scheduled.extractionExecutionId!)[0]!;
-    assert.throws(() => fixture.database.client.prepare("update ai_memories set status='APPROVED', reviewed_at=?, safe_review_code='SYSTEM_AUTO_APPROVED' where id=?").run(BASE_TIME + 300, link.memoryId), /lifecycle|invalid|review/i);
+    assert.throws(() => fixture.database.client.prepare("update ai_memories set status='APPROVED', reviewed_at=?, safe_review_code='SYSTEM_AUTO_APPROVED' where id=?").run(BASE_TIME + 300, link.memoryId), /lifecycle|invalid|review|automatic|execution/i);
+  } finally {
+    fixture.close();
+  }
+});
+
+test("M10B SYSTEM_AUTO_APPROVED is rejected for an unlinked Candidate even when Policy permits automation", async () => {
+  const fixture = await createFixture(false);
+  try {
+    const { conversation } = completeTurn(fixture);
+    const candidate = fixture.memories.createCandidate(PRINCIPAL, { conversationId: conversation.id, subjectKey: "biology", kind: "STUDY_GOAL", text: "Keep a weekly study plan.", confidenceUnits: 950_000, sourceStartOrdinal: 1, sourceEndOrdinal: 2, now: BASE_TIME + 200 });
+    assert.throws(() => fixture.database.client.prepare("update ai_memories set status='APPROVED', reviewed_at=?, safe_review_code='SYSTEM_AUTO_APPROVED' where id=?").run(BASE_TIME + 300, candidate.id), /automatic|execution|lifecycle|invalid/i);
+    assert.equal(fixture.memories.get(PRINCIPAL, candidate.id, "biology")!.status, "CANDIDATE");
+  } finally {
+    fixture.close();
+  }
+});
+
+test("M10B result links require proven invocation and exact source ownership at SQLite", async () => {
+  const fixture = await createFixture(false);
+  try {
+    const { conversation, response } = completeTurn(fixture);
+    const scheduled = fixture.orchestrator.scheduleForCompletedResponse(PRINCIPAL, response.id);
+    const candidate = fixture.memories.createCandidate(PRINCIPAL, { conversationId: conversation.id, subjectKey: "biology", kind: "STUDY_GOAL", text: "Keep a weekly study plan.", confidenceUnits: 950_000, sourceStartOrdinal: 1, sourceEndOrdinal: 2, now: BASE_TIME + 200 });
+    assert.throws(() => fixture.database.client.prepare("insert into ai_memory_execution_memory_links (execution_id,ordinal,memory_id) values (?,?,?)").run(scheduled.extractionExecutionId, 1, candidate.id), /ownership|invocation|invalid|execution/i);
+    assert.equal(fixture.executions.listExtractionResults(scheduled.extractionExecutionId!).length, 0);
   } finally {
     fixture.close();
   }
@@ -287,7 +347,26 @@ test("M10B leaves a low-confidence educational candidate pending automatic revie
     const memory = fixture.memories.get(PRINCIPAL, link.memoryId, "biology")!;
     assert.equal(memory.status, "CANDIDATE");
     assert.equal(memory.safeReviewCode, null);
+    assert.throws(() => fixture.database.client.prepare("update ai_memories set status='APPROVED', reviewed_at=?, safe_review_code='SYSTEM_AUTO_APPROVED' where id=?").run(BASE_TIME + 300, memory.id), /automatic|execution|lifecycle|invalid/i);
+    assert.throws(() => fixture.database.client.prepare("update ai_memories set memory_policy_revision=999, status='APPROVED', reviewed_at=?, safe_review_code='SYSTEM_AUTO_APPROVED' where id=?").run(BASE_TIME + 300, memory.id), /automatic|execution|lifecycle|invalid/i);
     assert.equal(fixture.adapter.calls, 1);
+  } finally {
+    fixture.close();
+  }
+});
+
+test("M10B refuses an Arabic personal-health extraction before any Memory row is stored", async () => {
+  const fixture = await createFixture(false);
+  try {
+    fixture.adapter.output = JSON.stringify({ candidates: [{ kind: "LEARNING_DIFFICULTY", text: "أنا مصاب بمرض السكري", confidenceUnits: 950_000 }] });
+    const { response } = completeTurn(fixture);
+    const scheduled = fixture.orchestrator.scheduleForCompletedResponse(PRINCIPAL, response.id);
+    await fixture.worker.runOnce(BASE_TIME + 100);
+    const execution = fixture.executions.getById(scheduled.extractionExecutionId!)!;
+    assert.equal(execution.status, "FAILED");
+    assert.equal(execution.providerInvoked, true);
+    assert.equal(fixture.executions.listExtractionResults(execution.id).length, 0);
+    assert.equal((fixture.database.client.prepare("select count(*) as count from ai_memories where source_conversation_id=?").get(response.conversationId) as { count: number }).count, 0);
   } finally {
     fixture.close();
   }
@@ -317,15 +396,15 @@ test("M10B keeps source/output markers out of durable operational metadata", asy
   }
 });
 
-test("M10B 0040 to 0041 preserves populated M10A rows and adds execution tables", async () => {
-  const root = mkdtempSync(path.join(os.tmpdir(), "pythagoras-ai-memory-0040-upgrade-"));
-  const oldMigrations = mkdtempSync(path.join(os.tmpdir(), "pythagoras-ai-memory-0040-migrations-"));
+test("M10B 0041 to 0042 preserves populated M10A rows and adds trust triggers", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "pythagoras-ai-memory-0041-upgrade-"));
+  const oldMigrations = mkdtempSync(path.join(os.tmpdir(), "pythagoras-ai-memory-0041-migrations-"));
   let oldDatabase: ContentDatabase | null = null;
   let upgraded: ContentDatabase | null = null;
   try {
     mkdirSync(path.join(oldMigrations, "meta"), { recursive: true });
     const journal = JSON.parse(readFileSync(path.join(migrationsDirectory, "meta", "_journal.json"), "utf8")) as { entries: Array<{ idx: number; tag: string }> };
-    const entries = journal.entries.slice(0, 41);
+    const entries = journal.entries.slice(0, 42);
     for (const entry of entries) {
       copyFileSync(path.join(migrationsDirectory, `${entry.tag}.sql`), path.join(oldMigrations, `${entry.tag}.sql`));
       const snapshot = `${entry.idx.toString().padStart(4, "0")}_snapshot.json`;
@@ -333,6 +412,7 @@ test("M10B 0040 to 0041 preserves populated M10A rows and adds execution tables"
     }
     writeFileSync(path.join(oldMigrations, "meta", "_journal.json"), JSON.stringify({ ...journal, entries }));
     oldDatabase = openContentDatabase({ dataDirectory: root, migrationsDirectory: oldMigrations });
+    assert.equal((oldDatabase.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 42);
     const canonical = new SQLiteCanonicalContentRepository(oldDatabase, () => BASE_TIME);
     canonical.bootstrap();
     const identities = new SQLiteAdminIdentityRepository(oldDatabase);
@@ -350,10 +430,10 @@ test("M10B 0040 to 0041 preserves populated M10A rows and adds execution tables"
     oldDatabase.close();
     oldDatabase = null;
     upgraded = openContentDatabase({ dataDirectory: root, migrationsDirectory });
-    assert.equal((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 42);
+    assert.equal((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 43);
     assert.equal((upgraded.client.prepare("select count(*) as count from ai_memory_execution_configs").get() as { count: number }).count, 0);
     assert.deepEqual(upgraded.client.prepare("select kind,memory_text from ai_memories").get(), { kind: null, memory_text: "UPGRADE_MEMORY" });
-    for (const trigger of ["ai_memories_no_delete", "ai_memory_execution_config_revisions_no_update", "ai_memory_execution_memory_links_insert_valid"]) assert.ok(upgraded.client.prepare("select name from sqlite_master where type='trigger' and name=?").get(trigger));
+    for (const trigger of ["ai_memories_no_delete", "ai_memory_execution_config_revisions_no_update", "ai_memory_execution_memory_links_insert_valid", "ai_memory_execution_memory_links_exact_owner", "ai_memories_system_auto_approved_valid", "ai_memory_executions_result_commit_valid"]) assert.ok(upgraded.client.prepare("select name from sqlite_master where type='trigger' and name=?").get(trigger));
   } finally {
     oldDatabase?.close();
     upgraded?.close();
@@ -414,6 +494,101 @@ test("M10B automatic Memories follow the existing Conversation deletion scrub", 
     assert.equal(deleted.status, "DELETED");
     assert.equal(deleted.memoryText, null);
     assert.equal(deleted.safeReviewCode, "CONVERSATION_DELETED");
+  } finally {
+    fixture.close();
+  }
+});
+
+test("M10B terminal execution replay repairs an open Operation and EXECUTING Reservation", async () => {
+  const fixture = await createFixture(false);
+  try {
+    const { response } = completeTurn(fixture);
+    const scheduled = fixture.orchestrator.scheduleForCompletedResponse(PRINCIPAL, response.id);
+    await fixture.worker.runOnce(BASE_TIME + 100);
+    const before = fixture.executions.getById(scheduled.extractionExecutionId!)!;
+    const memoryCount = (fixture.database.client.prepare("select count(*) as count from ai_memories where source_conversation_id=?").get(response.conversationId) as { count: number }).count;
+    fixture.database.client.prepare("update ai_cost_operations set status='OPEN', completed_at=null where id=?").run(before.costOperationId);
+    fixture.database.client.prepare("update ai_budget_reservations set status='EXECUTING', finalized_at=null, overage_nano=null where id=?").run(before.budgetReservationId);
+    const replay = await fixture.executionService.executeJob(before.id);
+    assert.equal(replay.status, "COMPLETED");
+    assert.equal(fixture.adapter.calls, 1);
+    assert.equal((fixture.database.client.prepare("select status from ai_cost_operations where id=?").get(before.costOperationId) as { status: string }).status, "COMPLETED");
+    assert.equal((fixture.database.client.prepare("select status from ai_budget_reservations where id=?").get(before.budgetReservationId) as { status: string }).status, "SETTLED");
+    assert.equal((fixture.database.client.prepare("select count(*) as count from ai_memories where source_conversation_id=?").get(response.conversationId) as { count: number }).count, memoryCount);
+  } finally {
+    fixture.close();
+  }
+});
+
+test("M10B re-entry after Provider/accounting before result commit becomes AMBIGUOUS without an artifact", async () => {
+  const fixture = await createFixture(false);
+  try {
+    const { response } = completeTurn(fixture);
+    const scheduled = fixture.orchestrator.scheduleForCompletedResponse(PRINCIPAL, response.id);
+    const execution = fixture.executions.getById(scheduled.extractionExecutionId!)!;
+    const config = fixture.configs.getById(fixture.executionConfigId)!;
+    const operation = fixture.accountingService.createOperation({ costCenter: "STUDENT_GENERATION", idempotencyKey: null, opaquePrincipalRef: PRINCIPAL.principalRef, subjectKey: "biology", conversationId: response.conversationId, responseId: response.id, jobId: null, evalRunId: null, knowledgeRevision: null, status: "OPEN", startedAt: BASE_TIME + 100, completedAt: null }, execution.id);
+    const periodStart = new Date(BASE_TIME + 100);
+    const budgetPeriod = { startAt: Date.UTC(periodStart.getUTCFullYear(), periodStart.getUTCMonth(), periodStart.getUTCDate()), endAt: Date.UTC(periodStart.getUTCFullYear(), periodStart.getUTCMonth(), periodStart.getUTCDate()) + 86_400_000 };
+    const admissionBase = { principalRef: PRINCIPAL.principalRef, budgetPolicyId: config.budgetPolicyId, budgetPolicyRevision: config.budgetPolicyRevision, rateLimitPolicyId: config.rateLimitPolicyId, rateLimitPolicyRevision: config.rateLimitPolicyRevision, budgetPeriod, costOperationId: operation.id, costEstimate: { currency: "USD", maxCostNano: 10_000, estimateBasis: "crash-fixture" }, idempotencyKey: `crash-admission-${execution.id}` };
+    const admission = fixture.admission.admit({ ...admissionBase, requestFingerprint: createAIAdmissionRequestFingerprint(admissionBase) });
+    fixture.admission.startExecution(admission.reservation.id, BASE_TIME + 101);
+    fixture.accountingService.recordAttempt({ operationId: operation.id, attempt: { gatewayRequestId: execution.id, capability: "GENERATION", attemptIndex: 0, modelConfigId: fixture.generationModelId, modelConfigRevision: 1, providerConfigId: fixture.providerId, providerConfigRevision: 1, adapterKey: "test.memory-extraction", providerModelId: "fixture-memory-model", startedAt: BASE_TIME + 100, completedAt: BASE_TIME + 101, latencyMs: 1, status: "SUCCEEDED", providerInvoked: true }, normalizedUsage: { inputTokens: 1, outputTokens: 1, reasoningTokens: 0, cacheHitInputTokens: 0, cacheMissInputTokens: 0 }, capability: "GENERATION", providerModelId: "fixture-memory-model", at: BASE_TIME + 100 });
+    fixture.executions.bindCostOperation(execution.id, operation.id, BASE_TIME + 102);
+    fixture.executions.bindReservation(execution.id, admission.reservation.id, BASE_TIME + 102);
+    fixture.database.client.prepare("update ai_memory_executions set status='RUNNING', provider_invocation_state='INVOKED_WITH_ACCOUNTING', provider_invoked=1, started_at=? where id=?").run(BASE_TIME + 103, execution.id);
+    const result = await fixture.executionService.executeJob(execution.id);
+    assert.equal(result.status, "AMBIGUOUS");
+    assert.equal(fixture.adapter.calls, 0);
+    assert.equal((fixture.database.client.prepare("select count(*) as count from ai_memories where source_conversation_id=?").get(response.conversationId) as { count: number }).count, 0);
+    assert.equal(fixture.executions.listExtractionResults(execution.id).length, 0);
+    assert.equal((fixture.database.client.prepare("select status from ai_cost_operations where id=?").get(operation.id) as { status: string }).status, "FAILED");
+    assert.equal((fixture.database.client.prepare("select status from ai_budget_reservations where id=?").get(admission.reservation.id) as { status: string }).status, "SETTLED");
+    assert.equal((fixture.database.client.prepare("select count(*) as count from ai_usage_cost_records where operation_id=?").get(operation.id) as { count: number }).count, 1);
+  } finally {
+    fixture.close();
+  }
+});
+
+test("M10B rolls back the entire extraction result when completion fails", async () => {
+  const fixture = await createFixture(false);
+  try {
+    fixture.adapter.output = JSON.stringify({ candidates: [
+      { kind: "STUDY_GOAL", text: "Keep a weekly study plan.", confidenceUnits: 950_000 },
+      { kind: "LEARNING_DIFFICULTY", text: "I confuse the two stages.", confidenceUnits: 950_000 },
+    ] });
+    const { response } = completeTurn(fixture);
+    const scheduled = fixture.orchestrator.scheduleForCompletedResponse(PRINCIPAL, response.id);
+    const repository = fixture.executions as unknown as { complete: (...args: never[]) => never };
+    repository.complete = () => { throw new Error("fault-injected execution completion failure"); };
+    await fixture.worker.runOnce(BASE_TIME + 100);
+    const execution = fixture.executions.getById(scheduled.extractionExecutionId!)!;
+    assert.equal(execution.status, "FAILED");
+    assert.equal(fixture.adapter.calls, 1);
+    assert.equal((fixture.database.client.prepare("select count(*) as count from ai_memories where source_conversation_id=?").get(response.conversationId) as { count: number }).count, 0);
+    assert.equal(fixture.executions.listExtractionResults(execution.id).length, 0);
+  } finally {
+    fixture.close();
+  }
+});
+
+test("M10B rolls back a Summary when compaction completion fails", async () => {
+  const fixture = await createFixture(false);
+  try {
+    let last = completeTurn(fixture, "one");
+    completeTurn(fixture, "two", last.conversation.id);
+    completeTurn(fixture, "three", last.conversation.id);
+    last = completeTurn(fixture, "four", last.conversation.id);
+    fixture.adapter.output = JSON.stringify({ summary: "The Student prefers worked examples." });
+    const scheduled = fixture.orchestrator.scheduleForCompletedResponse(PRINCIPAL, last.response.id);
+    await fixture.worker.runOnce(BASE_TIME + 100);
+    const repository = fixture.executions as unknown as { complete: (...args: never[]) => never };
+    repository.complete = () => { throw new Error("fault-injected compaction completion failure"); };
+    await fixture.worker.runOnce(BASE_TIME + 100);
+    const execution = fixture.executions.getById(scheduled.compactionExecutionId!)!;
+    assert.equal(execution.status, "FAILED");
+    assert.equal((fixture.database.client.prepare("select count(*) as count from ai_conversation_summary_revisions where conversation_id=? and status='ACTIVE'").get(last.conversation.id) as { count: number }).count, 0);
+    assert.equal(fixture.adapter.calls, 2);
   } finally {
     fixture.close();
   }

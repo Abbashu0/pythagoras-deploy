@@ -11,7 +11,7 @@ import { SQLiteAIModelConfigRepository } from "../model-registry";
 import { SQLiteAIProviderConfigRepository } from "../configuration";
 import type { AIJobExecutionContext, AIJobHandlerDefinition, AIJobTerminalReconciler, AIJob, AIJobTerminalReconciliationResult } from "../operations/jobs";
 import { AIJobExecutionError } from "../operations/jobs";
-import type { AIMemoryPolicyRepository } from "./contracts";
+import { AIMemoryError, type AIMemoryPolicyRepository } from "./contracts";
 import { AIMemoryService } from "./service";
 import { SQLiteAIMemoryPolicyRepository } from "./policy-repository";
 import type { AIConversationSummaryRepository } from "./summary-contracts";
@@ -104,12 +104,18 @@ export class AIMemoryExecutionService implements AIJobTerminalReconciler {
 
   async executeJob(executionId: string, context?: AIJobExecutionContext): Promise<AIMemoryExecutionRunResult> {
     let execution = this.requireExecution(executionId);
-    if (isTerminal(execution.status)) return resultFromExecution(execution, this.executions.listExtractionResults(execution.id).map((link) => link.memoryId));
+    if (isTerminal(execution.status)) {
+      execution = this.reconcileTerminalFinancial(execution);
+      return resultFromExecution(execution, this.executions.listExtractionResults(execution.id).map((link) => link.memoryId));
+    }
     if (context) {
       const expectedJobKind = execution.executionKind === "EXTRACTION" ? "ai.memory.extraction" : "ai.memory.compaction";
       if (context.job.kind !== expectedJobKind || context.job.payloadVersion !== 1) throw new AIMemoryExecutionError("AI_MEMORY_EXECUTION_INVALID", "The Memory Job kind does not match its canonical execution.");
       execution = this.executions.bindJob(execution.id, context.job.id, this.safeNow());
-      if (isTerminal(execution.status)) return resultFromExecution(execution, this.executions.listExtractionResults(execution.id).map((link) => link.memoryId));
+      if (isTerminal(execution.status)) {
+        execution = this.reconcileTerminalFinancial(execution);
+        return resultFromExecution(execution, this.executions.listExtractionResults(execution.id).map((link) => link.memoryId));
+      }
     }
     if (execution.providerInvocationState !== "NOT_INVOKED" || execution.providerInvoked) {
       return this.reconcileAmbiguous(execution, "AI_MEMORY_EXECUTION_PROVIDER_AMBIGUOUS");
@@ -240,43 +246,61 @@ export class AIMemoryExecutionService implements AIJobTerminalReconciler {
 
     const output = providerResult.output;
     try {
+      // All post-Provider identity and deletion fences are checked before the
+      // result transaction begins. A changed dependency cannot leave an
+      // otherwise valid-looking canonical artifact behind.
+      this.requireConfig(execution);
+      this.requireModel(execution);
+      if (execution.executionKind === "EXTRACTION") this.requireMemoryPolicy(execution);
       this.source.getSource(execution);
       if (execution.executionKind === "EXTRACTION") {
         const parsed = parseAIMemoryExtractionOutput(output, Math.min(config.maxExtractionCandidates, 100));
-        const memoryIds: string[] = [];
-        for (const [index, candidate] of parsed.candidates.entries()) {
-          const memory = this.memories.createCandidate({ principalRef: execution.principalRef, status: "ACTIVE" }, {
-            id: this.idFactory(),
-            conversationId: execution.conversationId,
-            subjectKey: execution.subjectKey,
-            memoryPolicyId: policy!.memoryPolicyId,
-            memoryPolicyRevision: policy!.revision,
-            kind: candidate.kind,
-            text: candidate.text,
-            confidenceUnits: candidate.confidenceUnits,
-            sourceStartOrdinal: execution.requestOrdinal,
-            sourceEndOrdinal: execution.assistantOrdinal,
-            now: this.safeNow(),
-          });
-          if (!config.autoApprovalMinConfidenceUnits || candidate.confidenceUnits >= config.autoApprovalMinConfidenceUnits) {
-            try {
-              this.memories.approveAutomatically({ memoryId: memory.id, principalRef: execution.principalRef, subjectKey: execution.subjectKey, memoryPolicyId: policy!.memoryPolicyId, memoryPolicyRevision: policy!.revision, minimumConfidenceUnits: config.autoApprovalMinConfidenceUnits, now: this.safeNow() });
-            } catch {
-              // A failed automatic review leaves the safe CANDIDATE in place.
+        const committed = this.dependencies.database.client.transaction(() => {
+          const memoryIds: string[] = [];
+          for (const [index, candidate] of parsed.candidates.entries()) {
+            const memory = this.memories.createCandidate({ principalRef: execution.principalRef, status: "ACTIVE" }, {
+              id: this.idFactory(),
+              conversationId: execution.conversationId,
+              subjectKey: execution.subjectKey,
+              memoryPolicyId: policy!.memoryPolicyId,
+              memoryPolicyRevision: policy!.revision,
+              kind: candidate.kind,
+              text: candidate.text,
+              confidenceUnits: candidate.confidenceUnits,
+              sourceStartOrdinal: execution.requestOrdinal,
+              sourceEndOrdinal: execution.assistantOrdinal,
+              now: this.safeNow(),
+            });
+            // The link is created before the optional automatic review so the
+            // SQLite trust trigger can prove the exact execution provenance.
+            this.executions.insertExtractionResultInTransaction({ executionId: execution.id, ordinal: index + 1, memoryId: memory.id });
+            if (!config.autoApprovalMinConfidenceUnits || candidate.confidenceUnits >= config.autoApprovalMinConfidenceUnits) {
+              try {
+                this.memories.approveAutomatically({ memoryId: memory.id, principalRef: execution.principalRef, subjectKey: execution.subjectKey, memoryPolicyId: policy!.memoryPolicyId, memoryPolicyRevision: policy!.revision, minimumConfidenceUnits: config.autoApprovalMinConfidenceUnits, now: this.safeNow() });
+              } catch (error) {
+                // Policy-required review and a source deletion are expected
+                // safety outcomes. Unexpected persistence failures abort the
+                // enclosing result transaction instead of leaking a partial
+                // result batch.
+                if (!(error instanceof AIMemoryError) || !["AI_MEMORY_LIFECYCLE_CONFLICT", "AI_MEMORY_SOURCE_INVALID"].includes(error.code)) throw error;
+              }
             }
+            memoryIds.push(memory.id);
           }
-          this.executions.insertExtractionResultInTransaction({ executionId: execution.id, ordinal: index + 1, memoryId: memory.id });
-          memoryIds.push(memory.id);
-        }
-        const completed = this.executions.complete({ id: execution.id, resultSha256: hash(output), resultByteSize: Buffer.byteLength(output, "utf8"), resultCount: parsed.candidates.length, now: this.safeNow() });
-        this.closeFinancial(completed, "COMPLETED", true, this.safeNow());
-        return resultFromExecution(completed, memoryIds);
+          const completed = this.executions.complete({ id: execution.id, resultSha256: hash(output), resultByteSize: Buffer.byteLength(output, "utf8"), resultCount: parsed.candidates.length, now: this.safeNow() });
+          return { completed, memoryIds };
+        }).immediate();
+        this.closeFinancial(committed.completed, "COMPLETED", true, this.safeNow());
+        return resultFromExecution(committed.completed, committed.memoryIds);
       }
       const parsed = parseAIConversationCompactionOutput(output);
-      const summary = this.createSummary(execution, parsed.summary);
-      const completed = this.executions.complete({ id: execution.id, resultSha256: hash(output), resultByteSize: Buffer.byteLength(output, "utf8"), resultCount: 1, resultSummaryId: summary.id, resultSummaryRevision: summary.revision, now: this.safeNow() });
-      this.closeFinancial(completed, "COMPLETED", true, this.safeNow());
-      return resultFromExecution(completed, []);
+      const committed = this.dependencies.database.client.transaction(() => {
+        const summary = this.createSummary(execution, parsed.summary);
+        const completed = this.executions.complete({ id: execution.id, resultSha256: hash(output), resultByteSize: Buffer.byteLength(output, "utf8"), resultCount: 1, resultSummaryId: summary.id, resultSummaryRevision: summary.revision, now: this.safeNow() });
+        return { completed, summary };
+      }).immediate();
+      this.closeFinancial(committed.completed, "COMPLETED", true, this.safeNow());
+      return resultFromExecution(committed.completed, []);
     } catch (error) {
       this.closeFinancial(execution, "FAILED", true, this.safeNow());
       const failed = this.executions.fail({ id: execution.id, safeFailureCode: error instanceof AIMemoryExecutionError ? error.code : "AI_MEMORY_EXECUTION_RESULT_INVALID", resultSha256: hash(output), resultByteSize: Buffer.byteLength(output, "utf8"), now: this.safeNow() });
@@ -448,6 +472,17 @@ export class AIMemoryExecutionService implements AIJobTerminalReconciler {
     } else {
       this.dependencies.admission.releaseUninvokedExecution(reservation.id, now, status === "CANCELLED" ? "CANCELLED_BEFORE_PROVIDER" : "PRE_PROVIDER_RELEASE");
     }
+  }
+
+  private reconcileTerminalFinancial(execution: AIMemoryExecution): AIMemoryExecution {
+    const operationStatus = execution.status === "COMPLETED"
+      ? "COMPLETED" as const
+      : execution.status === "CANCELLED"
+        ? "CANCELLED" as const
+        : "FAILED" as const;
+    const providerInvoked = execution.providerInvoked || execution.providerInvocationState === "INVOKED_WITH_ACCOUNTING" || execution.providerInvocationState === "AMBIGUOUS";
+    this.closeFinancial(execution, operationStatus, providerInvoked, this.safeNow());
+    return this.executions.getById(execution.id) ?? execution;
   }
 
   private createSummary(execution: AIMemoryExecution, summaryText: string) {

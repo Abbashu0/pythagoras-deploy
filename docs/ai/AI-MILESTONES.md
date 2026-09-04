@@ -147,7 +147,7 @@ AI-M8A, AI-M8B, and AI-M8C are approved; AI-M8 Grounded Tutor is complete at `e7
 
 ## AI-M10 — Memory & Compaction
 
-**Status:** Split into M10A/M10B; M10A is APPROVED/COMPLETE at `d106e5bb3b82095e3d1b3abeab1f150237d87d06`, M10B is implemented pending independent review through migration `0041_violet_nico_minoru`, AI-M10 remains incomplete, and AI-M11 is not started.
+**Status:** Split into M10A/M10B; M10A is APPROVED/COMPLETE at `d106e5bb3b82095e3d1b3abeab1f150237d87d06`, M10B is implemented pending independent review through migrations `0041_violet_nico_minoru` and `0042_memory-execution-commit-safety`, AI-M10 remains incomplete, and AI-M11 is not started.
 
 ### AI-M10A — Memory, Conversation Summaries & Context Selection
 
@@ -158,7 +158,7 @@ AI-M8A, AI-M8B, and AI-M8C are approved; AI-M8 Grounded Tutor is complete at `e7
 ### AI-M10B — Extraction, Compaction Jobs & Runtime Hardening
 
 **Status:** Implemented pending independent review.
-**Delivered boundary:** Governed subject-bound Memory Execution Config revisions; strict educational Memory Extraction and Conversation Compaction protocols; reference-only Outbox → Job execution; exact Model/Provider/Policy pins; Student-owned `STUDENT_GENERATION` admission/accounting; durable ambiguity/source-deletion fences; canonical Candidate/Summary result persistence; and deterministic automatic review only when the exact Memory Policy permits it. Migration `0041_violet_nico_minoru` adds the execution/config/link tables and SQLite lifecycle guards.
+**Delivered boundary:** Governed subject-bound Memory Execution Config revisions; strict educational Memory Extraction and Conversation Compaction protocols; reference-only Outbox → Job execution; exact Model/Provider/Policy pins; Student-owned `STUDENT_GENERATION` admission/accounting; durable ambiguity/source-deletion fences; atomic Candidate/link/approval and Summary result commits; terminal financial replay repair; Arabic/English sensitive-content rejection; and deterministic automatic review only when the exact Memory Policy permits it. Migrations `0041_violet_nico_minoru` and `0042_memory-execution-commit-safety` add the execution/config/link tables and SQLite trust guards.
 **Explicit boundary:** M10B makes one Gateway Generation attempt per execution and uses only in-process test adapters in this repository. Jobs/Outbox/execution/accounting metadata contain no raw C4. `CANDIDATE` remains an internal safety stage; `SYSTEM_AUTO_APPROVED` is distinct from Student approval and is permitted only above the governed threshold and under a pinned policy with `candidateReviewRequired = false`. No Student/Admin/Mobile UI, public Student AI API, production Provider, Judge, automatic publication, RAG, or Agent 2 is added.
 
 ## Remaining future milestones

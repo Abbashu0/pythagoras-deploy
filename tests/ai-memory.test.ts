@@ -523,7 +523,7 @@ test("M10A migration 0039 is fresh and preserves a populated 0038 database", () 
   let upgraded: ContentDatabase | null = null;
   try {
     const fresh = openContentDatabase({ dataDirectory: freshRoot, migrationsDirectory });
-    assert.equal((fresh.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 42);
+    assert.equal((fresh.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 43);
     fresh.close();
 
     mkdirSync(path.join(oldMigrations, "meta"), { recursive: true });
@@ -544,7 +544,7 @@ test("M10A migration 0039 is fresh and preserves a populated 0038 database", () 
     oldDatabase = null;
 
     upgraded = openContentDatabase({ dataDirectory: oldRoot, migrationsDirectory });
-    assert.equal((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 42);
+    assert.equal((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 43);
     assert.ok(upgraded.client.prepare("select id from ai_conversations where id=?").get(conversation.id));
     for (const trigger of ["ai_memories_insert_valid", "ai_memories_lifecycle_valid", "ai_conversation_summary_revisions_insert_valid", "ai_memory_policy_revisions_no_update"]) assert.ok(upgraded.client.prepare("select name from sqlite_master where type='trigger' and name=?").get(trigger));
     assert.ok(owner.id);
@@ -565,7 +565,7 @@ test("M10A migration 0040 upgrades a populated 0039 database without rewriting M
   let upgraded: ContentDatabase | null = null;
   try {
     const fresh = openContentDatabase({ dataDirectory: freshRoot, migrationsDirectory });
-    assert.equal((fresh.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 42);
+    assert.equal((fresh.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 43);
     fresh.close();
 
     mkdirSync(path.join(oldMigrations, "meta"), { recursive: true });
@@ -612,7 +612,7 @@ test("M10A migration 0040 upgrades a populated 0039 database without rewriting M
     oldDatabase = null;
 
     upgraded = openContentDatabase({ dataDirectory: oldRoot, migrationsDirectory });
-    assert.equal((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 42);
+    assert.equal((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 43);
     assert.deepEqual(upgraded.client.prepare("select status,memory_text,safe_review_code from ai_memories where id=?").get(memoryId), { status: "APPROVED", memory_text: "UPGRADE_MEMORY_TEXT", safe_review_code: "STUDENT_APPROVED" });
     assert.deepEqual(upgraded.client.prepare("select status,summary_text,safe_deletion_code from ai_conversation_summary_revisions where id=?").get(summaryId), { status: "ACTIVE", summary_text: "UPGRADE_SUMMARY_TEXT", safe_deletion_code: null });
     assert.deepEqual(upgraded.client.prepare("select status,summary_text,safe_deletion_code from ai_conversation_summary_revisions where id=?").get(deletedSummaryId), { status: "DELETED", summary_text: null, safe_deletion_code: "CONVERSATION_DELETED" });

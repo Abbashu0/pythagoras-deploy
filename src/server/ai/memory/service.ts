@@ -82,7 +82,7 @@ export class AIMemoryService {
     const now = input.now ?? this.safeNow();
     this.assertTimestamp(now);
     const expiresAt = this.addRetention(now, policyRevision.retentionDays);
-    return this.database.client.transaction(() => this.memories.insertCandidate({
+    const insert = () => this.memories.insertCandidate({
       id: input.id ?? this.idFactory(),
       principalRef: activePrincipal.principalRef,
       subjectKey,
@@ -103,7 +103,8 @@ export class AIMemoryService {
       deletedAt: null,
       expiresAt,
       safeReviewCode: null,
-    })).immediate();
+    });
+    return this.database.client.inTransaction ? insert() : this.database.client.transaction(insert).immediate();
   }
 
   get(principal: AIStudentPrincipal, memoryId: string, subjectKey: string): AIMemory | null {
