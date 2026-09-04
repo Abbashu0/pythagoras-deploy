@@ -396,6 +396,58 @@ test("M10A Conversation deletion atomically scrubs Summary and Memory text while
   }
 });
 
+test("M10A internal principal purge scrubs active C4 without touching another principal", () => {
+  const fixture = createFixture();
+  try {
+    publishMemoryPolicy(fixture, memoryPolicyContent());
+    const conversationA = fixture.conversations.createConversation(PRINCIPAL_A, "biology");
+    completeTurn(fixture, PRINCIPAL_A, conversationA.id, "active-a", "answer-a");
+    const memoryA = createApprovedMemory(fixture, PRINCIPAL_A, conversationA.id, "PRIVATE_PRINCIPAL_PURGE_MEMORY_A", 900_000, BASE_TIME + 90);
+    const currentA = beginCurrent(fixture, PRINCIPAL_A, conversationA.id, "active-current-a");
+    const summaryA = fixture.summary.createRevision(PRINCIPAL_A, { conversationId: conversationA.id, subjectKey: "biology", summaryText: "PRIVATE_PRINCIPAL_PURGE_SUMMARY_A", coversThroughOrdinal: 2, now: BASE_TIME + 91 });
+
+    const conversationB = fixture.conversations.createConversation(PRINCIPAL_B, "biology");
+    completeTurn(fixture, PRINCIPAL_B, conversationB.id, "active-b", "answer-b");
+    const memoryB = createApprovedMemory(fixture, PRINCIPAL_B, conversationB.id, "PRIVATE_PRINCIPAL_PURGE_MEMORY_B", 800_000, BASE_TIME + 92);
+    const summaryB = fixture.summary.createRevision(PRINCIPAL_B, { conversationId: conversationB.id, subjectKey: "biology", summaryText: "PRIVATE_PRINCIPAL_PURGE_SUMMARY_B", coversThroughOrdinal: 2, now: BASE_TIME + 93 });
+    const messageCountBefore = fixture.conversations.listMessages(PRINCIPAL_A, conversationA.id).length;
+
+    assert.equal(fixture.memory.purgePrincipalInTransaction(PRINCIPAL_A.principalRef, BASE_TIME + 94), 1);
+    assert.equal(fixture.summary.purgePrincipalInTransaction(PRINCIPAL_A.principalRef, BASE_TIME + 94), 1);
+    const purgedMemory = fixture.memory.get(PRINCIPAL_A, memoryA.id, "biology")!;
+    const purgedSummary = fixture.summaries.getRevision({ principalRef: PRINCIPAL_A.principalRef, conversationId: conversationA.id, revision: 1 })!;
+    assert.deepEqual({ status: purgedMemory.status, text: purgedMemory.memoryText, code: purgedMemory.safeReviewCode }, { status: "DELETED", text: null, code: "PRINCIPAL_PURGED" });
+    assert.deepEqual({ status: purgedSummary.status, text: purgedSummary.summaryText, code: purgedSummary.safeDeletionCode }, { status: "DELETED", text: null, code: "PRINCIPAL_PURGED" });
+    assert.equal(fixture.conversations.listMessages(PRINCIPAL_A, conversationA.id).length, messageCountBefore);
+    assert.equal(fixture.memory.get(PRINCIPAL_B, memoryB.id, "biology")?.status, "APPROVED");
+    assert.equal(fixture.summaries.getRevision({ principalRef: PRINCIPAL_B.principalRef, conversationId: conversationB.id, revision: 1 })?.id, summaryB.id);
+    assert.equal(fixture.memory.listEligible(PRINCIPAL_A, "biology", { at: BASE_TIME + 95 }).length, 0);
+    assert.equal(fixture.context.build(PRINCIPAL_A, { responseId: currentA.response.id, contextPolicyId: fixture.contextPolicyId, estimator: unitEstimator() }).plan.memories.length, 0);
+    assert.equal(fixture.context.build(PRINCIPAL_A, { responseId: currentA.response.id, contextPolicyId: fixture.contextPolicyId, estimator: unitEstimator() }).plan.summary, undefined);
+    assert.equal(fixture.memory.purgePrincipalInTransaction(PRINCIPAL_A.principalRef, BASE_TIME + 96), 0);
+    assert.equal(fixture.summary.purgePrincipalInTransaction(PRINCIPAL_A.principalRef, BASE_TIME + 96), 0);
+  } finally {
+    fixture.close();
+  }
+});
+
+test("M10A principal purge is bounded and drains more than one batch", () => {
+  const fixture = createFixture();
+  try {
+    publishMemoryPolicy(fixture, memoryPolicyContent());
+    const conversation = fixture.conversations.createConversation(PRINCIPAL_A, "biology");
+    completeTurn(fixture, PRINCIPAL_A, conversation.id, "bounded-source", "bounded-answer");
+    const memories = Array.from({ length: 101 }, (_, index) => createApprovedMemory(fixture, PRINCIPAL_A, conversation.id, `PRIVATE_BOUNDED_PURGE_${index}`, 500_000, BASE_TIME + 100 + index));
+    assert.equal(memories.length, 101);
+    assert.equal(fixture.memory.purgePrincipalInTransaction(PRINCIPAL_A.principalRef, BASE_TIME + 300), 100);
+    assert.equal(fixture.memory.purgePrincipalInTransaction(PRINCIPAL_A.principalRef, BASE_TIME + 301), 1);
+    assert.equal(fixture.memory.purgePrincipalInTransaction(PRINCIPAL_A.principalRef, BASE_TIME + 302), 0);
+    assert.equal((fixture.database.client.prepare("select count(*) as count from ai_memories where principal_ref=? and status <> 'DELETED'").get(PRINCIPAL_A.principalRef) as { count: number }).count, 0);
+  } finally {
+    fixture.close();
+  }
+});
+
 test("M10A SQLite boundary rejects cross-owner/subject writes and illegal Memory/Summary lifecycle mutations", () => {
   const fixture = createFixture();
   try {
@@ -427,6 +479,42 @@ test("M10A SQLite boundary rejects cross-owner/subject writes and illegal Memory
   }
 });
 
+test("M10A SQLite enforces Summary coverage monotonicity and exact Memory review/retention", () => {
+  const fixture = createFixture();
+  try {
+    const policy = publishMemoryPolicy(fixture, memoryPolicyContent({ retentionDays: 1 }));
+    const equalConversation = fixture.conversations.createConversation(PRINCIPAL_A, "biology");
+    completeTurn(fixture, PRINCIPAL_A, equalConversation.id, "equal-one", "equal-answer-one");
+    const firstEqual = fixture.summary.createRevision(PRINCIPAL_A, { conversationId: equalConversation.id, subjectKey: "biology", summaryText: "equal-one-summary", coversThroughOrdinal: 2, now: BASE_TIME + 400 });
+    completeTurn(fixture, PRINCIPAL_A, equalConversation.id, "equal-two", "equal-answer-two");
+    const insertSummary = fixture.database.client.prepare("insert into ai_conversation_summary_revisions (id,conversation_id,principal_ref,subject_key,revision,status,summary_text,covers_through_ordinal,source_start_ordinal,source_end_ordinal,source_message_count,created_at,deleted_at,safe_deletion_code) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+    assert.doesNotThrow(() => insertSummary.run(uuidv7(), equalConversation.id, PRINCIPAL_A.principalRef, "biology", 2, "ACTIVE", "equal-coverage-summary", 2, 1, 2, 2, BASE_TIME + 401, null, null));
+    const backwardConversation = fixture.conversations.createConversation(PRINCIPAL_A, "biology");
+    completeTurn(fixture, PRINCIPAL_A, backwardConversation.id, "back-one", "back-answer-one");
+    completeTurn(fixture, PRINCIPAL_A, backwardConversation.id, "back-two", "back-answer-two");
+    fixture.summary.createRevision(PRINCIPAL_A, { conversationId: backwardConversation.id, subjectKey: "biology", summaryText: "forward-summary", coversThroughOrdinal: 4, now: BASE_TIME + 402 });
+    assert.throws(() => insertSummary.run(uuidv7(), backwardConversation.id, PRINCIPAL_A.principalRef, "biology", 2, "ACTIVE", "backward-summary", 2, 1, 2, 2, BASE_TIME + 403, null, null), /monotonicity|coverage|constraint/i);
+    assert.equal(firstEqual.revision, 1);
+
+    const reviewConversation = fixture.conversations.createConversation(PRINCIPAL_A, "biology");
+    completeTurn(fixture, PRINCIPAL_A, reviewConversation.id, "review-source", "review-answer");
+    const candidate = fixture.memory.createCandidate(PRINCIPAL_A, { conversationId: reviewConversation.id, subjectKey: "biology", text: "review-memory", confidenceUnits: 500_000, sourceStartOrdinal: 1, sourceEndOrdinal: 2, now: BASE_TIME + 410 });
+    assert.throws(() => fixture.memory.approve(PRINCIPAL_A, { memoryId: candidate.id, subjectKey: "biology", now: BASE_TIME + 409 }), (error) => error instanceof AIMemoryError && error.code === "AI_MEMORY_INVALID");
+    assert.throws(() => fixture.memory.reject(PRINCIPAL_A, { memoryId: candidate.id, subjectKey: "biology", now: -1 }), (error) => error instanceof AIMemoryError && error.code === "AI_MEMORY_INVALID");
+    const directCandidate = fixture.memory.createCandidate(PRINCIPAL_A, { conversationId: reviewConversation.id, subjectKey: "biology", text: "direct-review-memory", confidenceUnits: 500_000, sourceStartOrdinal: 1, sourceEndOrdinal: 2, now: BASE_TIME + 411 });
+    assert.throws(() => fixture.database.client.prepare("update ai_memories set status='APPROVED', reviewed_at=?, safe_review_code='STUDENT_APPROVED' where id=?").run(directCandidate.createdAt - 1, directCandidate.id), /timestamp|lifecycle|invalid|constraint/i);
+
+    const memoryInsert = fixture.database.client.prepare("insert into ai_memories (id,principal_ref,subject_key,memory_policy_id,memory_policy_revision,revision,status,visibility_scope,creation_origin,source_conversation_id,source_start_ordinal,source_end_ordinal,memory_text,confidence_units,created_at,reviewed_at,deleted_at,expires_at,safe_review_code) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+    const exactCreatedAt = BASE_TIME + 420;
+    const exactExpiresAt = exactCreatedAt + 86_400_000;
+    const memoryValues = (id: string, expiresAt: number) => [id, PRINCIPAL_A.principalRef, "biology", policy.id, 1, 1, "CANDIDATE", "PRINCIPAL_SUBJECT", "CONVERSATION", reviewConversation.id, 1, 2, "direct-retention-memory", 400_000, exactCreatedAt, null, null, expiresAt, null];
+    assert.doesNotThrow(() => memoryInsert.run(...memoryValues(uuidv7(), exactExpiresAt)));
+    assert.throws(() => memoryInsert.run(...memoryValues(uuidv7(), exactExpiresAt + 1)), /retention|ownership|invalid|constraint/i);
+  } finally {
+    fixture.close();
+  }
+});
+
 test("M10A migration 0039 is fresh and preserves a populated 0038 database", () => {
   const freshRoot = mkdtempSync(path.join(os.tmpdir(), "pythagoras-memory-fresh-"));
   const oldRoot = mkdtempSync(path.join(os.tmpdir(), "pythagoras-memory-old-"));
@@ -435,7 +523,7 @@ test("M10A migration 0039 is fresh and preserves a populated 0038 database", () 
   let upgraded: ContentDatabase | null = null;
   try {
     const fresh = openContentDatabase({ dataDirectory: freshRoot, migrationsDirectory });
-    assert.equal((fresh.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 40);
+    assert.equal((fresh.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 41);
     fresh.close();
 
     mkdirSync(path.join(oldMigrations, "meta"), { recursive: true });
@@ -456,10 +544,79 @@ test("M10A migration 0039 is fresh and preserves a populated 0038 database", () 
     oldDatabase = null;
 
     upgraded = openContentDatabase({ dataDirectory: oldRoot, migrationsDirectory });
-    assert.equal((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 40);
+    assert.equal((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 41);
     assert.ok(upgraded.client.prepare("select id from ai_conversations where id=?").get(conversation.id));
     for (const trigger of ["ai_memories_insert_valid", "ai_memories_lifecycle_valid", "ai_conversation_summary_revisions_insert_valid", "ai_memory_policy_revisions_no_update"]) assert.ok(upgraded.client.prepare("select name from sqlite_master where type='trigger' and name=?").get(trigger));
     assert.ok(owner.id);
+  } finally {
+    oldDatabase?.close();
+    upgraded?.close();
+    rmSync(freshRoot, { recursive: true, force: true });
+    rmSync(oldRoot, { recursive: true, force: true });
+    rmSync(oldMigrations, { recursive: true, force: true });
+  }
+});
+
+test("M10A migration 0040 upgrades a populated 0039 database without rewriting Memory or Summary", () => {
+  const freshRoot = mkdtempSync(path.join(os.tmpdir(), "pythagoras-memory-0040-fresh-"));
+  const oldRoot = mkdtempSync(path.join(os.tmpdir(), "pythagoras-memory-0040-old-"));
+  const oldMigrations = mkdtempSync(path.join(os.tmpdir(), "pythagoras-memory-0040-migrations-"));
+  let oldDatabase: ContentDatabase | null = null;
+  let upgraded: ContentDatabase | null = null;
+  try {
+    const fresh = openContentDatabase({ dataDirectory: freshRoot, migrationsDirectory });
+    assert.equal((fresh.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 41);
+    fresh.close();
+
+    mkdirSync(path.join(oldMigrations, "meta"), { recursive: true });
+    const journal = JSON.parse(readFileSync(path.join(migrationsDirectory, "meta", "_journal.json"), "utf8"));
+    const entries0039 = journal.entries.slice(0, 40);
+    for (const entry of entries0039) {
+      copyFileSync(path.join(migrationsDirectory, `${entry.tag}.sql`), path.join(oldMigrations, `${entry.tag}.sql`));
+      const snapshotName = `${entry.idx.toString().padStart(4, "0")}_snapshot.json`;
+      if (existsSync(path.join(migrationsDirectory, "meta", snapshotName))) copyFileSync(path.join(migrationsDirectory, "meta", snapshotName), path.join(oldMigrations, "meta", snapshotName));
+    }
+    writeFileSync(path.join(oldMigrations, "meta", "_journal.json"), JSON.stringify({ ...journal, entries: entries0039 }));
+
+    oldDatabase = openContentDatabase({ dataDirectory: oldRoot, migrationsDirectory: oldMigrations });
+    assert.equal((oldDatabase.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 40);
+    new SQLiteCanonicalContentRepository(oldDatabase, () => BASE_TIME).bootstrap();
+    const owner = new SQLiteAdminIdentityRepository(oldDatabase).createInitialOwner({ id: uuidv7(), email: `old-0040-${uuidv7()}@memory.test`, displayName: "Old 0040 Owner", passwordHash: "fixture", createdAt: BASE_TIME });
+    const policyId = uuidv7();
+    const principal = { principalRef: "upgrade-memory-owner", status: "ACTIVE" } as AIStudentPrincipal;
+    oldDatabase.client.prepare("insert into ai_memory_policies (id,key,subject_key,current_revision,created_at,updated_at,created_by,updated_by) values (?,?,?,?,?,?,?,?)").run(policyId, "upgrade-memory-policy", "biology", 1, BASE_TIME + 1, BASE_TIME + 1, owner.id, owner.id);
+    oldDatabase.client.prepare("insert into ai_memory_policy_revisions (id,memory_policy_id,revision,display_name,enabled,candidate_review_required,retention_days,max_selected_memories,created_at,created_by) values (?,?,?,?,?,?,?,?,?,?)").run(uuidv7(), policyId, 1, "Upgrade Memory Policy", 1, 1, 1, 3, BASE_TIME + 1, owner.id);
+    const conversations = new AIConversationService(oldDatabase, { clock: () => BASE_TIME + 2 });
+    const conversation = conversations.createConversation(principal, "biology");
+    const turn = conversations.beginTurn(principal, { conversationId: conversation.id, idempotencyKey: `upgrade-${uuidv7()}`, userContent: "upgrade source" });
+    conversations.startResponse(principal, turn.response.id);
+    conversations.appendResponseChunk(principal, turn.response.id, 0, "upgrade answer");
+    conversations.completeResponse(principal, turn.response.id, "STOP");
+    const memoryId = uuidv7();
+    const createdAt = BASE_TIME + 10;
+    const expiresAt = createdAt + 86_400_000;
+    oldDatabase.client.prepare("insert into ai_memories (id,principal_ref,subject_key,memory_policy_id,memory_policy_revision,revision,status,visibility_scope,creation_origin,source_conversation_id,source_start_ordinal,source_end_ordinal,memory_text,confidence_units,created_at,reviewed_at,deleted_at,expires_at,safe_review_code) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(memoryId, principal.principalRef, "biology", policyId, 1, 1, "CANDIDATE", "PRINCIPAL_SUBJECT", "CONVERSATION", conversation.id, 1, 2, "UPGRADE_MEMORY_TEXT", 500_000, createdAt, null, null, expiresAt, null);
+    oldDatabase.client.prepare("update ai_memories set status='APPROVED', reviewed_at=?, safe_review_code='STUDENT_APPROVED' where id=?").run(createdAt + 1, memoryId);
+    const summaryId = uuidv7();
+    oldDatabase.client.prepare("insert into ai_conversation_summary_revisions (id,conversation_id,principal_ref,subject_key,revision,status,summary_text,covers_through_ordinal,source_start_ordinal,source_end_ordinal,source_message_count,created_at,deleted_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?)").run(summaryId, conversation.id, principal.principalRef, "biology", 1, "ACTIVE", "UPGRADE_SUMMARY_TEXT", 2, 1, 2, 2, createdAt + 2, null);
+    const deletedConversation = conversations.createConversation(principal, "biology");
+    const deletedTurn = conversations.beginTurn(principal, { conversationId: deletedConversation.id, idempotencyKey: `upgrade-deleted-${uuidv7()}`, userContent: "deleted upgrade source" });
+    conversations.startResponse(principal, deletedTurn.response.id);
+    conversations.appendResponseChunk(principal, deletedTurn.response.id, 0, "deleted upgrade answer");
+    conversations.completeResponse(principal, deletedTurn.response.id, "STOP");
+    const deletedSummaryId = uuidv7();
+    oldDatabase.client.prepare("insert into ai_conversation_summary_revisions (id,conversation_id,principal_ref,subject_key,revision,status,summary_text,covers_through_ordinal,source_start_ordinal,source_end_ordinal,source_message_count,created_at,deleted_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?)").run(deletedSummaryId, deletedConversation.id, principal.principalRef, "biology", 1, "ACTIVE", "UPGRADE_DELETED_SUMMARY_TEXT", 2, 1, 2, 2, createdAt + 3, null);
+    oldDatabase.client.prepare("update ai_conversations set status='DELETED', deleted_at=? where id=?").run(createdAt + 4, deletedConversation.id);
+    oldDatabase.client.prepare("update ai_conversation_summary_revisions set status='DELETED', summary_text=null, deleted_at=? where id=?").run(createdAt + 4, deletedSummaryId);
+    oldDatabase.close();
+    oldDatabase = null;
+
+    upgraded = openContentDatabase({ dataDirectory: oldRoot, migrationsDirectory });
+    assert.equal((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 41);
+    assert.deepEqual(upgraded.client.prepare("select status,memory_text,safe_review_code from ai_memories where id=?").get(memoryId), { status: "APPROVED", memory_text: "UPGRADE_MEMORY_TEXT", safe_review_code: "STUDENT_APPROVED" });
+    assert.deepEqual(upgraded.client.prepare("select status,summary_text,safe_deletion_code from ai_conversation_summary_revisions where id=?").get(summaryId), { status: "ACTIVE", summary_text: "UPGRADE_SUMMARY_TEXT", safe_deletion_code: null });
+    assert.deepEqual(upgraded.client.prepare("select status,summary_text,safe_deletion_code from ai_conversation_summary_revisions where id=?").get(deletedSummaryId), { status: "DELETED", summary_text: null, safe_deletion_code: "CONVERSATION_DELETED" });
+    for (const trigger of ["ai_memories_insert_valid", "ai_memories_lifecycle_valid", "ai_memories_no_delete", "ai_conversation_summary_revisions_insert_valid", "ai_conversation_summary_revisions_lifecycle_valid", "ai_conversation_summary_revisions_no_delete"]) assert.ok(upgraded.client.prepare("select name from sqlite_master where type='trigger' and name=?").get(trigger));
   } finally {
     oldDatabase?.close();
     upgraded?.close();

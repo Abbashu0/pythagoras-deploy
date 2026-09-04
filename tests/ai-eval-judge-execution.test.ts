@@ -2147,7 +2147,7 @@ test("Migration 0038: fresh 0000->0038 and populated 0037->0038 migration preser
     const freshCount = Number(
       (freshDb.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count,
     );
-    assert.equal(freshCount, 40);
+    assert.equal(freshCount, 41);
     freshDb.close();
 
     // 2. Prepare 0000..0037 directory
@@ -2182,7 +2182,7 @@ test("Migration 0038: fresh 0000->0038 and populated 0037->0038 migration preser
     const upgradedCount = Number(
       (upgradedDb.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count,
     );
-    assert.equal(upgradedCount, 40);
+    assert.equal(upgradedCount, 41);
 
     // Verify 0038 trigger exists
     const trigger = upgradedDb.client.prepare(

@@ -147,12 +147,12 @@ AI-M8A, AI-M8B, and AI-M8C are approved; AI-M8 Grounded Tutor is complete at `e7
 
 ## AI-M10 — Memory & Compaction
 
-**Status:** Split into M10A/M10B; M10A is implemented pending independent review through migration `0039_glossy_sleepwalker`, M10B is not started, AI-M10 remains incomplete, and AI-M11 is not started.
+**Status:** Split into M10A/M10B; M10A is implemented/corrected pending independent review through migrations `0039_glossy_sleepwalker` and `0040_wandering_invisible_woman`, M10B is not started, AI-M10 remains incomplete, and AI-M11 is not started.
 
 ### AI-M10A — Memory, Conversation Summaries & Context Selection
 
 **Status:** Implemented pending independent review.
-**Delivered boundary:** Governed subject-bound `ai.memory-policy` identities and append-only revisions; private principal/subject-scoped Memory candidates with explicit review, expiry, provenance, and deletion scrubbing; append-only Conversation Summary revisions sourced only from complete non-partial M4 turns; deterministic server-owned Summary/Memory selection through M5 Context budgeting; default history cutover after a canonical Summary; and atomic Conversation deletion propagation through migration `0039_glossy_sleepwalker`.
+**Delivered boundary:** Governed subject-bound `ai.memory-policy` identities and append-only revisions; private principal/subject-scoped Memory candidates with explicit review, expiry, provenance, and deletion scrubbing; append-only Conversation Summary revisions sourced only from complete non-partial M4 turns; deterministic server-owned Summary/Memory selection through M5 Context budgeting; default history cutover after a canonical Summary; bounded principal purge; and atomic Conversation deletion propagation through migrations `0039_glossy_sleepwalker` and `0040_wandering_invisible_woman`.
 **Explicit boundary:** Context Snapshots retain only safe IDs, revisions, token counts, and decisions; Summary/Memory text remains runtime C4. No extraction or compaction Provider/Generation call, durable Job, Student/Admin/Mobile UI, automatic publication, analytics, RAG, or Agent 2 is added.
 
 ### AI-M10B — Extraction, Compaction Jobs & Runtime Hardening

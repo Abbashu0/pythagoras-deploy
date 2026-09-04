@@ -43,7 +43,7 @@ AI-M9B1 is approved/complete at `61d6de1276735f511712dd47797a2c6a6304fcf3`. It a
 
 AI-M9B2 is approved/complete at `815d9230dcbde77433f98d80a2d37e3b08e2faaa`. It adds the governed supplementary Judge boundary, runtime-only target/evidence handoff, separate EVALS Judge accounting, strict protocol and Provider-invocation proof, crash/re-entry and lease/cancellation handling, and qualitative scoring through migrations `0037_eval-supplementary-judge` and `0038_eval-judge-execution-hardening`. It makes zero production Provider or network calls.
 
-AI-M10A is implemented pending independent review. It owns governed subject-bound Memory Policy, private candidate/approval lifecycle, append-only Conversation Summary revisions, deterministic bounded Context selection, M5 memory-budget integration, summary history cutover, and atomic deletion propagation through migration `0039_glossy_sleepwalker`. AI-M10B will own extraction/compaction Jobs, Provider/Gateway execution, economics, and final runtime hardening; it is not started.
+AI-M10A is implemented/corrected pending independent review. It owns governed subject-bound Memory Policy, private candidate/approval lifecycle, append-only Conversation Summary revisions, deterministic bounded Context selection, M5 memory-budget integration, summary history cutover, bounded principal purge, and atomic deletion propagation through migrations `0039_glossy_sleepwalker` and `0040_wandering_invisible_woman`. AI-M10B will own extraction/compaction Jobs, Provider/Gateway execution, economics, and final runtime hardening; it is not started.
 
 | Document | Responsibility |
 | --- | --- |

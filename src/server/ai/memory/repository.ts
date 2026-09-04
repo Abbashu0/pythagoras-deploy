@@ -81,6 +81,13 @@ export class SQLiteAIMemoryRepository implements AIMemoryRepository {
   }
 
   review(input: { id: string; principalRef: string; status: "APPROVED" | "REJECTED"; reviewedAt: number; safeReviewCode: "STUDENT_APPROVED" | "STUDENT_REJECTED" }): AIMemory {
+    const candidate = this.database.db.select({ createdAt: aiMemories.createdAt }).from(aiMemories).where(and(
+      eq(aiMemories.id, input.id),
+      eq(aiMemories.principalRef, input.principalRef),
+      eq(aiMemories.status, "CANDIDATE"),
+    )).get();
+    if (!candidate) throw new AIMemoryError("AI_MEMORY_LIFECYCLE_CONFLICT", "The Memory candidate is unavailable for review.");
+    if (!Number.isSafeInteger(input.reviewedAt) || input.reviewedAt < 0 || input.reviewedAt > 8_640_000_000_000_000 || input.reviewedAt < candidate.createdAt) throw new AIMemoryError("AI_MEMORY_INVALID", "The Memory review timestamp is invalid.");
     const row = this.database.db.update(aiMemories).set({
       status: input.status,
       reviewedAt: input.reviewedAt,
@@ -90,7 +97,7 @@ export class SQLiteAIMemoryRepository implements AIMemoryRepository {
       eq(aiMemories.principalRef, input.principalRef),
       eq(aiMemories.status, "CANDIDATE"),
     )).returning().get();
-    if (!row) throw new AIMemoryError("AI_MEMORY_LIFECYCLE_CONFLICT", "The Memory candidate is unavailable for review.");
+    if (!row) throw new AIMemoryError("AI_MEMORY_LIFECYCLE_CONFLICT", "The Memory candidate changed before review.");
     return fromRow(row);
   }
 
@@ -115,7 +122,6 @@ export class SQLiteAIMemoryRepository implements AIMemoryRepository {
       .innerJoin(aiConversations, eq(aiMemories.sourceConversationId, aiConversations.id))
       .where(and(
         eq(aiMemories.principalRef, input.principalRef),
-        eq(aiConversations.status, "DELETED"),
         inArray(aiMemories.status, ["CANDIDATE", "APPROVED", "REJECTED"]),
       ))
       .orderBy(asc(aiMemories.createdAt), asc(aiMemories.id))
@@ -127,7 +133,7 @@ export class SQLiteAIMemoryRepository implements AIMemoryRepository {
         status: "DELETED",
         memoryText: null,
         deletedAt: input.at,
-        safeReviewCode: "CONVERSATION_DELETED",
+        safeReviewCode: "PRINCIPAL_PURGED",
       }).where(and(eq(aiMemories.id, row.id), inArray(aiMemories.status, ["CANDIDATE", "APPROVED", "REJECTED"]))).run();
       count += result.changes;
     }

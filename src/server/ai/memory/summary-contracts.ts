@@ -3,6 +3,8 @@ import type { AIStudentPrincipal, AIConversationMessage } from "../conversations
 export const AI_CONVERSATION_SUMMARY_MAX_BYTES = 128 * 1024;
 export const AI_CONVERSATION_SUMMARY_STATUSES = ["ACTIVE", "DELETED"] as const;
 export type AIConversationSummaryStatus = (typeof AI_CONVERSATION_SUMMARY_STATUSES)[number];
+export const AI_CONVERSATION_SUMMARY_SAFE_DELETION_CODES = ["CONVERSATION_DELETED", "PRINCIPAL_PURGED"] as const;
+export type AIConversationSummarySafeDeletionCode = (typeof AI_CONVERSATION_SUMMARY_SAFE_DELETION_CODES)[number];
 
 export interface AIConversationSummary {
   id: string;
@@ -18,12 +20,13 @@ export interface AIConversationSummary {
   sourceMessageCount: number;
   createdAt: number;
   deletedAt: number | null;
+  safeDeletionCode: AIConversationSummarySafeDeletionCode | null;
 }
 
 export interface AIConversationSummaryRepository {
   getCurrentForConversation(input: { principalRef: string; conversationId: string; subjectKey: string }): AIConversationSummary | null;
   getRevision(input: { principalRef: string; conversationId: string; revision: number }): AIConversationSummary | null;
-  insertRevision(input: Omit<AIConversationSummary, "status" | "deletedAt"> & { id: string }): AIConversationSummary;
+  insertRevision(input: Omit<AIConversationSummary, "status" | "deletedAt" | "safeDeletionCode"> & { id: string }): AIConversationSummary;
   purgeForConversationInTransaction(input: { conversationId: string; principalRef: string; at: number }): number;
   purgeForPrincipalInTransaction(input: { principalRef: string; at: number; limit?: number }): number;
 }

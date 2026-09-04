@@ -21,6 +21,7 @@ export const AI_MEMORY_SAFE_REVIEW_CODES = [
   "STUDENT_APPROVED",
   "STUDENT_REJECTED",
   "CONVERSATION_DELETED",
+  "PRINCIPAL_PURGED",
 ] as const;
 export type AIMemorySafeReviewCode = (typeof AI_MEMORY_SAFE_REVIEW_CODES)[number];
 

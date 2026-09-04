@@ -52,7 +52,7 @@ import type {
   AIMemoryStatus,
   AIMemoryVisibilityScope,
 } from "../ai/memory/contracts";
-import type { AIConversationSummaryStatus } from "../ai/memory/summary-contracts";
+import type { AIConversationSummarySafeDeletionCode, AIConversationSummaryStatus } from "../ai/memory/summary-contracts";
 import type {
   AIInstructionPolicyScope,
 } from "../ai/policy/instruction-contracts";
@@ -902,7 +902,7 @@ export const aiMemories = sqliteTable(
     check("ai_memories_text_valid", sql`(${table.status} = 'DELETED' and ${table.memoryText} is null) or (${table.status} <> 'DELETED' and ${table.memoryText} is not null and length(cast(${table.memoryText} as blob)) between 1 and 131072)`),
     check("ai_memories_confidence_valid", sql`${table.confidenceUnits} between 0 and 1000000`),
     check("ai_memories_created_nonnegative", sql`${table.createdAt} >= 0`),
-    check("ai_memories_reviewed_consistent", sql`(${table.status} = 'CANDIDATE' and ${table.reviewedAt} is null and ${table.safeReviewCode} is null) or (${table.status} = 'APPROVED' and ${table.reviewedAt} is not null and ${table.safeReviewCode} = 'STUDENT_APPROVED') or (${table.status} = 'REJECTED' and ${table.reviewedAt} is not null and ${table.safeReviewCode} = 'STUDENT_REJECTED') or (${table.status} = 'DELETED' and ${table.deletedAt} is not null and ${table.safeReviewCode} = 'CONVERSATION_DELETED')`),
+    check("ai_memories_reviewed_consistent", sql`(${table.status} = 'CANDIDATE' and ${table.reviewedAt} is null and ${table.safeReviewCode} is null) or (${table.status} = 'APPROVED' and ${table.reviewedAt} is not null and ${table.safeReviewCode} = 'STUDENT_APPROVED') or (${table.status} = 'REJECTED' and ${table.reviewedAt} is not null and ${table.safeReviewCode} = 'STUDENT_REJECTED') or (${table.status} = 'DELETED' and ${table.deletedAt} is not null and ${table.safeReviewCode} in ('CONVERSATION_DELETED','PRINCIPAL_PURGED'))`),
     check("ai_memories_deleted_timestamp_valid", sql`${table.deletedAt} is null or ${table.deletedAt} >= ${table.createdAt}`),
     check("ai_memories_expiry_valid", sql`${table.expiresAt} > ${table.createdAt}`),
   ],
@@ -925,6 +925,7 @@ export const aiConversationSummaryRevisions = sqliteTable(
     sourceMessageCount: integer("source_message_count").notNull(),
     createdAt: integer("created_at").notNull(),
     deletedAt: integer("deleted_at"),
+    safeDeletionCode: text("safe_deletion_code").$type<AIConversationSummarySafeDeletionCode>(),
   },
   (table) => [
     uniqueIndex("ai_conversation_summary_revisions_identity_unique").on(table.conversationId, table.revision),
@@ -938,6 +939,7 @@ export const aiConversationSummaryRevisions = sqliteTable(
     check("ai_conversation_summary_revisions_coverage_valid", sql`${table.coversThroughOrdinal} >= 1 and ${table.sourceStartOrdinal} = 1 and ${table.sourceEndOrdinal} = ${table.coversThroughOrdinal} and ${table.sourceMessageCount} = ${table.coversThroughOrdinal}`),
     check("ai_conversation_summary_revisions_created_nonnegative", sql`${table.createdAt} >= 0`),
     check("ai_conversation_summary_revisions_deleted_timestamp_valid", sql`${table.deletedAt} is null or ${table.deletedAt} >= ${table.createdAt}`),
+    check("ai_conversation_summary_revisions_deletion_code_valid", sql`(${table.status} = 'ACTIVE' and ${table.safeDeletionCode} is null) or (${table.status} = 'DELETED' and ${table.safeDeletionCode} in ('CONVERSATION_DELETED','PRINCIPAL_PURGED'))`),
   ],
 );
 

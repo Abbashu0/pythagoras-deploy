@@ -56,6 +56,7 @@ export class SQLiteAIConversationSummaryRepository implements AIConversationSumm
         sourceMessageCount: input.sourceMessageCount,
         createdAt: input.createdAt,
         deletedAt: null,
+        safeDeletionCode: null,
       }).returning().get();
       return fromRow(row);
     } catch (error) {
@@ -68,6 +69,7 @@ export class SQLiteAIConversationSummaryRepository implements AIConversationSumm
       status: "DELETED",
       summaryText: null,
       deletedAt: input.at,
+      safeDeletionCode: "CONVERSATION_DELETED",
     }).where(and(
       eq(aiConversationSummaryRevisions.conversationId, input.conversationId),
       eq(aiConversationSummaryRevisions.principalRef, input.principalRef),
@@ -81,7 +83,7 @@ export class SQLiteAIConversationSummaryRepository implements AIConversationSumm
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > AI_MEMORY_PURGE_BATCH_SIZE) throw new AIMemoryError("AI_MEMORY_SUMMARY_INVALID", "The Summary principal purge limit is invalid.");
     const rows = this.database.db.select({ id: aiConversationSummaryRevisions.id }).from(aiConversationSummaryRevisions)
       .innerJoin(aiConversations, eq(aiConversationSummaryRevisions.conversationId, aiConversations.id))
-      .where(and(eq(aiConversationSummaryRevisions.principalRef, input.principalRef), eq(aiConversations.status, "DELETED"), eq(aiConversationSummaryRevisions.status, "ACTIVE")))
+      .where(and(eq(aiConversationSummaryRevisions.principalRef, input.principalRef), eq(aiConversationSummaryRevisions.status, "ACTIVE")))
       .orderBy(asc(aiConversationSummaryRevisions.createdAt), asc(aiConversationSummaryRevisions.id))
       .limit(limit)
       .all();
@@ -91,6 +93,7 @@ export class SQLiteAIConversationSummaryRepository implements AIConversationSumm
         status: "DELETED",
         summaryText: null,
         deletedAt: input.at,
+        safeDeletionCode: "PRINCIPAL_PURGED",
       }).where(eq(aiConversationSummaryRevisions.id, row.id)).run().changes;
     }
     return count;
@@ -112,5 +115,6 @@ function fromRow(row: AIConversationSummaryRevisionRow): AIConversationSummary {
     sourceMessageCount: row.sourceMessageCount,
     createdAt: row.createdAt,
     deletedAt: row.deletedAt,
+    safeDeletionCode: row.safeDeletionCode,
   };
 }

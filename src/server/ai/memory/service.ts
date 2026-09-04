@@ -115,13 +115,15 @@ export class AIMemoryService {
   approve(principal: AIStudentPrincipal, input: { memoryId: string; subjectKey: string; now?: number }): AIMemory {
     const activePrincipal = assertActiveStudentPrincipal(principal);
     const memory = this.requireCandidate(activePrincipal.principalRef, input.memoryId, input.subjectKey);
-    return this.memories.review({ id: memory.id, principalRef: activePrincipal.principalRef, status: "APPROVED", reviewedAt: input.now ?? this.safeNow(), safeReviewCode: "STUDENT_APPROVED" });
+    const reviewedAt = this.reviewTimestamp(input.now, memory.createdAt);
+    return this.memories.review({ id: memory.id, principalRef: activePrincipal.principalRef, status: "APPROVED", reviewedAt, safeReviewCode: "STUDENT_APPROVED" });
   }
 
   reject(principal: AIStudentPrincipal, input: { memoryId: string; subjectKey: string; now?: number }): AIMemory {
     const activePrincipal = assertActiveStudentPrincipal(principal);
     const memory = this.requireCandidate(activePrincipal.principalRef, input.memoryId, input.subjectKey);
-    return this.memories.review({ id: memory.id, principalRef: activePrincipal.principalRef, status: "REJECTED", reviewedAt: input.now ?? this.safeNow(), safeReviewCode: "STUDENT_REJECTED" });
+    const reviewedAt = this.reviewTimestamp(input.now, memory.createdAt);
+    return this.memories.review({ id: memory.id, principalRef: activePrincipal.principalRef, status: "REJECTED", reviewedAt, safeReviewCode: "STUDENT_REJECTED" });
   }
 
   /** Internal, server-owned preparation for future principal deletion. */
@@ -153,6 +155,13 @@ export class AIMemoryService {
 
   private assertTimestamp(value: number): void {
     if (!Number.isSafeInteger(value) || value < 0 || value > MAX_TIMESTAMP) throw new AIMemoryError("AI_MEMORY_INVALID", "Memory timestamp is invalid.");
+  }
+
+  private reviewTimestamp(value: number | undefined, createdAt: number): number {
+    const reviewedAt = value === undefined ? this.safeNow() : value;
+    this.assertTimestamp(reviewedAt);
+    if (reviewedAt < createdAt) throw new AIMemoryError("AI_MEMORY_INVALID", "The Memory review timestamp precedes creation.");
+    return reviewedAt;
   }
 
   private safeNow(): number {
