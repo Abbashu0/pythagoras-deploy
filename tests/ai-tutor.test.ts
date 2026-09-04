@@ -490,7 +490,7 @@ test("0029 and 0030 upgrade a populated 0028 database and keep existing Tutor Tr
 
     const upgradedDatabase = openContentDatabase({ dataDirectory: root, migrationsDirectory });
     upgraded = upgradedDatabase;
-    assert.equal(Number((upgradedDatabase.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count), 38);
+    assert.equal(Number((upgradedDatabase.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count), 39);
     for (const table of ["ai_tutor_configs", "ai_tutor_config_revisions", "ai_tutor_response_traces", "ai_tutor_trace_projection_refs", "ai_tutor_trace_evidence_refs"]) assert.ok(upgradedDatabase.client.prepare("select name from sqlite_master where type='table' and name=?").get(table));
     for (const trigger of ["ai_tutor_configs_identity_no_update", "ai_tutor_configs_revision_pointer", "ai_tutor_config_revisions_no_update", "ai_tutor_config_revisions_no_delete", "ai_tutor_response_traces_insert_integrity", "ai_tutor_response_traces_identity_no_update", "ai_tutor_response_traces_lifecycle", "ai_tutor_response_traces_refs_sealed_state", "ai_tutor_response_traces_requires_sealed_refs", "ai_tutor_trace_projection_refs_sealed_insert", "ai_tutor_trace_evidence_refs_sealed_insert"]) assert.ok(upgradedDatabase.client.prepare("select name from sqlite_master where type='trigger' and name=?").get(trigger));
     assert.equal((upgradedDatabase.client.prepare("select count(*) as count from ai_tutor_configs").get() as { count: number }).count, 1);

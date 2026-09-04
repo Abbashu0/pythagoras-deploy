@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { v7 as uuidv7 } from "uuid";
 
 import type { ContentDatabase } from "../../content/database";
+import { AIJobError } from "../operations/jobs";
 import {
   AIBudgetAdmissionService,
   AI_EVALS_ADMISSION_PRINCIPAL_REF,
@@ -138,6 +139,44 @@ export class AIEvalJudgeExecutionService {
       return execution;
     }
 
+    if (execution) {
+      // Existing nonterminal Judge Execution encountered at function entry.
+      // Implement conservative durable recovery semantics:
+      const hasUsage = execution.judgeCostOperationId
+        ? this.accounting.listUsageCostRecords(execution.judgeCostOperationId).length > 0
+        : false;
+      const impliesInvocation =
+        execution.providerInvocationState === "INVOKING" ||
+        execution.providerInvocationState === "INVOKED_WITH_ACCOUNTING" ||
+        execution.providerInvoked ||
+        hasUsage;
+
+      if (impliesInvocation) {
+        if (execution.judgeCostOperationId) {
+          this.completeOperation(execution.judgeCostOperationId, "FAILED", now);
+        }
+        this.settle(execution.budgetReservationId, now);
+        return this.judgeExecutions.ambiguous({
+          id: execution.id,
+          safeFailureCode: "EVAL_JUDGE_PROVIDER_AMBIGUOUS",
+          now,
+        });
+      }
+
+      // Existing nonterminal execution that did not invoke Provider.
+      // Original runtime-only target output from interrupted process is no longer safely owned.
+      // Fail closed as INPUT_LOST rather than pretending raw target answer can be reconstructed.
+      if (execution.judgeCostOperationId) {
+        this.completeOperation(execution.judgeCostOperationId, "FAILED", now);
+      }
+      this.settle(execution.budgetReservationId, now);
+      return this.judgeExecutions.inputLost({
+        id: execution.id,
+        safeFailureCode: "EVAL_JUDGE_INPUT_LOST",
+        now,
+      });
+    }
+
     const judgeConfig = this.judgeConfigs.getRevisionByKey(
       suite.supplementaryJudgeConfig.referenceKey,
       suite.supplementaryJudgeConfig.revision,
@@ -145,36 +184,58 @@ export class AIEvalJudgeExecutionService {
 
     const fingerprint = judgeConfig ? fingerprintAIEvalJudgeConfig(judgeConfig) : "0".repeat(64);
 
-    if (!execution) {
-      execution = this.judgeExecutions.create({
-        runId: run.id,
-        caseId: caseRevision.caseId,
-        caseRevision: caseRevision.revision,
-        ordinal: caseResult.ordinal,
-        subjectKey: suite.subjectKey,
-        judgeConfigId: judgeConfig?.judgeConfigId ?? "00000000-0000-0000-0000-000000000000",
-        judgeConfigRevision: judgeConfig?.revision ?? 1,
-        judgeConfigFingerprint: fingerprint,
-        protocolKey: judgeConfig?.protocolKey ?? AI_EVAL_JUDGE_PROTOCOL_KEY,
-        protocolRevision: judgeConfig?.protocolRevision ?? AI_EVAL_JUDGE_PROTOCOL_REVISION,
-        judgeModelConfigId: judgeConfig?.modelConfigId ?? "00000000-0000-0000-0000-000000000000",
-        judgeModelConfigRevision: judgeConfig?.modelConfigRevision ?? 1,
-        judgeProviderConfigId: judgeConfig?.providerConfigId ?? "00000000-0000-0000-0000-000000000000",
-        judgeProviderConfigRevision: judgeConfig?.providerConfigRevision ?? 1,
-        judgeCostOperationId: null,
-        budgetReservationId: null,
-        status: "PENDING",
-        providerInvocationState: "NOT_INVOKED",
+    execution = this.judgeExecutions.create({
+      runId: run.id,
+      caseId: caseRevision.caseId,
+      caseRevision: caseRevision.revision,
+      ordinal: caseResult.ordinal,
+      subjectKey: suite.subjectKey,
+      judgeConfigId: judgeConfig?.judgeConfigId ?? "00000000-0000-0000-0000-000000000000",
+      judgeConfigRevision: judgeConfig?.revision ?? 1,
+      judgeConfigFingerprint: fingerprint,
+      protocolKey: judgeConfig?.protocolKey ?? AI_EVAL_JUDGE_PROTOCOL_KEY,
+      protocolRevision: judgeConfig?.protocolRevision ?? AI_EVAL_JUDGE_PROTOCOL_REVISION,
+      judgeModelConfigId: judgeConfig?.modelConfigId ?? "00000000-0000-0000-0000-000000000000",
+      judgeModelConfigRevision: judgeConfig?.modelConfigRevision ?? 1,
+      judgeProviderConfigId: judgeConfig?.providerConfigId ?? "00000000-0000-0000-0000-000000000000",
+      judgeProviderConfigRevision: judgeConfig?.providerConfigRevision ?? 1,
+      judgeCostOperationId: null,
+      budgetReservationId: null,
+      status: "PENDING",
+      providerInvocationState: "NOT_INVOKED",
+      providerInvoked: false,
+      judgeOutputSha256: null,
+      judgeOutputByteSize: null,
+      safeFailureCode: null,
+      latencyMs: null,
+      createdAt: now,
+      startedAt: null,
+      completedAt: null,
+      updatedAt: now,
+    });
+
+    if (signal?.aborted) {
+      return this.judgeExecutions.cancel({
+        id: execution.id,
         providerInvoked: false,
-        judgeOutputSha256: null,
-        judgeOutputByteSize: null,
-        safeFailureCode: null,
-        latencyMs: null,
-        createdAt: now,
-        startedAt: null,
-        completedAt: null,
-        updatedAt: now,
+        safeFailureCode: "EVAL_JUDGE_CANCELLED",
+        now: this.safeNow(),
       });
+    }
+
+    try {
+      checkLease?.();
+    } catch (error) {
+      if (error instanceof AIJobError && error.code === "AI_JOB_LEASE_LOST") {
+        this.judgeExecutions.fail({
+          id: execution.id,
+          providerInvoked: false,
+          safeFailureCode: "EVAL_JUDGE_LEASE_LOST",
+          now: this.safeNow(),
+        });
+        throw error;
+      }
+      throw error;
     }
 
     // 1. Config validation
@@ -261,6 +322,22 @@ export class AIEvalJudgeExecutionService {
         safeFailureCode: "EVAL_JUDGE_CANCELLED",
         now: this.safeNow(),
       });
+    }
+
+    try {
+      checkLease?.();
+    } catch (error) {
+      if (error instanceof AIJobError && error.code === "AI_JOB_LEASE_LOST") {
+        this.completeOperation(operation.id, "FAILED", this.safeNow());
+        this.judgeExecutions.fail({
+          id: execution.id,
+          providerInvoked: false,
+          safeFailureCode: "EVAL_JUDGE_LEASE_LOST",
+          now: this.safeNow(),
+        });
+        throw error;
+      }
+      throw error;
     }
 
     // 5. Format prompt envelope
@@ -365,10 +442,43 @@ export class AIEvalJudgeExecutionService {
       });
     }
 
+    try {
+      checkLease?.();
+    } catch (error) {
+      if (error instanceof AIJobError && error.code === "AI_JOB_LEASE_LOST") {
+        this.completeOperation(operation.id, "FAILED", this.safeNow());
+        this.settle(reservationId, this.safeNow());
+        this.judgeExecutions.fail({
+          id: execution.id,
+          providerInvoked: false,
+          safeFailureCode: "EVAL_JUDGE_LEASE_LOST",
+          now: this.safeNow(),
+        });
+        throw error;
+      }
+      throw error;
+    }
+
     // 8. Mark Running & Invoking
     execution = this.judgeExecutions.markRunning(execution.id, this.safeNow());
     execution = this.judgeExecutions.markInvoking(execution.id, this.safeNow());
-    checkLease?.();
+
+    try {
+      checkLease?.();
+    } catch (error) {
+      if (error instanceof AIJobError && error.code === "AI_JOB_LEASE_LOST") {
+        this.completeOperation(operation.id, "FAILED", this.safeNow());
+        this.settle(reservationId, this.safeNow());
+        this.judgeExecutions.fail({
+          id: execution.id,
+          providerInvoked: false,
+          safeFailureCode: "EVAL_JUDGE_LEASE_LOST",
+          now: this.safeNow(),
+        });
+        throw error;
+      }
+      throw error;
+    }
 
     // 9. Call Provider Gateway
     const controller = new AbortController();
@@ -428,8 +538,38 @@ export class AIEvalJudgeExecutionService {
     const providerInvoked = invoked.length > 0;
     if (providerInvoked) {
       this.recordAttempts(operation.id, invoked, usage.snapshot());
-      checkLease?.();
       execution = this.judgeExecutions.markInvokedWithAccounting(execution.id, this.safeNow());
+    }
+
+    let leaseLostAfterGateway = false;
+    try {
+      checkLease?.();
+    } catch (error) {
+      if (error instanceof AIJobError && error.code === "AI_JOB_LEASE_LOST") {
+        leaseLostAfterGateway = true;
+      } else {
+        throw error;
+      }
+    }
+
+    if (leaseLostAfterGateway) {
+      this.completeOperation(operation.id, "FAILED", this.safeNow());
+      this.settle(reservationId, this.safeNow());
+      if (providerInvoked) {
+        this.judgeExecutions.ambiguous({
+          id: execution.id,
+          safeFailureCode: "EVAL_JUDGE_PROVIDER_AMBIGUOUS",
+          now: this.safeNow(),
+        });
+      } else {
+        this.judgeExecutions.fail({
+          id: execution.id,
+          providerInvoked: false,
+          safeFailureCode: "EVAL_JUDGE_LEASE_LOST",
+          now: this.safeNow(),
+        });
+      }
+      throw new AIJobError("AI_JOB_LEASE_LOST", "The Job lease was lost during Judge execution.");
     }
 
     const outputSha256 = judgeOutput ? createHash("sha256").update(judgeOutput, "utf8").digest("hex") : null;
@@ -464,6 +604,20 @@ export class AIEvalJudgeExecutionService {
         judgeOutputSha256: outputSha256,
         judgeOutputByteSize: outputByteSize,
         safeFailureCode: "EVAL_JUDGE_GATEWAY_ERROR",
+        now: this.safeNow(),
+      });
+    }
+
+    // 10.5. Proven Provider Invocation check (Finding 2)
+    if (!providerInvoked || execution.providerInvocationState !== "INVOKED_WITH_ACCOUNTING" || !execution.judgeCostOperationId) {
+      this.completeOperation(operation.id, "FAILED", this.safeNow());
+      this.settle(reservationId, this.safeNow());
+      return this.judgeExecutions.fail({
+        id: execution.id,
+        providerInvoked: false,
+        judgeOutputSha256: outputSha256,
+        judgeOutputByteSize: outputByteSize,
+        safeFailureCode: "EVAL_JUDGE_PROVIDER_NOT_INVOKED",
         now: this.safeNow(),
       });
     }

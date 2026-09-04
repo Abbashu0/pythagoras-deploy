@@ -220,9 +220,9 @@ export class AIEvalTargetExecutionService {
       providerInvoked = providerInvoked || this.dependencies.accounting.listUsageCostRecords(operation.id).length > 0;
       if (providerInvoked && !execution.providerInvoked) execution = this.executions.markInvokedWithAccounting(execution.id, this.safeNow());
       else if (execution.providerInvocationState === "INVOKING") execution = this.executions.markNotInvoked(execution.id, this.safeNow());
-      if (input.signal?.aborted) return await this.finishObserved(target, execution, operation, reservationId, "CANCELLED", "EVAL_TARGET_CANCELLED", pack, "", [], "CANCELLED", providerInvoked, null);
+      if (input.signal?.aborted) return await this.finishObserved(target, execution, operation, reservationId, "CANCELLED", "EVAL_TARGET_CANCELLED", pack, "", [], "CANCELLED", providerInvoked, null, input.signal, input.checkLease);
       if (pack.status !== "SUFFICIENT" || !pack.sufficient) {
-        return await this.finishObserved(target, execution, operation, reservationId, "BLOCKED", "EVAL_RETRIEVAL_INSUFFICIENT", pack, "", [], "OTHER", providerInvoked, null);
+        return await this.finishObserved(target, execution, operation, reservationId, "BLOCKED", "EVAL_RETRIEVAL_INSUFFICIENT", pack, "", [], "OTHER", providerInvoked, null, input.signal, input.checkLease);
       }
       this.assertCandidateRetrieval(target.run.candidateSnapshot, pack);
       const generationPlan = this.dependencies.planner.plan(preflight, pack);
@@ -259,17 +259,17 @@ export class AIEvalTargetExecutionService {
         execution = this.executions.markInvokedWithAccounting(execution.id, this.safeNow());
       }
       if (input.signal?.aborted || (isAIProviderGatewayError(gatewayError) && gatewayError.code === "CANCELLED")) {
-        return await this.finishObserved(target, execution, operation, reservationId, "CANCELLED", "EVAL_TARGET_CANCELLED", pack, output, generationPlan.citationMap, "CANCELLED", providerInvoked, generationPlan.planFingerprint);
+        return await this.finishObserved(target, execution, operation, reservationId, "CANCELLED", "EVAL_TARGET_CANCELLED", pack, output, generationPlan.citationMap, "CANCELLED", providerInvoked, generationPlan.planFingerprint, input.signal, input.checkLease);
       }
       if (gatewayError || !finishReason || !providerInvoked) {
         const reason = isAIProviderGatewayError(gatewayError) ? `EVAL_PROVIDER_${gatewayError.code}` : "EVAL_TARGET_FAILED";
-        return await this.finishObserved(target, execution, operation, reservationId, "FAILED", reason, pack, output, generationPlan.citationMap, "FAILED", providerInvoked, generationPlan.planFingerprint);
+        return await this.finishObserved(target, execution, operation, reservationId, "FAILED", reason, pack, output, generationPlan.citationMap, "FAILED", providerInvoked, generationPlan.planFingerprint, input.signal, input.checkLease);
       }
       const validation = this.outputValidator.validate({ outputText: output, citationMap: generationPlan.citationMap, finishReason, groundingProtocolKey: generationPlan.groundingProtocolKey, groundingProtocolRevision: generationPlan.groundingProtocolRevision, citationProtocolKey: generationPlan.citationProtocolKey, citationProtocolRevision: generationPlan.citationProtocolRevision });
-      if (validation.status !== "VALID") return await this.finishObserved(target, execution, operation, reservationId, "FAILED", "EVAL_OUTPUT_INVALID", pack, output, generationPlan.citationMap, "FAILED", providerInvoked, generationPlan.planFingerprint);
+      if (validation.status !== "VALID") return await this.finishObserved(target, execution, operation, reservationId, "FAILED", "EVAL_OUTPUT_INVALID", pack, output, generationPlan.citationMap, "FAILED", providerInvoked, generationPlan.planFingerprint, input.signal, input.checkLease);
       this.dependencies.retrieval.assertEvidencePackCurrent(pack);
       this.assertCandidateCurrent(target.run, target.suite.subjectKey);
-      return await this.finishObserved(target, execution, operation, reservationId, "COMPLETED", null, pack, output, generationPlan.citationMap, finishReason, providerInvoked, generationPlan.planFingerprint);
+      return await this.finishObserved(target, execution, operation, reservationId, "COMPLETED", null, pack, output, generationPlan.citationMap, finishReason, providerInvoked, generationPlan.planFingerprint, input.signal, input.checkLease);
     } catch (error) {
       if (error instanceof AIJobError && error.code === "AI_JOB_LEASE_LOST") throw error;
       const safe = error instanceof AIEvalError ? error : new AIEvalError("AI_EVAL_TARGET_INVALID", "The Eval target could not be completed safely.", {}, error);
@@ -376,7 +376,7 @@ export class AIEvalTargetExecutionService {
     for (const attempt of attempts) this.dependencies.accounting.recordAttempt({ operationId, attempt, normalizedUsage: usage, capability: attempt.capability, providerModelId: attempt.providerModelId ?? "unknown", at: attempt.startedAt, latencyMs: attempt.latencyMs });
   }
 
-  private async finishObserved(target: ReturnType<AIEvalTargetExecutionService["validateTarget"]>, execution: AIEvalCaseExecution, operation: AICostOperation, reservationId: string, status: "COMPLETED" | "BLOCKED" | "FAILED" | "CANCELLED", safeFailureCode: string | null, pack: AIEvidencePack, output: string, citationMap: readonly import("../tutor/preflight/contracts").AITutorCitationMapItem[], finishReason: "STOP" | "LENGTH" | "CONTENT_FILTER" | "OTHER" | "FAILED" | "CANCELLED", providerInvoked: boolean, planFingerprint: string | null): Promise<AIEvalTargetExecutionResult> {
+  private async finishObserved(target: ReturnType<AIEvalTargetExecutionService["validateTarget"]>, execution: AIEvalCaseExecution, operation: AICostOperation, reservationId: string, status: "COMPLETED" | "BLOCKED" | "FAILED" | "CANCELLED", safeFailureCode: string | null, pack: AIEvidencePack, output: string, citationMap: readonly import("../tutor/preflight/contracts").AITutorCitationMapItem[], finishReason: "STOP" | "LENGTH" | "CONTENT_FILTER" | "OTHER" | "FAILED" | "CANCELLED", providerInvoked: boolean, planFingerprint: string | null, signal?: AbortSignal, checkLease?: () => void): Promise<AIEvalTargetExecutionResult> {
     const completedAt = this.safeNow();
     const elapsedLatencyMs = this.elapsedLatency(execution, completedAt);
     const finalStatus = elapsedLatencyMs === null ? "FAILED" : status;
@@ -400,9 +400,12 @@ export class AIEvalTargetExecutionService {
           outputText: output,
           evidencePack: pack,
           finishReason: finalFinishReason,
+          signal,
+          checkLease,
         });
-      } catch {
-        // Any judge failure does not alter or rollback the recorded target result or accounting
+      } catch (error) {
+        if (error instanceof AIJobError && error.code === "AI_JOB_LEASE_LOST") throw error;
+        // Any other judge failure does not alter or rollback the recorded target result or accounting
       }
     }
     const hash = hashOutput(output);

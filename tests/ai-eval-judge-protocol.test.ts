@@ -285,3 +285,56 @@ test("strict Judge parser rejects oversized output", () => {
     (err) => err instanceof AIEvalError && err.code === "AI_EVAL_JUDGE_OUTPUT_INVALID",
   );
 });
+
+test("strict Judge parser enforces rubricBand and scoreUnits consistency across exact boundaries", () => {
+  const required: AIEvalDimension[] = ["ARABIC_QUALITY"];
+
+  // Exact valid boundaries:
+  const validBoundaries = [
+    { band: "FAIL", score: 0 },
+    { band: "FAIL", score: 499_999 },
+    { band: "MARGINAL", score: 500_000 },
+    { band: "MARGINAL", score: 699_999 },
+    { band: "PASS", score: 700_000 },
+    { band: "PASS", score: 899_999 },
+    { band: "EXCELLENT", score: 900_000 },
+    { band: "EXCELLENT", score: 1_000_000 },
+  ];
+
+  for (const { band, score } of validBoundaries) {
+    const payload = JSON.stringify({
+      protocol: AI_EVAL_JUDGE_PROTOCOL_KEY,
+      revision: AI_EVAL_JUDGE_PROTOCOL_REVISION,
+      scores: [{ dimension: "ARABIC_QUALITY", scoreUnits: score, rubricBand: band }],
+    });
+    const parsed = parseAIEvalJudgeResponse(payload, required);
+    assert.equal(parsed.scores[0].scoreUnits, score);
+    assert.equal(parsed.scores[0].rubricBand, band);
+  }
+
+  // Exact invalid cross-band mismatches:
+  const invalidMismatches = [
+    { band: "EXCELLENT", score: 0 },
+    { band: "EXCELLENT", score: 899_999 },
+    { band: "PASS", score: 699_999 },
+    { band: "PASS", score: 900_000 },
+    { band: "MARGINAL", score: 499_999 },
+    { band: "MARGINAL", score: 900_000 },
+    { band: "FAIL", score: 500_000 },
+    { band: "FAIL", score: 1_000_000 },
+    { band: "UNKNOWN_BAND", score: 800_000 },
+  ];
+
+  for (const { band, score } of invalidMismatches) {
+    const payload = JSON.stringify({
+      protocol: AI_EVAL_JUDGE_PROTOCOL_KEY,
+      revision: AI_EVAL_JUDGE_PROTOCOL_REVISION,
+      scores: [{ dimension: "ARABIC_QUALITY", scoreUnits: score, rubricBand: band }],
+    });
+    assert.throws(
+      () => parseAIEvalJudgeResponse(payload, required),
+      (err) => err instanceof AIEvalError && err.code === "AI_EVAL_JUDGE_OUTPUT_INVALID",
+      `Expected rejection for band ${band} with score ${score}`,
+    );
+  }
+});

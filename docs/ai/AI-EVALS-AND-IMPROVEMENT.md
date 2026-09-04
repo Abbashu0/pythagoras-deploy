@@ -57,7 +57,7 @@ The target invokes the real internal M7C Retrieval, M8A Preflight/Generation Pla
 
 ## 2C. AI-M9B2 supplementary judge and final M9 integration boundary
 
-AI-M9B2 introduces the governed Supplementary LLM Judge domain via migration `0037_eval-supplementary-judge.sql` and the `ai.eval-judge-config` resource type managed through Change Sets with OWNER-only approval and publication. A Judge Config pins the subjectKey, Model Config, Provider Config, Budget Policy, Rate Limit Policy, timeout, max output tokens, and code-owned protocol identity `eval-judge-v1@1`.
+AI-M9B2 introduces the governed Supplementary LLM Judge domain via migrations `0037_eval-supplementary-judge.sql` and `0038_eval-judge-execution-hardening.sql`, and the `ai.eval-judge-config` resource type managed through Change Sets with OWNER-only approval and publication. A Judge Config pins the subjectKey, Model Config, Provider Config, Budget Policy, Rate Limit Policy, timeout, max output tokens, and code-owned protocol identity `eval-judge-v1@1`.
 
 Key invariants and delivered architectural boundaries include:
 1. **Runtime-Only Evaluation Handoff:** Target execution hands candidate output and retrieved evidence snippets directly to the Judge Execution Service in memory. Raw candidate output, evidence text, prompt templates, and raw judge outputs are strictly ephemeral and never written to SQLite or disk.
@@ -65,10 +65,13 @@ Key invariants and delivered architectural boundaries include:
 3. **Self-Judge Prevention:** A candidate model revision cannot evaluate itself; self-judge configurations fail closed at execution time and trigger database-level trigger constraints.
 4. **Prohibition of Judge Security Evaluation:** Security is strictly deterministic; SQLite triggers and protocol validators forbid the Judge from evaluating the `SECURITY` dimension.
 5. **Strict Protocol & Non-Repairing JSON Parser:** The Judge must output valid JSON conforming strictly to `{"protocol": "eval-judge-v1", "revision": 1, "scores": [{"dimension": string, "rubricBand": string, "scoreUnits": number}]}`. Malformed JSON, extra keys, missing dimensions, duplicate dimensions, or invalid rubric bands fail safely without secondary model repair loops.
-6. **Fixed-Point Integer Scoring:** Qualitative scores use the 0..1,000,000 scale. Valid rubric bands are `EXCELLENT` (900k-1M), `PASS` (700k-899k), `MARGINAL` (500k-699k), and `FAIL` (0-499k). Both `EXCELLENT` and `PASS` count towards passed cases.
-7. **Deterministic Security Priority:** Deterministic security failures block the Run regardless of high qualitative Judge scores.
-8. **Strict Baseline Comparability:** Baseline comparisons require exact identity match across Judge configuration, protocol, model revision, and provider revision. Divergence results in `BASELINE_NOT_COMPARABLE`.
-9. **Candidate Latency Purity:** The `MAX_LATENCY_MS` gate evaluates candidate target generation latency only, strictly excluding judge latency.
+6. **Fixed-Point Integer Scoring & Strict Rubric Bands:** Qualitative scores use the 0..1,000,000 scale with exact rubric band boundaries enforced at the protocol parser, repository, and SQLite trigger layers: `EXCELLENT` (900,000..1,000,000), `PASS` (700,000..899,999), `MARGINAL` (500,000..699,999), and `FAIL` (0..499,999). Both `EXCELLENT` and `PASS` count towards passed cases.
+7. **Crash / Re-Entry Fail-Closed Recovery:** Re-entering a nonterminal Judge Execution fails closed to `AMBIGUOUS` if invocation is proven with accounting, or `INPUT_LOST` if unproven, with ZERO second Gateway calls.
+8. **Lease / Cancellation Propagation:** Lease loss before Judge Provider work aborts with `EVALS_JUDGE_LEASE_LOST` (re-throwing `AI_JOB_LEASE_LOST`); lease loss after Provider work marks the execution `AMBIGUOUS` while preserving recorded usage and financial accounting.
+9. **Proven Provider Invocation:** Judge Results are rejected by the repository and database triggers unless the parent execution proves `provider_invoked = 1`, `provider_invocation_state = 'INVOKED_WITH_ACCOUNTING'`, and a linked `judge_cost_operation_id`.
+10. **Deterministic Security Priority:** Deterministic security failures block the Run regardless of high qualitative Judge scores.
+11. **Strict Baseline Comparability:** Baseline comparisons require exact identity match across Judge configuration, protocol, model revision, and provider revision. Divergence results in `BASELINE_NOT_COMPARABLE`.
+12. **Candidate Latency Purity:** The `MAX_LATENCY_MS` gate evaluates candidate target generation latency only, strictly excluding judge latency.
 
 ## 3. Agent 2 is read-only intelligence
 

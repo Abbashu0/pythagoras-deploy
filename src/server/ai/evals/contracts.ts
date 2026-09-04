@@ -656,6 +656,9 @@ export interface AIEvalJudgeConfigRepository {
   appendRevision(input: { id: string; expectedRevision: number; content: AIEvalJudgeConfigContent; actor: AdminActor; now: number }): AIEvalJudgeConfigRevision;
 }
 
+export const AI_EVAL_JUDGE_RUBRIC_BANDS = ["EXCELLENT", "PASS", "MARGINAL", "FAIL"] as const;
+export type AIEvalJudgeRubricBand = (typeof AI_EVAL_JUDGE_RUBRIC_BANDS)[number];
+
 export interface AIEvalJudgeResult {
   id: string;
   judgeExecutionId: string;
@@ -673,7 +676,7 @@ export interface AIEvalJudgeResult {
   judgeProviderConfigId: string;
   judgeProviderConfigRevision: number;
   scoreUnits: number;
-  rubricBand: string;
+  rubricBand: AIEvalJudgeRubricBand;
   safeReasonCode: string;
   createdAt: number;
 }
@@ -681,7 +684,7 @@ export interface AIEvalJudgeResult {
 export interface AIEvalJudgeScore {
   dimension: AIEvalDimension;
   scoreUnits: number;
-  rubricBand: string;
+  rubricBand: AIEvalJudgeRubricBand;
 }
 
 export interface AIEvalJudgeResponse {

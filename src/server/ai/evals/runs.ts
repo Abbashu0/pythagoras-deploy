@@ -7,6 +7,7 @@ import {
   aiEvalDimensionAggregates,
   aiEvalGateResults,
   aiEvalGraderResults,
+  aiEvalJudgeExecutions,
   aiEvalJudgeResults,
   aiEvalRunExecutionBindings,
   aiEvalRuns,
@@ -27,12 +28,14 @@ import type {
   AIEvalGateResult,
   AIEvalGraderResult,
   AIEvalJudgeResult,
+  AIEvalJudgeRubricBand,
   AIEvalRun,
   AIEvalRunRepository,
   AIEvalRunStatus,
   AIEvalRunExecutionBinding,
 } from "./contracts";
 import { AIEvalError } from "./errors";
+import { validateRubricBandAndScore } from "./judge-protocol";
 import { fingerprintAIEvalCandidate, fingerprintAIEvalManifest, normalizeAIEvalAccountingBasis, normalizeAIEvalCandidateSnapshot } from "./validation";
 
 const TERMINAL_RUN_STATUSES = new Set<AIEvalRunStatus>(["COMPLETED", "FAILED", "CANCELLED"]);
@@ -226,6 +229,9 @@ export class SQLiteAIEvalRunRepository implements AIEvalRunRepository {
     if (!Number.isSafeInteger(input.scoreUnits) || input.scoreUnits < 0 || input.scoreUnits > 1_000_000) {
       throw new AIEvalError("AI_EVAL_RUN_INVALID", "The Eval judge score is invalid.");
     }
+    if (!validateRubricBandAndScore(input.rubricBand, input.scoreUnits)) {
+      throw new AIEvalError("AI_EVAL_RUN_INVALID", `The Eval judge score ${input.scoreUnits} and rubric band ${input.rubricBand} are inconsistent.`);
+    }
     if (input.dimension === "SECURITY") {
       throw new AIEvalError("AI_EVAL_JUDGE_SECURITY_FORBIDDEN", "The SECURITY dimension cannot be evaluated by a Judge.");
     }
@@ -243,6 +249,45 @@ export class SQLiteAIEvalRunRepository implements AIEvalRunRepository {
       .get();
     if (!parent || parent.runStatus !== "RUNNING") {
       throw new AIEvalError("AI_EVAL_RUN_NOT_SCORABLE", "Judge Eval results can only be inserted while a Run is RUNNING.");
+    }
+    const execution = this.database.db.select({
+      id: aiEvalJudgeExecutions.id,
+      runId: aiEvalJudgeExecutions.runId,
+      caseId: aiEvalJudgeExecutions.caseId,
+      caseRevision: aiEvalJudgeExecutions.caseRevision,
+      providerInvoked: aiEvalJudgeExecutions.providerInvoked,
+      providerInvocationState: aiEvalJudgeExecutions.providerInvocationState,
+      judgeCostOperationId: aiEvalJudgeExecutions.judgeCostOperationId,
+      judgeConfigId: aiEvalJudgeExecutions.judgeConfigId,
+      judgeConfigRevision: aiEvalJudgeExecutions.judgeConfigRevision,
+      protocolKey: aiEvalJudgeExecutions.protocolKey,
+      protocolRevision: aiEvalJudgeExecutions.protocolRevision,
+      judgeModelConfigId: aiEvalJudgeExecutions.judgeModelConfigId,
+      judgeModelConfigRevision: aiEvalJudgeExecutions.judgeModelConfigRevision,
+      judgeProviderConfigId: aiEvalJudgeExecutions.judgeProviderConfigId,
+      judgeProviderConfigRevision: aiEvalJudgeExecutions.judgeProviderConfigRevision,
+    })
+      .from(aiEvalJudgeExecutions)
+      .where(eq(aiEvalJudgeExecutions.id, input.judgeExecutionId))
+      .get();
+    if (
+      !execution ||
+      execution.runId !== parent.runId ||
+      execution.caseId !== parent.caseId ||
+      execution.caseRevision !== parent.caseRevision ||
+      !execution.providerInvoked ||
+      execution.providerInvocationState !== "INVOKED_WITH_ACCOUNTING" ||
+      !execution.judgeCostOperationId ||
+      execution.judgeConfigId !== input.judgeConfigId ||
+      execution.judgeConfigRevision !== input.judgeConfigRevision ||
+      execution.protocolKey !== input.protocolKey ||
+      execution.protocolRevision !== input.protocolRevision ||
+      execution.judgeModelConfigId !== input.judgeModelConfigId ||
+      execution.judgeModelConfigRevision !== input.judgeModelConfigRevision ||
+      execution.judgeProviderConfigId !== input.judgeProviderConfigId ||
+      execution.judgeProviderConfigRevision !== input.judgeProviderConfigRevision
+    ) {
+      throw new AIEvalError("AI_EVAL_RUN_INVALID", "The Eval Judge Execution does not prove valid provider invocation or ownership is mismatched.");
     }
     const suiteRevision = this.database.db.select({
       requiredDimensions: aiEvalSuiteRevisions.requiredDimensions,
@@ -401,7 +446,7 @@ function judgeResultFromRow(row: AIEvalJudgeResultRow): AIEvalJudgeResult {
     judgeProviderConfigId: row.judgeProviderConfigId,
     judgeProviderConfigRevision: row.judgeProviderConfigRevision,
     scoreUnits: row.scoreUnits,
-    rubricBand: row.rubricBand,
+    rubricBand: row.rubricBand as AIEvalJudgeRubricBand,
     safeReasonCode: row.safeReasonCode,
     createdAt: row.createdAt,
   };

@@ -2,8 +2,10 @@ import type { AIEvidencePack } from "../retrieval";
 import {
   AI_EVAL_JUDGE_PROTOCOL_KEY,
   AI_EVAL_JUDGE_PROTOCOL_REVISION,
+  AI_EVAL_JUDGE_RUBRIC_BANDS,
   type AIEvalDimension,
   type AIEvalJudgeResponse,
+  type AIEvalJudgeRubricBand,
   type AIEvalJudgeScore,
 } from "./contracts";
 import { AIEvalError } from "./errors";
@@ -132,9 +134,31 @@ export function formatAIEvalJudgePrompt(input: FormatAIEvalJudgePromptInput): {
   return { systemPrompt, userPrompt };
 }
 
+export function validateRubricBandAndScore(
+  rubricBand: string,
+  scoreUnits: number,
+): rubricBand is AIEvalJudgeRubricBand {
+  if (!Number.isSafeInteger(scoreUnits) || scoreUnits < 0 || scoreUnits > 1_000_000) {
+    return false;
+  }
+  if (rubricBand === "EXCELLENT") {
+    return scoreUnits >= 900_000 && scoreUnits <= 1_000_000;
+  }
+  if (rubricBand === "PASS") {
+    return scoreUnits >= 700_000 && scoreUnits <= 899_999;
+  }
+  if (rubricBand === "MARGINAL") {
+    return scoreUnits >= 500_000 && scoreUnits <= 699_999;
+  }
+  if (rubricBand === "FAIL") {
+    return scoreUnits >= 0 && scoreUnits <= 499_999;
+  }
+  return false;
+}
+
 /**
  * Strict parser for Judge JSON responses.
- * Rejects malformed JSON, duplicate/missing/extra dimensions, non-integers, out-of-range scores, and unexpected fields.
+ * Rejects malformed JSON, duplicate/missing/extra dimensions, non-integers, out-of-range scores, inconsistent rubric bands, and unexpected fields.
  * Never attempts model-based repair.
  */
 export function parseAIEvalJudgeResponse(
@@ -185,7 +209,7 @@ export function parseAIEvalJudgeResponse(
 
   const seenDimensions = new Set<string>();
   const scoreKeys = ["dimension", "rubricBand", "scoreUnits"].sort();
-  const validRubricBands = new Set(["EXCELLENT", "PASS", "MARGINAL", "FAIL"]);
+  const validRubricBands = new Set<string>(AI_EVAL_JUDGE_RUBRIC_BANDS);
   const scores: AIEvalJudgeScore[] = [];
 
   for (const item of record.scores) {
@@ -220,6 +244,13 @@ export function parseAIEvalJudgeResponse(
     const rubricBand = itemRecord.rubricBand;
     if (typeof rubricBand !== "string" || !validRubricBands.has(rubricBand)) {
       throw new AIEvalError("AI_EVAL_JUDGE_OUTPUT_INVALID", `Invalid rubric band for dimension ${dimension}: ${String(rubricBand)}`);
+    }
+
+    if (!validateRubricBandAndScore(rubricBand, scoreUnits)) {
+      throw new AIEvalError(
+        "AI_EVAL_JUDGE_OUTPUT_INVALID",
+        `Rubric band ${rubricBand} is inconsistent with score ${scoreUnits} for dimension ${dimension}.`,
+      );
     }
 
     scores.push({

@@ -473,7 +473,7 @@ test("0006 inspection cache migration applies to fresh and existing 0005 databas
   const oldMigrations = mkdtempSync(path.join(os.tmpdir(), "pythagoras-m8-migrations-"));
   try {
     const fresh = openContentDatabase({ dataDirectory: freshRoot, migrationsDirectory });
-    assert.equal((fresh.client.prepare("select count(*) count from __drizzle_migrations").get() as { count: number }).count, 38);
+    assert.equal((fresh.client.prepare("select count(*) count from __drizzle_migrations").get() as { count: number }).count, 39);
     assert.ok(fresh.client.prepare("select name from sqlite_master where name='question_package_inspections'").get());
     fresh.close();
 
@@ -492,7 +492,7 @@ test("0006 inspection cache migration applies to fresh and existing 0005 databas
     const old = openContentDatabase({ dataDirectory: oldRoot, migrationsDirectory: oldMigrations });
     old.close();
     const upgraded = openContentDatabase({ dataDirectory: oldRoot, migrationsDirectory });
-    assert.equal((upgraded.client.prepare("select count(*) count from __drizzle_migrations").get() as { count: number }).count, 38);
+    assert.equal((upgraded.client.prepare("select count(*) count from __drizzle_migrations").get() as { count: number }).count, 39);
     assert.ok(upgraded.client.prepare("select name from sqlite_master where name='question_package_inspections'").get());
     upgraded.close();
   } finally {
