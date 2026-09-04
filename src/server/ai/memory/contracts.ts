@@ -17,11 +17,21 @@ export type AIMemoryVisibilityScope = (typeof AI_MEMORY_VISIBILITY_SCOPES)[numbe
 export const AI_MEMORY_CREATION_ORIGINS = ["CONVERSATION"] as const;
 export type AIMemoryCreationOrigin = (typeof AI_MEMORY_CREATION_ORIGINS)[number];
 
+export const AI_MEMORY_KINDS = [
+  "LEARNING_PREFERENCE",
+  "EXPLANATION_PREFERENCE",
+  "LEARNING_DIFFICULTY",
+  "STUDY_GOAL",
+  "STUDY_PROGRESS",
+] as const;
+export type AIMemoryKind = (typeof AI_MEMORY_KINDS)[number];
+
 export const AI_MEMORY_SAFE_REVIEW_CODES = [
   "STUDENT_APPROVED",
   "STUDENT_REJECTED",
   "CONVERSATION_DELETED",
   "PRINCIPAL_PURGED",
+  "SYSTEM_AUTO_APPROVED",
 ] as const;
 export type AIMemorySafeReviewCode = (typeof AI_MEMORY_SAFE_REVIEW_CODES)[number];
 
@@ -73,6 +83,7 @@ export interface AIMemory {
   status: AIMemoryStatus;
   visibilityScope: AIMemoryVisibilityScope;
   creationOrigin: AIMemoryCreationOrigin;
+  kind: AIMemoryKind | null;
   sourceConversationId: string;
   sourceStartOrdinal: number;
   sourceEndOrdinal: number;
@@ -103,7 +114,7 @@ export interface AIMemoryRepository {
   getById(input: { principalRef: string; memoryId: string; subjectKey?: string }): AIMemory | null;
   listEligible(input: { principalRef: string; subjectKey: string; at: number; limit: number }): AIContextMemory[];
   insertCandidate(input: Omit<AIMemory, "id"> & { id: string }): AIMemory;
-  review(input: { id: string; principalRef: string; status: "APPROVED" | "REJECTED"; reviewedAt: number; safeReviewCode: "STUDENT_APPROVED" | "STUDENT_REJECTED" }): AIMemory;
+  review(input: { id: string; principalRef: string; status: "APPROVED" | "REJECTED"; reviewedAt: number; safeReviewCode: "STUDENT_APPROVED" | "STUDENT_REJECTED" | "SYSTEM_AUTO_APPROVED" }): AIMemory;
   purgeForConversationInTransaction(input: { conversationId: string; principalRef: string; at: number }): number;
   purgeForPrincipalInTransaction(input: { principalRef: string; at: number; limit?: number }): number;
 }

@@ -4,6 +4,7 @@ import { assertActiveStudentPrincipal } from "../conversations/principal";
 import type { AIStudentPrincipal } from "../conversations/contracts";
 import { SQLiteAIConversationRepository } from "../conversations/sqlite-repository";
 import { AIMemoryError, AI_MEMORY_MAX_SOURCE_MESSAGES, AI_MEMORY_CONFIDENCE_SCALE } from "./contracts";
+import type { AIMemoryKind } from "./contracts";
 import type { AIMemory, AIMemoryPolicyRepository, AIMemoryRepository } from "./contracts";
 import { SQLiteAIMemoryPolicyRepository } from "./policy-repository";
 import { SQLiteAIMemoryRepository } from "./repository";
@@ -43,6 +44,9 @@ export class AIMemoryService {
     conversationId: string;
     subjectKey: string;
     text: string;
+    kind?: AIMemoryKind;
+    memoryPolicyId?: string;
+    memoryPolicyRevision?: number;
     confidenceUnits: number;
     sourceStartOrdinal: number;
     sourceEndOrdinal: number;
@@ -55,7 +59,10 @@ export class AIMemoryService {
     if (conversation.subjectKey !== subjectKey) throw new AIMemoryError("AI_MEMORY_SCOPE_MISMATCH", "The Memory subject does not match its source Conversation.");
     const policy = this.policies.getBySubjectKey(subjectKey);
     if (!policy) throw new AIMemoryError("AI_MEMORY_POLICY_NOT_FOUND", "No Memory Policy is published for this subject.");
-    const policyRevision = this.policies.getCurrentRevision(policy.id);
+    if (input.memoryPolicyId !== undefined && input.memoryPolicyId !== policy.id) throw new AIMemoryError("AI_MEMORY_SCOPE_MISMATCH", "The Memory Policy does not match the source subject.");
+    const policyRevision = input.memoryPolicyRevision === undefined
+      ? this.policies.getCurrentRevision(policy.id)
+      : this.policies.getRevision(policy.id, input.memoryPolicyRevision);
     if (!policyRevision) throw new AIMemoryError("AI_MEMORY_POLICY_NOT_FOUND", "The current Memory Policy revision is unavailable.");
     if (!policyRevision.enabled) throw new AIMemoryError("AI_MEMORY_POLICY_DISABLED", "The Memory Policy is disabled.");
     const text = normalizeAIMemoryText(input.text);
@@ -85,6 +92,7 @@ export class AIMemoryService {
       status: "CANDIDATE",
       visibilityScope: "PRINCIPAL_SUBJECT",
       creationOrigin: "CONVERSATION",
+      kind: input.kind ?? "LEARNING_PREFERENCE",
       sourceConversationId: conversation.id,
       sourceStartOrdinal: input.sourceStartOrdinal,
       sourceEndOrdinal: input.sourceEndOrdinal,
@@ -124,6 +132,47 @@ export class AIMemoryService {
     const memory = this.requireCandidate(activePrincipal.principalRef, input.memoryId, input.subjectKey);
     const reviewedAt = this.reviewTimestamp(input.now, memory.createdAt);
     return this.memories.review({ id: memory.id, principalRef: activePrincipal.principalRef, status: "REJECTED", reviewedAt, safeReviewCode: "STUDENT_REJECTED" });
+  }
+
+  /**
+   * Server-owned automatic review.  It is deliberately separate from the
+   * Student review API and re-checks the exact pinned Policy revision before
+   * changing a candidate's lifecycle.
+   */
+  approveAutomatically(input: {
+    memoryId: string;
+    principalRef: string;
+    subjectKey: string;
+    memoryPolicyId: string;
+    memoryPolicyRevision: number;
+    minimumConfidenceUnits: number;
+    now?: number;
+  }): AIMemory {
+    const subjectKey = normalizeSubjectKey(input.subjectKey);
+    if (typeof input.principalRef !== "string" || !/^[A-Za-z0-9_-]{1,200}$/u.test(input.principalRef)) throw new AIMemoryError("AI_MEMORY_SCOPE_MISMATCH", "The Memory principal is invalid.");
+    if (!UUID_PATTERN.test(input.memoryId) || !UUID_PATTERN.test(input.memoryPolicyId) || !Number.isSafeInteger(input.memoryPolicyRevision) || input.memoryPolicyRevision < 1 || !Number.isSafeInteger(input.minimumConfidenceUnits) || input.minimumConfidenceUnits < 0 || input.minimumConfidenceUnits > AI_MEMORY_CONFIDENCE_SCALE) throw new AIMemoryError("AI_MEMORY_INVALID", "The automatic Memory review input is invalid.");
+    const memory = this.memories.getById({ principalRef: input.principalRef, memoryId: input.memoryId, subjectKey });
+    if (!memory || memory.status !== "CANDIDATE" || memory.memoryPolicyId !== input.memoryPolicyId || memory.memoryPolicyRevision !== input.memoryPolicyRevision || memory.kind === null || memory.confidenceUnits < input.minimumConfidenceUnits) throw new AIMemoryError("AI_MEMORY_LIFECYCLE_CONFLICT", "The Memory candidate is not eligible for automatic review.");
+    const policy = this.policies.getRevision(input.memoryPolicyId, input.memoryPolicyRevision);
+    if (!policy || !policy.enabled || policy.subjectKey !== subjectKey || policy.candidateReviewRequired) throw new AIMemoryError("AI_MEMORY_LIFECYCLE_CONFLICT", "The pinned Memory Policy requires explicit Student review.");
+    const conversation = this.conversations.getConversation(input.principalRef, memory.sourceConversationId);
+    if (!conversation || conversation.status !== "ACTIVE" || conversation.principalRef !== input.principalRef || conversation.subjectKey !== subjectKey) throw new AIMemoryError("AI_MEMORY_SOURCE_INVALID", "The Memory source is no longer active for automatic review.");
+    const messages = this.conversations.listMessagesBefore({
+      principalRef: input.principalRef,
+      conversationId: conversation.id,
+      beforeOrdinal: memory.sourceEndOrdinal + 1,
+      afterOrdinal: memory.sourceStartOrdinal - 1,
+      limit: AI_MEMORY_MAX_SOURCE_MESSAGES,
+      excludePartial: false,
+    }).sort((left, right) => left.ordinal - right.ordinal);
+    if (messages.length !== memory.sourceEndOrdinal - memory.sourceStartOrdinal + 1 || messages.some((message) => message.isPartial) || messages.at(-1)?.role !== "ASSISTANT") throw new AIMemoryError("AI_MEMORY_SOURCE_INVALID", "The Memory source turn is no longer complete for automatic review.");
+    const reviewedAt = input.now ?? this.safeNow();
+    this.reviewTimestamp(reviewedAt, memory.createdAt);
+    return this.memories.review({ id: memory.id, principalRef: input.principalRef, status: "APPROVED", reviewedAt, safeReviewCode: "SYSTEM_AUTO_APPROVED" });
+  }
+
+  autoApprove(input: Parameters<AIMemoryService["approveAutomatically"]>[0]): AIMemory {
+    return this.approveAutomatically(input);
   }
 
   /** Internal, server-owned preparation for future principal deletion. */

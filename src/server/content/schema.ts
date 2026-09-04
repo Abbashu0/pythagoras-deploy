@@ -48,10 +48,16 @@ import type {
 } from "../ai/context/contracts";
 import type {
   AIMemoryCreationOrigin,
+  AIMemoryKind,
   AIMemorySafeReviewCode,
   AIMemoryStatus,
   AIMemoryVisibilityScope,
 } from "../ai/memory/contracts";
+import type {
+  AIMemoryExecutionKind,
+  AIMemoryProviderInvocationState,
+  AIMemoryExecutionStatus,
+} from "../ai/memory/execution-contracts";
 import type { AIConversationSummarySafeDeletionCode, AIConversationSummaryStatus } from "../ai/memory/summary-contracts";
 import type {
   AIInstructionPolicyScope,
@@ -877,6 +883,7 @@ export const aiMemories = sqliteTable(
     status: text("status").$type<AIMemoryStatus>().notNull(),
     visibilityScope: text("visibility_scope").$type<AIMemoryVisibilityScope>().notNull(),
     creationOrigin: text("creation_origin").$type<AIMemoryCreationOrigin>().notNull(),
+    kind: text("kind").$type<AIMemoryKind>(),
     sourceConversationId: text("source_conversation_id").notNull().references(() => aiConversations.id, { onDelete: "restrict" }),
     sourceStartOrdinal: integer("source_start_ordinal").notNull(),
     sourceEndOrdinal: integer("source_end_ordinal").notNull(),
@@ -898,11 +905,12 @@ export const aiMemories = sqliteTable(
     check("ai_memories_status_valid", sql`${table.status} in ('CANDIDATE','APPROVED','REJECTED','DELETED')`),
     check("ai_memories_visibility_valid", sql`${table.visibilityScope} = 'PRINCIPAL_SUBJECT'`),
     check("ai_memories_origin_valid", sql`${table.creationOrigin} = 'CONVERSATION'`),
+    check("ai_memories_kind_valid", sql`${table.kind} is null or ${table.kind} in ('LEARNING_PREFERENCE','EXPLANATION_PREFERENCE','LEARNING_DIFFICULTY','STUDY_GOAL','STUDY_PROGRESS')`),
     check("ai_memories_source_range_valid", sql`${table.sourceStartOrdinal} >= 1 and ${table.sourceEndOrdinal} >= ${table.sourceStartOrdinal} and ${table.sourceEndOrdinal} - ${table.sourceStartOrdinal} + 1 <= 10000`),
     check("ai_memories_text_valid", sql`(${table.status} = 'DELETED' and ${table.memoryText} is null) or (${table.status} <> 'DELETED' and ${table.memoryText} is not null and length(cast(${table.memoryText} as blob)) between 1 and 131072)`),
     check("ai_memories_confidence_valid", sql`${table.confidenceUnits} between 0 and 1000000`),
     check("ai_memories_created_nonnegative", sql`${table.createdAt} >= 0`),
-    check("ai_memories_reviewed_consistent", sql`(${table.status} = 'CANDIDATE' and ${table.reviewedAt} is null and ${table.safeReviewCode} is null) or (${table.status} = 'APPROVED' and ${table.reviewedAt} is not null and ${table.safeReviewCode} = 'STUDENT_APPROVED') or (${table.status} = 'REJECTED' and ${table.reviewedAt} is not null and ${table.safeReviewCode} = 'STUDENT_REJECTED') or (${table.status} = 'DELETED' and ${table.deletedAt} is not null and ${table.safeReviewCode} in ('CONVERSATION_DELETED','PRINCIPAL_PURGED'))`),
+    check("ai_memories_reviewed_consistent", sql`(${table.status} = 'CANDIDATE' and ${table.reviewedAt} is null and ${table.safeReviewCode} is null) or (${table.status} = 'APPROVED' and ${table.reviewedAt} is not null and ${table.safeReviewCode} in ('STUDENT_APPROVED','SYSTEM_AUTO_APPROVED')) or (${table.status} = 'REJECTED' and ${table.reviewedAt} is not null and ${table.safeReviewCode} = 'STUDENT_REJECTED') or (${table.status} = 'DELETED' and ${table.deletedAt} is not null and ${table.safeReviewCode} in ('CONVERSATION_DELETED','PRINCIPAL_PURGED'))`),
     check("ai_memories_deleted_timestamp_valid", sql`${table.deletedAt} is null or ${table.deletedAt} >= ${table.createdAt}`),
     check("ai_memories_expiry_valid", sql`${table.expiresAt} > ${table.createdAt}`),
   ],
@@ -4049,6 +4057,168 @@ export const aiEvalJudgeResults = sqliteTable(
   ],
 );
 
+/** Stable subject-bound Memory Extraction/Compaction execution configuration. */
+export const aiMemoryExecutionConfigs = sqliteTable(
+  "ai_memory_execution_configs",
+  {
+    id: text("id").primaryKey(),
+    key: text("key").notNull(),
+    subjectKey: text("subject_key").notNull().references(() => canonicalMaterials.subjectKey, { onDelete: "restrict" }),
+    currentRevision: integer("current_revision").notNull().default(1),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    createdBy: text("created_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+    updatedBy: text("updated_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+  },
+  (table) => [
+    uniqueIndex("ai_memory_execution_configs_key_unique").on(table.key),
+    uniqueIndex("ai_memory_execution_configs_subject_unique").on(table.subjectKey),
+    check("ai_memory_execution_configs_key_valid", sql`length(trim(${table.key})) between 1 and 120 and ${table.key} not glob '*[^a-z0-9.-]*'`),
+    check("ai_memory_execution_configs_subject_valid", sql`length(trim(${table.subjectKey})) between 1 and 80 and ${table.subjectKey} not glob '*[^a-z0-9-]*'`),
+    check("ai_memory_execution_configs_revision_positive", sql`${table.currentRevision} >= 1`),
+    check("ai_memory_execution_configs_created_nonnegative", sql`${table.createdAt} >= 0`),
+    check("ai_memory_execution_configs_timestamps_ordered", sql`${table.updatedAt} >= ${table.createdAt}`),
+  ],
+);
+
+/** Append-only governed Memory Execution Config revisions. */
+export const aiMemoryExecutionConfigRevisions = sqliteTable(
+  "ai_memory_execution_config_revisions",
+  {
+    id: text("id").primaryKey(),
+    memoryExecutionConfigId: text("memory_execution_config_id").notNull().references(() => aiMemoryExecutionConfigs.id, { onDelete: "restrict" }),
+    revision: integer("revision").notNull(),
+    displayName: text("display_name").notNull(),
+    enabled: integer("enabled", { mode: "boolean" }).notNull(),
+    generationModelConfigId: text("generation_model_config_id").notNull().references(() => aiModelConfigs.id, { onDelete: "restrict" }),
+    generationModelConfigRevision: integer("generation_model_config_revision").notNull(),
+    generationProviderConfigId: text("generation_provider_config_id").notNull().references(() => aiProviderConfigs.id, { onDelete: "restrict" }),
+    generationProviderConfigRevision: integer("generation_provider_config_revision").notNull(),
+    budgetPolicyId: text("budget_policy_id").notNull().references(() => aiBudgetPolicies.id, { onDelete: "restrict" }),
+    budgetPolicyRevision: integer("budget_policy_revision").notNull(),
+    rateLimitPolicyId: text("rate_limit_policy_id").notNull().references(() => aiRateLimitPolicies.id, { onDelete: "restrict" }),
+    rateLimitPolicyRevision: integer("rate_limit_policy_revision").notNull(),
+    timeoutMs: integer("timeout_ms").notNull(),
+    extractionMaxOutputTokens: integer("extraction_max_output_tokens").notNull(),
+    compactionMaxOutputTokens: integer("compaction_max_output_tokens").notNull(),
+    maxExtractionCandidates: integer("max_extraction_candidates").notNull(),
+    autoApprovalMinConfidenceUnits: integer("auto_approval_min_confidence_units").notNull(),
+    compactionTriggerMessageCount: integer("compaction_trigger_message_count").notNull(),
+    compactionRetainRecentMessageCount: integer("compaction_retain_recent_message_count").notNull(),
+    extractionProtocolKey: text("extraction_protocol_key").notNull(),
+    extractionProtocolRevision: integer("extraction_protocol_revision").notNull(),
+    compactionProtocolKey: text("compaction_protocol_key").notNull(),
+    compactionProtocolRevision: integer("compaction_protocol_revision").notNull(),
+    createdAt: integer("created_at").notNull(),
+    createdBy: text("created_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+  },
+  (table) => [
+    uniqueIndex("ai_memory_execution_config_revisions_identity_unique").on(table.memoryExecutionConfigId, table.revision),
+    index("ai_memory_execution_config_revisions_config_index").on(table.memoryExecutionConfigId, table.revision),
+    index("ai_memory_execution_config_revisions_enabled_index").on(table.enabled),
+    check("ai_memory_execution_config_revisions_revision_positive", sql`${table.revision} >= 1`),
+    check("ai_memory_execution_config_revisions_display_name_valid", sql`length(trim(${table.displayName})) between 1 and 200`),
+    check("ai_memory_execution_config_revisions_enabled_boolean", sql`${table.enabled} in (0,1)`),
+    check("ai_memory_execution_config_revisions_dependency_revisions_valid", sql`${table.generationModelConfigRevision} >= 1 and ${table.generationProviderConfigRevision} >= 1 and ${table.budgetPolicyRevision} >= 1 and ${table.rateLimitPolicyRevision} >= 1`),
+    check("ai_memory_execution_config_revisions_bounds_valid", sql`${table.timeoutMs} between 100 and 120000 and ${table.extractionMaxOutputTokens} between 1 and 65536 and ${table.compactionMaxOutputTokens} between 1 and 65536 and ${table.maxExtractionCandidates} between 1 and 100 and ${table.autoApprovalMinConfidenceUnits} between 0 and 1000000 and ${table.compactionTriggerMessageCount} between 2 and 10000 and ${table.compactionRetainRecentMessageCount} between 1 and 9999 and ${table.compactionTriggerMessageCount} > ${table.compactionRetainRecentMessageCount}`),
+    check("ai_memory_execution_config_revisions_protocol_valid", sql`${table.extractionProtocolKey} = 'memory-extraction-v1' and ${table.extractionProtocolRevision} = 1 and ${table.compactionProtocolKey} = 'conversation-compaction-v1' and ${table.compactionProtocolRevision} = 1`),
+    check("ai_memory_execution_config_revisions_created_nonnegative", sql`${table.createdAt} >= 0`),
+  ],
+);
+
+/** Durable, reference-only Memory Extraction/Compaction execution state. */
+export const aiMemoryExecutions = sqliteTable(
+  "ai_memory_executions",
+  {
+    id: text("id").primaryKey(),
+    executionKind: text("execution_kind").$type<AIMemoryExecutionKind>().notNull(),
+    scheduleKey: text("schedule_key").notNull(),
+    principalRef: text("principal_ref").notNull(),
+    subjectKey: text("subject_key").notNull().references(() => canonicalMaterials.subjectKey, { onDelete: "restrict" }),
+    conversationId: text("conversation_id").notNull().references(() => aiConversations.id, { onDelete: "restrict" }),
+    responseId: text("response_id").notNull().references(() => aiConversationResponses.id, { onDelete: "restrict" }),
+    requestMessageId: text("request_message_id").notNull(),
+    requestOrdinal: integer("request_ordinal").notNull(),
+    assistantMessageId: text("assistant_message_id").notNull(),
+    assistantOrdinal: integer("assistant_ordinal").notNull(),
+    executionConfigId: text("execution_config_id").notNull().references(() => aiMemoryExecutionConfigs.id, { onDelete: "restrict" }),
+    executionConfigRevision: integer("execution_config_revision").notNull(),
+    executionConfigFingerprint: text("execution_config_fingerprint").notNull(),
+    generationModelConfigId: text("generation_model_config_id").notNull().references(() => aiModelConfigs.id, { onDelete: "restrict" }),
+    generationModelConfigRevision: integer("generation_model_config_revision").notNull(),
+    generationProviderConfigId: text("generation_provider_config_id").notNull().references(() => aiProviderConfigs.id, { onDelete: "restrict" }),
+    generationProviderConfigRevision: integer("generation_provider_config_revision").notNull(),
+    budgetPolicyId: text("budget_policy_id").notNull().references(() => aiBudgetPolicies.id, { onDelete: "restrict" }),
+    budgetPolicyRevision: integer("budget_policy_revision").notNull(),
+    rateLimitPolicyId: text("rate_limit_policy_id").notNull().references(() => aiRateLimitPolicies.id, { onDelete: "restrict" }),
+    rateLimitPolicyRevision: integer("rate_limit_policy_revision").notNull(),
+    protocolKey: text("protocol_key").notNull(),
+    protocolRevision: integer("protocol_revision").notNull(),
+    memoryPolicyId: text("memory_policy_id").references(() => aiMemoryPolicies.id, { onDelete: "restrict" }),
+    memoryPolicyRevision: integer("memory_policy_revision"),
+    baseSummaryId: text("base_summary_id").references(() => aiConversationSummaryRevisions.id, { onDelete: "restrict" }),
+    baseSummaryRevision: integer("base_summary_revision"),
+    baseSummaryCoverage: integer("base_summary_coverage"),
+    targetCutoffOrdinal: integer("target_cutoff_ordinal"),
+    jobId: text("job_id").references(() => aiJobs.id, { onDelete: "restrict" }),
+    costOperationId: text("cost_operation_id").references(() => aiCostOperations.id, { onDelete: "restrict" }),
+    budgetReservationId: text("budget_reservation_id").references(() => aiBudgetReservations.id, { onDelete: "restrict" }),
+    admissionAttempt: integer("admission_attempt").notNull().default(0),
+    status: text("status").$type<AIMemoryExecutionStatus>().notNull(),
+    providerInvocationState: text("provider_invocation_state").$type<AIMemoryProviderInvocationState>().notNull(),
+    providerInvoked: integer("provider_invoked", { mode: "boolean" }).notNull().default(false),
+    resultSha256: text("result_sha256"),
+    resultByteSize: integer("result_byte_size"),
+    resultCount: integer("result_count").notNull().default(0),
+    resultSummaryId: text("result_summary_id").references(() => aiConversationSummaryRevisions.id, { onDelete: "restrict" }),
+    resultSummaryRevision: integer("result_summary_revision"),
+    safeFailureCode: text("safe_failure_code"),
+    createdAt: integer("created_at").notNull(),
+    startedAt: integer("started_at"),
+    completedAt: integer("completed_at"),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("ai_memory_executions_schedule_unique").on(table.scheduleKey),
+    uniqueIndex("ai_memory_executions_job_unique").on(table.jobId).where(sql`${table.jobId} is not null`),
+    uniqueIndex("ai_memory_executions_operation_unique").on(table.costOperationId).where(sql`${table.costOperationId} is not null`),
+    index("ai_memory_executions_status_index").on(table.status, table.updatedAt),
+    index("ai_memory_executions_source_index").on(table.conversationId, table.responseId),
+    check("ai_memory_executions_kind_valid", sql`${table.executionKind} in ('EXTRACTION','COMPACTION')`),
+    check("ai_memory_executions_schedule_valid", sql`length(trim(${table.scheduleKey})) between 1 and 500`),
+    check("ai_memory_executions_principal_valid", sql`length(trim(${table.principalRef})) between 1 and 200`),
+    check("ai_memory_executions_subject_valid", sql`length(trim(${table.subjectKey})) between 1 and 80`),
+    check("ai_memory_executions_ordinals_valid", sql`${table.requestOrdinal} >= 1 and ${table.assistantOrdinal} > ${table.requestOrdinal}`),
+    check("ai_memory_executions_config_valid", sql`${table.executionConfigRevision} >= 1 and length(${table.executionConfigFingerprint}) = 64 and ${table.executionConfigFingerprint} not glob '*[^0-9a-f]*'`),
+    check("ai_memory_executions_dependency_revisions_valid", sql`${table.generationModelConfigRevision} >= 1 and ${table.generationProviderConfigRevision} >= 1 and ${table.budgetPolicyRevision} >= 1 and ${table.rateLimitPolicyRevision} >= 1`),
+    check("ai_memory_executions_protocol_valid", sql`length(trim(${table.protocolKey})) between 1 and 120 and ${table.protocolRevision} >= 1`),
+    check("ai_memory_executions_admission_valid", sql`${table.admissionAttempt} between 0 and 100`),
+    check("ai_memory_executions_status_valid", sql`${table.status} in ('PENDING','RUNNING','COMPLETED','FAILED','CANCELLED','AMBIGUOUS','INPUT_LOST')`),
+    check("ai_memory_executions_invocation_valid", sql`${table.providerInvocationState} in ('NOT_INVOKED','INVOKING','INVOKED_WITH_ACCOUNTING','AMBIGUOUS')`),
+    check("ai_memory_executions_result_valid", sql`${table.resultSha256} is null or (length(${table.resultSha256}) = 64 and ${table.resultSha256} not glob '*[^0-9a-f]*')`),
+    check("ai_memory_executions_result_size_valid", sql`${table.resultByteSize} is null or ${table.resultByteSize} between 0 and 262144`),
+    check("ai_memory_executions_result_count_valid", sql`${table.resultCount} between 0 and 100`),
+    check("ai_memory_executions_summary_valid", sql`(${table.resultSummaryId} is null and ${table.resultSummaryRevision} is null) or (${table.resultSummaryId} is not null and ${table.resultSummaryRevision} >= 1)`),
+    check("ai_memory_executions_failure_valid", sql`${table.safeFailureCode} is null or (length(trim(${table.safeFailureCode})) between 1 and 120 and ${table.safeFailureCode} not glob '*[^A-Z0-9_.-]*')`),
+    check("ai_memory_executions_timestamps_valid", sql`${table.createdAt} >= 0 and ${table.updatedAt} >= ${table.createdAt} and (${table.startedAt} is null or ${table.startedAt} >= ${table.createdAt}) and (${table.completedAt} is null or ${table.completedAt} >= ${table.createdAt})`),
+  ],
+);
+
+/** Metadata-only links from one extraction execution to its canonical Memory rows. */
+export const aiMemoryExecutionMemoryLinks = sqliteTable(
+  "ai_memory_execution_memory_links",
+  {
+    executionId: text("execution_id").notNull().references(() => aiMemoryExecutions.id, { onDelete: "restrict" }),
+    ordinal: integer("ordinal").notNull(),
+    memoryId: text("memory_id").notNull().references(() => aiMemories.id, { onDelete: "restrict" }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.executionId, table.ordinal] }),
+    uniqueIndex("ai_memory_execution_memory_links_memory_unique").on(table.executionId, table.memoryId),
+    check("ai_memory_execution_memory_links_ordinal_valid", sql`${table.ordinal} between 1 and 100`),
+  ],
+);
+
 export type ChangeSetRow = typeof changeSets.$inferSelect;
 export type ChangeSetItemRow = typeof changeSetItems.$inferSelect;
 export type ChangeSetEventRow = typeof changeSetEvents.$inferSelect;
@@ -4131,3 +4301,7 @@ export type AIMemoryPolicyRow = typeof aiMemoryPolicies.$inferSelect;
 export type AIMemoryPolicyRevisionRow = typeof aiMemoryPolicyRevisions.$inferSelect;
 export type AIMemoryRow = typeof aiMemories.$inferSelect;
 export type AIConversationSummaryRevisionRow = typeof aiConversationSummaryRevisions.$inferSelect;
+export type AIMemoryExecutionConfigRow = typeof aiMemoryExecutionConfigs.$inferSelect;
+export type AIMemoryExecutionConfigRevisionRow = typeof aiMemoryExecutionConfigRevisions.$inferSelect;
+export type AIMemoryExecutionRow = typeof aiMemoryExecutions.$inferSelect;
+export type AIMemoryExecutionMemoryLinkRow = typeof aiMemoryExecutionMemoryLinks.$inferSelect;

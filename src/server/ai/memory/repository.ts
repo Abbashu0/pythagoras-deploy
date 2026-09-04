@@ -63,6 +63,7 @@ export class SQLiteAIMemoryRepository implements AIMemoryRepository {
         status: input.status,
         visibilityScope: input.visibilityScope,
         creationOrigin: input.creationOrigin,
+        kind: input.kind,
         sourceConversationId: input.sourceConversationId,
         sourceStartOrdinal: input.sourceStartOrdinal,
         sourceEndOrdinal: input.sourceEndOrdinal,
@@ -80,7 +81,7 @@ export class SQLiteAIMemoryRepository implements AIMemoryRepository {
     }
   }
 
-  review(input: { id: string; principalRef: string; status: "APPROVED" | "REJECTED"; reviewedAt: number; safeReviewCode: "STUDENT_APPROVED" | "STUDENT_REJECTED" }): AIMemory {
+  review(input: { id: string; principalRef: string; status: "APPROVED" | "REJECTED"; reviewedAt: number; safeReviewCode: "STUDENT_APPROVED" | "STUDENT_REJECTED" | "SYSTEM_AUTO_APPROVED" }): AIMemory {
     const candidate = this.database.db.select({ createdAt: aiMemories.createdAt }).from(aiMemories).where(and(
       eq(aiMemories.id, input.id),
       eq(aiMemories.principalRef, input.principalRef),
@@ -152,6 +153,7 @@ function fromRow(row: AIMemoryRow): AIMemory {
     status: row.status,
     visibilityScope: row.visibilityScope,
     creationOrigin: row.creationOrigin,
+    kind: row.kind,
     sourceConversationId: row.sourceConversationId,
     sourceStartOrdinal: row.sourceStartOrdinal,
     sourceEndOrdinal: row.sourceEndOrdinal,

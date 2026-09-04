@@ -140,6 +140,35 @@ export class AIBudgetAdmissionService {
     }).immediate();
   }
 
+  /**
+   * Closes a reservation after it entered EXECUTING when no Provider usage was
+   * observed.  This is the same pre-execution release semantics, expressed at
+   * the point where M8/M10 execution boundaries start admission before their
+   * final Provider handoff.
+   */
+  releaseUninvokedExecution(
+    reservationId: string,
+    at = this.safeNow(),
+    reasonCode: "PRE_PROVIDER_RELEASE" | "SOURCE_LOST" | "CANCELLED_BEFORE_PROVIDER" = "PRE_PROVIDER_RELEASE",
+  ): AIBudgetReservation {
+    this.assertTimestamp(at);
+    return this.database.client.transaction(() => {
+      const reservation = this.requireReservation(reservationId);
+      if (reservation.status === "RELEASED") return reservation;
+      if (reservation.status !== "EXECUTING") throw new AIAdmissionError("AI_ADMISSION_INVALID", "Only an EXECUTING reservation can be released before an uninvoked Provider handoff.");
+      const cost = this.accounting.getOperationCost(reservation.operationId);
+      if (cost.observed) throw new AIAdmissionError("AI_ADMISSION_INVALID", "A reservation with observed Provider usage cannot be released as uninvoked.");
+      const updated = this.budgetRuntime.transitionReservation({
+        id: reservation.id,
+        expectedStatus: "EXECUTING",
+        status: "RELEASED",
+        finalizedAt: at,
+      });
+      this.appendLifecycleLedger(updated, "RELEASED", updated.reservedNano, reasonCode, at);
+      return updated;
+    }).immediate();
+  }
+
   settle(reservationId: string, at = this.safeNow()): AIAdmissionSettlementResult {
     this.assertTimestamp(at);
     return this.database.client.transaction(() => {

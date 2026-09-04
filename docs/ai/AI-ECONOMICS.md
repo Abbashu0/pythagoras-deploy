@@ -16,6 +16,8 @@ AI-M9B1 adds a governed Eval Execution Config and executes one exact target Case
 
 AI-M9B2 adds distinct `EVALS` Cost Accounting for Supplementary LLM Judge executions. Each Judge execution creates its own separate `EVALS` Cost Operation and Budget Reservation under the same code-owned `system-evals` scope. Private student identities, conversation, response, and job identities remain null. Usage and Rate Card pricing are accounted and settled completely independently from the target operation. Both target and Judge cost operations are bound to the Run (`evalRunId = run.id`) and are resolved together into the Run's immutable accounting basis for `MAX_COST_NANO` gate evaluations.
 
+AI-M10B uses the existing `STUDENT_GENERATION` cost center for both Memory Extraction and Conversation Compaction. Each execution owns one Student-attributed Cost Operation and one Budget Reservation, pins exact Budget/Rate Limit/Model/Provider revisions, records actual Gateway usage before terminalization, and settles or reconciles through M3. Admission retries use a fresh bounded admission identity while reusing the same execution/operation; no duplicate reservation or Provider attempt is created. Unknown or partial usage is never treated as zero, and no raw C4 enters accounting metadata.
+
 ## 1. Cost centers
 
 AI-M7C query embedding and optional reranking are variable-cost work in the caller's existing `STUDENT_GENERATION` operation. M7C requires the matching reservation to be `EXECUTING`, records each actual Gateway attempt through M3A accounting, and leaves operation completion and reservation settlement to the owning orchestration milestone. M7C never charges query work to `KNOWLEDGE_INDEXING` and does not create a second admission.

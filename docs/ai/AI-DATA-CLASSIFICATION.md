@@ -1,6 +1,6 @@
 # AI data classification, privacy, and retention
 
-AI-M0 established data handling rules before AI runtime existed. AI-M4 materializes the private Conversation core, AI-M5 materializes governed Policy/Context metadata, AI-M6 materializes governed Knowledge content, AI-M7A materializes rebuildable Chunk/FTS projections, AI-M7B materializes rebuildable embedding/vector projections, AI-M8A materializes Tutor planning and metadata-only Response Trace foundations, and AI-M10A materializes private Memory/Conversation Summary lifecycle metadata while preserving these classifications. Classification follows the strictest applicable class when a record contains multiple kinds of data.
+AI-M0 established data handling rules before AI runtime existed. AI-M4 materializes the private Conversation core, AI-M5 materializes governed Policy/Context metadata, AI-M6 materializes governed Knowledge content, AI-M7A materializes rebuildable Chunk/FTS projections, AI-M7B materializes rebuildable embedding/vector projections, AI-M8A materializes Tutor planning and metadata-only Response Trace foundations, AI-M10A materializes private Memory/Conversation Summary lifecycle metadata, and AI-M10B materializes bounded execution/config metadata while preserving these classifications. Classification follows the strictest applicable class when a record contains multiple kinds of data.
 
 ## 1. Data classes
 
@@ -20,6 +20,8 @@ AI-M0 established data handling rules before AI runtime existed. AI-M4 materiali
 AI-M7C query text and EvidencePacks are request-scoped runtime data. The query is untrusted and bounded, is sent only to the selected embedding/reranker adapter through the Gateway, and is not placed in configuration, durable Jobs, projections, vectors, trace metadata, or cost records. EvidencePack items retain only bounded published evidence and safe provenance/scores for the future Tutor boundary; serialized text plus serialized origin/provenance metadata are jointly bounded and never truncated.
 
 AI-M10A Memory and Conversation Summary text are also C4 runtime data. They are selected only from the server-owned principal/subject boundary, are never copied into Knowledge or retrieval projections, and are excluded from metadata-only Context Snapshots. Conversation deletion scrubs the derived text and preserves only bounded lifecycle metadata needed for audit and ineligibility.
+
+M10B execution Configs and protocol identities are C2; execution rows, Jobs, Outbox events, Cost Operations, Budget Reservations, and Provider attempt references contain C5-safe metadata only. Runtime source messages, Provider output, Memory text, and Summary text remain C4. Jobs and Outbox payloads contain an execution ID only; no raw prompt, source, output, or secret is copied into operational records. The extraction result may become a canonical Memory candidate and, when the exact pinned policy permits it, a server-owned `SYSTEM_AUTO_APPROVED` Memory; this does not make the Memory C1 curriculum truth.
 
 The **Raw Conversation Store** and **De-identified Analytics Projection** are different boundaries.
 

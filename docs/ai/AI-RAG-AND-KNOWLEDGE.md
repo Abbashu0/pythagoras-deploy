@@ -130,7 +130,7 @@ M8C is approved. After Provider completion and usage accounting, it re-fences M7
 
 AI-M10A adds no retrieval corpus and no RAG source. Governed `ai.memory-policy` revisions control private, exact principal/subject-scoped Memory candidates; only explicitly approved, live, unexpired, source-owned Memory may enter M5 Context. Conversation Summary revisions are append-only C4 records sourced only from complete M4 turns. A canonical current Summary cuts its covered old messages out of the default Context plan while preserving those messages in M4 until deletion. The M5 budget manager selects whole Summary/Memory items deterministically under their configured budgets.
 
-Summary and Memory text is runtime C4 and never enters M5 Context Snapshots, Snapshot Items, Knowledge Packages, Chunks, FTS, vectors, EvidencePacks, or retrieval traces. Snapshots retain only bounded IDs, revisions, source references, token counts, and decisions. Conversation deletion scrubs derived text and makes it ineligible atomically; extraction, compaction Jobs, Provider calls, and M10B execution remain out of scope.
+Summary and Memory text is runtime C4 and never enters M5 Context Snapshots, Snapshot Items, Knowledge Packages, Chunks, FTS, vectors, EvidencePacks, or retrieval traces. Snapshots retain only bounded IDs, revisions, source references, token counts, and decisions. Conversation deletion scrubs derived text and makes it ineligible atomically. M10B's explicit Student-only execution boundary reads completed M4 turns at Worker time, writes only authorized Memory/Summary C4 results, and keeps prompts, Provider envelopes, and execution payloads out of retrieval storage; it does not add a Knowledge/RAG path.
 
 ## 7. Grounding contract
 

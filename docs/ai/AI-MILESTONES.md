@@ -147,24 +147,26 @@ AI-M8A, AI-M8B, and AI-M8C are approved; AI-M8 Grounded Tutor is complete at `e7
 
 ## AI-M10 — Memory & Compaction
 
-**Status:** Split into M10A/M10B; M10A is implemented/corrected pending independent review through migrations `0039_glossy_sleepwalker` and `0040_wandering_invisible_woman`, M10B is not started, AI-M10 remains incomplete, and AI-M11 is not started.
+**Status:** Split into M10A/M10B; M10A is APPROVED/COMPLETE at `d106e5bb3b82095e3d1b3abeab1f150237d87d06`, M10B is implemented pending independent review through migration `0041_violet_nico_minoru`, AI-M10 remains incomplete, and AI-M11 is not started.
 
 ### AI-M10A — Memory, Conversation Summaries & Context Selection
 
-**Status:** Implemented pending independent review.
+**Status:** APPROVED/COMPLETE at `d106e5bb3b82095e3d1b3abeab1f150237d87d06`.
 **Delivered boundary:** Governed subject-bound `ai.memory-policy` identities and append-only revisions; private principal/subject-scoped Memory candidates with explicit review, expiry, provenance, and deletion scrubbing; append-only Conversation Summary revisions sourced only from complete non-partial M4 turns; deterministic server-owned Summary/Memory selection through M5 Context budgeting; default history cutover after a canonical Summary; bounded principal purge; and atomic Conversation deletion propagation through migrations `0039_glossy_sleepwalker` and `0040_wandering_invisible_woman`.
 **Explicit boundary:** Context Snapshots retain only safe IDs, revisions, token counts, and decisions; Summary/Memory text remains runtime C4. No extraction or compaction Provider/Generation call, durable Job, Student/Admin/Mobile UI, automatic publication, analytics, RAG, or Agent 2 is added.
 
 ### AI-M10B — Extraction, Compaction Jobs & Runtime Hardening
 
-**Status:** Not started. It remains a future separately reviewed boundary for extraction/compaction orchestration, any Provider/Gateway execution, economics, retries, and final product integration.
+**Status:** Implemented pending independent review.
+**Delivered boundary:** Governed subject-bound Memory Execution Config revisions; strict educational Memory Extraction and Conversation Compaction protocols; reference-only Outbox → Job execution; exact Model/Provider/Policy pins; Student-owned `STUDENT_GENERATION` admission/accounting; durable ambiguity/source-deletion fences; canonical Candidate/Summary result persistence; and deterministic automatic review only when the exact Memory Policy permits it. Migration `0041_violet_nico_minoru` adds the execution/config/link tables and SQLite lifecycle guards.
+**Explicit boundary:** M10B makes one Gateway Generation attempt per execution and uses only in-process test adapters in this repository. Jobs/Outbox/execution/accounting metadata contain no raw C4. `CANDIDATE` remains an internal safety stage; `SYSTEM_AUTO_APPROVED` is distinct from Student approval and is permitted only above the governed threshold and under a pinned policy with `candidateReviewRequired = false`. No Student/Admin/Mobile UI, public Student AI API, production Provider, Judge, automatic publication, RAG, or Agent 2 is added.
 
 ## Remaining future milestones
 
 | Milestone | Coherent boundary | Independent exit gate |
 | --- | --- | --- |
 | **AI-M9 Evals V1** | Versioned Eval Suite, deterministic graders, supplementary judge adapter, regression cases, security/cost/latency gates | Baseline suites cover all required dimensions and block an unsafe or materially regressed promotion |
-| **AI-M10 Memory & Compaction** | M10A: governed private Memory/Summary foundation and Context selection; M10B: future extraction/compaction execution and runtime integration | No cross-user memory; summaries are traceable; old history is preserved but not replayed by default; deletion propagates; M10 remains incomplete until both checkpoints are reviewed |
+| **AI-M10 Memory & Compaction** | M10A: governed private Memory/Summary foundation and Context selection; M10B: implemented extraction/compaction execution and runtime integration pending review | No cross-user memory; summaries are traceable; old history is preserved but not replayed by default; deletion propagates; M10 remains incomplete until both checkpoints are reviewed |
 | **AI-M11 Intelligence Telemetry** | Retrieval traces, feedback/events, de-identified analytics, usage dashboards/data contracts, and privacy-safe operational metrics | Analytics cannot reveal raw PII by default; response/retrieval/cost traces correlate end to end |
 | **AI-M12 Agent 2 Read-only** | Deterministic event/SQL inputs, representative samples, optional clustering, structured analysis, and bounded Insight candidates | Agent 2 cannot publish, mutate truth/credentials, message students, or bypass privacy/Evals; outputs are reproducible |
 | **AI-M13 Second Brain** | Relational Insight, evidence, typed relations, QuestionCluster, Misconception, KnowledgeGap, ExplanationPattern, RetrievalProblem | Typed relationships and provenance are queryable/visualizable; insights remain separate from curriculum truth |

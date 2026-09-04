@@ -1,9 +1,9 @@
 # AI architecture lock
 
 **Milestone:** AI-M0 — Architecture Lock & Backend Readiness Specification
-**Status:** AI-M0 through AI-M9 are approved/complete, with AI-M9A approved at `860b474bd146abb944c15f774afa88578b463a80`, AI-M9B1 approved at `61d6de1276735f511712dd47797a2c6a6304fcf3`, and AI-M9B2 approved at `815d9230dcbde77433f98d80a2d37e3b08e2faaa`. AI-M10A is implemented/corrected pending independent review through migrations `0039_glossy_sleepwalker` and `0040_wandering_invisible_woman`; AI-M10B is not started, AI-M10 remains incomplete, and no production provider is selected.
+**Status:** AI-M0 through AI-M9 are approved/complete, with AI-M9A approved at `860b474bd146abb944c15f774afa88578b463a80`, AI-M9B1 approved at `61d6de1276735f511712dd47797a2c6a6304fcf3`, and AI-M9B2 approved at `815d9230dcbde77433f98d80a2d37e3b08e2faaa`. AI-M10A is APPROVED/COMPLETE at `d106e5bb3b82095e3d1b3abeab1f150237d87d06`; AI-M10B is implemented and pending independent review through migration `0041_violet_nico_minoru`, AI-M10 remains incomplete, and no production provider is selected.
 
-Current reviewed status: AI-M8A, AI-M8B, and AI-M8C are approved; AI-M8 is complete at `e73d6dc5ba4ae18c1bf4dd614b093b605849d179`. AI-M9A is approved/complete at `860b474bd146abb944c15f774afa88578b463a80`; AI-M9B1 is approved/complete at `61d6de1276735f511712dd47797a2c6a6304fcf3`; AI-M9B2 is approved/complete at `815d9230dcbde77433f98d80a2d37e3b08e2faaa`; AI-M9 is complete; AI-M10A is implemented pending independent review; AI-M10B is not started; and AI-M10 remains incomplete.
+Current reviewed status: AI-M8A, AI-M8B, and AI-M8C are approved; AI-M8 is complete at `e73d6dc5ba4ae18c1bf4dd614b093b605849d179`. AI-M9A is approved/complete at `860b474bd146abb944c15f774afa88578b463a80`; AI-M9B1 is approved/complete at `61d6de1276735f511712dd47797a2c6a6304fcf3`; AI-M9B2 is approved/complete at `815d9230dcbde77433f98d80a2d37e3b08e2faaa`; AI-M9 is complete; AI-M10A is approved/complete; AI-M10B is implemented pending independent review; and AI-M10 remains incomplete.
 
 ## 1. Architectural position
 
@@ -88,7 +88,7 @@ The original AI-M0 audit was performed against `HEAD == origin/main == b528f198d
 
 The public Student content routes currently expose published content without a Student principal. That is acceptable for the current read-only content surface but is not an acceptable trust boundary for a metered Student AI API.
 
-The current M10A checkpoint supersedes the migration summary row above: migration `0040_wandering_invisible_woman` completes the bounded principal purge boundary, exact Summary coverage monotonicity, and Memory review/retention SQLite guards. M10A remains pending independent review; M10B and M11 are not started.
+The current M10A/M10B checkpoint supersedes the migration summary row above: migration `0040_wandering_invisible_woman` completes the bounded principal purge boundary, exact Summary coverage monotonicity, and Memory review/retention SQLite guards; migration `0041_violet_nico_minoru` adds the governed Memory execution, strict protocol, exact source-pin, and canonical result boundary. M10B remains pending independent review; M11 is not started.
 
 ## 3. Ownership layers
 
@@ -152,9 +152,15 @@ Migration `0030_require-unsealed-tutor-trace-creation` closes the SQLite creatio
 
 ### AI-M10A memory and compaction foundation
 
-AI-M10A is implemented/corrected pending independent review. It adds governed subject-bound `ai.memory-policy` revisions, private principal/subject-scoped Memory candidates with explicit review and expiry, append-only Conversation Summary revisions sourced only from complete M4 turns, and deterministic bounded selection through the existing M5 ContextBudgetManager. Summary and Memory text are runtime C4 only: Context Snapshots retain IDs, revisions, token counts, and decisions, never raw text. A Summary cuts covered old history out of the default Context plan while the original M4 messages remain queryable until ordinary deletion. Migration `0040_wandering_invisible_woman` adds bounded principal purge provenance, Summary coverage monotonicity, and exact review/retention guards without reopening M10B.
+AI-M10A is approved/complete at `d106e5bb3b82095e3d1b3abeab1f150237d87d06`. It adds governed subject-bound `ai.memory-policy` revisions, private principal/subject-scoped Memory candidates with review and expiry, append-only Conversation Summary revisions sourced only from complete M4 turns, and deterministic bounded selection through the existing M5 ContextBudgetManager. Summary and Memory text are runtime C4 only: Context Snapshots retain IDs, revisions, token counts, and decisions, never raw text. A Summary cuts covered old history out of the default Context plan while the original M4 messages remain queryable until ordinary deletion. Migration `0040_wandering_invisible_woman` adds bounded principal purge provenance, Summary coverage monotonicity, and exact review/retention guards.
 
-Conversation deletion atomically scrubs Summary/Memory text and marks derived rows ineligible through the M4 tombstone path. SQLite ownership, subject, lifecycle, revision, and deletion rules protect the new tables. M10A makes no Provider, Generation, Embedding, Rerank, extraction, compaction Job, Student API/UI, or automatic publication call; M10B owns those future execution concerns and is not started.
+Conversation deletion atomically scrubs Summary/Memory text and marks derived rows ineligible through the M4 tombstone path. SQLite ownership, subject, lifecycle, revision, and deletion rules protect the new tables.
+
+### AI-M10B Memory execution boundary
+
+AI-M10B is implemented pending independent review. A governed subject-bound `ai.memory-execution-config` pins the exact Generation Model/Provider, Budget and Rate Limit revisions, bounded extraction/compaction protocols, output limits, and automatic-review confidence threshold. Completed Student Tutor turns are scheduled explicitly into reference-only Outbox events and durable Jobs; the Worker resolves the live C4 source, admits one `STUDENT_GENERATION` operation/reservation per execution, invokes one exact Gateway Generation attempt, records usage before terminalization, and creates only the authorized Memory Candidate or Summary revision. Provider ambiguity and source deletion fail closed without blind replay.
+
+Extraction uses strict `memory-extraction-v1@1` JSON with a closed educational Memory-kind vocabulary. `CANDIDATE` remains the safety stage: an exact pinned Memory Policy with `candidateReviewRequired = true` requires Student review, while `false` permits a server-owned deterministic gate to record `SYSTEM_AUTO_APPROVED` only for eligible high-confidence educational candidates. `STUDENT_APPROVED` remains distinct. No generic personal facts, sensitive/transient profile data, raw prompt, Provider envelope, or chain-of-thought enters execution metadata; only authorized Memory/Summary C4 stores may contain result text. M10B adds no Student/Admin UI, public Student AI API, production Provider, or automatic publication.
 
 ## 6. Governance and operational separation
 
