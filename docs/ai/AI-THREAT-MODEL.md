@@ -48,6 +48,10 @@ M8A is a no-execution boundary: preflight and planning do not call Generation, E
 
 M8B adds the first execution boundary without weakening those controls: only the server-owned `{ principal, responseId, tutorConfigId, signal? }` input is accepted; one response-bound Cost Operation and Budget Reservation cover M7C plus one exact-pinned Generation; M7C's final fence is re-run before Generation; and the Gateway receives no credential reference, secret version, provenance, or database handle. Cumulative usage is recorded before terminal status/settlement, output is bounded through M4's UTF-8-safe stream, and Provider output is retained only in the scoped Assistant Message. M8C adds deterministic exact-citation validation, a post-Generation currentness fence, partial-output context exclusion, and replay hardening without a second Provider call. No production Provider, tools, Web Search, or Student API is part of M8B/M8C.
 
+## 3.5 Scoped Student Memory controls
+
+M10R/M10A2 keeps Memory private to one server-resolved principal and an explicit `GLOBAL` or canonical `SUBJECT` scope. The kind vocabulary is closed to low-risk educational preferences/progress; generic personal facts, sensitive/private profile data, and transient mood are not Memory semantics. `PROPOSED` inferred state is non-eligible and can carry only bounded text plus safe turn references; activation is a future trusted Agent 1 decision. Conversation origin, completed non-partial provenance, optimistic revisions, quotas, lifecycle, deletion reconciliation, and principal purge are enforced at both service and SQLite boundaries. M10A2 does not add Agent 1 tools, Gateway tool calling, sidecar extraction, or Provider execution.
+
 ## 4. Security requirements for provider calls
 
 - Provider adapters receive only the minimum context required for the operation.

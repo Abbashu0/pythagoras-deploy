@@ -302,6 +302,13 @@
       "when": 1788540036211,
       "tag": "0042_memory-execution-commit-safety",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "6",
+      "when": 1788546593868,
+      "tag": "0043_scoped-student-memory-foundation",
+      "breakpoints": true
     }
   ]
 }

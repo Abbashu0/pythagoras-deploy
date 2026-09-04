@@ -92,7 +92,7 @@ export class AIConversationService {
    */
   createConversationInTransaction(
     principal: AIStudentPrincipal,
-    input: { conversationId: string; subjectKey: string; createdAt: number },
+    input: { conversationId: string; subjectKey: string; createdAt: number; origin?: "STUDENT" | "EVAL_SYNTHETIC" },
   ): AIConversation {
     if (!this.database.client.inTransaction) {
       throw new AIConversationError("AI_CONVERSATION_INVALID", "This Conversation creation helper requires an active transaction.");
@@ -107,6 +107,7 @@ export class AIConversationService {
       id: conversationId,
       principalRef: activePrincipal.principalRef,
       subjectKey: subject.subjectKey,
+      origin: input.origin,
       createdAt: input.createdAt,
     });
   }

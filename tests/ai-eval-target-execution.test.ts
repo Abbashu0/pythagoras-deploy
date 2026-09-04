@@ -254,7 +254,7 @@ test("0035 to 0036 preserves populated M9B1 data and hardens retry lifecycle", (
     assert.equal(Number((oldDatabase.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count), 36);
     oldDatabase.close(); oldDatabase = null;
     upgraded = openContentDatabase({ dataDirectory: root, migrationsDirectory });
-    assert.equal(Number((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count), 43);
+    assert.equal(Number((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count), 44);
     assert.ok(upgraded.client.prepare("select id from ai_eval_cases where id=?").get(caseId));
     assert.ok(upgraded.client.prepare("select id from ai_eval_suites where id=?").get(suiteId));
     assert.deepEqual(upgraded.client.prepare("select status, admission_attempt, execution_config_id, execution_config_revision, case_id, ordinal from ai_eval_case_executions where id=?").get(executionId), { status: "PENDING", admission_attempt: 0, execution_config_id: executionConfigId, execution_config_revision: 1, case_id: caseId, ordinal: 1 });

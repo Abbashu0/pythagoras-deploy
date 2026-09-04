@@ -13,6 +13,7 @@ import {
 } from "../../content/schema";
 import type {
   AIConversation,
+  AIConversationOrigin,
   AIConversationFinishReason,
   AIConversationListCursor,
   AIConversationMessage,
@@ -29,6 +30,10 @@ export class SQLiteAIConversationRepository {
   constructor(private readonly database: ContentDatabase) {}
 
   getConversation(principalRef: string, conversationId: string, includeDeleted = false): AIConversation | null {
+    if (!this.hasOriginColumn()) {
+      const row = this.database.client.prepare(`select id,principal_ref,subject_key,status,created_at,updated_at,last_activity_at,deleted_at,revision from ai_conversations where id=? and principal_ref=?${includeDeleted ? "" : " and status='ACTIVE'"}`).get(conversationId, principalRef) as LegacyConversationRow | undefined;
+      return row ? conversationFromLegacyRow(row) : null;
+    }
     const row = this.database.db.select().from(aiConversations).where(and(
       eq(aiConversations.id, conversationId),
       eq(aiConversations.principalRef, principalRef),
@@ -177,21 +182,14 @@ export class SQLiteAIConversationRepository {
     id: string;
     principalRef: string;
     subjectKey: string;
+    origin?: AIConversationOrigin;
     createdAt: number;
   }): AIConversation {
     try {
-      const row = this.database.db.insert(aiConversations).values({
-        id: input.id,
-        principalRef: input.principalRef,
-        subjectKey: input.subjectKey,
-        status: "ACTIVE",
-        createdAt: input.createdAt,
-        updatedAt: input.createdAt,
-        lastActivityAt: input.createdAt,
-        deletedAt: null,
-        revision: 1,
-      }).returning().get();
-      return conversationFromRow(row);
+      const row = this.hasOriginColumn()
+        ? this.database.db.insert(aiConversations).values({ id: input.id, principalRef: input.principalRef, subjectKey: input.subjectKey, origin: input.origin ?? "STUDENT", status: "ACTIVE" as const, createdAt: input.createdAt, updatedAt: input.createdAt, lastActivityAt: input.createdAt, deletedAt: null, revision: 1 }).returning().get()
+        : this.database.client.prepare("insert into ai_conversations (id,principal_ref,subject_key,status,created_at,updated_at,last_activity_at,deleted_at,revision) values (?,?,?,?,?,?,?,?,?) returning *").get(input.id, input.principalRef, input.subjectKey, "ACTIVE", input.createdAt, input.createdAt, input.createdAt, null, 1) as LegacyConversationRow;
+      return this.hasOriginColumn() ? conversationFromRow(row as AIConversationRow) : conversationFromLegacyRow(row as LegacyConversationRow);
     } catch (error) {
       throw new AIConversationError("AI_CONVERSATION_INVALID", "The Conversation could not be created.", {}, error);
     }
@@ -273,7 +271,7 @@ export class SQLiteAIConversationRepository {
       eq(aiConversations.id, conversationId),
       eq(aiConversations.principalRef, principalRef),
       eq(aiConversations.status, status),
-    )).returning().get();
+    )).returning({ id: aiConversations.id, principalRef: aiConversations.principalRef, subjectKey: aiConversations.subjectKey, status: aiConversations.status, createdAt: aiConversations.createdAt, updatedAt: aiConversations.updatedAt, lastActivityAt: aiConversations.lastActivityAt, deletedAt: aiConversations.deletedAt, revision: aiConversations.revision }).get();
     if (!row) throw new AIConversationError("AI_CONVERSATION_NOT_FOUND", "The Conversation was not found.");
     return conversationFromRow(row);
   }
@@ -287,7 +285,7 @@ export class SQLiteAIConversationRepository {
       eq(aiConversations.id, conversationId),
       eq(aiConversations.principalRef, principalRef),
       eq(aiConversations.status, "ACTIVE"),
-    )).returning().get();
+    )).returning({ id: aiConversations.id, principalRef: aiConversations.principalRef, subjectKey: aiConversations.subjectKey, status: aiConversations.status, createdAt: aiConversations.createdAt, updatedAt: aiConversations.updatedAt, lastActivityAt: aiConversations.lastActivityAt, deletedAt: aiConversations.deletedAt, revision: aiConversations.revision }).get();
     if (!row) throw new AIConversationError("AI_CONVERSATION_NOT_FOUND", "The Conversation was not found.");
     return conversationFromRow(row);
   }
@@ -346,16 +344,21 @@ export class SQLiteAIConversationRepository {
       eq(aiConversations.id, input.conversationId),
       eq(aiConversations.principalRef, input.principalRef),
       eq(aiConversations.status, "ACTIVE"),
-    )).returning().get();
+    )).returning({ id: aiConversations.id, principalRef: aiConversations.principalRef, subjectKey: aiConversations.subjectKey, status: aiConversations.status, createdAt: aiConversations.createdAt, updatedAt: aiConversations.updatedAt, lastActivityAt: aiConversations.lastActivityAt, deletedAt: aiConversations.deletedAt, revision: aiConversations.revision }).get();
     return row ? conversationFromRow(row) : null;
+  }
+
+  private hasOriginColumn(): boolean {
+    return (this.database.client.prepare("pragma table_info(ai_conversations)").all() as Array<{ name?: string }>).some((column) => column.name === "origin");
   }
 }
 
-function conversationFromRow(row: AIConversationRow): AIConversation {
+function conversationFromRow(row: Omit<AIConversationRow, "origin"> & { origin?: AIConversationOrigin }): AIConversation {
   return {
     id: row.id,
     principalRef: row.principalRef,
     subjectKey: row.subjectKey,
+    origin: row.origin ?? "STUDENT",
     status: row.status,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -364,6 +367,34 @@ function conversationFromRow(row: AIConversationRow): AIConversation {
     revision: row.revision,
   };
 }
+
+interface LegacyConversationRow {
+  id: string;
+  principal_ref: string;
+  subject_key: string;
+  status: AIConversation["status"];
+  created_at: number;
+  updated_at: number;
+  last_activity_at: number;
+  deleted_at: number | null;
+  revision: number;
+}
+
+function conversationFromLegacyRow(row: LegacyConversationRow): AIConversation {
+  return {
+    id: row.id,
+    principalRef: row.principal_ref,
+    subjectKey: row.subject_key,
+    origin: "STUDENT",
+    status: row.status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    lastActivityAt: row.last_activity_at,
+    deletedAt: row.deleted_at,
+    revision: row.revision,
+  };
+}
+
 
 function messageFromRow(row: AIConversationMessageRow): AIConversationMessage {
   return {

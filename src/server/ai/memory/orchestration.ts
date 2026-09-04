@@ -5,7 +5,6 @@ import { SQLiteAIConversationRepository } from "../conversations";
 import type { AIStudentPrincipal } from "../conversations";
 import type { AIOutboxEvent, AIOutboxRouterDefinition } from "../operations/outbox";
 import { AIOutboxError } from "../operations/outbox";
-import { AI_MEMORY_CONFIDENCE_SCALE, type AIMemoryPolicyRepository } from "./contracts";
 import type {
   AIMemoryExecution,
   AIMemoryExecutionConfigRepository,
@@ -18,8 +17,6 @@ import {
   AI_MEMORY_EXECUTION_PAYLOAD_VERSION,
   AI_MEMORY_EXTRACTION_JOB_KIND,
   AI_MEMORY_EXTRACTION_OUTBOX_EVENT_TYPE,
-  AI_MEMORY_EXTRACTION_PROTOCOL_KEY,
-  AI_MEMORY_EXTRACTION_PROTOCOL_REVISION,
   AI_MEMORY_COMPACTION_JOB_KIND,
   AI_MEMORY_COMPACTION_OUTBOX_EVENT_TYPE,
 } from "./execution-contracts";
@@ -28,15 +25,16 @@ import type { ContentDatabase } from "../../content/database";
 import type { AIOutboxService } from "../operations/outbox";
 import { SQLiteAIMemoryExecutionConfigRepository } from "./execution-config-repository";
 import { SQLiteAIMemoryExecutionRepository } from "./execution-repository";
-import { SQLiteAIMemoryPolicyRepository } from "./policy-repository";
 import { SQLiteAIConversationSummaryRepository } from "./summary-repository";
 import { AIMemoryExecutionError } from "./execution-errors";
+import type { AIMemoryPolicyRepository } from "./contracts";
 
 export interface AIMemoryOrchestratorDependencies {
   database: ContentDatabase;
   outbox: AIOutboxService;
   executions?: AIMemoryExecutionRepository;
   configs?: AIMemoryExecutionConfigRepository;
+  /** Deprecated extraction dependency; retained only for caller compatibility. */
   memoryPolicies?: AIMemoryPolicyRepository;
   conversations?: SQLiteAIConversationRepository;
   clock?: () => number;
@@ -46,7 +44,6 @@ export interface AIMemoryOrchestratorDependencies {
 export class AIMemoryOrchestrator {
   private readonly executions: AIMemoryExecutionRepository;
   private readonly configs: AIMemoryExecutionConfigRepository;
-  private readonly memoryPolicies: AIMemoryPolicyRepository;
   private readonly conversations: SQLiteAIConversationRepository;
   private readonly summaries: SQLiteAIConversationSummaryRepository;
   private readonly clock: () => number;
@@ -55,7 +52,6 @@ export class AIMemoryOrchestrator {
   constructor(private readonly dependencies: AIMemoryOrchestratorDependencies) {
     this.executions = dependencies.executions ?? new SQLiteAIMemoryExecutionRepository(dependencies.database);
     this.configs = dependencies.configs ?? new SQLiteAIMemoryExecutionConfigRepository(dependencies.database);
-    this.memoryPolicies = dependencies.memoryPolicies ?? new SQLiteAIMemoryPolicyRepository(dependencies.database);
     this.conversations = dependencies.conversations ?? new SQLiteAIConversationRepository(dependencies.database);
     this.summaries = new SQLiteAIConversationSummaryRepository(dependencies.database);
     this.clock = dependencies.clock ?? Date.now;
@@ -71,42 +67,7 @@ export class AIMemoryOrchestrator {
       if (!config || !config.enabled) throw new AIMemoryExecutionError("AI_MEMORY_EXECUTION_CONFIG_NOT_FOUND", "No enabled Memory Execution Config is published for this subject.");
       const configRevision = this.configs.getRevision(config.id, config.currentRevision);
       if (!configRevision || !configRevision.enabled) throw new AIMemoryExecutionError("AI_MEMORY_EXECUTION_CONFIG_NOT_FOUND", "The current Memory Execution Config revision is unavailable.");
-      const policy = this.memoryPolicies.getBySubjectKey(source.conversation.subjectKey);
-      const policyRevision = policy ? this.memoryPolicies.getCurrentRevision(policy.id) : null;
-      if (!policy || !policyRevision || !policyRevision.enabled) throw new AIMemoryExecutionError("AI_MEMORY_EXECUTION_CONFIG_DEPENDENCY_INVALID", "No enabled Memory Policy is published for this subject.");
       const configFingerprint = fingerprintAIMemoryExecutionConfig({ ...configRevision, executionConfigId: config.id, revision: configRevision.revision });
-      const extraction = this.createOrReuse({
-        executionKind: "EXTRACTION",
-        scheduleKey: `memory-extraction:${source.response.id}:${config.id}:${configRevision.revision}:${policy.id}:${policyRevision.revision}`,
-        principalRef: activePrincipal.principalRef,
-        subjectKey: source.conversation.subjectKey,
-        conversationId: source.conversation.id,
-        responseId: source.response.id,
-        requestMessageId: source.requestMessage.id,
-        requestOrdinal: source.requestMessage.ordinal,
-        assistantMessageId: source.assistantMessage.id,
-        assistantOrdinal: source.assistantMessage.ordinal,
-        executionConfigId: config.id,
-        executionConfigRevision: configRevision.revision,
-        executionConfigFingerprint: configFingerprint,
-        generationModelConfigId: configRevision.generationModelConfigId,
-        generationModelConfigRevision: configRevision.generationModelConfigRevision,
-        generationProviderConfigId: configRevision.generationProviderConfigId,
-        generationProviderConfigRevision: configRevision.generationProviderConfigRevision,
-        budgetPolicyId: configRevision.budgetPolicyId,
-        budgetPolicyRevision: configRevision.budgetPolicyRevision,
-        rateLimitPolicyId: configRevision.rateLimitPolicyId,
-        rateLimitPolicyRevision: configRevision.rateLimitPolicyRevision,
-        protocolKey: AI_MEMORY_EXTRACTION_PROTOCOL_KEY,
-        protocolRevision: AI_MEMORY_EXTRACTION_PROTOCOL_REVISION,
-        memoryPolicyId: policy.id,
-        memoryPolicyRevision: policyRevision.revision,
-        baseSummaryId: null,
-        baseSummaryRevision: null,
-        baseSummaryCoverage: null,
-        targetCutoffOrdinal: null,
-        now,
-      }, AI_MEMORY_EXTRACTION_OUTBOX_EVENT_TYPE);
       let compaction: { execution: AIMemoryExecution; outbox: AIOutboxEvent } | null = null;
       const currentSummary = this.summaries.getCurrentForConversation({ principalRef: activePrincipal.principalRef, conversationId: source.conversation.id, subjectKey: source.conversation.subjectKey });
       const baseCoverage = currentSummary?.coversThroughOrdinal ?? 0;
@@ -149,9 +110,9 @@ export class AIMemoryOrchestrator {
         }
       }
       return {
-        extractionExecutionId: extraction.execution.id,
+        extractionExecutionId: null,
         compactionExecutionId: compaction?.execution.id ?? null,
-        extractionOutboxId: extraction.outbox.id,
+        extractionOutboxId: null,
         compactionOutboxId: compaction?.outbox.id ?? null,
       };
     }).immediate();

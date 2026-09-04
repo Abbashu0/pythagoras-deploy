@@ -27,6 +27,10 @@ export type AIConversationSubjectRecord = Pick<CanonicalMaterial, "subjectKey" |
 export const AI_CONVERSATION_STATUSES = ["ACTIVE", "DELETED"] as const;
 export type AIConversationStatus = (typeof AI_CONVERSATION_STATUSES)[number];
 
+/** Server-owned source classification used by Memory provenance boundaries. */
+export const AI_CONVERSATION_ORIGINS = ["STUDENT", "EVAL_SYNTHETIC"] as const;
+export type AIConversationOrigin = (typeof AI_CONVERSATION_ORIGINS)[number];
+
 export const AI_CONVERSATION_MESSAGE_ROLES = ["USER", "ASSISTANT"] as const;
 export type AIConversationMessageRole = (typeof AI_CONVERSATION_MESSAGE_ROLES)[number];
 
@@ -55,6 +59,7 @@ export interface AIConversation {
   id: string;
   principalRef: string;
   subjectKey: string;
+  origin: AIConversationOrigin;
   status: AIConversationStatus;
   createdAt: number;
   updatedAt: number;

@@ -41,6 +41,7 @@ import type {
   AIConversationResponseStatus,
   AIConversationSafeErrorCode,
   AIConversationStatus,
+  AIConversationOrigin,
 } from "../ai/conversations/contracts";
 import type {
   AIContextSnapshotItemDecision,
@@ -49,6 +50,7 @@ import type {
 import type {
   AIMemoryCreationOrigin,
   AIMemoryKind,
+  AIMemoryScope,
   AIMemorySafeReviewCode,
   AIMemoryStatus,
   AIMemoryVisibilityScope,
@@ -524,6 +526,7 @@ export const aiConversations = sqliteTable(
     id: text("id").primaryKey(),
     principalRef: text("principal_ref").notNull(),
     subjectKey: text("subject_key").notNull().references(() => canonicalMaterials.subjectKey, { onDelete: "restrict" }),
+    origin: text("origin").$type<AIConversationOrigin>().notNull().default("STUDENT"),
     status: text("status").$type<AIConversationStatus>().notNull().default("ACTIVE"),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
@@ -537,6 +540,7 @@ export const aiConversations = sqliteTable(
     index("ai_conversations_subject_index").on(table.subjectKey, table.status, table.lastActivityAt),
     check("ai_conversations_principal_valid", sql`length(trim(${table.principalRef})) between 1 and 200 and ${table.principalRef} not glob '*[^A-Za-z0-9_-]*'`),
     check("ai_conversations_subject_valid", sql`length(trim(${table.subjectKey})) between 1 and 80 and ${table.subjectKey} not glob '*[^a-z0-9-]*'`),
+    check("ai_conversations_origin_valid", sql`${table.origin} in ('STUDENT','EVAL_SYNTHETIC')`),
     check("ai_conversations_status_valid", sql`${table.status} in ('ACTIVE','DELETED')`),
     check("ai_conversations_revision_positive", sql`${table.revision} >= 1`),
     check("ai_conversations_created_nonnegative", sql`${table.createdAt} >= 0`),
@@ -825,7 +829,8 @@ export const aiMemoryPolicies = sqliteTable(
   {
     id: text("id").primaryKey(),
     key: text("key").notNull(),
-    subjectKey: text("subject_key").notNull().references(() => canonicalMaterials.subjectKey, { onDelete: "restrict" }),
+    scope: text("scope").$type<AIMemoryScope>().notNull().default("SUBJECT"),
+    subjectKey: text("subject_key").references(() => canonicalMaterials.subjectKey, { onDelete: "restrict" }),
     currentRevision: integer("current_revision").notNull().default(1),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
@@ -834,9 +839,10 @@ export const aiMemoryPolicies = sqliteTable(
   },
   (table) => [
     uniqueIndex("ai_memory_policies_key_unique").on(table.key),
-    uniqueIndex("ai_memory_policies_subject_unique").on(table.subjectKey),
+    uniqueIndex("ai_memory_policies_global_unique").on(table.scope).where(sql`${table.scope} = 'GLOBAL'`),
+    uniqueIndex("ai_memory_policies_subject_unique").on(table.subjectKey).where(sql`${table.scope} = 'SUBJECT' and ${table.subjectKey} is not null`),
     check("ai_memory_policies_key_valid", sql`length(trim(${table.key})) between 1 and 120 and ${table.key} not glob '*[^a-z0-9.-]*'`),
-    check("ai_memory_policies_subject_valid", sql`length(trim(${table.subjectKey})) between 1 and 80 and ${table.subjectKey} not glob '*[^a-z0-9-]*'`),
+    check("ai_memory_policies_scope_valid", sql`${table.scope} in ('GLOBAL','SUBJECT') and ((${table.scope} = 'GLOBAL' and ${table.subjectKey} is null) or (${table.scope} = 'SUBJECT' and ${table.subjectKey} is not null and ${table.subjectKey} not glob '*[^a-z0-9-]*' and length(trim(${table.subjectKey})) between 1 and 80))`),
     check("ai_memory_policies_revision_positive", sql`${table.currentRevision} >= 1`),
     check("ai_memory_policies_created_nonnegative", sql`${table.createdAt} >= 0`),
     check("ai_memory_policies_updated_ordered", sql`${table.updatedAt} >= ${table.createdAt}`),
@@ -853,8 +859,18 @@ export const aiMemoryPolicyRevisions = sqliteTable(
     displayName: text("display_name").notNull(),
     enabled: integer("enabled", { mode: "boolean" }).notNull(),
     candidateReviewRequired: integer("candidate_review_required", { mode: "boolean" }).notNull(),
+    allowedKinds: text("allowed_kinds").notNull(),
+    targetActiveCount: integer("target_active_count").notNull(),
+    hardActiveMaximum: integer("hard_active_maximum").notNull(),
+    maxSelectedPerRequest: integer("max_selected_per_request").notNull(),
+    proposedHardMaximum: integer("proposed_hard_maximum").notNull(),
+    perMemoryMaxBytes: integer("per_memory_max_bytes").notNull(),
     retentionDays: integer("retention_days").notNull(),
     maxSelectedMemories: integer("max_selected_memories").notNull(),
+    mutationEnabled: integer("mutation_enabled", { mode: "boolean" }).notNull(),
+    explicitMinConfidenceUnits: integer("explicit_min_confidence_units").notNull(),
+    inferredMinConfidenceUnits: integer("inferred_min_confidence_units").notNull(),
+    inferredMinDistinctEvidenceTurns: integer("inferred_min_distinct_evidence_turns").notNull(),
     createdAt: integer("created_at").notNull(),
     createdBy: text("created_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
   },
@@ -864,19 +880,23 @@ export const aiMemoryPolicyRevisions = sqliteTable(
     check("ai_memory_policy_revisions_revision_positive", sql`${table.revision} >= 1`),
     check("ai_memory_policy_revisions_display_name_valid", sql`length(trim(${table.displayName})) between 1 and 200`),
     check("ai_memory_policy_revisions_enabled_boolean", sql`${table.enabled} in (0,1) and ${table.candidateReviewRequired} in (0,1)`),
+    check("ai_memory_policy_revisions_allowed_kinds_valid", sql`length(trim(${table.allowedKinds})) between 2 and 2048`),
+    check("ai_memory_policy_revisions_quota_bounds", sql`${table.targetActiveCount} between 0 and 100 and ${table.hardActiveMaximum} between 1 and 100 and ${table.targetActiveCount} <= ${table.hardActiveMaximum} and ${table.maxSelectedPerRequest} between 0 and 100 and ${table.maxSelectedPerRequest} <= ${table.hardActiveMaximum} and ${table.proposedHardMaximum} between 0 and 20 and ${table.perMemoryMaxBytes} between 1 and 131072`),
     check("ai_memory_policy_revisions_retention_valid", sql`${table.retentionDays} between 1 and 3650`),
     check("ai_memory_policy_revisions_selection_bound_valid", sql`${table.maxSelectedMemories} between 1 and 100`),
+    check("ai_memory_policy_revisions_confidence_bounds", sql`${table.mutationEnabled} in (0,1) and ${table.explicitMinConfidenceUnits} between 0 and 1000000 and ${table.inferredMinConfidenceUnits} between 0 and 1000000 and ${table.inferredMinDistinctEvidenceTurns} between 1 and 10`),
     check("ai_memory_policy_revisions_created_nonnegative", sql`${table.createdAt} >= 0`),
   ],
 );
 
-/** Private, principal/subject-scoped Memory candidates and approved records. */
+/** Private, principal-scoped Global/Subject Memory current state. */
 export const aiMemories = sqliteTable(
   "ai_memories",
   {
     id: text("id").primaryKey(),
     principalRef: text("principal_ref").notNull(),
-    subjectKey: text("subject_key").notNull().references(() => canonicalMaterials.subjectKey, { onDelete: "restrict" }),
+    scope: text("scope").$type<AIMemoryScope>().notNull().default("SUBJECT"),
+    subjectKey: text("subject_key").references(() => canonicalMaterials.subjectKey, { onDelete: "restrict" }),
     memoryPolicyId: text("memory_policy_id").notNull().references(() => aiMemoryPolicies.id, { onDelete: "restrict" }),
     memoryPolicyRevision: integer("memory_policy_revision").notNull(),
     revision: integer("revision").notNull().default(1),
@@ -890,29 +910,136 @@ export const aiMemories = sqliteTable(
     memoryText: text("memory_text"),
     confidenceUnits: integer("confidence_units").notNull(),
     createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
     reviewedAt: integer("reviewed_at"),
+    resolvedAt: integer("resolved_at"),
     deletedAt: integer("deleted_at"),
     expiresAt: integer("expires_at").notNull(),
     safeReviewCode: text("safe_review_code").$type<AIMemorySafeReviewCode>(),
+    contentSha256: text("content_sha256"),
   },
   (table) => [
-    index("ai_memories_principal_subject_index").on(table.principalRef, table.subjectKey, table.status, table.expiresAt),
+    index("ai_memories_principal_scope_index").on(table.principalRef, table.scope, table.subjectKey, table.status, table.expiresAt),
     index("ai_memories_source_conversation_index").on(table.sourceConversationId, table.status),
+    uniqueIndex("ai_memories_global_singleton_preference_unique").on(table.principalRef, table.kind).where(sql`${table.scope} = 'GLOBAL' and ${table.status} = 'ACTIVE' and ${table.kind} in ('PREFERRED_NAME','FORM_OF_ADDRESS','RESPONSE_DEPTH_PREFERENCE')`),
     check("ai_memories_principal_valid", sql`length(trim(${table.principalRef})) between 1 and 200 and ${table.principalRef} not glob '*[^A-Za-z0-9_-]*'`),
-    check("ai_memories_subject_valid", sql`length(trim(${table.subjectKey})) between 1 and 80 and ${table.subjectKey} not glob '*[^a-z0-9-]*'`),
+    check("ai_memories_scope_valid", sql`${table.scope} in ('GLOBAL','SUBJECT') and ((${table.scope} = 'GLOBAL' and ${table.subjectKey} is null and ${table.visibilityScope} = 'PRINCIPAL_GLOBAL') or (${table.scope} = 'SUBJECT' and ${table.subjectKey} is not null and ${table.subjectKey} not glob '*[^a-z0-9-]*' and length(trim(${table.subjectKey})) between 1 and 80 and ${table.visibilityScope} = 'PRINCIPAL_SUBJECT'))`),
     check("ai_memories_policy_revision_valid", sql`${table.memoryPolicyRevision} >= 1`),
     check("ai_memories_revision_valid", sql`${table.revision} >= 1`),
-    check("ai_memories_status_valid", sql`${table.status} in ('CANDIDATE','APPROVED','REJECTED','DELETED')`),
-    check("ai_memories_visibility_valid", sql`${table.visibilityScope} = 'PRINCIPAL_SUBJECT'`),
-    check("ai_memories_origin_valid", sql`${table.creationOrigin} = 'CONVERSATION'`),
-    check("ai_memories_kind_valid", sql`${table.kind} is null or ${table.kind} in ('LEARNING_PREFERENCE','EXPLANATION_PREFERENCE','LEARNING_DIFFICULTY','STUDY_GOAL','STUDY_PROGRESS')`),
+    check("ai_memories_status_valid", sql`${table.status} in ('PROPOSED','ACTIVE','RESOLVED','EXPIRED','DELETED')`),
+    check("ai_memories_visibility_valid", sql`${table.visibilityScope} in ('PRINCIPAL_GLOBAL','PRINCIPAL_SUBJECT')`),
+    check("ai_memories_origin_valid", sql`${table.creationOrigin} in ('EXPLICIT','INFERRED','LEGACY_SUBJECT')`),
+    check("ai_memories_kind_valid", sql`${table.kind} is null or ${table.kind} in ('LEARNING_PREFERENCE','EXPLANATION_PREFERENCE','RESPONSE_DEPTH_PREFERENCE','FORM_OF_ADDRESS','PREFERRED_NAME','LEARNING_DIFFICULTY','STUDY_GOAL','STUDY_PROGRESS','LEARNING_STRATEGY_PREFERENCE')`),
     check("ai_memories_source_range_valid", sql`${table.sourceStartOrdinal} >= 1 and ${table.sourceEndOrdinal} >= ${table.sourceStartOrdinal} and ${table.sourceEndOrdinal} - ${table.sourceStartOrdinal} + 1 <= 10000`),
-    check("ai_memories_text_valid", sql`(${table.status} = 'DELETED' and ${table.memoryText} is null) or (${table.status} <> 'DELETED' and ${table.memoryText} is not null and length(cast(${table.memoryText} as blob)) between 1 and 131072)`),
+    check("ai_memories_text_valid", sql`(${table.status} in ('RESOLVED','EXPIRED','DELETED') and ${table.memoryText} is null) or (${table.status} in ('PROPOSED','ACTIVE') and ${table.memoryText} is not null and length(cast(${table.memoryText} as blob)) between 1 and 131072)`),
     check("ai_memories_confidence_valid", sql`${table.confidenceUnits} between 0 and 1000000`),
     check("ai_memories_created_nonnegative", sql`${table.createdAt} >= 0`),
-    check("ai_memories_reviewed_consistent", sql`(${table.status} = 'CANDIDATE' and ${table.reviewedAt} is null and ${table.safeReviewCode} is null) or (${table.status} = 'APPROVED' and ${table.reviewedAt} is not null and ${table.safeReviewCode} in ('STUDENT_APPROVED','SYSTEM_AUTO_APPROVED')) or (${table.status} = 'REJECTED' and ${table.reviewedAt} is not null and ${table.safeReviewCode} = 'STUDENT_REJECTED') or (${table.status} = 'DELETED' and ${table.deletedAt} is not null and ${table.safeReviewCode} in ('CONVERSATION_DELETED','PRINCIPAL_PURGED'))`),
+    check("ai_memories_reviewed_consistent", sql`(${table.status} = 'PROPOSED' and ${table.resolvedAt} is null and ${table.deletedAt} is null and ${table.safeReviewCode} in ('INFERRED_PROPOSED','LEGACY_MIGRATED')) or (${table.status} = 'ACTIVE' and ${table.resolvedAt} is null and ${table.deletedAt} is null and ${table.safeReviewCode} in ('EXPLICIT_CREATED','INFERRED_ACTIVATED','LEGACY_MIGRATED','STUDENT_APPROVED')) or (${table.status} = 'RESOLVED' and ${table.resolvedAt} is not null and ${table.memoryText} is null and ${table.safeReviewCode} = 'MEMORY_RESOLVED') or (${table.status} = 'EXPIRED' and ${table.memoryText} is null and ${table.safeReviewCode} = 'MEMORY_EXPIRED') or (${table.status} = 'DELETED' and ${table.deletedAt} is not null and ${table.memoryText} is null and ${table.safeReviewCode} in ('MEMORY_DELETED','CONVERSATION_DELETED','PRINCIPAL_PURGED'))`),
+    check("ai_memories_updated_ordered", sql`${table.updatedAt} >= ${table.createdAt}`),
     check("ai_memories_deleted_timestamp_valid", sql`${table.deletedAt} is null or ${table.deletedAt} >= ${table.createdAt}`),
+    check("ai_memories_resolved_timestamp_valid", sql`${table.resolvedAt} is null or ${table.resolvedAt} >= ${table.createdAt}`),
+    check("ai_memories_content_hash_valid", sql`${table.contentSha256} is null or (length(${table.contentSha256}) = 64 and ${table.contentSha256} not glob '*[^0-9a-f]*')`),
     check("ai_memories_expiry_valid", sql`${table.expiresAt} > ${table.createdAt}`),
+  ],
+);
+
+/** Bounded metadata-only source evidence for a Memory revision. */
+export const aiMemoryProvenance = sqliteTable(
+  "ai_memory_provenance",
+  {
+    id: text("id").primaryKey(),
+    memoryId: text("memory_id").notNull().references(() => aiMemories.id, { onDelete: "restrict" }),
+    memoryRevision: integer("memory_revision").notNull(),
+    principalRef: text("principal_ref").notNull(),
+    scope: text("scope").$type<AIMemoryScope>().notNull(),
+    subjectKey: text("subject_key").references(() => canonicalMaterials.subjectKey, { onDelete: "restrict" }),
+    conversationId: text("conversation_id").notNull().references(() => aiConversations.id, { onDelete: "restrict" }),
+    responseId: text("response_id").notNull().references(() => aiConversationResponses.id, { onDelete: "restrict" }),
+    requestMessageId: text("request_message_id").notNull(),
+    assistantMessageId: text("assistant_message_id").notNull(),
+    sourceStartOrdinal: integer("source_start_ordinal").notNull(),
+    sourceEndOrdinal: integer("source_end_ordinal").notNull(),
+    sourceState: text("source_state").notNull().default("ACTIVE"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("ai_memory_provenance_evidence_unique").on(table.memoryId, table.memoryRevision, table.responseId),
+    index("ai_memory_provenance_memory_index").on(table.memoryId, table.memoryRevision),
+    check("ai_memory_provenance_revision_valid", sql`${table.memoryRevision} >= 1`),
+    check("ai_memory_provenance_scope_valid", sql`${table.scope} in ('GLOBAL','SUBJECT') and ((${table.scope} = 'GLOBAL' and ${table.subjectKey} is null) or (${table.scope} = 'SUBJECT' and ${table.subjectKey} is not null and ${table.subjectKey} not glob '*[^a-z0-9-]*'))`),
+    check("ai_memory_provenance_source_state_valid", sql`${table.sourceState} in ('ACTIVE','DELETED')`),
+    check("ai_memory_provenance_range_valid", sql`${table.sourceStartOrdinal} >= 1 and ${table.sourceEndOrdinal} >= ${table.sourceStartOrdinal} and ${table.sourceEndOrdinal} - ${table.sourceStartOrdinal} + 1 <= 10000`),
+    check("ai_memory_provenance_created_nonnegative", sql`${table.createdAt} >= 0`),
+  ],
+);
+
+/** Short-lived C4 command material used to make a future Agent 1 mutation crash-safe. */
+export const aiMemoryMutationIntents = sqliteTable(
+  "ai_memory_mutation_intents",
+  {
+    id: text("id").primaryKey(),
+    commandId: text("command_id").notNull(),
+    principalRef: text("principal_ref").notNull(),
+    responseId: text("response_id").notNull().references(() => aiConversationResponses.id, { onDelete: "restrict" }),
+    conversationId: text("conversation_id").notNull().references(() => aiConversations.id, { onDelete: "restrict" }),
+    scope: text("scope").$type<AIMemoryScope>().notNull(),
+    subjectKey: text("subject_key").references(() => canonicalMaterials.subjectKey, { onDelete: "restrict" }),
+    action: text("action").notNull(),
+    memoryId: text("memory_id").references(() => aiMemories.id, { onDelete: "restrict" }),
+    expectedRevision: integer("expected_revision"),
+    kind: text("kind").$type<AIMemoryKind>(),
+    origin: text("origin").$type<AIMemoryCreationOrigin>(),
+    confidenceUnits: integer("confidence_units"),
+    memoryText: text("memory_text"),
+    status: text("status").notNull().default("PENDING"),
+    contentSha256: text("content_sha256"),
+    createdAt: integer("created_at").notNull(),
+    appliedAt: integer("applied_at"),
+  },
+  (table) => [
+    uniqueIndex("ai_memory_mutation_intents_command_unique").on(table.commandId),
+    index("ai_memory_mutation_intents_status_index").on(table.status, table.createdAt, table.id),
+    check("ai_memory_mutation_intents_scope_valid", sql`${table.scope} in ('GLOBAL','SUBJECT') and ((${table.scope} = 'GLOBAL' and ${table.subjectKey} is null) or (${table.scope} = 'SUBJECT' and ${table.subjectKey} is not null and ${table.subjectKey} not glob '*[^a-z0-9-]*'))`),
+    check("ai_memory_mutation_intents_action_valid", sql`${table.action} in ('NOOP','CREATE','UPDATE','RESOLVE','DELETE')`),
+    check("ai_memory_mutation_intents_status_valid", sql`${table.status} in ('PENDING','APPLIED','FAILED','CANCELLED')`),
+    check("ai_memory_mutation_intents_revision_valid", sql`${table.expectedRevision} is null or ${table.expectedRevision} >= 1`),
+    check("ai_memory_mutation_intents_confidence_valid", sql`${table.confidenceUnits} is null or ${table.confidenceUnits} between 0 and 1000000`),
+    check("ai_memory_mutation_intents_text_valid", sql`${table.memoryText} is null or length(cast(${table.memoryText} as blob)) between 1 and 131072`),
+    check("ai_memory_mutation_intents_hash_valid", sql`${table.contentSha256} is null or (length(${table.contentSha256}) = 64 and ${table.contentSha256} not glob '*[^0-9a-f]*')`),
+    check("ai_memory_mutation_intents_applied_valid", sql`(${table.status} = 'PENDING' and ${table.appliedAt} is null) or (${table.status} = 'APPLIED' and ${table.appliedAt} is not null and ${table.memoryText} is null) or (${table.status} in ('FAILED','CANCELLED') and ${table.memoryText} is null)`),
+  ],
+);
+
+/** Metadata-only durable audit of Memory mutation commands. */
+export const aiMemoryMutationRecords = sqliteTable(
+  "ai_memory_mutation_records",
+  {
+    id: text("id").primaryKey(),
+    commandId: text("command_id").notNull(),
+    principalRef: text("principal_ref").notNull(),
+    responseId: text("response_id").notNull().references(() => aiConversationResponses.id, { onDelete: "restrict" }),
+    scope: text("scope").$type<AIMemoryScope>().notNull(),
+    subjectKey: text("subject_key").references(() => canonicalMaterials.subjectKey, { onDelete: "restrict" }),
+    action: text("action").notNull(),
+    memoryId: text("memory_id").references(() => aiMemories.id, { onDelete: "restrict" }),
+    origin: text("origin").$type<AIMemoryCreationOrigin>(),
+    expectedRevision: integer("expected_revision"),
+    resultRevision: integer("result_revision"),
+    status: text("status").notNull(),
+    contentSha256: text("content_sha256"),
+    safeErrorCode: text("safe_error_code"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("ai_memory_mutation_records_command_unique").on(table.commandId),
+    index("ai_memory_mutation_records_principal_index").on(table.principalRef, table.createdAt),
+    check("ai_memory_mutation_records_scope_valid", sql`${table.scope} in ('GLOBAL','SUBJECT') and ((${table.scope} = 'GLOBAL' and ${table.subjectKey} is null) or (${table.scope} = 'SUBJECT' and ${table.subjectKey} is not null and ${table.subjectKey} not glob '*[^a-z0-9-]*'))`),
+    check("ai_memory_mutation_records_action_valid", sql`${table.action} in ('NOOP','CREATE','UPDATE','RESOLVE','DELETE')`),
+    check("ai_memory_mutation_records_status_valid", sql`${table.status} in ('APPLIED','REJECTED')`),
+    check("ai_memory_mutation_records_revision_valid", sql`${table.expectedRevision} is null or ${table.expectedRevision} >= 1`),
+    check("ai_memory_mutation_records_result_revision_valid", sql`${table.resultRevision} is null or ${table.resultRevision} >= 1`),
+    check("ai_memory_mutation_records_hash_valid", sql`${table.contentSha256} is null or (length(${table.contentSha256}) = 64 and ${table.contentSha256} not glob '*[^0-9a-f]*')`),
+    check("ai_memory_mutation_records_created_nonnegative", sql`${table.createdAt} >= 0`),
   ],
 );
 
@@ -4300,6 +4427,9 @@ export type AIEvalJudgeResultRow = typeof aiEvalJudgeResults.$inferSelect;
 export type AIMemoryPolicyRow = typeof aiMemoryPolicies.$inferSelect;
 export type AIMemoryPolicyRevisionRow = typeof aiMemoryPolicyRevisions.$inferSelect;
 export type AIMemoryRow = typeof aiMemories.$inferSelect;
+export type AIMemoryProvenanceRow = typeof aiMemoryProvenance.$inferSelect;
+export type AIMemoryMutationIntentRow = typeof aiMemoryMutationIntents.$inferSelect;
+export type AIMemoryMutationRecordRow = typeof aiMemoryMutationRecords.$inferSelect;
 export type AIConversationSummaryRevisionRow = typeof aiConversationSummaryRevisions.$inferSelect;
 export type AIMemoryExecutionConfigRow = typeof aiMemoryExecutionConfigs.$inferSelect;
 export type AIMemoryExecutionConfigRevisionRow = typeof aiMemoryExecutionConfigRevisions.$inferSelect;

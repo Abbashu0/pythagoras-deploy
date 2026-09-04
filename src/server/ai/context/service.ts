@@ -109,8 +109,9 @@ export class AIContextService {
       }
       const summary = currentSummaryRecord ? summaryContext(currentSummaryRecord) : undefined;
       const memoryPolicy = this.memoryDomainAvailable ? this.memoryPolicies.getBySubjectKey(conversation.subjectKey) : null;
-      const memories = memoryPolicy?.enabled
-        ? this.memories.listEligible({ principalRef: activePrincipal.principalRef, subjectKey: conversation.subjectKey, at: this.safeNow(), limit: memoryPolicy.maxSelectedMemories })
+      const memoryLimit = memoryPolicy?.maxSelectedPerRequest ?? memoryPolicy?.maxSelectedMemories ?? 1;
+      const memories = memoryPolicy?.enabled && memoryLimit > 0
+        ? this.memories.listEligible({ principalRef: activePrincipal.principalRef, subjectKey: conversation.subjectKey, at: this.safeNow(), limit: memoryLimit })
         : [];
       const previousMessages = this.conversations.listMessagesBefore({
         principalRef: activePrincipal.principalRef,

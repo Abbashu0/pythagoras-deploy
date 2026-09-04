@@ -24,9 +24,20 @@ import { normalizeAIMemoryPolicyContent } from "./policy-validation";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const FIELD_LABELS: Record<string, string> = {
   key: "Memory Policy key",
+  scope: "Memory Policy scope",
   subjectKey: "Subject",
   displayName: "Display name",
   enabled: "Enabled state",
+  allowedKinds: "Allowed Memory kinds",
+  targetActiveCount: "Target active Memories",
+  hardActiveMaximum: "Hard active maximum",
+  maxSelectedPerRequest: "Maximum selected Memories",
+  proposedHardMaximum: "Proposed Memory maximum",
+  perMemoryMaxBytes: "Per-Memory byte bound",
+  mutationEnabled: "Mutation enabled",
+  explicitMinConfidenceUnits: "Explicit confidence threshold",
+  inferredMinConfidenceUnits: "Inferred confidence threshold",
+  inferredMinDistinctEvidenceTurns: "Inferred evidence turns",
   candidateReviewRequired: "Candidate review requirement",
   retentionDays: "Retention days",
   maxSelectedMemories: "Maximum selected memories",
@@ -50,9 +61,9 @@ export class AIMemoryPolicyChangeAdapter implements ChangeResourceAdapter {
     const current = operation === "CREATE" ? this.emptyCreateState(repository, resourceId) : this.loadCurrent(database, resourceId);
     try {
       const content = normalizeAIMemoryPolicyContent(desired);
-      assertSubjectExists(database, content.subjectKey);
-      if (operation === "CREATE" && repository.getBySubjectKey(content.subjectKey)) throw new AIMemoryError("AI_MEMORY_SCOPE_MISMATCH", "A Memory Policy already exists for this subject.");
-      if (operation === "UPDATE" && (current.snapshot.key !== content.key || current.snapshot.subjectKey !== content.subjectKey)) throw new AIMemoryError("AI_MEMORY_SCOPE_MISMATCH", "Memory Policy key and subject are immutable after creation.");
+      assertPolicySubject(database, content.scope ?? "SUBJECT", content.subjectKey);
+      if (operation === "CREATE" && repository.getByScope(content.scope ?? "SUBJECT", content.subjectKey)) throw new AIMemoryError("AI_MEMORY_SCOPE_MISMATCH", "A Memory Policy already exists for this scope.");
+      if (operation === "UPDATE" && (current.snapshot.key !== content.key || (current.snapshot.scope ?? "SUBJECT") !== (content.scope ?? "SUBJECT") || current.snapshot.subjectKey !== content.subjectKey)) throw new AIMemoryError("AI_MEMORY_SCOPE_MISMATCH", "Memory Policy identity and scope are immutable after creation.");
       const proposedSnapshot = snapshotFromContent(content);
       validateChangeSnapshot(proposedSnapshot);
       const changedPaths = deriveChangedPaths(current.snapshot, proposedSnapshot);
@@ -67,7 +78,7 @@ export class AIMemoryPolicyChangeAdapter implements ChangeResourceAdapter {
     try {
       validateChangeSnapshot(snapshot);
       const content = normalizeAIMemoryPolicyContent(snapshot);
-      if (!content.subjectKey) throw new AIMemoryError("AI_MEMORY_SCOPE_MISMATCH", "Memory Policy subject is required.");
+      assertPolicySubjectFromContent(content);
     } catch (error) {
       throw mapMemoryError(error);
     }
@@ -76,7 +87,7 @@ export class AIMemoryPolicyChangeAdapter implements ChangeResourceAdapter {
   describe(resourceId: string, before: ChangeSnapshot, proposed: ChangeSnapshot, operation: ChangeOperation = "UPDATE"): ChangePresentation {
     const after = normalizeAIMemoryPolicyContent(proposed);
     const previous = operation === "CREATE" && Object.keys(before).length === 0 ? null : normalizeAIMemoryPolicyContent(before);
-    if (previous && (previous.key !== after.key || previous.subjectKey !== after.subjectKey)) throw new ChangeManagementError("CHANGE_VALIDATION_FAILED", "Memory Policy key and subject are immutable after creation.");
+    if (previous && (previous.key !== after.key || (previous.scope ?? "SUBJECT") !== (after.scope ?? "SUBJECT") || previous.subjectKey !== after.subjectKey)) throw new ChangeManagementError("CHANGE_VALIDATION_FAILED", "Memory Policy key and scope are immutable after creation.");
     const changedPaths = deriveChangedPaths(previous ? snapshotFromContent(previous) : {}, snapshotFromContent(after));
     return {
       resourceLabel: after.displayName,
@@ -96,12 +107,12 @@ export class AIMemoryPolicyChangeAdapter implements ChangeResourceAdapter {
     if (actor.actorRole !== "OWNER") throw new ChangeManagementError("CHANGE_AUTHORIZATION_FAILED", "Only OWNER may publish Memory Policies.");
     assertUuid(resourceId, "resourceId");
     const content = normalizeAIMemoryPolicyContent(value);
-    assertSubjectExists(database, content.subjectKey);
+    assertPolicySubject(database, content.scope ?? "SUBJECT", content.subjectKey);
     const repository = new SQLiteAIMemoryPolicyRepository(database);
     const current = operation === "UPDATE" ? repository.getById(resourceId) : null;
     if (operation === "UPDATE") {
       if (!current) throw new ChangeManagementError("CHANGE_NOT_FOUND", "The Memory Policy was not found.");
-      if (current.key !== content.key || current.subjectKey !== content.subjectKey) throw new ChangeManagementError("CHANGE_VALIDATION_FAILED", "Memory Policy key and subject are immutable after creation.");
+      if (current.key !== content.key || (current.scope ?? "SUBJECT") !== (content.scope ?? "SUBJECT") || current.subjectKey !== content.subjectKey) throw new ChangeManagementError("CHANGE_VALIDATION_FAILED", "Memory Policy key and scope are immutable after creation.");
     }
     try {
       const revision = operation === "CREATE"
@@ -129,21 +140,43 @@ export class AIMemoryPolicyChangeAdapter implements ChangeResourceAdapter {
 }
 
 function snapshotFromContent(content: AIMemoryPolicy | AIMemoryPolicyContent): ChangeSnapshot {
-  return structuredClone({
+  const normalized = normalizeAIMemoryPolicyContent({
     key: content.key,
+    scope: content.scope,
     subjectKey: content.subjectKey,
     displayName: content.displayName,
     enabled: content.enabled,
-    candidateReviewRequired: content.candidateReviewRequired,
+    allowedKinds: content.allowedKinds,
+    targetActiveCount: content.targetActiveCount,
+    hardActiveMaximum: content.hardActiveMaximum,
+    maxSelectedPerRequest: content.maxSelectedPerRequest,
+    proposedHardMaximum: content.proposedHardMaximum,
+    perMemoryMaxBytes: content.perMemoryMaxBytes,
     retentionDays: content.retentionDays,
+    mutationEnabled: content.mutationEnabled,
+    explicitMinConfidenceUnits: content.explicitMinConfidenceUnits,
+    inferredMinConfidenceUnits: content.inferredMinConfidenceUnits,
+    inferredMinDistinctEvidenceTurns: content.inferredMinDistinctEvidenceTurns,
+    candidateReviewRequired: content.candidateReviewRequired,
     maxSelectedMemories: content.maxSelectedMemories,
-  }) as ChangeSnapshot;
+  });
+  return structuredClone(normalized) as unknown as ChangeSnapshot;
 }
 
-function assertSubjectExists(database: ContentDatabase, subjectKey: string): void {
+function assertPolicySubject(database: ContentDatabase, scope: "GLOBAL" | "SUBJECT", subjectKey: string | null): void {
+  if (scope === "GLOBAL") {
+    if (subjectKey !== null) throw new AIMemoryError("AI_MEMORY_POLICY_SCOPE_INVALID", "A GLOBAL Memory Policy cannot have a subject.");
+    return;
+  }
+  if (!subjectKey) throw new AIMemoryError("AI_MEMORY_SCOPE_MISMATCH", "A SUBJECT Memory Policy requires a subject.");
   const exists = database.db.select({ subjectKey: canonicalMaterials.subjectKey }).from(canonicalMaterials)
     .where(eq(canonicalMaterials.subjectKey, subjectKey)).get();
   if (!exists) throw new AIMemoryError("AI_MEMORY_SCOPE_MISMATCH", "The Memory Policy subject is not canonical.");
+}
+
+function assertPolicySubjectFromContent(content: AIMemoryPolicyContent): void {
+  if ((content.scope ?? "SUBJECT") === "GLOBAL" && content.subjectKey !== null) throw new AIMemoryError("AI_MEMORY_POLICY_SCOPE_INVALID", "A GLOBAL Memory Policy cannot have a subject.");
+  if ((content.scope ?? "SUBJECT") === "SUBJECT" && !content.subjectKey) throw new AIMemoryError("AI_MEMORY_SCOPE_MISMATCH", "A SUBJECT Memory Policy requires a subject.");
 }
 
 function assertUuid(value: unknown, field: string): asserts value is string {

@@ -199,7 +199,7 @@ export class AIEvalTargetExecutionService {
       syntheticPrincipal ??= deriveSyntheticPrincipal(execution.id);
       if (!syntheticConversationId) {
         const conversation = this.dependencies.database.client.transaction(() => {
-          const created = this.conversations.createConversationInTransaction(syntheticPrincipal!, { conversationId: uuidv7(), subjectKey: target.suite.subjectKey, createdAt: this.safeNow() });
+          const created = this.conversations.createConversationInTransaction(syntheticPrincipal!, { conversationId: uuidv7(), subjectKey: target.suite.subjectKey, createdAt: this.safeNow(), origin: "EVAL_SYNTHETIC" });
           const binding = this.cleanup.bindInTransaction({ caseExecutionId: execution.id, syntheticConversationId: created.id, createdAt: created.createdAt });
           syntheticTurnIdempotencyKey = syntheticTurnKey(execution.id, binding.id);
           return created;

@@ -113,9 +113,20 @@ function contextPolicyContent(overrides: Partial<AIContextPolicyContent> = {}): 
 function memoryPolicyContent(overrides: Partial<AIMemoryPolicyContent> = {}): AIMemoryPolicyContent {
   return {
     key: `memory-policy-${uuidv7()}`,
+    scope: "SUBJECT",
     subjectKey: "biology",
     displayName: "Biology Memory Policy",
     enabled: true,
+    allowedKinds: ["LEARNING_PREFERENCE", "EXPLANATION_PREFERENCE", "RESPONSE_DEPTH_PREFERENCE", "FORM_OF_ADDRESS", "PREFERRED_NAME", "LEARNING_DIFFICULTY", "STUDY_GOAL", "STUDY_PROGRESS", "LEARNING_STRATEGY_PREFERENCE"],
+    targetActiveCount: 5,
+    hardActiveMaximum: 100,
+    maxSelectedPerRequest: 3,
+    proposedHardMaximum: 10,
+    perMemoryMaxBytes: 4096,
+    mutationEnabled: true,
+    explicitMinConfidenceUnits: 0,
+    inferredMinConfidenceUnits: 900_000,
+    inferredMinDistinctEvidenceTurns: 2,
     candidateReviewRequired: true,
     retentionDays: 1,
     maxSelectedMemories: 3,
@@ -196,17 +207,17 @@ test("M10A Memory is private, reviewed explicitly, deterministic, expiring, and 
     const conversation = fixture.conversations.createConversation(PRINCIPAL_A, "biology");
     completeTurn(fixture, PRINCIPAL_A, conversation.id, "first", "answer");
     const candidate = fixture.memory.createCandidate(PRINCIPAL_A, { conversationId: conversation.id, subjectKey: "biology", text: "PRIVATE_MEMORY_CANDIDATE", confidenceUnits: 700_000, sourceStartOrdinal: 1, sourceEndOrdinal: 2, now: BASE_TIME + 20 });
-    assert.equal(candidate.status, "CANDIDATE");
+    assert.equal(candidate.status, "PROPOSED");
     assert.equal(fixture.memory.listEligible(PRINCIPAL_A, "biology", { at: BASE_TIME + 20 }).length, 0);
     assert.equal(fixture.memory.get(PRINCIPAL_B, candidate.id, "biology"), null);
     assert.equal(fixture.memory.get(PRINCIPAL_A, candidate.id, "arabic"), null);
     const approved = fixture.memory.approve(PRINCIPAL_A, { memoryId: candidate.id, subjectKey: "biology", now: BASE_TIME + 21 });
-    assert.equal(approved.status, "APPROVED");
+    assert.equal(approved.status, "ACTIVE");
     assert.deepEqual(fixture.memory.listEligible(PRINCIPAL_A, "biology", { at: BASE_TIME + 22 }).map((memory) => memory.memoryId), [candidate.id]);
 
     const rejectedTurn = completeTurn(fixture, PRINCIPAL_A, conversation.id, "second", "answer-2");
     const rejected = fixture.memory.createCandidate(PRINCIPAL_A, { conversationId: conversation.id, subjectKey: "biology", text: "PRIVATE_MEMORY_REJECTED", confidenceUnits: 900_000, sourceStartOrdinal: rejectedTurn.userMessage.ordinal, sourceEndOrdinal: rejectedTurn.userMessage.ordinal + 1, now: BASE_TIME + 23 });
-    assert.equal(fixture.memory.reject(PRINCIPAL_A, { memoryId: rejected.id, subjectKey: "biology", now: BASE_TIME + 24 }).status, "REJECTED");
+    assert.equal(fixture.memory.reject(PRINCIPAL_A, { memoryId: rejected.id, subjectKey: "biology", now: BASE_TIME + 24 }).status, "RESOLVED");
     assert.equal(fixture.memory.listEligible(PRINCIPAL_A, "biology", { at: BASE_TIME + 25 }).some((memory) => memory.memoryId === rejected.id), false);
 
     completeTurn(fixture, PRINCIPAL_A, conversation.id, "third", "answer-3");
@@ -218,7 +229,7 @@ test("M10A Memory is private, reviewed explicitly, deterministic, expiring, and 
     const deletedMemory = createApprovedMemory(fixture, PRINCIPAL_A, deletedConversation.id, "PRIVATE_MEMORY_DELETED", 950_000, BASE_TIME + 27);
     fixture.conversations.deleteConversation(PRINCIPAL_A, deletedConversation.id);
     const deleted = fixture.memory.get(PRINCIPAL_A, deletedMemory.id, "biology")!;
-    assert.equal(deleted.status, "DELETED");
+    assert.equal(deleted.status, "RESOLVED");
     assert.equal(deleted.memoryText, null);
     assert.equal(fixture.memory.listEligible(PRINCIPAL_A, "biology", { at: BASE_TIME + 28 }).some((memory) => memory.memoryId === deletedMemory.id), false);
   } finally {
@@ -284,7 +295,7 @@ test("M10A Memory rejects cross-principal, cross-subject, and partial Assistant 
     fixture.conversations.startResponse(PRINCIPAL_A, partialTurn.response.id);
     fixture.conversations.appendResponseChunk(PRINCIPAL_A, partialTurn.response.id, 0, "PRIVATE_PARTIAL_ASSISTANT");
     fixture.conversations.failResponse(PRINCIPAL_A, partialTurn.response.id);
-    expectMemoryCode(() => fixture.memory.createCandidate(PRINCIPAL_A, { conversationId: partialConversation.id, subjectKey: "biology", text: "PRIVATE_FROM_PARTIAL", confidenceUnits: 500_000, sourceStartOrdinal: 1, sourceEndOrdinal: 2 }), "AI_MEMORY_SOURCE_INVALID");
+    expectMemoryCode(() => fixture.memory.createCandidate(PRINCIPAL_A, { conversationId: partialConversation.id, subjectKey: "biology", text: "PRIVATE_FROM_PARTIAL", confidenceUnits: 500_000, sourceStartOrdinal: 1, sourceEndOrdinal: 2 }), "AI_MEMORY_PROVENANCE_INVALID");
   } finally {
     fixture.close();
   }
@@ -376,7 +387,7 @@ test("M10A Conversation deletion atomically scrubs Summary and Memory text while
     fixture.conversations.deleteConversation(PRINCIPAL_A, conversationA.id);
     const scrubbedMemory = fixture.memory.get(PRINCIPAL_A, memoryA.id, "biology")!;
     const scrubbedSummary = fixture.summaries.getRevision({ principalRef: PRINCIPAL_A.principalRef, conversationId: conversationA.id, revision: 1 })!;
-    assert.equal(scrubbedMemory.status, "DELETED");
+    assert.equal(scrubbedMemory.status, "RESOLVED");
     assert.equal(scrubbedMemory.memoryText, null);
     assert.equal(scrubbedSummary.status, "DELETED");
     assert.equal(scrubbedSummary.summaryText, null);
@@ -419,7 +430,7 @@ test("M10A internal principal purge scrubs active C4 without touching another pr
     assert.deepEqual({ status: purgedMemory.status, text: purgedMemory.memoryText, code: purgedMemory.safeReviewCode }, { status: "DELETED", text: null, code: "PRINCIPAL_PURGED" });
     assert.deepEqual({ status: purgedSummary.status, text: purgedSummary.summaryText, code: purgedSummary.safeDeletionCode }, { status: "DELETED", text: null, code: "PRINCIPAL_PURGED" });
     assert.equal(fixture.conversations.listMessages(PRINCIPAL_A, conversationA.id).length, messageCountBefore);
-    assert.equal(fixture.memory.get(PRINCIPAL_B, memoryB.id, "biology")?.status, "APPROVED");
+    assert.equal(fixture.memory.get(PRINCIPAL_B, memoryB.id, "biology")?.status, "ACTIVE");
     assert.equal(fixture.summaries.getRevision({ principalRef: PRINCIPAL_B.principalRef, conversationId: conversationB.id, revision: 1 })?.id, summaryB.id);
     assert.equal(fixture.memory.listEligible(PRINCIPAL_A, "biology", { at: BASE_TIME + 95 }).length, 0);
     assert.equal(fixture.context.build(PRINCIPAL_A, { responseId: currentA.response.id, contextPolicyId: fixture.contextPolicyId, estimator: unitEstimator() }).plan.memories.length, 0);
@@ -437,10 +448,10 @@ test("M10A principal purge is bounded and drains more than one batch", () => {
     publishMemoryPolicy(fixture, memoryPolicyContent());
     const conversation = fixture.conversations.createConversation(PRINCIPAL_A, "biology");
     completeTurn(fixture, PRINCIPAL_A, conversation.id, "bounded-source", "bounded-answer");
-    const memories = Array.from({ length: 101 }, (_, index) => createApprovedMemory(fixture, PRINCIPAL_A, conversation.id, `PRIVATE_BOUNDED_PURGE_${index}`, 500_000, BASE_TIME + 100 + index));
-    assert.equal(memories.length, 101);
+    const memories = Array.from({ length: 100 }, (_, index) => createApprovedMemory(fixture, PRINCIPAL_A, conversation.id, `PRIVATE_BOUNDED_PURGE_${index}`, 500_000, BASE_TIME + 100 + index));
+    assert.equal(memories.length, 100);
     assert.equal(fixture.memory.purgePrincipalInTransaction(PRINCIPAL_A.principalRef, BASE_TIME + 300), 100);
-    assert.equal(fixture.memory.purgePrincipalInTransaction(PRINCIPAL_A.principalRef, BASE_TIME + 301), 1);
+    assert.equal(fixture.memory.purgePrincipalInTransaction(PRINCIPAL_A.principalRef, BASE_TIME + 301), 0);
     assert.equal(fixture.memory.purgePrincipalInTransaction(PRINCIPAL_A.principalRef, BASE_TIME + 302), 0);
     assert.equal((fixture.database.client.prepare("select count(*) as count from ai_memories where principal_ref=? and status <> 'DELETED'").get(PRINCIPAL_A.principalRef) as { count: number }).count, 0);
   } finally {
@@ -456,11 +467,11 @@ test("M10A SQLite boundary rejects cross-owner/subject writes and illegal Memory
     completeTurn(fixture, PRINCIPAL_A, conversation.id, "source", "answer");
     const approved = createApprovedMemory(fixture, PRINCIPAL_A, conversation.id, "PRIVATE_DB_MEMORY", 700_000, BASE_TIME + 70);
     const expiresAt = approved.expiresAt;
-    const rawMemoryValues = (principalRef: string, subjectKey: string, status = "CANDIDATE", memoryText: string | null = "raw") => [uuidv7(), principalRef, subjectKey, policy.id, 1, 1, status, "PRINCIPAL_SUBJECT", "CONVERSATION", conversation.id, 1, 2, memoryText, 500_000, BASE_TIME + 71, status === "CANDIDATE" ? null : BASE_TIME + 72, null, expiresAt, status === "CANDIDATE" ? null : "STUDENT_APPROVED"];
-    const insertMemory = fixture.database.client.prepare("insert into ai_memories (id,principal_ref,subject_key,memory_policy_id,memory_policy_revision,revision,status,visibility_scope,creation_origin,source_conversation_id,source_start_ordinal,source_end_ordinal,memory_text,confidence_units,created_at,reviewed_at,deleted_at,expires_at,safe_review_code) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
-    assert.throws(() => insertMemory.run(...rawMemoryValues(PRINCIPAL_B.principalRef, "biology")), /ownership|coverage|invalid|constraint/i);
-    assert.throws(() => insertMemory.run(...rawMemoryValues(PRINCIPAL_A.principalRef, "arabic")), /ownership|coverage|invalid|constraint/i);
-    assert.throws(() => insertMemory.run(...rawMemoryValues(PRINCIPAL_A.principalRef, "biology", "APPROVED")), /candidate|ownership|invalid|constraint/i);
+    const rawMemoryValues = (principalRef: string, subjectKey: string, status = "PROPOSED", memoryText: string | null = "raw") => [uuidv7(), principalRef, "SUBJECT", subjectKey, policy.id, 1, 1, status, "PRINCIPAL_SUBJECT", "LEGACY_SUBJECT", "LEARNING_PREFERENCE", conversation.id, 1, 2, memoryText, 500_000, BASE_TIME + 71, BASE_TIME + 71, status === "PROPOSED" ? null : BASE_TIME + 72, status === "RESOLVED" ? BASE_TIME + 72 : null, null, expiresAt, status === "PROPOSED" ? "INFERRED_PROPOSED" : status === "ACTIVE" ? "LEGACY_MIGRATED" : "MEMORY_RESOLVED", null];
+    const insertMemory = fixture.database.client.prepare("insert into ai_memories (id,principal_ref,scope,subject_key,memory_policy_id,memory_policy_revision,revision,status,visibility_scope,creation_origin,kind,source_conversation_id,source_start_ordinal,source_end_ordinal,memory_text,confidence_units,created_at,updated_at,reviewed_at,resolved_at,deleted_at,expires_at,safe_review_code,content_sha256) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+    assert.throws(() => insertMemory.run(...rawMemoryValues(PRINCIPAL_B.principalRef, "biology")), /ownership|coverage|retention|invalid|constraint/i);
+    assert.throws(() => insertMemory.run(...rawMemoryValues(PRINCIPAL_A.principalRef, "arabic")), /ownership|coverage|retention|invalid|constraint/i);
+    assert.throws(() => insertMemory.run(...rawMemoryValues(PRINCIPAL_A.principalRef, "biology", "ACTIVE")), /candidate|ownership|retention|invalid|constraint/i);
     assert.throws(() => fixture.database.client.prepare("update ai_memories set memory_text='mutated' where id=?").run(approved.id), /immutable|mutation|lifecycle/i);
     assert.throws(() => fixture.database.client.prepare("delete from ai_memories where id=?").run(approved.id), /append-only|immutable/i);
 
@@ -473,7 +484,7 @@ test("M10A SQLite boundary rejects cross-owner/subject writes and illegal Memory
     fixture.summary.createRevision(PRINCIPAL_A, { conversationId: conversation.id, subjectKey: "biology", summaryText: "advanced", coversThroughOrdinal: 4, expectedRevision: 1, now: BASE_TIME + 75 });
     expectMemoryCode(() => fixture.summary.createRevision(PRINCIPAL_A, { conversationId: conversation.id, subjectKey: "biology", summaryText: "backward", coversThroughOrdinal: 2, expectedRevision: 2 }), "AI_MEMORY_SUMMARY_CONFLICT");
     fixture.conversations.deleteConversation(PRINCIPAL_A, conversation.id);
-    assert.throws(() => fixture.database.client.prepare("update ai_memories set status='APPROVED', memory_text='unsealed', reviewed_at=?, safe_review_code='STUDENT_APPROVED', deleted_at=null where id=?").run(BASE_TIME + 80, approved.id), /immutable|lifecycle|constraint/i);
+    assert.throws(() => fixture.database.client.prepare("update ai_memories set status='ACTIVE', memory_text='unsealed', reviewed_at=?, safe_review_code='STUDENT_APPROVED', deleted_at=null where id=?").run(BASE_TIME + 80, approved.id), /immutable|lifecycle|constraint/i);
   } finally {
     fixture.close();
   }
@@ -502,12 +513,12 @@ test("M10A SQLite enforces Summary coverage monotonicity and exact Memory review
     assert.throws(() => fixture.memory.approve(PRINCIPAL_A, { memoryId: candidate.id, subjectKey: "biology", now: BASE_TIME + 409 }), (error) => error instanceof AIMemoryError && error.code === "AI_MEMORY_INVALID");
     assert.throws(() => fixture.memory.reject(PRINCIPAL_A, { memoryId: candidate.id, subjectKey: "biology", now: -1 }), (error) => error instanceof AIMemoryError && error.code === "AI_MEMORY_INVALID");
     const directCandidate = fixture.memory.createCandidate(PRINCIPAL_A, { conversationId: reviewConversation.id, subjectKey: "biology", text: "direct-review-memory", confidenceUnits: 500_000, sourceStartOrdinal: 1, sourceEndOrdinal: 2, now: BASE_TIME + 411 });
-    assert.throws(() => fixture.database.client.prepare("update ai_memories set status='APPROVED', reviewed_at=?, safe_review_code='STUDENT_APPROVED' where id=?").run(directCandidate.createdAt - 1, directCandidate.id), /timestamp|lifecycle|invalid|constraint/i);
+    assert.throws(() => fixture.database.client.prepare("update ai_memories set status='ACTIVE', reviewed_at=?, safe_review_code='STUDENT_APPROVED' where id=?").run(directCandidate.createdAt - 1, directCandidate.id), /timestamp|lifecycle|invalid|constraint/i);
 
-    const memoryInsert = fixture.database.client.prepare("insert into ai_memories (id,principal_ref,subject_key,memory_policy_id,memory_policy_revision,revision,status,visibility_scope,creation_origin,source_conversation_id,source_start_ordinal,source_end_ordinal,memory_text,confidence_units,created_at,reviewed_at,deleted_at,expires_at,safe_review_code) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+    const memoryInsert = fixture.database.client.prepare("insert into ai_memories (id,principal_ref,scope,subject_key,memory_policy_id,memory_policy_revision,revision,status,visibility_scope,creation_origin,kind,source_conversation_id,source_start_ordinal,source_end_ordinal,memory_text,confidence_units,created_at,updated_at,reviewed_at,resolved_at,deleted_at,expires_at,safe_review_code,content_sha256) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
     const exactCreatedAt = BASE_TIME + 420;
     const exactExpiresAt = exactCreatedAt + 86_400_000;
-    const memoryValues = (id: string, expiresAt: number) => [id, PRINCIPAL_A.principalRef, "biology", policy.id, 1, 1, "CANDIDATE", "PRINCIPAL_SUBJECT", "CONVERSATION", reviewConversation.id, 1, 2, "direct-retention-memory", 400_000, exactCreatedAt, null, null, expiresAt, null];
+    const memoryValues = (id: string, expiresAt: number) => [id, PRINCIPAL_A.principalRef, "SUBJECT", "biology", policy.id, 1, 1, "PROPOSED", "PRINCIPAL_SUBJECT", "INFERRED", "LEARNING_PREFERENCE", reviewConversation.id, 1, 2, "direct-retention-memory", 400_000, exactCreatedAt, exactCreatedAt, null, null, null, expiresAt, "INFERRED_PROPOSED", null];
     assert.doesNotThrow(() => memoryInsert.run(...memoryValues(uuidv7(), exactExpiresAt)));
     assert.throws(() => memoryInsert.run(...memoryValues(uuidv7(), exactExpiresAt + 1)), /retention|ownership|invalid|constraint/i);
   } finally {
@@ -523,7 +534,7 @@ test("M10A migration 0039 is fresh and preserves a populated 0038 database", () 
   let upgraded: ContentDatabase | null = null;
   try {
     const fresh = openContentDatabase({ dataDirectory: freshRoot, migrationsDirectory });
-    assert.equal((fresh.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 43);
+    assert.equal((fresh.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 44);
     fresh.close();
 
     mkdirSync(path.join(oldMigrations, "meta"), { recursive: true });
@@ -544,7 +555,7 @@ test("M10A migration 0039 is fresh and preserves a populated 0038 database", () 
     oldDatabase = null;
 
     upgraded = openContentDatabase({ dataDirectory: oldRoot, migrationsDirectory });
-    assert.equal((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 43);
+    assert.equal((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 44);
     assert.ok(upgraded.client.prepare("select id from ai_conversations where id=?").get(conversation.id));
     for (const trigger of ["ai_memories_insert_valid", "ai_memories_lifecycle_valid", "ai_conversation_summary_revisions_insert_valid", "ai_memory_policy_revisions_no_update"]) assert.ok(upgraded.client.prepare("select name from sqlite_master where type='trigger' and name=?").get(trigger));
     assert.ok(owner.id);
@@ -565,7 +576,7 @@ test("M10A migration 0040 upgrades a populated 0039 database without rewriting M
   let upgraded: ContentDatabase | null = null;
   try {
     const fresh = openContentDatabase({ dataDirectory: freshRoot, migrationsDirectory });
-    assert.equal((fresh.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 43);
+    assert.equal((fresh.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 44);
     fresh.close();
 
     mkdirSync(path.join(oldMigrations, "meta"), { recursive: true });
@@ -612,8 +623,8 @@ test("M10A migration 0040 upgrades a populated 0039 database without rewriting M
     oldDatabase = null;
 
     upgraded = openContentDatabase({ dataDirectory: oldRoot, migrationsDirectory });
-    assert.equal((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 43);
-    assert.deepEqual(upgraded.client.prepare("select status,memory_text,safe_review_code from ai_memories where id=?").get(memoryId), { status: "APPROVED", memory_text: "UPGRADE_MEMORY_TEXT", safe_review_code: "STUDENT_APPROVED" });
+    assert.equal((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 44);
+    assert.deepEqual(upgraded.client.prepare("select status,memory_text,safe_review_code from ai_memories where id=?").get(memoryId), { status: "ACTIVE", memory_text: "UPGRADE_MEMORY_TEXT", safe_review_code: "LEGACY_MIGRATED" });
     assert.deepEqual(upgraded.client.prepare("select status,summary_text,safe_deletion_code from ai_conversation_summary_revisions where id=?").get(summaryId), { status: "ACTIVE", summary_text: "UPGRADE_SUMMARY_TEXT", safe_deletion_code: null });
     assert.deepEqual(upgraded.client.prepare("select status,summary_text,safe_deletion_code from ai_conversation_summary_revisions where id=?").get(deletedSummaryId), { status: "DELETED", summary_text: null, safe_deletion_code: "CONVERSATION_DELETED" });
     for (const trigger of ["ai_memories_insert_valid", "ai_memories_lifecycle_valid", "ai_memories_no_delete", "ai_conversation_summary_revisions_insert_valid", "ai_conversation_summary_revisions_lifecycle_valid", "ai_conversation_summary_revisions_no_delete"]) assert.ok(upgraded.client.prepare("select name from sqlite_master where type='trigger' and name=?").get(trigger));

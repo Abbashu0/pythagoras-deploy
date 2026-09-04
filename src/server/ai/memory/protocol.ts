@@ -129,7 +129,7 @@ export function buildCompactionGatewayRequest(input: {
 function normalizeCandidateText(value: unknown): string {
   if (typeof value !== "string") invalid("The extraction candidate text is invalid.");
   const normalized = value.normalize("NFKC").trim();
-  if (!normalized || Buffer.byteLength(normalized, "utf8") > 131072 || hasForbiddenPersonalPattern(normalized)) invalid("The extraction candidate text is not eligible for educational Memory.");
+  if (!normalized || Buffer.byteLength(normalized, "utf8") > 131072 || hasNarrowDlpPattern(normalized)) invalid("The extraction candidate text is not eligible for Memory storage.");
   return normalized;
 }
 
@@ -139,37 +139,11 @@ function normalizeSummary(value: string): string {
   return normalized;
 }
 
-function hasForbiddenPersonalPattern(value: string): boolean {
-  const screening = normalizeForSensitiveScreening(value);
-  return [
-    /(?:^|\s)(?:i am|i'm|i have|i suffer from|i take|my diagnosis|i was diagnosed).{0,60}(?:diabetes|diabetic|cancer|asthma|epilepsy|illness|disease|medication|medicine|anxiety|depression|ptsd|mental-health|mental health|disorder)\b/iu,
-    /(?:^|\s)(?:انا|لدي|عندي|أعاني من|اعاني من|مصاب|مصابة|مريض|مريضة|تم تشخيصي|تشخيصي|دوائي|دواءي|اتناول|أتناول).{0,70}(?:السكري|مرض السكر|السرطان|الربو|الصرع|مرض|تشخيص|دواء|علاج|اضطراب|اكتئاب|قلق|الصحة النفسية|نفسي)/u,
-    /(?:^|\s)(?:my|i am|i'm|i identify as).{0,40}(?:religion|faith|muslim|christian|jewish|religious affiliation)\b/iu,
-    /(?:^|\s)(?:ديني|ديانتي|أنا مسلم|انا مسلم|أنا مسيحي|انا مسيحي|أنا يهودي|انا يهودي|انتمائي الديني|أعتنق|اعتنق)/u,
-    /(?:^|\s)(?:my|i support|i belong to|i am a member of).{0,40}(?:political party|party|political affiliation)\b/iu,
-    /(?:^|\s)(?:انتمائي السياسي|أنتمي إلى حزب|انتمي الى حزب|حزبي|أؤيد حزب|اؤيد حزب)/u,
-    /(?:^|\s)(?:my|i am|i'm).{0,40}(?:sex life|sexual orientation|sexuality|sexual information)\b/iu,
-    /(?:^|\s)(?:حياتي الجنسية|ميولي الجنسية|معلوماتي الجنسية)/u,
-    /(?:^|\s)(?:my criminal record|i was arrested|i was convicted|i committed a crime)\b/iu,
-    /(?:^|\s)(?:سجلي الجنائي|تم اعتقالي|اعتقلت|أدينت|ادينت|ارتكبت جريمة)/u,
-    /\b(?:password|passwd|secret|api[- ]?key|authentication token|access token|one[- ]?time code|credit[ -]?card|bank account|social security)\b/iu,
-    /\b(?:my medication|my diagnosis|my illness|my disease|my mental health)\b/iu,
-    /(?:كلمة المرور|كلمة السر|الرمز السري|مفتاح API|مفتاح api|رمز الدخول|رمز التحقق|رقم بطاقتي|بطاقتي الائتمانية|حسابي البنكي|رقم حسابي|رقم الضمان)/u,
-    /(?:^|\s)(?:my address|my location|my residence|my home|i live in|i reside in)\b.{0,80}/iu,
-    /(?:عنواني|أسكن في|اسكن في|أعيش في|اعيش في|موقعي|منزلي|مكاني)/u,
-    /(?:^|\s)(?:today|right now|this moment).{0,30}(?:hate|angry|frustrated|depressed|sad)\b/iu,
-    /(?:اليوم|الآن|هالوقت).{0,30}(?:أكره|اكره|غاضب|غاضبة|محبط|محبطة|حزين|حزينة)/u,
-    /(?:أنا|انا).{0,30}(?:أكره|اكره|غاضب|غاضبة|محبط|محبطة|حزين|حزينة)/u,
-    /\b(?:i hate|i am angry|i'm angry|i am frustrated|i'm frustrated)\b/iu,
-  ].some((pattern) => pattern.test(screening));
-}
-
-function normalizeForSensitiveScreening(value: string): string {
-  return value
-    .normalize("NFKC")
-    .replace(/[\u064B-\u065F\u0670\u0640]/gu, "")
-    .replace(/\s+/gu, " ")
-    .trim();
+function hasNarrowDlpPattern(value: string): boolean {
+  const screening = value.normalize("NFKC").replace(/[\u064B-\u065F\u0670\u0640]/gu, "").replace(/\s+/gu, " ").trim();
+  return /\b(?:password|passwd|api[-_ ]?key|access[-_ ]?token|secret[-_ ]?key)\b/iu.test(screening)
+    || /(?:كلمة المرور|كلمة السر|رمز الدخول|مفتاح\s*API|بطاقتي الائتمانية|حسابي البنكي)/u.test(screening)
+    || (/(?:credit\s*card|bank\s*account|رقم بطاقتي|رقم حسابي)/iu.test(screening) && /\d/.test(screening));
 }
 
 function assertOutputBytes(value: unknown): asserts value is string {

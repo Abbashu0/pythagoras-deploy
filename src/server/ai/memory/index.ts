@@ -4,6 +4,11 @@ export {
   AI_MEMORY_ERROR_CODES,
   AI_MEMORY_MAX_SOURCE_MESSAGES,
   AI_MEMORY_MAX_TEXT_BYTES,
+  AI_MEMORY_MAX_PROPOSED_PER_SCOPE,
+  AI_MEMORY_MAX_EVIDENCE_PER_REVISION,
+  AI_MEMORY_POLICY_MAX_HARD_ACTIVE,
+  AI_MEMORY_POLICY_MAX_PER_MEMORY_BYTES,
+  AI_MEMORY_POLICY_MAX_SELECTED_PER_REQUEST,
   AI_MEMORY_POLICY_MAX_RETENTION_DAYS,
   AI_MEMORY_POLICY_MAX_SELECTED_MEMORIES,
   AI_MEMORY_POLICY_RESOURCE_TYPE,
@@ -11,6 +16,7 @@ export {
   AI_MEMORY_SAFE_REVIEW_CODES,
   AI_MEMORY_STATUSES,
   AI_MEMORY_VISIBILITY_SCOPES,
+  AI_MEMORY_SCOPES,
   AIMemoryError,
   type AIContextMemory,
   type AIMemory,
@@ -25,6 +31,11 @@ export {
   type AIMemorySafeReviewCode,
   type AIMemoryStatus,
   type AIMemoryVisibilityScope,
+  type AIMemoryScope,
+  type AIMemoryProvenance,
+  type AIMemoryMutationIntent,
+  type AIMemoryMutationRecord,
+  type AIMemoryMutationRepository,
 } from "./contracts";
 export {
   AI_CONVERSATION_SUMMARY_MAX_BYTES,
@@ -39,7 +50,9 @@ export { normalizeAIMemoryPolicyContent, normalizeAIMemoryText } from "./policy-
 export { SQLiteAIMemoryPolicyRepository } from "./policy-repository";
 export { AIMemoryPolicyChangeAdapter } from "./policy-change-adapter";
 export { SQLiteAIMemoryRepository } from "./repository";
+export { SQLiteAIMemoryMutationRepository } from "./mutation-repository";
 export { AIMemoryService, type AIMemoryServiceDependencies } from "./service";
+export type { AIMemoryCreateInput, AIMemorySourceEvidenceInput, AIMemoryMutationIntentInput } from "./service";
 export { SQLiteAIConversationSummaryRepository } from "./summary-repository";
 export { AIConversationSummaryService, type AIConversationSummaryServiceDependencies } from "./summary-service";
 export { AIMemoryExecutionConfigChangeAdapter } from "./execution-config-change-adapter";
