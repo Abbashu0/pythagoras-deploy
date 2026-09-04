@@ -12,3 +12,8 @@ export * from "./case-executions";
 export * from "./target-cleanup";
 export * from "./target-execution";
 export * from "./orchestration";
+export * from "./judge-config";
+export * from "./judge-change-adapter";
+export * from "./judge-protocol";
+export * from "./judge-executions";
+export * from "./judge-execution";

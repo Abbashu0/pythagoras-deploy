@@ -17,8 +17,13 @@ import { AIInstructionPolicyChangeAdapter, AIContextPolicyChangeAdapter } from "
 import { AIKnowledgeSourceChangeAdapter } from "../ai/knowledge/source-change-adapter";
 import { AIKnowledgePackageChangeAdapter } from "../ai/knowledge/package-change-adapter";
 import { AIRetrievalConfigChangeAdapter } from "../ai/retrieval-config";
-import { AITutorConfigChangeAdapter } from "../ai/tutor";
-import { AIEvalCaseChangeAdapter, AIEvalExecutionConfigChangeAdapter, AIEvalSuiteChangeAdapter } from "../ai/evals";
+import { AITutorConfigChangeAdapter } from "../ai/tutor/configuration";
+import {
+  AIEvalCaseChangeAdapter,
+  AIEvalExecutionConfigChangeAdapter,
+  AIEvalJudgeConfigChangeAdapter,
+  AIEvalSuiteChangeAdapter,
+} from "../ai/evals";
 
 export class ChangeResourceAdapterRegistry {
   private readonly adapters = new Map<string, ChangeResourceAdapter>();
@@ -92,6 +97,7 @@ export function createDefaultChangeResourceRegistry(): ChangeResourceAdapterRegi
       new AIEvalCaseChangeAdapter(),
       new AIEvalSuiteChangeAdapter(),
       new AIEvalExecutionConfigChangeAdapter(),
+      new AIEvalJudgeConfigChangeAdapter(),
     ],
     [new QuestionChangeSetCoordinator(), new MaterialQuestionBankChangeSetCoordinator()],
   );

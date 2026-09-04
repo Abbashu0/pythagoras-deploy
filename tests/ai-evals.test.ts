@@ -33,6 +33,9 @@ import {
   normalizeAIEvalCaseContent,
   normalizeAIEvalObservation,
   normalizeAIEvalSuiteContent,
+  AI_EVAL_JUDGE_CONFIG_RESOURCE_TYPE,
+  AI_EVAL_JUDGE_PROTOCOL_KEY,
+  AI_EVAL_JUDGE_PROTOCOL_REVISION,
 } from "../src/server/ai/evals";
 import {
   AI_TUTOR_CITATION_PROTOCOL_KEY,
@@ -40,6 +43,10 @@ import {
   AI_TUTOR_GROUNDING_PROTOCOL_KEY,
   AI_TUTOR_GROUNDING_PROTOCOL_REVISION,
 } from "../src/server/ai/tutor";
+import { SQLiteAIBudgetPolicyRepository } from "../src/server/ai/budget";
+import { SQLiteAIProviderConfigRepository } from "../src/server/ai/configuration";
+import { SQLiteAIModelConfigRepository } from "../src/server/ai/model-registry";
+import { SQLiteAIRateLimitPolicyRepository } from "../src/server/ai/rate-limits";
 import { SQLiteAIAccountingRepository, type AICostOperationContent, type AIUsageCostRecord } from "../src/server/ai/economics";
 import { createChangeManagementService } from "../src/server/change-management";
 import { openContentDatabase, type ContentDatabase } from "../src/server/content";
@@ -205,6 +212,115 @@ function createPublishedSuite(fixture: Fixture, caseId: string, content = suiteC
   return id;
 }
 
+function createPublishedJudgeInfrastructure(fixture: Fixture): { referenceKey: string; revision: number } {
+  const credentialRef = uuidv7();
+  fixture.database.client
+    .prepare("insert into ai_secret_refs (credential_ref, status, secret_version, created_at, updated_at, revision) values (?, 'ACTIVE', 1, ?, ?, 1)")
+    .run(credentialRef, BASE_TIME, BASE_TIME);
+
+  const providerId = uuidv7();
+  new SQLiteAIProviderConfigRepository(fixture.database).create({
+    id: providerId,
+    content: {
+      key: `eval-judge-provider-${providerId.slice(0, 8)}`,
+      displayName: "Judge Provider",
+      baseUrl: "https://fake.provider.test",
+      enabled: true,
+      credentialRef,
+      retentionPolicy: "ZERO_RETENTION",
+      trainingPolicy: "NOT_USED_FOR_TRAINING",
+      zdrSupported: true,
+      zdrRequired: false,
+    },
+    actor: fixture.owner,
+    now: BASE_TIME,
+  });
+
+  const modelId = uuidv7();
+  new SQLiteAIModelConfigRepository(fixture.database).create({
+    id: modelId,
+    content: {
+      key: `eval-judge-model-${modelId.slice(0, 8)}`,
+      displayName: "Judge Model",
+      providerConfigId: providerId,
+      providerModelId: "judge-model-1",
+      capability: "GENERATION",
+      adapterKey: "fake-generation",
+      enabled: true,
+      contextWindowTokens: 8192,
+      maxOutputTokens: 2048,
+      embeddingDimensions: null,
+      supportsStreaming: true,
+      supportsReasoning: false,
+      supportsStructuredOutput: true,
+    },
+    actor: fixture.owner,
+    now: BASE_TIME,
+  });
+
+  const budgetPolicyId = uuidv7();
+  new SQLiteAIBudgetPolicyRepository(fixture.database).create({
+    id: budgetPolicyId,
+    content: {
+      key: `eval-judge-budget-${budgetPolicyId.slice(0, 8)}`,
+      displayName: "Eval Judge Budget",
+      currency: "USD",
+      costCenter: "EVALS",
+      hardCapNano: 10_000_000,
+      enabled: true,
+    },
+    actor: fixture.owner,
+    now: BASE_TIME,
+  });
+
+  const rateLimitPolicyId = uuidv7();
+  new SQLiteAIRateLimitPolicyRepository(fixture.database).create({
+    id: rateLimitPolicyId,
+    content: {
+      key: `eval-judge-rate-${rateLimitPolicyId.slice(0, 8)}`,
+      displayName: "Eval Judge Rate",
+      windowMs: 60_000,
+      maxRequests: 100,
+      maxConcurrentRequests: 100,
+      enabled: true,
+    },
+    actor: fixture.owner,
+    now: BASE_TIME,
+  });
+
+  const judgeConfigId = uuidv7();
+  const judgeKey = `eval-judge-${judgeConfigId.slice(0, 8)}`;
+  publishChange(fixture, {
+    title: "Publish Eval Judge Config",
+    initialItem: {
+      resourceType: AI_EVAL_JUDGE_CONFIG_RESOURCE_TYPE,
+      resourceId: judgeConfigId,
+      operation: "CREATE",
+      expectedRevision: 0,
+      desired: {
+        key: judgeKey,
+        subjectKey: "biology",
+        displayName: "Biology Eval Judge",
+        enabled: true,
+        modelConfigId: modelId,
+        modelConfigRevision: 1,
+        providerConfigId: providerId,
+        providerConfigRevision: 1,
+        budgetPolicyId,
+        budgetPolicyRevision: 1,
+        rateLimitPolicyId,
+        rateLimitPolicyRevision: 1,
+        protocolKey: AI_EVAL_JUDGE_PROTOCOL_KEY,
+        protocolRevision: AI_EVAL_JUDGE_PROTOCOL_REVISION,
+        timeoutMs: 15_000,
+        maxOutputTokens: 2048,
+      },
+    },
+  });
+
+  return { referenceKey: judgeKey, revision: 1 };
+}
+
 function candidateSnapshot() {
   return normalizeAIEvalCandidateSnapshot({
     tutorConfig: { id: uuidv7(), revision: 1 },
@@ -254,7 +370,7 @@ test("M9A migration is present and exposes no Provider execution path", () => {
   const fixture = createFixture();
   try {
     const count = Number((fixture.database.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count);
-    assert.equal(count, 37);
+    assert.equal(count, 38);
     assert.equal(fixture.database.client.prepare("select 1 from sqlite_master where type='table' and name='ai_eval_suites'").get() !== undefined, true);
     assert.equal(fixture.database.client.prepare("select 1 from sqlite_master where type='table' and name='ai_eval_runs'").get() !== undefined, true);
   } finally { fixture.close(); }
@@ -312,7 +428,7 @@ test("populated 0032 database upgrades to 0033 without rewriting Eval history", 
     oldDatabase.close(); oldDatabase = null;
 
     upgraded = openContentDatabase({ dataDirectory: root, migrationsDirectory });
-    assert.equal(Number((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count), 37);
+    assert.equal(Number((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count), 38);
     assert.deepEqual(upgraded.client.prepare("select key, subject_key, current_revision from ai_eval_suites where id=?").get(suiteId), { key: suiteIdentity.key, subject_key: "biology", current_revision: 2 });
     const historicalAfter = upgraded.client.prepare("select id, suite_id, revision, display_name, enabled, required_dimensions, grader_configs, gate_config, permitted_regression_deltas, baseline_mode, supplementary_judge_config, created_at, created_by from ai_eval_suite_revisions where suite_id=? order by revision").all(suiteId) as Array<Record<string, unknown>>;
     assert.deepEqual(historicalAfter, historicalBefore);
@@ -422,10 +538,12 @@ test("deterministic grader rows cannot impersonate a JUDGE_REQUIRED dimension", 
   const fixture = createFixture();
   try {
     const caseId = createPublishedCase(fixture);
+    const judgeRef = createPublishedJudgeInfrastructure(fixture);
     const suiteId = createPublishedSuite(fixture, caseId, suiteContent(caseId, 1, {
       requiredDimensions: [{ dimension: "ARABIC_QUALITY", mode: "JUDGE_REQUIRED" }],
       graderConfigs: [],
       baselineMode: "OPTIONAL",
+      supplementaryJudgeConfig: judgeRef,
     }));
     const runService = new AIEvalRunService(fixture.database);
     const run = runService.createRun({ id: uuidv7(), suiteId, suiteRevision: 1, candidateSnapshot: candidateSnapshot(), createdAt: BASE_TIME + 90 });
@@ -681,7 +799,8 @@ test("missing deterministic/judge dimensions produce INCOMPLETE and baseline com
   const fixture = createFixture();
   try {
     const caseId = createPublishedCase(fixture);
-    const suiteId = createPublishedSuite(fixture, caseId, suiteContent(caseId, 1, { requiredDimensions: [{ dimension: "ARABIC_QUALITY", mode: "JUDGE_REQUIRED" }], graderConfigs: [], baselineMode: "REQUIRED" }));
+    const judgeRef = createPublishedJudgeInfrastructure(fixture);
+    const suiteId = createPublishedSuite(fixture, caseId, suiteContent(caseId, 1, { requiredDimensions: [{ dimension: "ARABIC_QUALITY", mode: "JUDGE_REQUIRED" }], graderConfigs: [], baselineMode: "REQUIRED", supplementaryJudgeConfig: judgeRef }));
     const runService = new AIEvalRunService(fixture.database);
     const run = runService.createRun({ id: uuidv7(), suiteId, suiteRevision: 1, candidateSnapshot: candidateSnapshot(), createdAt: BASE_TIME + 40 });
     runService.startRun(run.id, BASE_TIME + 41);

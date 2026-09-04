@@ -87,6 +87,7 @@ export interface AIEvalTargetExecutionDependencies {
   providers?: AIProviderConfigRepository;
   embeddingProjections?: AIEmbeddingProjectionRepository;
   cleanup?: AIEvalTargetCleanupService;
+  judgeExecution?: Pick<import("./judge-execution").AIEvalJudgeExecutionService, "executeJudgeForCase">;
   budgetPeriodResolver: AIEvalTargetBudgetPeriodResolver;
   clock?: () => number;
 }
@@ -118,6 +119,7 @@ export class AIEvalTargetExecutionService {
   private readonly providers: AIProviderConfigRepository;
   private readonly embeddingProjections: AIEmbeddingProjectionRepository;
   private readonly cleanup: AIEvalTargetCleanupService;
+  private readonly judgeExecution?: Pick<import("./judge-execution").AIEvalJudgeExecutionService, "executeJudgeForCase">;
   private readonly outputValidator = new AITutorOutputValidator();
   private readonly clock: () => number;
 
@@ -136,6 +138,7 @@ export class AIEvalTargetExecutionService {
     this.providers = dependencies.providers ?? new SQLiteAIProviderConfigRepository(dependencies.database);
     this.embeddingProjections = dependencies.embeddingProjections ?? new SQLiteAIEmbeddingProjectionRepository(dependencies.database);
     this.cleanup = dependencies.cleanup ?? new AIEvalTargetCleanupService({ database: dependencies.database, executions: this.executions, conversations: this.conversations, clock: this.clock });
+    this.judgeExecution = dependencies.judgeExecution;
   }
 
   async execute(input: { runId: string; caseId: string; caseRevision: number; executionConfigId?: string; executionConfigRevision?: number; signal?: AbortSignal; checkLease?: () => void }): Promise<AIEvalTargetExecutionResult> {
@@ -381,10 +384,26 @@ export class AIEvalTargetExecutionService {
     const finalFinishReason = elapsedLatencyMs === null ? "FAILED" : finishReason;
     this.completeOperation(operation.id, finalStatus === "COMPLETED" || finalStatus === "BLOCKED" ? "COMPLETED" : finalStatus === "CANCELLED" ? "CANCELLED" : "FAILED", completedAt);
     const settlement = this.settle(reservationId, completedAt);
+    let recorded: { result: import("./contracts").AIEvalCaseResult; graders: readonly import("./contracts").AIEvalGraderResult[] };
     try {
-      this.evalRuns.recordObservationAndGrade({ runId: target.run.id, caseId: target.caseRevision.caseId, caseRevision: target.caseRevision.revision, observedSubjectKey: target.suite.subjectKey, observedStatus: finalStatus === "COMPLETED" ? "COMPLETED" : finalStatus, finishReason: finalFinishReason, outputText: output, citationMap, evidence: pack.items.map((item) => ({ originKind: item.originKind, originId: item.originId, subjectKey: item.subjectKey })), retrievalStatus: pack.status, outputBytes: Buffer.byteLength(output, "utf8"), elapsedLatencyMs, costOperationId: operation.id, groundingProtocolKey: AI_TUTOR_GROUNDING_PROTOCOL_KEY, groundingProtocolRevision: AI_TUTOR_GROUNDING_PROTOCOL_REVISION, citationProtocolKey: AI_TUTOR_CITATION_PROTOCOL_KEY, citationProtocolRevision: AI_TUTOR_CITATION_PROTOCOL_REVISION }, completedAt);
+      recorded = this.evalRuns.recordObservationAndGrade({ runId: target.run.id, caseId: target.caseRevision.caseId, caseRevision: target.caseRevision.revision, observedSubjectKey: target.suite.subjectKey, observedStatus: finalStatus === "COMPLETED" ? "COMPLETED" : finalStatus, finishReason: finalFinishReason, outputText: output, citationMap, evidence: pack.items.map((item) => ({ originKind: item.originKind, originId: item.originId, subjectKey: item.subjectKey })), retrievalStatus: pack.status, outputBytes: Buffer.byteLength(output, "utf8"), elapsedLatencyMs, costOperationId: operation.id, groundingProtocolKey: AI_TUTOR_GROUNDING_PROTOCOL_KEY, groundingProtocolRevision: AI_TUTOR_GROUNDING_PROTOCOL_REVISION, citationProtocolKey: AI_TUTOR_CITATION_PROTOCOL_KEY, citationProtocolRevision: AI_TUTOR_CITATION_PROTOCOL_REVISION }, completedAt);
     } catch {
       throw new AIEvalError("AI_EVAL_TARGET_INVALID", "The Eval observation could not be recorded safely.");
+    }
+    if (finalStatus === "COMPLETED" && target.suite.supplementaryJudgeConfig !== null && this.judgeExecution) {
+      try {
+        await this.judgeExecution.executeJudgeForCase({
+          run: target.run,
+          suite: target.suite,
+          caseRevision: target.caseRevision,
+          caseResult: recorded.result,
+          outputText: output,
+          evidencePack: pack,
+          finishReason: finalFinishReason,
+        });
+      } catch {
+        // Any judge failure does not alter or rollback the recorded target result or accounting
+      }
     }
     const hash = hashOutput(output);
     const outputByteSize = Buffer.byteLength(output, "utf8");

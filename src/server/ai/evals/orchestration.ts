@@ -3,13 +3,22 @@ import type { AIBudgetAdmissionService } from "../admission";
 import type { AIJobExecutionContext, AIJobHandlerDefinition, AIJobQueueService } from "../operations/jobs";
 import type { AIJobHandlerRegistry } from "../operations/jobs";
 import { AIJobExecutionError } from "../operations/jobs";
-import type { AIEvalCaseExecution, AIEvalCaseExecutionRepository } from "./contracts";
+import type {
+  AIEvalCaseExecution,
+  AIEvalCaseExecutionRepository,
+  AIEvalDimension,
+  AIEvalJudgeCoverage,
+  AIEvalJudgeExecutionRepository,
+} from "./contracts";
 import { AI_EVAL_TARGET_JOB_KIND, AI_EVAL_TARGET_JOB_PAYLOAD_VERSION } from "./contracts";
 import { AIEvalError } from "./errors";
 import { SQLiteAIEvalCaseExecutionRepository } from "./case-executions";
 import { SQLiteAIEvalExecutionConfigRepository, fingerprintAIEvalExecutionConfig } from "./execution-config";
+import { SQLiteAIEvalJudgeConfigRepository } from "./judge-config";
+import { SQLiteAIEvalJudgeExecutionRepository } from "./judge-executions";
 import { SQLiteAIEvalRunRepository } from "./runs";
 import { SQLiteAIEvalSuiteRepository } from "./configuration";
+import { AIEvalRunService } from "./service";
 import type { AIEvalTargetExecutionService } from "./target-execution";
 import { AIEvalTargetCleanupService } from "./target-cleanup";
 
@@ -46,6 +55,9 @@ export interface AIEvalTargetOrchestratorDependencies {
   runs?: SQLiteAIEvalRunRepository;
   executions?: AIEvalCaseExecutionRepository;
   executionConfigs?: SQLiteAIEvalExecutionConfigRepository;
+  judgeConfigs?: SQLiteAIEvalJudgeConfigRepository;
+  judgeExecutions?: AIEvalJudgeExecutionRepository;
+  evalRuns?: AIEvalRunService;
   clock?: () => number;
 }
 
@@ -54,12 +66,18 @@ export class AIEvalTargetOrchestrator {
   private readonly runs: SQLiteAIEvalRunRepository;
   private readonly executions: AIEvalCaseExecutionRepository;
   private readonly executionConfigs: SQLiteAIEvalExecutionConfigRepository;
+  private readonly judgeConfigs: SQLiteAIEvalJudgeConfigRepository;
+  private readonly judgeExecutions: AIEvalJudgeExecutionRepository;
+  private readonly evalRuns: AIEvalRunService;
   private readonly clock: () => number;
 
   constructor(private readonly dependencies: AIEvalTargetOrchestratorDependencies) {
     this.runs = dependencies.runs ?? new SQLiteAIEvalRunRepository(dependencies.database);
     this.executions = dependencies.executions ?? new SQLiteAIEvalCaseExecutionRepository(dependencies.database);
     this.executionConfigs = dependencies.executionConfigs ?? new SQLiteAIEvalExecutionConfigRepository(dependencies.database);
+    this.judgeConfigs = dependencies.judgeConfigs ?? new SQLiteAIEvalJudgeConfigRepository(dependencies.database);
+    this.judgeExecutions = dependencies.judgeExecutions ?? new SQLiteAIEvalJudgeExecutionRepository(dependencies.database);
+    this.evalRuns = dependencies.evalRuns ?? new AIEvalRunService(dependencies.database, { runs: this.runs, judgeExecutions: this.judgeExecutions });
     this.clock = dependencies.clock ?? Date.now;
   }
 
@@ -175,6 +193,103 @@ export class AIEvalTargetOrchestrator {
     const pendingCleanup = new AIEvalTargetCleanupService({ database: this.dependencies.database, executions: this.executions }).pendingCountForRun(runId);
     const complete = executions.length === suite.caseManifest.length && nonAmbiguous === suite.caseManifest.length && observed === suite.caseManifest.length && pendingCleanup === 0 && suite.caseManifest.every((entry) => executions.some((execution) => execution.caseId === entry.caseId && execution.caseRevision === entry.caseRevision && execution.ordinal === entry.ordinal && execution.jobId !== null) && results.some((result) => result.caseId === entry.caseId && result.caseRevision === entry.caseRevision && result.ordinal === entry.ordinal));
     return { runId, expected: suite.caseManifest.length, terminal, nonAmbiguous, observed, complete };
+  }
+
+  getJudgeCoverage(runId: string): AIEvalJudgeCoverage {
+    const run = this.runs.getById(runId);
+    if (!run) throw new AIEvalError("AI_EVAL_NOT_FOUND", "The Eval Run was not found.");
+    const suite = new SQLiteAIEvalSuiteRepository(this.dependencies.database).getRevision(run.suiteId, run.suiteRevision);
+    if (!suite) throw new AIEvalError("AI_EVAL_TARGET_INVALID", "The pinned Eval Suite revision is unavailable.");
+    const judgeRequiredDimensions = suite.requiredDimensions
+      .filter((d) => d.mode === "JUDGE_REQUIRED")
+      .map((d) => d.dimension as AIEvalDimension);
+
+    if (judgeRequiredDimensions.length === 0) {
+      return {
+        runId,
+        expectedCases: suite.caseManifest.length,
+        expectedDimensions: 0,
+        completedExecutions: 0,
+        nonAmbiguousExecutions: 0,
+        judgeResults: 0,
+        complete: true,
+      };
+    }
+
+    const judgeExecutions = this.judgeExecutions.listForRun(runId);
+    const terminal = judgeExecutions.filter((e) => ["COMPLETED", "FAILED", "CANCELLED", "AMBIGUOUS", "INPUT_LOST"].includes(e.status)).length;
+    const nonAmbiguous = judgeExecutions.filter((e) => e.status !== "AMBIGUOUS" && ["COMPLETED", "FAILED", "CANCELLED", "INPUT_LOST"].includes(e.status)).length;
+    const allResults = this.runs.listJudgeResultsForRun(runId);
+    const results = allResults.filter((r) => judgeRequiredDimensions.includes(r.dimension));
+
+    const manifestExactExecutions = suite.caseManifest.every((entry) =>
+      judgeExecutions.some((e) => e.caseId === entry.caseId && e.caseRevision === entry.caseRevision && e.status === "COMPLETED")
+    );
+
+    const expectedResultsCount = suite.caseManifest.length * judgeRequiredDimensions.length;
+    const manifestExactResults = suite.caseManifest.every((entry) => {
+      const caseResult = this.runs.listCaseResults(runId).find((c) => c.caseId === entry.caseId && c.caseRevision === entry.caseRevision && c.ordinal === entry.ordinal);
+      if (!caseResult) return false;
+      return judgeRequiredDimensions.every((dim) => {
+        const matching = results.filter((r) => r.caseResultId === caseResult.id && r.dimension === dim);
+        return matching.length === 1;
+      });
+    });
+
+    const complete = judgeExecutions.length === suite.caseManifest.length
+      && nonAmbiguous === suite.caseManifest.length
+      && manifestExactExecutions
+      && results.length === expectedResultsCount
+      && allResults.length === expectedResultsCount
+      && manifestExactResults;
+
+    return {
+      runId,
+      expectedCases: suite.caseManifest.length,
+      expectedDimensions: judgeRequiredDimensions.length,
+      completedExecutions: terminal,
+      nonAmbiguousExecutions: nonAmbiguous,
+      judgeResults: results.length,
+      complete,
+    };
+  }
+
+  assertCanBeginScoring(runId: string): void {
+    const run = this.runs.getById(runId);
+    if (!run || run.status !== "RUNNING") {
+      throw new AIEvalError("AI_EVAL_RUN_NOT_SCORABLE", "Only a RUNNING Eval Run can begin scoring.");
+    }
+    const suite = new SQLiteAIEvalSuiteRepository(this.dependencies.database).getRevision(run.suiteId, run.suiteRevision);
+    if (!suite) throw new AIEvalError("AI_EVAL_TARGET_INVALID", "The pinned Eval Suite revision is unavailable.");
+
+    // 1. Target coverage check
+    const targetCoverage = this.getCoverage(runId);
+    if (!targetCoverage.complete) {
+      throw new AIEvalError("AI_EVAL_RUN_NOT_SCORABLE", "Target execution is not complete for this Eval Run.");
+    }
+
+    // 2. Judge coverage check
+    const judgeCoverage = this.getJudgeCoverage(runId);
+    if (!judgeCoverage.complete) {
+      throw new AIEvalError("AI_EVAL_RUN_NOT_SCORABLE", "Supplementary judge evaluation is not complete for this Eval Run.");
+    }
+
+    // 3. Judge Config currentness check
+    if (suite.supplementaryJudgeConfig) {
+      const judgeConfig = this.judgeConfigs.getRevisionByKey(
+        suite.supplementaryJudgeConfig.referenceKey,
+        suite.supplementaryJudgeConfig.revision,
+      );
+      if (!judgeConfig || !judgeConfig.enabled) {
+        throw new AIEvalError("AI_EVAL_RUN_NOT_SCORABLE", "The pinned supplementary Judge Config is disabled or unavailable.");
+      }
+    }
+  }
+
+  finalizeAndScoreRun(runId: string, now = this.clock()): ReturnType<AIEvalRunService["completeRun"]> {
+    this.assertCanBeginScoring(runId);
+    this.evalRuns.beginScoring(runId, now);
+    return this.evalRuns.completeRun(runId, now);
   }
 }
 

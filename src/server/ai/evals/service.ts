@@ -22,6 +22,7 @@ import type {
 import { AIEvalError } from "./errors";
 import { createDefaultAIEvalGraderRegistry, assertSupportedDeterministicGrader } from "./graders";
 import { SQLiteAIEvalCaseRepository, SQLiteAIEvalSuiteRepository } from "./configuration";
+import { SQLiteAIEvalJudgeExecutionRepository } from "./judge-executions";
 import { SQLiteAIEvalRunRepository } from "./runs";
 import {
   fingerprintAIEvalCandidate,
@@ -37,6 +38,7 @@ export interface AIEvalRunServiceDependencies {
   suites?: AIEvalSuiteRepository;
   cases?: AIEvalCaseRepository;
   runs?: AIEvalRunRepository;
+  judgeExecutions?: import("./contracts").AIEvalJudgeExecutionRepository;
   graders?: AIEvalGraderRegistry;
   accounting?: AIEvalAccountingReader;
 }
@@ -53,6 +55,7 @@ export class AIEvalRunService {
   private readonly suites: AIEvalSuiteRepository;
   private readonly cases: AIEvalCaseRepository;
   private readonly runs: AIEvalRunRepository;
+  private readonly judgeExecutions: import("./contracts").AIEvalJudgeExecutionRepository;
   private readonly graders: AIEvalGraderRegistry;
   private readonly accounting: AIEvalAccountingReader;
 
@@ -60,6 +63,7 @@ export class AIEvalRunService {
     this.suites = dependencies.suites ?? new SQLiteAIEvalSuiteRepository(database);
     this.cases = dependencies.cases ?? new SQLiteAIEvalCaseRepository(database);
     this.runs = dependencies.runs ?? new SQLiteAIEvalRunRepository(database);
+    this.judgeExecutions = dependencies.judgeExecutions ?? new SQLiteAIEvalJudgeExecutionRepository(database);
     this.graders = dependencies.graders ?? createDefaultAIEvalGraderRegistry();
     this.accounting = dependencies.accounting ?? new SQLiteAIAccountingRepository(database);
   }
@@ -186,7 +190,29 @@ export class AIEvalRunService {
     return [...dimensions].sort().map((dimension) => {
       const requirement = suite.requiredDimensions.find((candidate) => candidate.dimension === dimension);
       if (requirement?.mode === "JUDGE_REQUIRED") {
-        return { runId: run.id, dimension, applicableCaseCount: 0, passedCaseCount: 0, failedCaseCount: 0, scoreUnits: null, blockingFailureCount: 0 };
+        const judgeResults = this.runs.listJudgeResultsForRun(run.id).filter((j) => j.dimension === dimension);
+        const caseScores: number[] = [];
+        let passedCaseCount = 0;
+        let failedCaseCount = 0;
+        for (const result of results) {
+          const caseJudgeResults = judgeResults.filter((j) => j.caseResultId === result.id);
+          if (caseJudgeResults.length !== 1) continue;
+          const judgeResult = caseJudgeResults[0];
+          caseScores.push(judgeResult.scoreUnits);
+          if (judgeResult.rubricBand === "PASS" || judgeResult.rubricBand === "EXCELLENT") passedCaseCount += 1; else failedCaseCount += 1;
+        }
+        const scoreUnits = caseScores.length === suite.caseManifest.length && results.length === suite.caseManifest.length
+          ? Math.floor(caseScores.reduce((sum, score) => sum + score, 0) / caseScores.length)
+          : null;
+        return {
+          runId: run.id,
+          dimension,
+          applicableCaseCount: caseScores.length,
+          passedCaseCount,
+          failedCaseCount,
+          scoreUnits,
+          blockingFailureCount: 0,
+        };
       }
       const requiredGraders = suite.graderConfigs.filter((config) => config.dimension === dimension && config.required);
       const configuredGraderIdentities = new Set(suite.graderConfigs.filter((config) => config.dimension === dimension).map((config) => `${config.graderKey}@${config.graderRevision}`));
@@ -260,6 +286,28 @@ export class AIEvalRunService {
     const candidateIdentities = graderIdentities(candidateResults, this.runs);
     const baselineIdentities = graderIdentities(baselineResults, this.runs);
     if (!sameSet(candidateIdentities, baselineIdentities)) return { comparable: false, recommendation: "INCOMPLETE", regressions: [], safeReasonCode: "BASELINE_GRADERS_NOT_COMPARABLE" };
+    const hasJudgeRequired = suite.requiredDimensions.some((d) => d.mode === "JUDGE_REQUIRED");
+    if (hasJudgeRequired) {
+      const candidateJudgeResults = this.runs.listJudgeResultsForRun(run.id);
+      const baselineJudgeResults = this.runs.listJudgeResultsForRun(baseline.id);
+      for (const requirement of suite.requiredDimensions) {
+        if (requirement.mode !== "JUDGE_REQUIRED") continue;
+        const candidateDimResults = candidateJudgeResults.filter((j) => j.dimension === requirement.dimension);
+        const baselineDimResults = baselineJudgeResults.filter((j) => j.dimension === requirement.dimension);
+        if (candidateDimResults.length !== suite.caseManifest.length || baselineDimResults.length !== suite.caseManifest.length) {
+          return { comparable: false, recommendation: "INCOMPLETE", regressions: [], safeReasonCode: "BASELINE_JUDGE_NOT_COMPARABLE" };
+        }
+        const candidateJudgeKey = `${candidateDimResults[0].judgeConfigId}:${candidateDimResults[0].judgeConfigRevision}:${candidateDimResults[0].protocolKey}:${candidateDimResults[0].protocolRevision}:${candidateDimResults[0].judgeModelConfigId}:${candidateDimResults[0].judgeModelConfigRevision}:${candidateDimResults[0].judgeProviderConfigId}:${candidateDimResults[0].judgeProviderConfigRevision}`;
+        const candidateMismatch = candidateDimResults.some((j) => `${j.judgeConfigId}:${j.judgeConfigRevision}:${j.protocolKey}:${j.protocolRevision}:${j.judgeModelConfigId}:${j.judgeModelConfigRevision}:${j.judgeProviderConfigId}:${j.judgeProviderConfigRevision}` !== candidateJudgeKey);
+        if (candidateMismatch) {
+          return { comparable: false, recommendation: "INCOMPLETE", regressions: [], safeReasonCode: "BASELINE_JUDGE_NOT_COMPARABLE" };
+        }
+        const baselineJudgeKey = `${baselineDimResults[0].judgeConfigId}:${baselineDimResults[0].judgeConfigRevision}:${baselineDimResults[0].protocolKey}:${baselineDimResults[0].protocolRevision}:${baselineDimResults[0].judgeModelConfigId}:${baselineDimResults[0].judgeModelConfigRevision}:${baselineDimResults[0].judgeProviderConfigId}:${baselineDimResults[0].judgeProviderConfigRevision}`;
+        if (candidateJudgeKey !== baselineJudgeKey) {
+          return { comparable: false, recommendation: "INCOMPLETE", regressions: [], safeReasonCode: "BASELINE_JUDGE_NOT_COMPARABLE" };
+        }
+      }
+    }
     const baselineAggregates = this.runs.listDimensionAggregates(baseline.id);
     const regressions: Array<{ dimension: AIEvalDimension; baselineScoreUnits: number; candidateScoreUnits: number; maximumRegressionUnits: number }> = [];
     for (const permitted of suite.permittedRegressionDeltas) {
@@ -280,8 +328,11 @@ export class AIEvalRunService {
     return this.resolveCanonicalOperationBasis(run, costOperationId)?.totalNano ?? null;
   }
 
-  private resolveRunAccountingBasis(run: AIEvalRun, results: readonly AIEvalCaseResult[]): AIEvalAccountingBasis | null {
-    const operationIds = [...new Set(results.map((result) => result.costOperationId).filter((value): value is string => value !== null))];
+  resolveRunAccountingBasis(run: AIEvalRun, results?: readonly AIEvalCaseResult[]): AIEvalAccountingBasis | null {
+    const caseResults = results ?? this.runs.listCaseResults(run.id);
+    const targetOperationIds = caseResults.map((result) => result.costOperationId).filter((value): value is string => value !== null);
+    const judgeOperationIds = this.judgeExecutions.listForRun(run.id).map((execution) => execution.judgeCostOperationId).filter((value): value is string => value !== null);
+    const operationIds = [...new Set([...targetOperationIds, ...judgeOperationIds])];
     if (operationIds.length === 0) return null;
     let currency: string | null = null;
     let total = BigInt(0);

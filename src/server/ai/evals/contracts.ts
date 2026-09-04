@@ -5,6 +5,7 @@ import type { AITutorCitationMapItem } from "../tutor/preflight/contracts";
 export const AI_EVAL_SUITE_RESOURCE_TYPE = "ai.eval-suite" as const;
 export const AI_EVAL_CASE_RESOURCE_TYPE = "ai.eval-case" as const;
 export const AI_EVAL_EXECUTION_CONFIG_RESOURCE_TYPE = "ai.eval-execution-config" as const;
+export const AI_EVAL_JUDGE_CONFIG_RESOURCE_TYPE = "ai.eval-judge-config" as const;
 
 /** Server-owned M9B1 target protocol identities. */
 export const AI_EVAL_TARGET_PROTOCOL_KEY = "eval-target-v1" as const;
@@ -13,6 +14,10 @@ export const AI_EVAL_CLEANUP_PROTOCOL_KEY = "synthetic-c4-cleanup-v1" as const;
 export const AI_EVAL_CLEANUP_PROTOCOL_REVISION = 1 as const;
 export const AI_EVAL_TARGET_JOB_KIND = "ai.eval.target-execution" as const;
 export const AI_EVAL_TARGET_JOB_PAYLOAD_VERSION = 1 as const;
+
+/** Server-owned M9B2 supplementary judge protocol identities. */
+export const AI_EVAL_JUDGE_PROTOCOL_KEY = "eval-judge-v1" as const;
+export const AI_EVAL_JUDGE_PROTOCOL_REVISION = 1 as const;
 
 export const AI_EVAL_DIMENSIONS = [
   "CORRECTNESS",
@@ -298,6 +303,54 @@ export interface AIEvalExecutionConfigRepository {
   appendRevision(input: { id: string; expectedRevision: number; content: AIEvalExecutionConfigContent; actor: AdminActor; now: number }): AIEvalExecutionConfigRevision;
 }
 
+export interface AIEvalJudgeConfigContent {
+  key: string;
+  subjectKey: string;
+  displayName: string;
+  enabled: boolean;
+  modelConfigId: string;
+  modelConfigRevision: number;
+  providerConfigId: string;
+  providerConfigRevision: number;
+  budgetPolicyId: string;
+  budgetPolicyRevision: number;
+  rateLimitPolicyId: string;
+  rateLimitPolicyRevision: number;
+  protocolKey: typeof AI_EVAL_JUDGE_PROTOCOL_KEY;
+  protocolRevision: typeof AI_EVAL_JUDGE_PROTOCOL_REVISION;
+  timeoutMs: number;
+  maxOutputTokens: number;
+}
+
+export interface AIEvalJudgeConfigRevision extends AIEvalJudgeConfigContent {
+  judgeConfigId: string;
+  revisionId: string;
+  revision: number;
+  fingerprint: string;
+  createdAt: number;
+  createdBy: string;
+}
+
+export interface AIEvalJudgeConfig extends AIEvalJudgeConfigRevision {
+  id: string;
+  currentRevision: number;
+  currentRevisionId: string;
+  createdAt: number;
+  updatedAt: number;
+  createdBy: string;
+  updatedBy: string;
+}
+
+export interface AIEvalJudgeConfigRepository {
+  getById(id: string): AIEvalJudgeConfig | null;
+  getByKey(key: string): AIEvalJudgeConfig | null;
+  getCurrentRevision(id: string): AIEvalJudgeConfigRevision | null;
+  getRevision(id: string, revision: number): AIEvalJudgeConfigRevision | null;
+  list(): AIEvalJudgeConfig[];
+  create(input: { id: string; content: AIEvalJudgeConfigContent; actor: AdminActor; now: number }): AIEvalJudgeConfigRevision;
+  appendRevision(input: { id: string; expectedRevision: number; content: AIEvalJudgeConfigContent; actor: AdminActor; now: number }): AIEvalJudgeConfigRevision;
+}
+
 export interface AIEvalRunExecutionBinding {
   runId: string;
   executionConfigId: string;
@@ -313,6 +366,9 @@ export const AI_EVAL_PROVIDER_INVOCATION_STATES = ["NOT_INVOKED", "INVOKING", "I
 export type AIEvalProviderInvocationState = (typeof AI_EVAL_PROVIDER_INVOCATION_STATES)[number];
 export const AI_EVAL_TARGET_CLEANUP_STATUSES = ["PENDING", "CLEANED"] as const;
 export type AIEvalTargetCleanupStatus = (typeof AI_EVAL_TARGET_CLEANUP_STATUSES)[number];
+
+export const AI_EVAL_JUDGE_EXECUTION_STATUSES = ["PENDING", "RUNNING", "COMPLETED", "FAILED", "CANCELLED", "AMBIGUOUS", "INPUT_LOST"] as const;
+export type AIEvalJudgeExecutionStatus = (typeof AI_EVAL_JUDGE_EXECUTION_STATUSES)[number];
 
 /** Durable target-execution metadata. It never stores prompts, output, or Evidence text. */
 export interface AIEvalCaseExecution {
@@ -372,6 +428,58 @@ export interface AIEvalCaseExecutionRepository {
   ambiguous(input: { id: string; safeFailureCode: string; now: number }): AIEvalCaseExecution;
   returnToPendingForAdmission(id: string, now: number): AIEvalCaseExecution;
   listPendingTerminalReconciliation(limit: number): AIEvalCaseExecution[];
+}
+
+/** Durable, safe metadata for one supplementary LLM Judge execution. */
+export interface AIEvalJudgeExecution {
+  id: string;
+  readonly idempotencyKey: string;
+  runId: string;
+  caseId: string;
+  caseRevision: number;
+  ordinal: number;
+  subjectKey: string;
+  judgeConfigId: string;
+  judgeConfigRevision: number;
+  judgeConfigFingerprint: string;
+  protocolKey: string;
+  protocolRevision: number;
+  judgeModelConfigId: string;
+  judgeModelConfigRevision: number;
+  judgeProviderConfigId: string;
+  judgeProviderConfigRevision: number;
+  judgeCostOperationId: string | null;
+  budgetReservationId: string | null;
+  status: AIEvalJudgeExecutionStatus;
+  providerInvocationState: AIEvalProviderInvocationState;
+  providerInvoked: boolean;
+  judgeOutputSha256: string | null;
+  judgeOutputByteSize: number | null;
+  safeFailureCode: string | null;
+  latencyMs: number | null;
+  createdAt: number;
+  startedAt: number | null;
+  completedAt: number | null;
+  updatedAt: number;
+}
+
+export interface AIEvalJudgeExecutionRepository {
+  getById(id: string): AIEvalJudgeExecution | null;
+  getForCase(input: { runId: string; caseId: string; caseRevision: number }): AIEvalJudgeExecution | null;
+  getByTarget(input: { runId: string; caseId: string; caseRevision: number }): AIEvalJudgeExecution | null;
+  listForRun(runId: string): AIEvalJudgeExecution[];
+  create(input: Omit<AIEvalJudgeExecution, "id" | "idempotencyKey"> & { id?: string }): AIEvalJudgeExecution;
+  bindOperation(id: string, judgeCostOperationId: string, now: number): AIEvalJudgeExecution;
+  bindAdmission(id: string, input: { judgeCostOperationId: string; budgetReservationId: string }, now: number): AIEvalJudgeExecution;
+  markRunning(id: string, now: number): AIEvalJudgeExecution;
+  markInvoking(id: string, now: number): AIEvalJudgeExecution;
+  markNotInvoked(id: string, now: number): AIEvalJudgeExecution;
+  markInvokedWithAccounting(id: string, now: number): AIEvalJudgeExecution;
+  complete(input: { id: string; providerInvoked: boolean; judgeOutputSha256: string; judgeOutputByteSize: number; latencyMs: number; now: number }): AIEvalJudgeExecution;
+  fail(input: { id: string; providerInvoked: boolean; judgeOutputSha256?: string | null; judgeOutputByteSize?: number | null; latencyMs?: number | null; safeFailureCode: string; now: number }): AIEvalJudgeExecution;
+  cancel(input: { id: string; providerInvoked: boolean; safeFailureCode: string; now: number }): AIEvalJudgeExecution;
+  ambiguous(input: { id: string; safeFailureCode: string; now: number }): AIEvalJudgeExecution;
+  inputLost(input: { id: string; safeFailureCode: string; now: number }): AIEvalJudgeExecution;
 }
 
 export interface AIEvalTargetCleanup {
@@ -537,6 +645,61 @@ export interface AIEvalCaseRepository {
   appendRevision(input: { id: string; expectedRevision: number; content: AIEvalCaseContent; actor: AdminActor; now: number }): AIEvalCaseRevision;
 }
 
+export interface AIEvalJudgeConfigRepository {
+  getById(id: string): AIEvalJudgeConfig | null;
+  getByKey(key: string): AIEvalJudgeConfig | null;
+  getCurrentRevision(id: string): AIEvalJudgeConfigRevision | null;
+  getRevision(id: string, revision: number): AIEvalJudgeConfigRevision | null;
+  getRevisionByKey(key: string, revision: number): AIEvalJudgeConfigRevision | null;
+  list(): AIEvalJudgeConfig[];
+  create(input: { id: string; content: AIEvalJudgeConfigContent; actor: AdminActor; now: number }): AIEvalJudgeConfigRevision;
+  appendRevision(input: { id: string; expectedRevision: number; content: AIEvalJudgeConfigContent; actor: AdminActor; now: number }): AIEvalJudgeConfigRevision;
+}
+
+export interface AIEvalJudgeResult {
+  id: string;
+  judgeExecutionId: string;
+  caseResultId: string;
+  runId: string;
+  caseId: string;
+  caseRevision: number;
+  dimension: AIEvalDimension;
+  judgeConfigId: string;
+  judgeConfigRevision: number;
+  protocolKey: string;
+  protocolRevision: number;
+  judgeModelConfigId: string;
+  judgeModelConfigRevision: number;
+  judgeProviderConfigId: string;
+  judgeProviderConfigRevision: number;
+  scoreUnits: number;
+  rubricBand: string;
+  safeReasonCode: string;
+  createdAt: number;
+}
+
+export interface AIEvalJudgeScore {
+  dimension: AIEvalDimension;
+  scoreUnits: number;
+  rubricBand: string;
+}
+
+export interface AIEvalJudgeResponse {
+  protocol: typeof AI_EVAL_JUDGE_PROTOCOL_KEY;
+  revision: typeof AI_EVAL_JUDGE_PROTOCOL_REVISION;
+  scores: readonly AIEvalJudgeScore[];
+}
+
+export interface AIEvalJudgeCoverage {
+  runId: string;
+  expectedCases: number;
+  expectedDimensions: number;
+  completedExecutions: number;
+  nonAmbiguousExecutions: number;
+  judgeResults: number;
+  complete: boolean;
+}
+
 export interface AIEvalRunRepository {
   getById(id: string): AIEvalRun | null;
   create(input: { id: string; suiteId: string; suiteRevision: number; manifestFingerprint: string; candidateSnapshot: AIEvalCandidateSnapshot; candidateFingerprint: string; baselineRunId: string | null; createdAt: number }): AIEvalRun;
@@ -547,6 +710,9 @@ export interface AIEvalRunRepository {
   listCaseResults(runId: string): AIEvalCaseResult[];
   insertGraderResult(input: Omit<AIEvalGraderResult, "id"> & { id?: string }): AIEvalGraderResult;
   listGraderResults(caseResultId: string): AIEvalGraderResult[];
+  insertJudgeResult(input: Omit<AIEvalJudgeResult, "id"> & { id?: string }): AIEvalJudgeResult;
+  listJudgeResults(caseResultId: string): AIEvalJudgeResult[];
+  listJudgeResultsForRun(runId: string): AIEvalJudgeResult[];
   insertDimensionAggregate(input: AIEvalDimensionAggregate): AIEvalDimensionAggregate;
   listDimensionAggregates(runId: string): AIEvalDimensionAggregate[];
   insertGateResult(input: AIEvalGateResult): AIEvalGateResult;

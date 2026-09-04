@@ -121,7 +121,7 @@ AI-M8A, AI-M8B, and AI-M8C are approved; AI-M8 Grounded Tutor is complete at `e7
 
 ## AI-M9 — Evals V1
 
-**Status:** Split into review checkpoints; AI-M9A is approved/complete at `860b474bd146abb944c15f774afa88578b463a80`, AI-M9B1 is implemented pending independent review, AI-M9B2 is not started, and AI-M9 overall is incomplete.
+**Status:** Split into review checkpoints; AI-M9A is approved/complete at `860b474bd146abb944c15f774afa88578b463a80`, AI-M9B1 is approved/complete at `61d6de1276735f511712dd47797a2c6a6304fcf3`, AI-M9B2 is implemented pending independent review, and AI-M9 overall is incomplete pending independent review.
 
 ### AI-M9A — Eval Domain, Versioned Suites, Deterministic Graders & Promotion Gates
 
@@ -131,8 +131,19 @@ AI-M8A, AI-M8B, and AI-M8C are approved; AI-M8 Grounded Tutor is complete at `e7
 
 ### AI-M9B — Eval Execution & EVALS Economics
 
-**Status:** Split into M9B1/M9B2; M9B1 is implemented pending independent review and M9B2 is not started.
-**Boundary:** M9B1 executes exact Eval targets through the existing M7C/M8A/Gateway boundaries using one EVALS Cost Operation and Budget Reservation per target, durable metadata-only synthetic Conversation cleanup ownership, bounded manifest scheduling and recovery, target latency observations, and ambiguity-safe recovery. Operational rate/concurrency denials remain retryable without candidate results; each retry has a durable monotonic admission generation and a fresh latency boundary, while bounded cleanup recovery uses fair retry position so one failed binding cannot starve later cleanup. The exact embedding space is fenced before Provider work. It makes no supplementary Judge call; M9B2 owns that later boundary.
+**Status:** Split into M9B1/M9B2; M9B1 is approved/complete at `61d6de1276735f511712dd47797a2c6a6304fcf3`, and M9B2 is implemented pending independent review.
+
+#### AI-M9B1 — Target Execution, Bounded Scheduling & EVALS Economics
+
+**Status:** Approved/complete at `61d6de1276735f511712dd47797a2c6a6304fcf3`.
+**Delivered boundary:** Governed subject-bound Eval Execution Config; bounded exact Case Execution and target Job orchestration; EVALS admission and accounting; durable metadata-only synthetic M4 cleanup ownership; real internal M7C/M8A/M8C target composition using test adapters; bounded target latency observations; and migrations `0034_eval-target-execution`, `0035_eval-target-orchestration-hardening`, and `0036_eval-retry-lifecycle`.
+**Explicit boundary:** Makes no supplementary Judge call; leaves Run scoring explicit.
+
+#### AI-M9B2 — Supplementary LLM Judge, Qualitative Evaluation & Final M9 Integration
+
+**Status:** Implemented pending independent review.
+**Delivered boundary:** Governed revisioned `ai.eval-judge-config` resources through Change Sets and OWNER publication; strict code-owned `eval-judge-v1@1` protocol formatting and non-repairing JSON parser; runtime-only in-memory handoff of candidate target answers and retrieved evidence to LLM Judge; dedicated distinct `EVALS` cost operations for Judge executions; strict prevention of self-judge (candidate model revision !== judge model revision); prohibition of Judge evaluating SECURITY dimension; integer scoring on 0..1,000,000 fixed-point scale with rubric bands (EXCELLENT, PASS, MARGINAL, FAIL); deterministic security blocker overrides; baseline comparability evaluation requiring identical Judge identity; candidate latency gate purity (excluding Judge latency); zero raw target output, evidence snippets, or judge rationale persisted to DB or disk; and migration `0037_eval-supplementary-judge`.
+**Explicit boundary:** Zero production Provider/network calls or vendor SDKs (in-process mock adapters only); no model repair loops; no automatic promotion/publication; AI-M9 overall is incomplete pending review; AI-M10 is not started.
 
 ## Remaining future milestones
 

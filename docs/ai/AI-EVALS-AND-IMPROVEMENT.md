@@ -55,6 +55,21 @@ M9B1 uses a governed subject-bound Eval Execution Config with append-only revisi
 
 The target invokes the real internal M7C Retrieval, M8A Preflight/Generation Planner, M8C validator, and Provider Gateway with deterministic test adapters only. It requires the Run candidate snapshot, including the exact embedding projection/model space, to remain current before Provider work, records QUERY Embedding/Rerank/Generation usage against the same operation, and never mixes Provider attempts or performs Generation fallback. Synthetic M4 Conversations have durable metadata-only cleanup ownership and are deleted through the approved M4 path; cleanup is bounded, idempotent, recoverable after restart, and target coverage remains incomplete while cleanup is pending. Target latency is the bounded integer interval from Case Execution `startedAt` to terminal observation. Rate-limit and transient concurrency denials remain retryable infrastructure state without a candidate Case result; budget denial is terminal operational failure without a fabricated candidate result. Jobs are reference-only and terminal recovery uses relational Case Execution ownership without requiring a parseable payload. M9B1 leaves Runs `RUNNING` for explicit later scoring; it does not add a Judge, Student API/UI, or production Provider.
 
+## 2C. AI-M9B2 supplementary judge and final M9 integration boundary
+
+AI-M9B2 introduces the governed Supplementary LLM Judge domain via migration `0037_eval-supplementary-judge.sql` and the `ai.eval-judge-config` resource type managed through Change Sets with OWNER-only approval and publication. A Judge Config pins the subjectKey, Model Config, Provider Config, Budget Policy, Rate Limit Policy, timeout, max output tokens, and code-owned protocol identity `eval-judge-v1@1`.
+
+Key invariants and delivered architectural boundaries include:
+1. **Runtime-Only Evaluation Handoff:** Target execution hands candidate output and retrieved evidence snippets directly to the Judge Execution Service in memory. Raw candidate output, evidence text, prompt templates, and raw judge outputs are strictly ephemeral and never written to SQLite or disk.
+2. **Distinct EVALS Cost Accounting:** Every Judge execution runs under a separate, dedicated `EVALS` Cost Operation and Budget Reservation under the `system-evals` admission scope. Private identities (`opaquePrincipalRef`, conversation, response, job) remain null. Target and Judge operations are both included in the Run's accounting basis for max-cost gates.
+3. **Self-Judge Prevention:** A candidate model revision cannot evaluate itself; self-judge configurations fail closed at execution time and trigger database-level trigger constraints.
+4. **Prohibition of Judge Security Evaluation:** Security is strictly deterministic; SQLite triggers and protocol validators forbid the Judge from evaluating the `SECURITY` dimension.
+5. **Strict Protocol & Non-Repairing JSON Parser:** The Judge must output valid JSON conforming strictly to `{"protocol": "eval-judge-v1", "revision": 1, "scores": [{"dimension": string, "rubricBand": string, "scoreUnits": number}]}`. Malformed JSON, extra keys, missing dimensions, duplicate dimensions, or invalid rubric bands fail safely without secondary model repair loops.
+6. **Fixed-Point Integer Scoring:** Qualitative scores use the 0..1,000,000 scale. Valid rubric bands are `EXCELLENT` (900k-1M), `PASS` (700k-899k), `MARGINAL` (500k-699k), and `FAIL` (0-499k). Both `EXCELLENT` and `PASS` count towards passed cases.
+7. **Deterministic Security Priority:** Deterministic security failures block the Run regardless of high qualitative Judge scores.
+8. **Strict Baseline Comparability:** Baseline comparisons require exact identity match across Judge configuration, protocol, model revision, and provider revision. Divergence results in `BASELINE_NOT_COMPARABLE`.
+9. **Candidate Latency Purity:** The `MAX_LATENCY_MS` gate evaluates candidate target generation latency only, strictly excluding judge latency.
+
 ## 3. Agent 2 is read-only intelligence
 
 Agent 2 is not a free-running autonomous agent. Its baseline pipeline is:

@@ -456,6 +456,17 @@ function validateSuiteGraderModes(content: AIEvalSuiteContent): void {
   for (const requirement of content.requiredDimensions) {
     if (requirement.mode === "DETERMINISTICALLY_GRADED" && !content.graderConfigs.some((grader) => grader.dimension === requirement.dimension && grader.required)) invalid("Every required deterministic dimension needs a required grader.");
   }
+  const securityReq = content.requiredDimensions.find((r) => r.dimension === "SECURITY");
+  if (securityReq?.mode === "JUDGE_REQUIRED") {
+    invalid("The SECURITY dimension cannot be JUDGE_REQUIRED.");
+  }
+  const judgeRequiredCount = content.requiredDimensions.filter((r) => r.mode === "JUDGE_REQUIRED").length;
+  if (judgeRequiredCount > 0 && content.supplementaryJudgeConfig === null) {
+    invalid("A Suite with JUDGE_REQUIRED dimensions requires a supplementaryJudgeConfig.");
+  }
+  if (judgeRequiredCount === 0 && content.supplementaryJudgeConfig !== null) {
+    invalid("A Suite with no JUDGE_REQUIRED dimensions must not specify a supplementaryJudgeConfig.");
+  }
 }
 
 function sameEvidenceOrigin(left: AIEvalEvidenceOriginReference, right: AIEvalEvidenceOriginReference): boolean {

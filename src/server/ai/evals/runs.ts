@@ -7,6 +7,7 @@ import {
   aiEvalDimensionAggregates,
   aiEvalGateResults,
   aiEvalGraderResults,
+  aiEvalJudgeResults,
   aiEvalRunExecutionBindings,
   aiEvalRuns,
   aiEvalSuiteCaseRefs,
@@ -15,14 +16,17 @@ import {
   type AIEvalDimensionAggregateRow,
   type AIEvalGateResultRow,
   type AIEvalGraderResultRow,
+  type AIEvalJudgeResultRow,
   type AIEvalRunRow,
 } from "../../content/schema";
 import type {
   AIEvalCaseResult,
   AIEvalCandidateSnapshot,
+  AIEvalDimension,
   AIEvalDimensionAggregate,
   AIEvalGateResult,
   AIEvalGraderResult,
+  AIEvalJudgeResult,
   AIEvalRun,
   AIEvalRunRepository,
   AIEvalRunStatus,
@@ -217,6 +221,86 @@ export class SQLiteAIEvalRunRepository implements AIEvalRunRepository {
     return this.database.db.select().from(aiEvalGraderResults).where(eq(aiEvalGraderResults.caseResultId, caseResultId)).orderBy(asc(aiEvalGraderResults.dimension), asc(aiEvalGraderResults.graderKey), asc(aiEvalGraderResults.graderRevision)).all().map(graderResultFromRow);
   }
 
+  insertJudgeResult(input: Omit<AIEvalJudgeResult, "id"> & { id?: string }): AIEvalJudgeResult {
+    const id = input.id ?? uuidv7();
+    if (!Number.isSafeInteger(input.scoreUnits) || input.scoreUnits < 0 || input.scoreUnits > 1_000_000) {
+      throw new AIEvalError("AI_EVAL_RUN_INVALID", "The Eval judge score is invalid.");
+    }
+    if (input.dimension === "SECURITY") {
+      throw new AIEvalError("AI_EVAL_JUDGE_SECURITY_FORBIDDEN", "The SECURITY dimension cannot be evaluated by a Judge.");
+    }
+    const parent = this.database.db.select({
+      runId: aiEvalCaseResults.runId,
+      runStatus: aiEvalRuns.status,
+      suiteId: aiEvalRuns.suiteId,
+      suiteRevision: aiEvalRuns.suiteRevision,
+      caseId: aiEvalCaseResults.caseId,
+      caseRevision: aiEvalCaseResults.caseRevision,
+    })
+      .from(aiEvalCaseResults)
+      .innerJoin(aiEvalRuns, eq(aiEvalCaseResults.runId, aiEvalRuns.id))
+      .where(eq(aiEvalCaseResults.id, input.caseResultId))
+      .get();
+    if (!parent || parent.runStatus !== "RUNNING") {
+      throw new AIEvalError("AI_EVAL_RUN_NOT_SCORABLE", "Judge Eval results can only be inserted while a Run is RUNNING.");
+    }
+    const suiteRevision = this.database.db.select({
+      requiredDimensions: aiEvalSuiteRevisions.requiredDimensions,
+    })
+      .from(aiEvalSuiteRevisions)
+      .where(and(eq(aiEvalSuiteRevisions.suiteId, parent.suiteId), eq(aiEvalSuiteRevisions.revision, parent.suiteRevision)))
+      .get();
+    if (!suiteRevision || !isConfiguredJudgeDimension(suiteRevision.requiredDimensions, input.dimension)) {
+      throw new AIEvalError("AI_EVAL_JUDGE_UNSUPPORTED", "The dimension is not configured as JUDGE_REQUIRED for the pinned Suite.");
+    }
+    try {
+      this.database.db.insert(aiEvalJudgeResults).values({
+        id,
+        judgeExecutionId: input.judgeExecutionId,
+        caseResultId: input.caseResultId,
+        runId: parent.runId,
+        caseId: parent.caseId,
+        caseRevision: parent.caseRevision,
+        dimension: input.dimension,
+        judgeConfigId: input.judgeConfigId,
+        judgeConfigRevision: input.judgeConfigRevision,
+        protocolKey: input.protocolKey,
+        protocolRevision: input.protocolRevision,
+        judgeModelConfigId: input.judgeModelConfigId,
+        judgeModelConfigRevision: input.judgeModelConfigRevision,
+        judgeProviderConfigId: input.judgeProviderConfigId,
+        judgeProviderConfigRevision: input.judgeProviderConfigRevision,
+        scoreUnits: input.scoreUnits,
+        rubricBand: input.rubricBand,
+        safeReasonCode: input.safeReasonCode,
+        createdAt: input.createdAt,
+      }).run();
+    } catch (error) {
+      throw new AIEvalError("AI_EVAL_DUPLICATE_RESULT", "The Eval judge result could not be appended.", {}, error);
+    }
+    const row = this.database.db.select().from(aiEvalJudgeResults).where(eq(aiEvalJudgeResults.id, id)).get();
+    if (!row) throw new AIEvalError("AI_EVAL_RUN_INVALID", "The Eval judge result could not be read after insertion.");
+    return judgeResultFromRow(row);
+  }
+
+  listJudgeResults(caseResultId: string): AIEvalJudgeResult[] {
+    return this.database.db.select()
+      .from(aiEvalJudgeResults)
+      .where(eq(aiEvalJudgeResults.caseResultId, caseResultId))
+      .orderBy(asc(aiEvalJudgeResults.dimension))
+      .all()
+      .map(judgeResultFromRow);
+  }
+
+  listJudgeResultsForRun(runId: string): AIEvalJudgeResult[] {
+    return this.database.db.select()
+      .from(aiEvalJudgeResults)
+      .where(eq(aiEvalJudgeResults.runId, runId))
+      .orderBy(asc(aiEvalJudgeResults.caseId), asc(aiEvalJudgeResults.dimension))
+      .all()
+      .map(judgeResultFromRow);
+  }
+
   insertDimensionAggregate(input: AIEvalDimensionAggregate): AIEvalDimensionAggregate {
     try {
       this.database.db.insert(aiEvalDimensionAggregates).values(input).run();
@@ -299,6 +383,30 @@ function graderResultFromRow(row: AIEvalGraderResultRow): AIEvalGraderResult {
   return { id: row.id, caseResultId: row.caseResultId, dimension: row.dimension, graderKey: row.graderKey, graderRevision: row.graderRevision, verdict: row.verdict, scoreUnits: row.scoreUnits, safeReasonCode: row.safeReasonCode, blocking: row.blocking, createdAt: row.createdAt };
 }
 
+function judgeResultFromRow(row: AIEvalJudgeResultRow): AIEvalJudgeResult {
+  return {
+    id: row.id,
+    judgeExecutionId: row.judgeExecutionId,
+    caseResultId: row.caseResultId,
+    runId: row.runId,
+    caseId: row.caseId,
+    caseRevision: row.caseRevision,
+    dimension: row.dimension as AIEvalDimension,
+    judgeConfigId: row.judgeConfigId,
+    judgeConfigRevision: row.judgeConfigRevision,
+    protocolKey: row.protocolKey,
+    protocolRevision: row.protocolRevision,
+    judgeModelConfigId: row.judgeModelConfigId,
+    judgeModelConfigRevision: row.judgeModelConfigRevision,
+    judgeProviderConfigId: row.judgeProviderConfigId,
+    judgeProviderConfigRevision: row.judgeProviderConfigRevision,
+    scoreUnits: row.scoreUnits,
+    rubricBand: row.rubricBand,
+    safeReasonCode: row.safeReasonCode,
+    createdAt: row.createdAt,
+  };
+}
+
 function aggregateFromRow(row: AIEvalDimensionAggregateRow): AIEvalDimensionAggregate {
   return { runId: row.runId, dimension: row.dimension, applicableCaseCount: row.applicableCaseCount, passedCaseCount: row.passedCaseCount, failedCaseCount: row.failedCaseCount, scoreUnits: row.scoreUnits, blockingFailureCount: row.blockingFailureCount };
 }
@@ -329,6 +437,11 @@ function isConfiguredDeterministicGrader(
     && requirement.dimension === input.dimension
     && requirement.mode === "DETERMINISTICALLY_GRADED");
   return configured && deterministic;
+}
+
+function isConfiguredJudgeDimension(requiredDimensions: unknown, dimension: string): boolean {
+  if (!Array.isArray(requiredDimensions)) return false;
+  return requiredDimensions.some((req) => isRecord(req) && req.dimension === dimension && req.mode === "JUDGE_REQUIRED");
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

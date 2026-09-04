@@ -123,6 +123,7 @@ import type {
   AIEvalRunStatus,
   AIEvalSourceRevisionReference,
   AIEvalTargetCleanupStatus,
+  AIEvalJudgeExecutionStatus,
 } from "../ai/evals/contracts";
 import {
   AI_RETRIEVAL_FUSION_ALGORITHM_KEY,
@@ -3758,6 +3759,159 @@ export const aiEvalTargetCleanups = sqliteTable(
   ],
 );
 
+/** Stable governed supplementary Judge configuration; behavior is revisioned below. */
+export const aiEvalJudgeConfigs = sqliteTable(
+  "ai_eval_judge_configs",
+  {
+    id: text("id").primaryKey(),
+    key: text("key").notNull(),
+    subjectKey: text("subject_key").notNull().references(() => canonicalMaterials.subjectKey, { onDelete: "restrict" }),
+    currentRevision: integer("current_revision").notNull().default(1),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    createdBy: text("created_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+    updatedBy: text("updated_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+  },
+  (table) => [
+    uniqueIndex("ai_eval_judge_configs_key_unique").on(table.key),
+    index("ai_eval_judge_configs_subject_index").on(table.subjectKey),
+    check("ai_eval_judge_configs_key_valid", sql`length(trim(${table.key})) between 1 and 120 and ${table.key} not glob '*[^a-z0-9.-]*'`),
+    check("ai_eval_judge_configs_subject_valid", sql`length(trim(${table.subjectKey})) between 1 and 80 and ${table.subjectKey} not glob '*[^a-z0-9-]*'`),
+    check("ai_eval_judge_configs_revision_positive", sql`${table.currentRevision} >= 1`),
+    check("ai_eval_judge_configs_created_nonnegative", sql`${table.createdAt} >= 0`),
+    check("ai_eval_judge_configs_timestamps_ordered", sql`${table.updatedAt} >= ${table.createdAt}`),
+  ],
+);
+
+/** Immutable governed supplementary Judge revision. */
+export const aiEvalJudgeConfigRevisions = sqliteTable(
+  "ai_eval_judge_config_revisions",
+  {
+    id: text("id").primaryKey(),
+    judgeConfigId: text("judge_config_id").notNull().references(() => aiEvalJudgeConfigs.id, { onDelete: "restrict" }),
+    revision: integer("revision").notNull(),
+    displayName: text("display_name").notNull(),
+    enabled: integer("enabled", { mode: "boolean" }).notNull(),
+    modelConfigId: text("model_config_id").notNull().references(() => aiModelConfigs.id, { onDelete: "restrict" }),
+    modelConfigRevision: integer("model_config_revision").notNull(),
+    providerConfigId: text("provider_config_id").notNull().references(() => aiProviderConfigs.id, { onDelete: "restrict" }),
+    providerConfigRevision: integer("provider_config_revision").notNull(),
+    budgetPolicyId: text("budget_policy_id").notNull().references(() => aiBudgetPolicies.id, { onDelete: "restrict" }),
+    budgetPolicyRevision: integer("budget_policy_revision").notNull(),
+    rateLimitPolicyId: text("rate_limit_policy_id").notNull().references(() => aiRateLimitPolicies.id, { onDelete: "restrict" }),
+    rateLimitPolicyRevision: integer("rate_limit_policy_revision").notNull(),
+    protocolKey: text("protocol_key").notNull(),
+    protocolRevision: integer("protocol_revision").notNull(),
+    timeoutMs: integer("timeout_ms").notNull(),
+    maxOutputTokens: integer("max_output_tokens").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    createdAt: integer("created_at").notNull(),
+    createdBy: text("created_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+  },
+  (table) => [
+    uniqueIndex("ai_eval_judge_config_revisions_identity_unique").on(table.judgeConfigId, table.revision),
+    index("ai_eval_judge_config_revisions_config_index").on(table.judgeConfigId, table.revision),
+    check("ai_eval_judge_config_revisions_revision_positive", sql`${table.revision} >= 1`),
+    check("ai_eval_judge_config_revisions_display_name_valid", sql`length(trim(${table.displayName})) between 1 and 200`),
+    check("ai_eval_judge_config_revisions_enabled_boolean", sql`${table.enabled} in (0,1)`),
+    check("ai_eval_judge_config_revisions_policy_revision_valid", sql`${table.modelConfigRevision} >= 1 and ${table.providerConfigRevision} >= 1 and ${table.budgetPolicyRevision} >= 1 and ${table.rateLimitPolicyRevision} >= 1`),
+    check("ai_eval_judge_config_revisions_protocol_valid", sql`length(trim(${table.protocolKey})) between 1 and 120 and ${table.protocolKey} not glob '*[^a-z0-9.-]*' and ${table.protocolRevision} >= 1`),
+    check("ai_eval_judge_config_revisions_bounds_valid", sql`${table.timeoutMs} between 100 and 86400000 and ${table.maxOutputTokens} between 1 and 65536`),
+    check("ai_eval_judge_config_revisions_fingerprint_valid", sql`length(${table.fingerprint}) = 64 and ${table.fingerprint} not glob '*[^0-9a-f]*'`),
+    check("ai_eval_judge_config_revisions_created_nonnegative", sql`${table.createdAt} >= 0`),
+  ],
+);
+
+/** Durable, safe metadata for one exact supplementary Judge execution. */
+export const aiEvalJudgeExecutions = sqliteTable(
+  "ai_eval_judge_executions",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id").notNull().references(() => aiEvalRuns.id, { onDelete: "restrict" }),
+    caseId: text("case_id").notNull().references(() => aiEvalCases.id, { onDelete: "restrict" }),
+    caseRevision: integer("case_revision").notNull(),
+    ordinal: integer("ordinal").notNull(),
+    subjectKey: text("subject_key").notNull().references(() => canonicalMaterials.subjectKey, { onDelete: "restrict" }),
+    judgeConfigId: text("judge_config_id").notNull().references(() => aiEvalJudgeConfigs.id, { onDelete: "restrict" }),
+    judgeConfigRevision: integer("judge_config_revision").notNull(),
+    judgeConfigFingerprint: text("judge_config_fingerprint").notNull(),
+    protocolKey: text("protocol_key").notNull(),
+    protocolRevision: integer("protocol_revision").notNull(),
+    judgeModelConfigId: text("judge_model_config_id").notNull().references(() => aiModelConfigs.id, { onDelete: "restrict" }),
+    judgeModelConfigRevision: integer("judge_model_config_revision").notNull(),
+    judgeProviderConfigId: text("judge_provider_config_id").notNull().references(() => aiProviderConfigs.id, { onDelete: "restrict" }),
+    judgeProviderConfigRevision: integer("judge_provider_config_revision").notNull(),
+    judgeCostOperationId: text("judge_cost_operation_id").references(() => aiCostOperations.id, { onDelete: "restrict" }),
+    budgetReservationId: text("budget_reservation_id").references(() => aiBudgetReservations.id, { onDelete: "restrict" }),
+    status: text("status").$type<AIEvalJudgeExecutionStatus>().notNull(),
+    providerInvocationState: text("provider_invocation_state").$type<AIEvalProviderInvocationState>().notNull(),
+    providerInvoked: integer("provider_invoked", { mode: "boolean" }).notNull().default(false),
+    judgeOutputSha256: text("judge_output_sha256"),
+    judgeOutputByteSize: integer("judge_output_byte_size"),
+    safeFailureCode: text("safe_failure_code"),
+    latencyMs: integer("latency_ms"),
+    createdAt: integer("created_at").notNull(),
+    startedAt: integer("started_at"),
+    completedAt: integer("completed_at"),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("ai_eval_judge_executions_run_case_unique").on(table.runId, table.caseId, table.caseRevision),
+    uniqueIndex("ai_eval_judge_executions_run_ordinal_unique").on(table.runId, table.ordinal),
+    uniqueIndex("ai_eval_judge_executions_operation_unique").on(table.judgeCostOperationId).where(sql`${table.judgeCostOperationId} is not null`),
+    index("ai_eval_judge_executions_status_index").on(table.status, table.updatedAt),
+    index("ai_eval_judge_executions_run_index").on(table.runId, table.ordinal),
+    check("ai_eval_judge_executions_case_revision_valid", sql`${table.caseRevision} >= 1 and ${table.ordinal} between 1 and 10000`),
+    check("ai_eval_judge_executions_subject_valid", sql`length(trim(${table.subjectKey})) between 1 and 80`),
+    check("ai_eval_judge_executions_config_revision_valid", sql`${table.judgeConfigRevision} >= 1`),
+    check("ai_eval_judge_executions_fingerprints_valid", sql`length(${table.judgeConfigFingerprint}) = 64 and ${table.judgeConfigFingerprint} not glob '*[^0-9a-f]*'`),
+    check("ai_eval_judge_executions_status_valid", sql`${table.status} in ('PENDING','RUNNING','COMPLETED','FAILED','CANCELLED','AMBIGUOUS','INPUT_LOST')`),
+    check("ai_eval_judge_executions_invocation_state_valid", sql`${table.providerInvocationState} in ('NOT_INVOKED','INVOKING','INVOKED_WITH_ACCOUNTING','AMBIGUOUS')`),
+    check("ai_eval_judge_executions_output_valid", sql`${table.judgeOutputSha256} is null or (length(${table.judgeOutputSha256}) = 64 and ${table.judgeOutputSha256} not glob '*[^0-9a-f]*')`),
+    check("ai_eval_judge_executions_output_size_valid", sql`${table.judgeOutputByteSize} is null or ${table.judgeOutputByteSize} between 0 and 524288`),
+    check("ai_eval_judge_executions_protocol_valid", sql`length(trim(${table.protocolKey})) between 1 and 120 and ${table.protocolRevision} >= 1`),
+    check("ai_eval_judge_executions_timestamps_valid", sql`${table.createdAt} >= 0 and ${table.updatedAt} >= ${table.createdAt} and (${table.startedAt} is null or ${table.startedAt} >= ${table.createdAt}) and (${table.completedAt} is null or ${table.completedAt} >= ${table.createdAt})`),
+  ],
+);
+
+/** Distinct, durable supplementary LLM Judge result. Deterministic grader results remain separate. */
+export const aiEvalJudgeResults = sqliteTable(
+  "ai_eval_judge_results",
+  {
+    id: text("id").primaryKey(),
+    judgeExecutionId: text("judge_execution_id").notNull().references(() => aiEvalJudgeExecutions.id, { onDelete: "restrict" }),
+    caseResultId: text("case_result_id").notNull().references(() => aiEvalCaseResults.id, { onDelete: "restrict" }),
+    runId: text("run_id").notNull().references(() => aiEvalRuns.id, { onDelete: "restrict" }),
+    caseId: text("case_id").notNull().references(() => aiEvalCases.id, { onDelete: "restrict" }),
+    caseRevision: integer("case_revision").notNull(),
+    dimension: text("dimension").$type<AIEvalDimension>().notNull(),
+    judgeConfigId: text("judge_config_id").notNull().references(() => aiEvalJudgeConfigs.id, { onDelete: "restrict" }),
+    judgeConfigRevision: integer("judge_config_revision").notNull(),
+    protocolKey: text("protocol_key").notNull(),
+    protocolRevision: integer("protocol_revision").notNull(),
+    judgeModelConfigId: text("judge_model_config_id").notNull().references(() => aiModelConfigs.id, { onDelete: "restrict" }),
+    judgeModelConfigRevision: integer("judge_model_config_revision").notNull(),
+    judgeProviderConfigId: text("judge_provider_config_id").notNull().references(() => aiProviderConfigs.id, { onDelete: "restrict" }),
+    judgeProviderConfigRevision: integer("judge_provider_config_revision").notNull(),
+    scoreUnits: integer("score_units").notNull(),
+    rubricBand: text("rubric_band").notNull(),
+    safeReasonCode: text("safe_reason_code").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("ai_eval_judge_results_execution_dim_unique").on(table.judgeExecutionId, table.dimension),
+    uniqueIndex("ai_eval_judge_results_case_dim_unique").on(table.caseResultId, table.dimension),
+    index("ai_eval_judge_results_run_dim_index").on(table.runId, table.dimension),
+    index("ai_eval_judge_results_case_index").on(table.caseResultId),
+    check("ai_eval_judge_results_dimension_valid", sql`${table.dimension} in ('CORRECTNESS','CURRICULUM_FIDELITY','GROUNDEDNESS','SOURCE_FIDELITY','RELEVANCE','CONCISENESS','INSTRUCTION_FOLLOWING','ARABIC_QUALITY','IRAQI_NATURALNESS','MATHEMATICS_CORRECTNESS','OFF_TOPIC_BEHAVIOR','RETRIEVAL_QUALITY') and ${table.dimension} != 'SECURITY'`),
+    check("ai_eval_judge_results_score_valid", sql`${table.scoreUnits} between 0 and 1000000`),
+    check("ai_eval_judge_results_rubric_band_valid", sql`length(trim(${table.rubricBand})) between 1 and 60 and ${table.rubricBand} not glob '*[^A-Z0-9_-]*'`),
+    check("ai_eval_judge_results_reason_valid", sql`length(trim(${table.safeReasonCode})) between 1 and 160 and ${table.safeReasonCode} not glob '*[^A-Z0-9_-]*'`),
+    check("ai_eval_judge_results_protocol_valid", sql`length(trim(${table.protocolKey})) between 1 and 120 and ${table.protocolRevision} >= 1`),
+    check("ai_eval_judge_results_created_nonnegative", sql`${table.createdAt} >= 0`),
+  ],
+);
+
 export type ChangeSetRow = typeof changeSets.$inferSelect;
 export type ChangeSetItemRow = typeof changeSetItems.$inferSelect;
 export type ChangeSetEventRow = typeof changeSetEvents.$inferSelect;
@@ -3832,3 +3986,7 @@ export type AIEvalExecutionConfigRevisionRow = typeof aiEvalExecutionConfigRevis
 export type AIEvalRunExecutionBindingRow = typeof aiEvalRunExecutionBindings.$inferSelect;
 export type AIEvalCaseExecutionRow = typeof aiEvalCaseExecutions.$inferSelect;
 export type AIEvalTargetCleanupRow = typeof aiEvalTargetCleanups.$inferSelect;
+export type AIEvalJudgeConfigRow = typeof aiEvalJudgeConfigs.$inferSelect;
+export type AIEvalJudgeConfigRevisionRow = typeof aiEvalJudgeConfigRevisions.$inferSelect;
+export type AIEvalJudgeExecutionRow = typeof aiEvalJudgeExecutions.$inferSelect;
+export type AIEvalJudgeResultRow = typeof aiEvalJudgeResults.$inferSelect;

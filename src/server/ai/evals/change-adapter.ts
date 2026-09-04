@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 import type { AdminActor } from "../../admin-auth/contracts";
 import type { ChangeOperation, ChangePresentation, ChangeResourceAdapter, ChangeSnapshot, ResourceState } from "../../change-management/contracts";
@@ -6,9 +6,15 @@ import { ChangeManagementError } from "../../change-management/errors";
 import { deriveChangedPaths, validateChangeSnapshot } from "../../change-management/snapshot";
 import type { ContentDatabase } from "../../content/database";
 import { canonicalMaterials } from "../../content/schema";
+import { SQLiteAIBudgetPolicyRepository } from "../budget";
+import { SQLiteAIProviderConfigRepository } from "../configuration";
+import { SQLiteAIModelConfigRepository } from "../model-registry";
+import { SQLiteAIRateLimitPolicyRepository } from "../rate-limits";
 import { AIEvalError } from "./errors";
 import {
   AI_EVAL_CASE_RESOURCE_TYPE,
+  AI_EVAL_JUDGE_PROTOCOL_KEY,
+  AI_EVAL_JUDGE_PROTOCOL_REVISION,
   AI_EVAL_SUITE_RESOURCE_TYPE,
   type AIEvalCase,
   type AIEvalCaseContent,
@@ -17,6 +23,7 @@ import {
 } from "./contracts";
 import { createDefaultAIEvalGraderRegistry } from "./graders";
 import { SQLiteAIEvalCaseRepository, SQLiteAIEvalSuiteRepository } from "./configuration";
+import { SQLiteAIEvalJudgeConfigRepository } from "./judge-config";
 import { normalizeAIEvalCaseContent, normalizeAIEvalSuiteContent } from "./validation";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -154,6 +161,39 @@ function validateSuiteProposal(database: ContentDatabase, content: AIEvalSuiteCo
     if (!grader || grader.dimension !== config.dimension) throw new AIEvalError("AI_EVAL_GRADER_UNSUPPORTED", "The Eval Suite references an unsupported deterministic grader.");
   }
   repository.validateManifest(content);
+  if (content.supplementaryJudgeConfig) {
+    assertSupplementaryJudgeConfig(database, content.subjectKey, content.supplementaryJudgeConfig);
+  }
+}
+
+function assertSupplementaryJudgeConfig(database: ContentDatabase, subjectKey: string, config: { referenceKey: string; revision: number }): void {
+  const judgeRepo = new SQLiteAIEvalJudgeConfigRepository(database);
+  const judgeRevision = judgeRepo.getRevisionByKey(config.referenceKey, config.revision);
+  if (!judgeRevision || !judgeRevision.enabled) {
+    throw new AIEvalError("AI_EVAL_JUDGE_CONFIG_INVALID", "The Eval Suite supplementary Judge Config revision does not exist or is disabled.");
+  }
+  if (judgeRevision.subjectKey !== subjectKey) {
+    throw new AIEvalError("AI_EVAL_JUDGE_CONFIG_INVALID", "The Eval Suite supplementary Judge Config subject does not match the Suite subject.");
+  }
+  if (judgeRevision.protocolKey !== AI_EVAL_JUDGE_PROTOCOL_KEY || judgeRevision.protocolRevision !== AI_EVAL_JUDGE_PROTOCOL_REVISION) {
+    throw new AIEvalError("AI_EVAL_JUDGE_CONFIG_INVALID", "The Eval Suite supplementary Judge Config uses an unsupported protocol.");
+  }
+  const model = new SQLiteAIModelConfigRepository(database).getById(judgeRevision.modelConfigId);
+  if (!model || model.revision !== judgeRevision.modelConfigRevision || !model.enabled || model.capability !== "GENERATION" || model.providerConfigId !== judgeRevision.providerConfigId) {
+    throw new AIEvalError("AI_EVAL_JUDGE_CONFIG_INVALID", "The Eval Suite supplementary Judge Generation model is invalid or disabled.");
+  }
+  const provider = new SQLiteAIProviderConfigRepository(database).getById(judgeRevision.providerConfigId);
+  if (!provider || provider.revision !== judgeRevision.providerConfigRevision || !provider.enabled) {
+    throw new AIEvalError("AI_EVAL_JUDGE_CONFIG_INVALID", "The Eval Suite supplementary Judge Provider is invalid or disabled.");
+  }
+  const budget = new SQLiteAIBudgetPolicyRepository(database).getRevision(judgeRevision.budgetPolicyId, judgeRevision.budgetPolicyRevision);
+  if (!budget || !budget.enabled || budget.costCenter !== "EVALS") {
+    throw new AIEvalError("AI_EVAL_JUDGE_CONFIG_INVALID", "The Eval Suite supplementary Judge Budget Policy is invalid or not enabled for EVALS.");
+  }
+  const rateLimit = new SQLiteAIRateLimitPolicyRepository(database).getRevision(judgeRevision.rateLimitPolicyId, judgeRevision.rateLimitPolicyRevision);
+  if (!rateLimit || !rateLimit.enabled) {
+    throw new AIEvalError("AI_EVAL_JUDGE_CONFIG_INVALID", "The Eval Suite supplementary Judge Rate Limit Policy is invalid or disabled.");
+  }
 }
 
 function caseSnapshot(content: AIEvalCase | AIEvalCaseContent): ChangeSnapshot {
