@@ -26,6 +26,8 @@ import type {
 import { AITutorExecutionError } from "./errors";
 import { AIMemoryService } from "../../memory";
 import { parseAIMemoryCommand, type AIMemoryCommand } from "../../memory/command";
+import { AIIntelligenceTelemetryService } from "../../telemetry";
+import type { AITelemetryFailureCode } from "../../telemetry";
 
 const MAX_SAFE_TIMESTAMP = 8_640_000_000_000_000;
 const OPERATION_IDEMPOTENCY_VERSION = 1;
@@ -40,15 +42,30 @@ export class AITutorExecutionService {
   private readonly clock: () => number;
   private readonly outputValidator: Pick<AITutorOutputValidator, "validate">;
   private readonly memory: AIMemoryService;
+  private readonly telemetry: AIIntelligenceTelemetryService;
 
   constructor(private readonly dependencies: AITutorExecutionDependencies) {
     this.clock = dependencies.clock ?? Date.now;
     this.outputValidator = dependencies.outputValidator ?? new AITutorOutputValidator();
     this.memory = dependencies.memory ?? new AIMemoryService(dependencies.database);
+    this.telemetry = dependencies.telemetry ?? new AIIntelligenceTelemetryService(dependencies.database);
     validateEstimator(dependencies.estimator);
   }
 
   async execute(input: AITutorExecutionInput): Promise<AITutorExecutionResult> {
+    const startedAt = this.safeNow();
+    this.safeTelemetry(() => this.telemetry.recordTutorStarted({ principalRef: input.principal.principalRef, responseId: input.responseId, occurredAt: startedAt }));
+    try {
+      const result = await this.executeInternal(input);
+      this.safeTelemetry(() => this.telemetry.recordTutorOutcome({ principalRef: input.principal.principalRef, responseId: input.responseId, status: result.status, occurredAt: this.safeNow(), startedAt, costOperationId: result.costOperationId, responseTraceId: result.traceId }));
+      return result;
+    } catch (error) {
+      this.safeTelemetry(() => this.telemetry.recordTutorOutcome({ principalRef: input.principal.principalRef, responseId: input.responseId, status: "FAILED", occurredAt: this.safeNow(), startedAt, failureCode: telemetryFailureCode(error) }));
+      throw error;
+    }
+  }
+
+  private async executeInternal(input: AITutorExecutionInput): Promise<AITutorExecutionResult> {
     validateExecutionInput(input);
     this.memory.recoverPendingMutationIntents({ limit: 100, now: this.safeNow() });
     const replay = this.replayExistingExecution(input);
@@ -80,6 +97,8 @@ export class AITutorExecutionService {
         throw executionError("AI_TUTOR_EXECUTION_OPERATION_CONFLICT", "The Tutor Budget Reservation could not enter execution safely.", error);
       }
 
+      const retrievalStartedAt = this.safeNow();
+      this.safeTelemetry(() => this.telemetry.recordRetrievalStarted({ principalRef: plan.principalRef, subjectKey: plan.subjectKey, requestId: plan.responseId, responseId: plan.responseId, conversationId: plan.conversationId, costOperationId: operationContext.operation.id, occurredAt: retrievalStartedAt }));
       let evidencePack: AIEvidencePack;
       try {
         evidencePack = await this.dependencies.retrieval.retrieve({
@@ -94,7 +113,9 @@ export class AITutorExecutionService {
             signal: linked.signal,
           },
         });
+        this.safeTelemetry(() => this.telemetry.recordRetrieval({ retrievalRequestId: plan.responseId, principalRef: plan.principalRef, subjectKey: plan.subjectKey, conversationId: plan.conversationId, responseId: plan.responseId, costOperationId: operationContext.operation.id, pack: evidencePack, startedAt: retrievalStartedAt, completedAt: this.safeNow() }));
       } catch (error) {
+        this.safeTelemetry(() => this.telemetry.recordEvent({ dedupeKey: `retrieval-failed:${plan.responseId}`, eventType: "RETRIEVAL_FAILED", principalRef: plan.principalRef, subjectKey: plan.subjectKey, conversationId: plan.conversationId, responseId: plan.responseId, costOperationId: operationContext.operation.id, failureCode: telemetryFailureCode(error), occurredAt: this.safeNow() }));
         const cancelled = linked.signal.aborted || isCancelledError(error);
         const trace = this.createTrace(plan, operationContext.operation.id, reservation.id, [], [], this.safeNow());
         this.transitionTrace(trace, cancelled ? "CANCELLED" : "FAILED", this.safeNow());
@@ -172,6 +193,10 @@ export class AITutorExecutionService {
 
   run(input: AITutorExecutionInput): Promise<AITutorExecutionResult> {
     return this.execute(input);
+  }
+
+  private safeTelemetry(operation: () => unknown): void {
+    try { operation(); } catch { /* telemetry must never change canonical Tutor truth */ }
   }
 
   private replayExistingExecution(input: AITutorExecutionInput): AITutorExecutionResult | null {
@@ -514,11 +539,17 @@ export class AITutorExecutionService {
         }
         if (mutationCommandId) {
           try {
-            this.memory.applyMutationIntent(mutationCommandId, this.safeNow());
-          } catch {
+            const record = this.memory.applyMutationIntent(mutationCommandId, this.safeNow());
+            const intent = this.memory.getMutationIntent(mutationCommandId);
+            if (intent) this.safeTelemetry(() => this.telemetry.recordMemoryMutation({ principalRef: plan.principalRef, responseId: plan.responseId, conversationId: plan.conversationId, subjectKey: intent.subjectKey, status: "APPLIED", action: intent.action, scope: intent.scope, kind: intent.kind, origin: intent.origin, memoryId: record.memoryId, memoryRevision: record.resultRevision, occurredAt: this.safeNow() }));
+          } catch (error) {
+            const intent = this.memory.getMutationIntent(mutationCommandId);
+            if (intent) this.safeTelemetry(() => this.telemetry.recordMemoryMutation({ principalRef: plan.principalRef, responseId: plan.responseId, conversationId: plan.conversationId, subjectKey: intent.subjectKey, status: "REJECTED", action: intent.action, scope: intent.scope, kind: intent.kind, origin: intent.origin, memoryId: intent.memoryId, memoryRevision: intent.expectedRevision, occurredAt: this.safeNow(), failureCode: telemetryFailureCode(error) }));
             // The Tutor response remains canonical; invalid/stale Memory intent
             // is already scrubbed/terminalized by the mutation boundary.
           }
+        } else if (memoryCommand?.action === "NOOP") {
+          this.safeTelemetry(() => this.telemetry.recordMemoryMutation({ principalRef: plan.principalRef, responseId: plan.responseId, conversationId: plan.conversationId, subjectKey: memoryCommand.subjectKey, status: "APPLIED", action: "NOOP", scope: memoryCommand.scope, kind: null, origin: null, occurredAt: this.safeNow() }));
         }
         this.transitionTrace(trace, "COMPLETED", this.safeNow());
         const settlement = this.closeOperationAndSettle(operation.id, reservationId, "COMPLETED");
@@ -979,4 +1010,21 @@ function mapExecutionError(error: unknown): AITutorExecutionError {
   if (error instanceof AIProviderGatewayError) return error.code === "CANCELLED" ? executionError("AI_TUTOR_EXECUTION_CANCELLED", "The Tutor execution was cancelled.", error) : executionError("AI_TUTOR_EXECUTION_PROVIDER_FAILED", "The Tutor Provider operation failed safely.", error);
   if (error instanceof AIAccountingError) return executionError("AI_TUTOR_EXECUTION_ACCOUNTING_FAILED", "The Tutor accounting operation failed safely.", error);
   return executionError("AI_TUTOR_EXECUTION_INVALID", "The Tutor execution failed safely.", error);
+}
+
+function telemetryFailureCode(error: unknown): AITelemetryFailureCode {
+  const code = typeof error === "object" && error !== null && "code" in error && typeof (error as { code?: unknown }).code === "string"
+    ? (error as { code: string }).code.toUpperCase()
+    : "";
+  if (code.includes("CANCEL")) return "CANCELLED";
+  if (code.includes("TIMEOUT")) return "PROVIDER_TIMEOUT";
+  if (code.includes("INPUT_LOST") || code.includes("NOT_FOUND")) return "INPUT_LOST";
+  if (code.includes("RETRIEVAL") || code.includes("EVIDENCE")) return "RETRIEVAL_FAILED";
+  if (code.includes("GROUND") || code.includes("CITATION") || code.includes("OUTPUT_INVALID")) return "GROUNDING_INVALID";
+  if (code.includes("RATE")) return "RATE_LIMITED";
+  if (code.includes("BUDGET")) return "BUDGET_REJECTED";
+  if (code.includes("ADMISSION") || code.includes("CONCURRENCY")) return "ADMISSION_REJECTED";
+  if (code.includes("PROVIDER")) return "PROVIDER_ERROR";
+  if (code.includes("CONFIGURATION")) return "CONFIGURATION_CHANGED";
+  return "INTERNAL_ERROR";
 }

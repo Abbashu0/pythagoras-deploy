@@ -132,6 +132,10 @@ M10R/M10A2/B2/C/D adds no retrieval corpus and no RAG source. Governed `ai.memor
 
 Summary and Memory text is runtime C4 and never enters M5 Context Snapshots, Snapshot Items, Knowledge Packages, Chunks, FTS, vectors, EvidencePacks, or retrieval traces. Snapshots retain only bounded IDs, revisions, source references, token counts, and decisions. Conversation deletion scrubs Summary and obsolete Memory text, tombstones safe provenance, and makes the affected state ineligible atomically. The former M10B second-pass extraction path is preserved only as historical compatibility data; M10B2 uses one same-call provider-neutral command and M10D keeps only bounded Compaction, with no second extraction Provider call.
 
+### AI-M11 Retrieval telemetry boundary
+
+AI-M11 persists a bounded metadata-only Retrieval Trace: request/Response identity, Retrieval Config and fusion revisions, M7A/M7B projection identities, candidate counts, ranks, fixed-point scores, selected chunk/origin IDs, reranker usage, latencies, and sufficient/insufficient outcome. Retrieved text and safe Question/Knowledge provenance text remain runtime-only and are not copied into telemetry. M11 adds diagnostics and de-identified read services without changing M7 retrieval or EvidencePack authority.
+
 ## 7. Grounding contract
 
 The Grounded Tutor receives:

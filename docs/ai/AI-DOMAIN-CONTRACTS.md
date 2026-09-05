@@ -168,7 +168,13 @@ M10R is the approved/complete scoped-memory baseline; M10A2/B2/C/D are implement
 
 The former M10A Summary/Context contract remains historical; its Summary behavior is unchanged where still supported. M10A2 migrations `0043_scoped-student-memory-foundation` and `0044_slippery_joshua_kane` add scoped policy revisions, current-policy SQLite thresholds, optimistic current Memory revisions, provenance, bounded mutation intents/records, deletion reconciliation, and principal purge. M10B2 applies at most one command from the same successful Tutor Generation and never schedules legacy extraction. M10C selects current Global plus exact Subject Memory in M5 Context without copying raw text into snapshots. M10D keeps bounded Student-only Compaction with contiguous uncovered history and append-only Summary coverage.
 
-The former M10B execution/config/protocol boundary through `0041_violet_nico_minoru` and `0042_memory-execution-commit-safety` is preserved as historical compatibility data but is superseded for new Memory mutation semantics. M10D schedules only bounded Student Conversation Compaction; no new `memory-extraction-v1` work is scheduled. M10A2/B2/C/D remain pending independent review; M11 is not started.
+The former M10B execution/config/protocol boundary through `0041_violet_nico_minoru` and `0042_memory-execution-commit-safety` is preserved as historical compatibility data but is superseded for new Memory mutation semantics. M10D schedules only bounded Student Conversation Compaction; no new `memory-extraction-v1` work is scheduled. M10A2/B2/C/D remain pending independent review.
+
+### AI-M11 telemetry, diagnostics, feedback, and analytics contract
+
+AI-M11 is implemented pending independent review through migration `0045_sturdy_bill_hollister`. Its event vocabulary is closed and versioned; event and diagnostic rows are append-only, deduplicated by stable opaque identity, and contain bounded metadata only. Retrieval traces retain request/config/model/provider identities, candidate counts, ranks, scores, selected chunk/origin IDs, and sufficient/latency outcomes, never retrieved text. Tutor diagnostics correlate the Response Trace, Retrieval Trace, Cost Operation, model/provider/config revisions, validation result, usage, and duration without copying the response.
+
+Memory and Compaction events retain only safe action/scope/kind/revision/status and execution/cost references. Feedback is structured, bounded, same-principal, and restricted to an exact completed Student Response. A server-owned stable pseudonymous analytics identity supports bounded UTC day/week/month read DTOs; M3 remains canonical cost truth. Principal purge removes identifying telemetry, and null-principal synthetic/evaluation events do not enter Student DAU/WAU/MAU. M11 prepares de-identified bounded inputs for a future Agent 2 but does not implement Agent 2, UI, or any new Provider execution.
 
 ### AI-M8C grounding-integrity and replay contract
 

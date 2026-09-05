@@ -74,7 +74,13 @@ AI-M4 implements explicit Student-owned Conversation deletion: active response s
 - Raw chain-of-thought is never persisted or exposed as Product data. A short structured decision/result reason may be stored when needed for audit.
 - Provider responses are normalized at the adapter boundary; provider debug payloads are not automatically persisted.
 
-## 7. Access model
+## 7. M11 telemetry boundary
+
+AI-M11 is implemented pending independent review through migration `0045_sturdy_bill_hollister`. Telemetry, Retrieval Traces, Tutor diagnostics, structured feedback, and analytics read services are metadata-only C7 projections. They store bounded IDs, revisions, classifications, counts, fixed-point scores, timestamps, durations, usage/cost references, and de-identified analytics principal IDs. Raw User/Assistant messages, Memory text, Summary text, Policy prompt text, Evidence text, Provider payloads, credentials, and chain-of-thought remain in their canonical private/runtime boundaries and are never copied automatically into telemetry.
+
+Principal purge removes identifying event, feedback, diagnostics, and retrieval-trace rows through a controlled relational boundary. Synthetic/evaluation events without a Student analytics identity remain excluded from Student active-user metrics. Analytics may retain only aggregates that are no longer identifying under the applicable retention policy; M11 provides the deletion boundary and does not create a transcript search surface.
+
+## 8. Access model
 
 | Actor | C1/C2 | C4 | C5/C6 | C7/C8 |
 | --- | --- | --- | --- | --- |

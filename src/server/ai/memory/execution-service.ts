@@ -36,6 +36,7 @@ import { AIMemoryExecutionError } from "./execution-errors";
 import { buildCompactionGatewayRequest, buildExtractionGatewayRequest, parseAIConversationCompactionOutput, parseAIMemoryExtractionOutput } from "./protocol";
 import { AIMemoryExecutionSourceReader } from "./execution-source";
 import type { ContentDatabase } from "../../content/database";
+import { AIIntelligenceTelemetryService } from "../telemetry";
 
 const MAX_TIMESTAMP = 8_640_000_000_000_000;
 const MAX_ADMISSION_ATTEMPTS = 10;
@@ -60,6 +61,7 @@ export interface AIMemoryExecutionServiceDependencies {
   budgetPeriodResolver?: AIMemoryBudgetPeriodResolver;
   clock?: () => number;
   idFactory?: () => string;
+  telemetry?: AIIntelligenceTelemetryService;
 }
 
 /**
@@ -80,6 +82,7 @@ export class AIMemoryExecutionService implements AIJobTerminalReconciler {
   private readonly periodResolver: AIMemoryBudgetPeriodResolver;
   private readonly clock: () => number;
   private readonly idFactory: () => string;
+  private readonly telemetry: AIIntelligenceTelemetryService;
 
   constructor(private readonly dependencies: AIMemoryExecutionServiceDependencies) {
     this.executions = dependencies.executions ?? new SQLiteAIMemoryExecutionRepository(dependencies.database);
@@ -94,6 +97,7 @@ export class AIMemoryExecutionService implements AIJobTerminalReconciler {
     this.periodResolver = dependencies.budgetPeriodResolver ?? new DailyMemoryBudgetPeriodResolver();
     this.clock = dependencies.clock ?? Date.now;
     this.idFactory = dependencies.idFactory ?? uuidv7;
+    this.telemetry = dependencies.telemetry ?? new AIIntelligenceTelemetryService(dependencies.database);
   }
 
   getExecution(id: string): AIMemoryExecution | null {
@@ -101,6 +105,19 @@ export class AIMemoryExecutionService implements AIJobTerminalReconciler {
   }
 
   async executeJob(executionId: string, context?: AIJobExecutionContext): Promise<AIMemoryExecutionRunResult> {
+    try {
+      const result = await this.executeJobCore(executionId, context);
+      const execution = this.executions.getById(executionId);
+      if (execution && isTerminal(execution.status)) this.safeTelemetry(() => this.telemetry.recordCompactionOutcome(execution));
+      return result;
+    } catch (error) {
+      const execution = this.executions.getById(executionId);
+      if (execution && isTerminal(execution.status)) this.safeTelemetry(() => this.telemetry.recordCompactionOutcome(execution));
+      throw error;
+    }
+  }
+
+  private async executeJobCore(executionId: string, context?: AIJobExecutionContext): Promise<AIMemoryExecutionRunResult> {
     let execution = this.requireExecution(executionId);
     if (isTerminal(execution.status)) {
       execution = this.reconcileTerminalFinancial(execution);
@@ -148,11 +165,15 @@ export class AIMemoryExecutionService implements AIJobTerminalReconciler {
     if (!matchesTerminalOwnership(execution, job)) return;
     if (execution.providerInvoked || execution.providerInvocationState !== "NOT_INVOKED") {
       this.reconcileAmbiguous(execution, "AI_MEMORY_EXECUTION_PROVIDER_AMBIGUOUS", now);
+      const terminal = this.executions.getById(execution.id);
+      if (terminal) this.safeTelemetry(() => this.telemetry.recordCompactionOutcome(terminal, now));
       return;
     }
     this.closeFinancial(execution, job.status === "CANCELLED" ? "CANCELLED" : "FAILED", false, now);
     if (job.status === "CANCELLED") this.executions.cancel({ id: execution.id, safeFailureCode: "AI_MEMORY_EXECUTION_JOB_CANCELLED", now });
     else this.executions.fail({ id: execution.id, safeFailureCode: "AI_MEMORY_EXECUTION_JOB_TERMINAL", now });
+    const terminal = this.executions.getById(execution.id);
+    if (terminal) this.safeTelemetry(() => this.telemetry.recordCompactionOutcome(terminal, now));
   }
 
   reconcilePending(input: { limit: number; now: number }): AIJobTerminalReconciliationResult {
@@ -527,6 +548,10 @@ export class AIMemoryExecutionService implements AIJobTerminalReconciler {
     const value = this.clock();
     if (!Number.isSafeInteger(value) || value < 0 || value > MAX_TIMESTAMP) throw new AIMemoryExecutionError("AI_MEMORY_EXECUTION_INVALID", "The Memory execution timestamp is invalid.");
     return value;
+  }
+
+  private safeTelemetry(operation: () => unknown): void {
+    try { operation(); } catch { /* diagnostics must never change Memory execution truth */ }
   }
 }
 

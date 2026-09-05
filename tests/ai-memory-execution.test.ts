@@ -153,6 +153,7 @@ test("M10A2 preserves Conversation Compaction as a separate bounded path", async
     assert.equal(execution.status, "COMPLETED");
     assert.equal((fixture.database.client.prepare("select count(*) as count from ai_conversation_summary_revisions where conversation_id=? and status='ACTIVE'").get(last.conversation.id) as { count: number }).count, 1);
     assert.equal(fixture.adapter.calls, 1);
+    assert.deepEqual((fixture.database.client.prepare("select event_type from ai_telemetry_events where conversation_id=? order by event_type").all(last.conversation.id) as Array<{ event_type: string }>).map((row) => row.event_type), ["COMPACTION_COMPLETED", "COMPACTION_SCHEDULED"]);
     await fixture.worker.runOnce(BASE_TIME + 101);
     assert.equal((fixture.database.client.prepare("select count(*) as count from ai_conversation_summary_revisions where conversation_id=? and status='ACTIVE'").get(last.conversation.id) as { count: number }).count, 1);
     assert.equal(fixture.adapter.calls, 1);

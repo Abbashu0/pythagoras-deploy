@@ -83,6 +83,7 @@ import { AIConversationService, SQLiteAIConversationRepository, type AIStudentPr
 import { createChangeManagementService } from "../src/server/change-management";
 import { createCanonicalContentRepository } from "../src/server/canonical-content/service";
 import { openContentDatabase, type ContentDatabase } from "../src/server/content";
+import { AIIntelligenceTelemetryService } from "../src/server/ai/telemetry";
 import type { CanonicalRichDocument } from "../src/server/questions/contracts";
 
 const MIGRATIONS = path.join(process.cwd(), "drizzle");
@@ -543,6 +544,15 @@ test("M8 final grounded Tutor path composes governed M8A through real M7C and on
     const metadata = JSON.stringify({ operation: fixture.database.client.prepare("select * from ai_cost_operations where id=?").get(result.costOperationId), usage, reservation: fixture.database.client.prepare("select * from ai_budget_reservations where id=?").get(result.budgetReservationId), events: fixture.database.client.prepare("select * from ai_rate_limit_events where operation_id=?").all(result.costOperationId), trace, projectionRefs, evidence: fixture.traces.listEvidenceRefs(trace.id) });
     assert.equal(metadata.includes(QUERY_MARKER), false);
     assert.equal(metadata.includes(EVIDENCE_MARKER), false);
+    const telemetryTypes = (fixture.database.client.prepare("select event_type from ai_telemetry_events where response_id=?").all(turn.responseId) as Array<{ event_type: string }>).map((row) => row.event_type);
+    assert.deepEqual([...new Set(telemetryTypes)].sort(), ["GROUNDING_VALIDATION_PASSED", "RETRIEVAL_COMPLETED", "RETRIEVAL_STARTED", "TUTOR_REQUEST_COMPLETED", "TUTOR_REQUEST_STARTED"]);
+    assert.equal((fixture.database.client.prepare("select response_id,subject_key,overall_latency_ms from ai_tutor_response_diagnostics where response_id=?").get(turn.responseId) as { response_id: string; subject_key: string; overall_latency_ms: number }).response_id, turn.responseId);
+    assert.equal((fixture.database.client.prepare("select response_id,subject_key,evidence_item_count from ai_retrieval_traces where response_id=?").get(turn.responseId) as { response_id: string; subject_key: string; evidence_item_count: number }).evidence_item_count, 1);
+    const retrievalDetails = new AIIntelligenceTelemetryService(fixture.database).getRetrievalTraceDetailsByRequestId(turn.responseId);
+    assert.ok(retrievalDetails);
+    assert.equal(retrievalDetails.items.length, 1);
+    assert.deepEqual(retrievalDetails.projections.map((projection) => projection.projectionKind).sort(), ["M7A", "M7B"]);
+    assert.equal(JSON.stringify(retrievalDetails).includes(EVIDENCE_MARKER), false);
   } finally { fixture.close(); }
 });
 
@@ -599,6 +609,7 @@ test("M10B2 applies one Agent-1 Memory command from the same Tutor Generation", 
     assert.deepEqual(memory, { status: "ACTIVE", creation_origin: "INFERRED", safe_review_code: "INFERRED_ACTIVATED", memory_text: memoryText });
     const mutation = fixture.database.client.prepare("select status, memory_text from ai_memory_mutation_intents where response_id=?").get(turn.responseId) as { status: string; memory_text: string | null };
     assert.deepEqual(mutation, { status: "APPLIED", memory_text: null });
+    assert.deepEqual(fixture.database.client.prepare("select event_type,memory_action,memory_scope,memory_origin from ai_telemetry_events where response_id=? and event_type='MEMORY_MUTATION_APPLIED'").get(turn.responseId), { event_type: "MEMORY_MUTATION_APPLIED", memory_action: "CREATE", memory_scope: "SUBJECT", memory_origin: "INFERRED" });
     assert.equal(Number((fixture.database.client.prepare("select count(*) as count from ai_memory_executions where execution_kind='EXTRACTION'").get() as { count: number }).count), 0);
     const operationalMetadata = ["ai_memory_mutation_intents", "ai_memory_mutation_records", "ai_memory_executions", "ai_jobs", "ai_outbox_events", "ai_cost_operations", "ai_usage_cost_records"].map((table) => JSON.stringify(fixture.database.client.prepare(`select * from ${table}`).all())).join("\n");
     assert.equal(operationalMetadata.includes(memoryText), false);

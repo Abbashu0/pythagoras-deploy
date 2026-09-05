@@ -147,7 +147,7 @@ AI-M8A, AI-M8B, and AI-M8C are approved; AI-M8 Grounded Tutor is complete at `e7
 
 ## AI-M10 — Memory & Compaction
 
-**Status:** The M10R rebaseline is APPROVED/COMPLETE. The former M10A subject-only and former M10B extraction contracts are historical/superseded; AI-M10A2, M10B2, M10C, and M10D are implemented pending independent review, AI-M10 is implemented pending independent review, and M11 is not started.
+**Status:** The M10R rebaseline is APPROVED/COMPLETE. The former M10A subject-only and former M10B extraction contracts are historical/superseded; AI-M10A2, M10B2, M10C, and M10D are implemented pending independent review, and AI-M10 is implemented pending independent review. AI-M11 is implemented pending independent review through migration `0045_sturdy_bill_hollister`; M12-M15 are not started.
 
 ### AI-M10A — Memory, Conversation Summaries & Context Selection
 
@@ -184,14 +184,19 @@ AI-M8A, AI-M8B, and AI-M8C are approved; AI-M8 Grounded Tutor is complete at `e7
 **Status:** Implemented pending independent review.
 **Delivered boundary:** Student-only completed turns can schedule bounded Compaction from a contiguous uncovered range ending at an Assistant message. Summary revisions are append-only and coverage is monotonic; deletion/input-loss fences prevent resurrection; duplicate Job replay is idempotent. New legacy Memory Extraction scheduling is disabled.
 
+## AI-M11 — Intelligence Telemetry, Diagnostics & Feedback
+
+**Status:** Implemented pending independent review through migration `0045_sturdy_bill_hollister`.
+**Delivered boundary:** A closed/versioned append-only AI event contract, metadata-only Retrieval Trace and Tutor diagnostics, Memory/Compaction lifecycle telemetry, structured completed-Response feedback, stable pseudonymous analytics-principal mapping, bounded UTC time-bucket analytics read services, and relational principal purge. Telemetry correlates Response/Retrieval/Cost/Model/Provider/Config identities without copying raw C4 text. M3 remains canonical economic truth. M11 does not add UI, Agent 2, a production Provider, or M12-M15 work.
+
 ## Remaining future milestones
 
 | Milestone | Coherent boundary | Independent exit gate |
 | --- | --- | --- |
 | **AI-M9 Evals V1** | Versioned Eval Suite, deterministic graders, supplementary judge adapter, regression cases, security/cost/latency gates | Baseline suites cover all required dimensions and block an unsafe or materially regressed promotion |
 | **AI-M10 Memory & Compaction** | M10R approved baseline; M10A2/M10B2/M10C/M10D implemented pending review | No cross-user memory; server-owned same-call Memory commands; deterministic Global/Subject Context; bounded Student Compaction; no second-pass extraction; M10 remains pending independent review |
-| **AI-M11 Intelligence Telemetry** | Retrieval traces, feedback/events, de-identified analytics, usage dashboards/data contracts, and privacy-safe operational metrics | Analytics cannot reveal raw PII by default; response/retrieval/cost traces correlate end to end |
-| **AI-M12 Agent 2 Read-only** | Deterministic event/SQL inputs, representative samples, optional clustering, structured analysis, and bounded Insight candidates | Agent 2 cannot publish, mutate truth/credentials, message students, or bypass privacy/Evals; outputs are reproducible |
+| **AI-M11 Intelligence Telemetry** | Implemented pending independent review: retrieval traces, feedback/events, de-identified analytics, usage read DTOs, and privacy-safe operational metrics | Analytics cannot reveal raw PII by default; response/retrieval/cost traces correlate end to end |
+| **AI-M12 Agent 2 Read-only** | NOT STARTED | Deterministic event/SQL inputs, representative samples, optional clustering, structured analysis, and bounded Insight candidates remain future work |
 | **AI-M13 Second Brain** | Relational Insight, evidence, typed relations, QuestionCluster, Misconception, KnowledgeGap, ExplanationPattern, RetrievalProblem | Typed relationships and provenance are queryable/visualizable; insights remain separate from curriculum truth |
 | **AI-M14 Improvement Governance** | ImprovementProposal workflow, Eval evidence, Change Set adapters/coordinators, OWNER approval/publication, and rollback/rebuild plan | A proposal cannot self-activate; governed changes have complete approvals, revisions, conflicts, and post-publish trace |
 | **AI-M15 Production Hardening** | Privacy/retention enforcement, abuse controls, provider risk review, disaster recovery, deletion/rotation operations, SLOs, and launch runbooks | Security, cost, resilience, deletion, provider outage, audit, and operational readiness gates pass for the approved launch scope |

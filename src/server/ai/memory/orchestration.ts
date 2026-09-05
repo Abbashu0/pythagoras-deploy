@@ -26,6 +26,7 @@ import { SQLiteAIMemoryExecutionRepository } from "./execution-repository";
 import { SQLiteAIConversationSummaryRepository } from "./summary-repository";
 import { AIMemoryExecutionError } from "./execution-errors";
 import type { AIMemoryPolicyRepository } from "./contracts";
+import { AIIntelligenceTelemetryService } from "../telemetry";
 
 export interface AIMemoryOrchestratorDependencies {
   database: ContentDatabase;
@@ -37,6 +38,7 @@ export interface AIMemoryOrchestratorDependencies {
   conversations?: SQLiteAIConversationRepository;
   clock?: () => number;
   idFactory?: () => string;
+  telemetry?: AIIntelligenceTelemetryService;
 }
 
 export class AIMemoryOrchestrator {
@@ -46,6 +48,7 @@ export class AIMemoryOrchestrator {
   private readonly summaries: SQLiteAIConversationSummaryRepository;
   private readonly clock: () => number;
   private readonly idFactory: () => string;
+  private readonly telemetry: AIIntelligenceTelemetryService;
 
   constructor(private readonly dependencies: AIMemoryOrchestratorDependencies) {
     this.executions = dependencies.executions ?? new SQLiteAIMemoryExecutionRepository(dependencies.database);
@@ -54,6 +57,7 @@ export class AIMemoryOrchestrator {
     this.summaries = new SQLiteAIConversationSummaryRepository(dependencies.database);
     this.clock = dependencies.clock ?? Date.now;
     this.idFactory = dependencies.idFactory ?? uuidv7;
+    this.telemetry = dependencies.telemetry ?? new AIIntelligenceTelemetryService(dependencies.database);
   }
 
   scheduleForCompletedResponse(principal: AIStudentPrincipal, responseId: string): AIMemoryScheduleResult {
@@ -106,6 +110,7 @@ export class AIMemoryOrchestrator {
             targetCutoffOrdinal: cutoff,
             now,
           }, AI_MEMORY_COMPACTION_OUTBOX_EVENT_TYPE);
+          try { this.telemetry.recordCompactionScheduled(compaction.execution, now); } catch { /* diagnostics must not change scheduling truth */ }
         }
       }
       return {

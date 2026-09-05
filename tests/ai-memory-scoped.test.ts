@@ -377,7 +377,7 @@ test("M10A2 migrates a populated 0042 database to scoped legacy Subject Memory w
     oldDatabase.close();
     oldDatabase = null;
     upgraded = openContentDatabase({ dataDirectory: root, migrationsDirectory });
-    assert.equal((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 45);
+    assert.equal((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 46);
     assert.equal((upgraded.client.prepare("select count(*) as count from ai_memories where scope='GLOBAL'").get() as { count: number }).count, 0);
     assert.deepEqual(upgraded.client.prepare("select scope,subject_key,creation_origin,status,memory_text from ai_memories").get(), { scope: "SUBJECT", subject_key: "biology", creation_origin: "LEGACY_SUBJECT", status: "PROPOSED", memory_text: "LEGACY_MEMORY_TEXT" });
     assert.deepEqual(upgraded.client.prepare("select scope,subject_key from ai_memory_policies where id=?").get(policyId), { scope: "SUBJECT", subject_key: "biology" });
@@ -428,7 +428,7 @@ test("M10A2 migrates populated 0043 Memory rows and cuts over legacy mutation au
     oldDatabase = null;
 
     upgraded = openContentDatabase({ dataDirectory: root, migrationsDirectory });
-    assert.equal((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 45);
+    assert.equal((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 46);
     assert.deepEqual(upgraded.client.prepare("select key,scope,subject_key,current_revision,m10a2_mutation_authority from ai_memory_policies where id=?").get(policyId), { key: "memory-0043-policy", scope: "SUBJECT", subject_key: "biology", current_revision: 1, m10a2_mutation_authority: 0 });
     assert.deepEqual(upgraded.client.prepare("select status,creation_origin,kind,memory_text,confidence_units from ai_memories where id=?").get(memoryId), { status: "PROPOSED", creation_origin: "INFERRED", kind: "LEARNING_PREFERENCE", memory_text: "UPGRADE_0043_MEMORY_TEXT", confidence_units: 900_000 });
     for (const trigger of ["ai_memory_policies_m10a2_authority_immutable", "ai_memories_current_policy_insert_valid", "ai_memories_current_policy_update_valid", "ai_memories_current_inferred_evidence_valid"]) assert.ok(upgraded.client.prepare("select name from sqlite_master where type='trigger' and name=?").get(trigger));

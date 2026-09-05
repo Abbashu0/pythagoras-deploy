@@ -156,6 +156,21 @@ import type {
   AITutorTraceSafeErrorCode,
   AITutorTraceStatus,
 } from "../ai/tutor/trace/contracts";
+import type {
+  AITelemetryFeedbackType,
+  AITelemetryEventType,
+  AITelemetryFailureCode,
+  AITelemetryFeedbackReasonCode,
+  AITelemetryFeedbackSurface,
+  AITelemetryMemoryAction,
+  AITelemetryMemoryKind,
+  AITelemetryMemoryOrigin,
+  AITelemetryMemoryScope,
+  AITelemetryPrivacyClass,
+  AITelemetryPrincipalState,
+  AITelemetryTerminalStatus,
+  AITelemetryValidationStatus,
+} from "../ai/telemetry/contracts";
 
 export type ContentPayload = Record<string, unknown>;
 
@@ -4347,6 +4362,299 @@ export const aiMemoryExecutionMemoryLinks = sqliteTable(
   ],
 );
 
+/** Stable server-owned pseudonymous identity used only by de-identified analytics. */
+export const aiAnalyticsPrincipals = sqliteTable(
+  "ai_analytics_principals",
+  {
+    id: text("id").primaryKey(),
+    principalRef: text("principal_ref").notNull(),
+    state: text("state").$type<AITelemetryPrincipalState>().notNull().default("ACTIVE"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("ai_analytics_principals_principal_unique").on(table.principalRef),
+    check("ai_analytics_principals_id_valid", sql`length(trim(${table.id})) between 1 and 240 and ${table.id} not glob '*[^A-Za-z0-9._:-]*'`),
+    check("ai_analytics_principals_principal_valid", sql`length(trim(${table.principalRef})) between 1 and 200 and ${table.principalRef} not glob '*[^A-Za-z0-9_-]*'`),
+    check("ai_analytics_principals_state_valid", sql`${table.state} in ('ACTIVE','PURGING')`),
+    check("ai_analytics_principals_timestamps_valid", sql`${table.createdAt} >= 0 and ${table.updatedAt} >= ${table.createdAt}`),
+  ],
+);
+
+/** Persistent bounded metadata for one M7C retrieval request; no retrieved text is stored. */
+export const aiRetrievalTraces = sqliteTable(
+  "ai_retrieval_traces",
+  {
+    id: text("id").primaryKey(),
+    retrievalRequestId: text("retrieval_request_id").notNull(),
+    analyticsPrincipalId: text("analytics_principal_id").references(() => aiAnalyticsPrincipals.id, { onDelete: "restrict" }),
+    subjectKey: text("subject_key").notNull().references(() => canonicalMaterials.subjectKey, { onDelete: "restrict" }),
+    conversationId: text("conversation_id").references(() => aiConversations.id, { onDelete: "restrict" }),
+    responseId: text("response_id").references(() => aiConversationResponses.id, { onDelete: "restrict" }),
+    responseTraceId: text("response_trace_id").references(() => aiTutorResponseTraces.id, { onDelete: "restrict" }),
+    costOperationId: text("cost_operation_id").references(() => aiCostOperations.id, { onDelete: "restrict" }),
+    retrievalConfigId: text("retrieval_config_id").notNull().references(() => aiRetrievalConfigs.id, { onDelete: "restrict" }),
+    retrievalConfigRevision: integer("retrieval_config_revision").notNull(),
+    fusionAlgorithmKey: text("fusion_algorithm_key").notNull(),
+    fusionAlgorithmRevision: integer("fusion_algorithm_revision").notNull(),
+    embeddingModelConfigId: text("embedding_model_config_id").references(() => aiModelConfigs.id, { onDelete: "restrict" }),
+    embeddingModelConfigRevision: integer("embedding_model_config_revision"),
+    embeddingProviderConfigId: text("embedding_provider_config_id").references(() => aiProviderConfigs.id, { onDelete: "restrict" }),
+    embeddingProviderConfigRevision: integer("embedding_provider_config_revision"),
+    rerankModelConfigId: text("rerank_model_config_id").references(() => aiModelConfigs.id, { onDelete: "restrict" }),
+    rerankModelConfigRevision: integer("rerank_model_config_revision"),
+    rerankProviderConfigId: text("rerank_provider_config_id").references(() => aiProviderConfigs.id, { onDelete: "restrict" }),
+    rerankProviderConfigRevision: integer("rerank_provider_config_revision"),
+    mode: text("mode").notNull(),
+    degraded: integer("degraded", { mode: "boolean" }).notNull(),
+    sufficient: integer("sufficient", { mode: "boolean" }).notNull(),
+    status: text("status").notNull(),
+    safeReason: text("safe_reason"),
+    lexicalCandidateCount: integer("lexical_candidate_count").notNull(),
+    semanticCandidateCount: integer("semantic_candidate_count").notNull(),
+    fusedCandidateCount: integer("fused_candidate_count").notNull(),
+    rerankedCandidateCount: integer("reranked_candidate_count").notNull(),
+    evidenceItemCount: integer("evidence_item_count").notNull(),
+    eligibleOriginCount: integer("eligible_origin_count").notNull(),
+    retrievalLatencyMs: integer("retrieval_latency_ms").notNull(),
+    queryEmbeddingLatencyMs: integer("query_embedding_latency_ms"),
+    rerankLatencyMs: integer("rerank_latency_ms"),
+    rerankerUsed: integer("reranker_used", { mode: "boolean" }).notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    createdAt: integer("created_at").notNull(),
+    completedAt: integer("completed_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("ai_retrieval_traces_request_unique").on(table.retrievalRequestId),
+    index("ai_retrieval_traces_principal_time_index").on(table.analyticsPrincipalId, table.completedAt),
+    index("ai_retrieval_traces_subject_time_index").on(table.subjectKey, table.completedAt),
+    check("ai_retrieval_traces_id_valid", sql`length(trim(${table.id})) between 1 and 240 and ${table.id} not glob '*[^A-Za-z0-9._:-]*'`),
+    check("ai_retrieval_traces_request_valid", sql`length(trim(${table.retrievalRequestId})) between 1 and 240 and ${table.retrievalRequestId} not glob '*[^A-Za-z0-9._:-]*'`),
+    check("ai_retrieval_traces_revision_valid", sql`${table.retrievalConfigRevision} >= 1 and ${table.fusionAlgorithmRevision} >= 1`),
+    check("ai_retrieval_traces_algorithm_valid", sql`${table.fusionAlgorithmKey} = 'weighted-rrf-v1' and ${table.fusionAlgorithmRevision} = 1`),
+    check("ai_retrieval_traces_mode_valid", sql`${table.mode} in ('HYBRID','LEXICAL_ONLY') and ${table.status} in ('SUFFICIENT','INSUFFICIENT') and ${table.sufficient} in (0,1) and ${table.degraded} in (0,1) and ${table.rerankerUsed} in (0,1)`),
+    check("ai_retrieval_traces_reason_valid", sql`${table.safeReason} is null or ${table.safeReason} in ('NO_CANDIDATES','PROJECTION_NOT_READY','SEMANTIC_COVERAGE_INCOMPLETE','QUERY_EMBEDDING_FAILED','RERANK_FAILED','BELOW_MINIMUM_EVIDENCE','RETRIEVAL_CONFIG_CHANGED','SOURCE_INELIGIBLE','PROJECTION_CHANGED','MODEL_SPACE_CHANGED','EXECUTION_CONTEXT_INVALID','RETRIEVAL_SCOPE_CHANGED')`),
+    check("ai_retrieval_traces_counts_valid", sql`${table.lexicalCandidateCount} between 0 and 1000000 and ${table.semanticCandidateCount} between 0 and 1000000 and ${table.fusedCandidateCount} between 0 and 1000000 and ${table.rerankedCandidateCount} between 0 and 1000000 and ${table.evidenceItemCount} between 0 and 50 and ${table.eligibleOriginCount} between 0 and 100`),
+    check("ai_retrieval_traces_latency_valid", sql`${table.retrievalLatencyMs} between 0 and 8640000000000 and (${table.queryEmbeddingLatencyMs} is null or ${table.queryEmbeddingLatencyMs} between 0 and 8640000000000) and (${table.rerankLatencyMs} is null or ${table.rerankLatencyMs} between 0 and 8640000000000)`),
+    check("ai_retrieval_traces_fingerprint_valid", sql`length(${table.fingerprint}) = 64 and ${table.fingerprint} not glob '*[^0-9a-f]*'`),
+    check("ai_retrieval_traces_time_valid", sql`${table.createdAt} >= 0 and ${table.completedAt} >= ${table.createdAt}`),
+    check("ai_retrieval_traces_embedding_identity_valid", sql`(${table.embeddingModelConfigId} is null and ${table.embeddingModelConfigRevision} is null and ${table.embeddingProviderConfigId} is null and ${table.embeddingProviderConfigRevision} is null) or (${table.embeddingModelConfigId} is not null and ${table.embeddingModelConfigRevision} >= 1 and ${table.embeddingProviderConfigId} is not null and ${table.embeddingProviderConfigRevision} >= 1)`),
+    check("ai_retrieval_traces_rerank_identity_valid", sql`(${table.rerankModelConfigId} is null and ${table.rerankModelConfigRevision} is null and ${table.rerankProviderConfigId} is null and ${table.rerankProviderConfigRevision} is null) or (${table.rerankModelConfigId} is not null and ${table.rerankModelConfigRevision} >= 1 and ${table.rerankProviderConfigId} is not null and ${table.rerankProviderConfigRevision} >= 1)`),
+  ],
+);
+
+/** Eligible origin identities captured by a Retrieval Trace. */
+export const aiRetrievalTraceOrigins = sqliteTable(
+  "ai_retrieval_trace_origins",
+  {
+    traceId: text("trace_id").notNull().references(() => aiRetrievalTraces.id, { onDelete: "restrict" }),
+    ordinal: integer("ordinal").notNull(),
+    originKind: text("origin_kind").$type<AIRetrievalOriginKind>().notNull(),
+    originId: text("origin_id").notNull(),
+    subjectKey: text("subject_key").notNull().references(() => canonicalMaterials.subjectKey, { onDelete: "restrict" }),
+    projectionSetId: text("projection_set_id"),
+    projectionRevisionId: text("projection_revision_id"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.traceId, table.ordinal] }),
+    uniqueIndex("ai_retrieval_trace_origins_identity_unique").on(table.traceId, table.originKind, table.originId),
+    check("ai_retrieval_trace_origins_ordinal_valid", sql`${table.ordinal} between 1 and 100`),
+    check("ai_retrieval_trace_origins_kind_valid", sql`${table.originKind} in ('KNOWLEDGE_PACKAGE','QUESTION_PACKAGE')`),
+    check("ai_retrieval_trace_origins_id_valid", sql`length(trim(${table.originId})) between 1 and 240`),
+    check("ai_retrieval_trace_origins_projection_pair_valid", sql`(${table.projectionSetId} is null and ${table.projectionRevisionId} is null) or (${table.projectionSetId} is not null and ${table.projectionRevisionId} is not null)`),
+  ],
+);
+
+/** Exact M7 projection identities used by a Retrieval Trace. */
+export const aiRetrievalTraceProjections = sqliteTable(
+  "ai_retrieval_trace_projections",
+  {
+    traceId: text("trace_id").notNull().references(() => aiRetrievalTraces.id, { onDelete: "restrict" }),
+    projectionKind: text("projection_kind").notNull(),
+    ordinal: integer("ordinal").notNull(),
+    projectionRevisionId: text("projection_revision_id").notNull(),
+    projectionSetId: text("projection_set_id"),
+    originKind: text("origin_kind").$type<AIRetrievalOriginKind>(),
+    originId: text("origin_id"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.traceId, table.projectionKind, table.ordinal] }),
+    uniqueIndex("ai_retrieval_trace_projections_identity_unique").on(table.traceId, table.projectionKind, table.projectionRevisionId),
+    check("ai_retrieval_trace_projections_kind_valid", sql`${table.projectionKind} in ('M7A','M7B')`),
+    check("ai_retrieval_trace_projections_ordinal_valid", sql`${table.ordinal} between 1 and 200`),
+    check("ai_retrieval_trace_projections_id_valid", sql`length(trim(${table.projectionRevisionId})) between 1 and 240`),
+    check("ai_retrieval_trace_projections_origin_valid", sql`(${table.originKind} is null and ${table.originId} is null) or (${table.originKind} is not null and ${table.originId} is not null)`),
+  ],
+);
+
+/** Selected Retrieval Trace ranking metadata; no chunk text or provenance text is stored. */
+export const aiRetrievalTraceItems = sqliteTable(
+  "ai_retrieval_trace_items",
+  {
+    traceId: text("trace_id").notNull().references(() => aiRetrievalTraces.id, { onDelete: "restrict" }),
+    ordinal: integer("ordinal").notNull(),
+    chunkId: text("chunk_id").notNull(),
+    originKind: text("origin_kind").$type<AIRetrievalOriginKind>().notNull(),
+    originId: text("origin_id").notNull(),
+    m7aProjectionRevisionId: text("m7a_projection_revision_id").notNull(),
+    m7bEmbeddingProjectionRevisionId: text("m7b_embedding_projection_revision_id"),
+    lexicalRank: integer("lexical_rank"),
+    semanticRank: integer("semantic_rank"),
+    cosineSimilarityUnits: integer("cosine_similarity_units"),
+    fusionScoreUnits: integer("fusion_score_units").notNull(),
+    rerankRank: integer("rerank_rank"),
+    rerankScoreUnits: integer("rerank_score_units"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.traceId, table.ordinal] }),
+    check("ai_retrieval_trace_items_ordinal_valid", sql`${table.ordinal} between 1 and 50`),
+    check("ai_retrieval_trace_items_id_valid", sql`length(trim(${table.chunkId})) between 1 and 240 and length(trim(${table.originId})) between 1 and 240 and length(trim(${table.m7aProjectionRevisionId})) between 1 and 240 and (${table.m7bEmbeddingProjectionRevisionId} is null or length(trim(${table.m7bEmbeddingProjectionRevisionId})) between 1 and 240)`),
+    check("ai_retrieval_trace_items_kind_valid", sql`${table.originKind} in ('KNOWLEDGE_PACKAGE','QUESTION_PACKAGE')`),
+    check("ai_retrieval_trace_items_rank_valid", sql`(${table.lexicalRank} is null or ${table.lexicalRank} between 1 and 1000000) and (${table.semanticRank} is null or ${table.semanticRank} between 1 and 1000000) and (${table.rerankRank} is null or ${table.rerankRank} between 1 and 1000000)`),
+    check("ai_retrieval_trace_items_score_valid", sql`${table.fusionScoreUnits} between 0 and 1000000000 and (${table.cosineSimilarityUnits} is null or ${table.cosineSimilarityUnits} between -1000000 and 1000000) and (${table.rerankScoreUnits} is null or ${table.rerankScoreUnits} between -1000000 and 1000000)`),
+  ],
+);
+
+/** Metadata-only Tutor diagnostics extending the existing Response Trace identity. */
+export const aiTutorResponseDiagnostics = sqliteTable(
+  "ai_tutor_response_diagnostics",
+  {
+    id: text("id").primaryKey(),
+    responseTraceId: text("response_trace_id").notNull().references(() => aiTutorResponseTraces.id, { onDelete: "restrict" }),
+    responseId: text("response_id").notNull().references(() => aiConversationResponses.id, { onDelete: "restrict" }),
+    conversationId: text("conversation_id").notNull().references(() => aiConversations.id, { onDelete: "restrict" }),
+    analyticsPrincipalId: text("analytics_principal_id").notNull().references(() => aiAnalyticsPrincipals.id, { onDelete: "restrict" }),
+    subjectKey: text("subject_key").notNull().references(() => canonicalMaterials.subjectKey, { onDelete: "restrict" }),
+    retrievalTraceId: text("retrieval_trace_id").references(() => aiRetrievalTraces.id, { onDelete: "restrict" }),
+    costOperationId: text("cost_operation_id").notNull().references(() => aiCostOperations.id, { onDelete: "restrict" }),
+    terminalStatus: text("terminal_status").$type<AITelemetryTerminalStatus>().notNull(),
+    groundingValidationStatus: text("grounding_validation_status").$type<AITelemetryValidationStatus>().notNull(),
+    citationValidationStatus: text("citation_validation_status").$type<AITelemetryValidationStatus>().notNull(),
+    startedAt: integer("started_at").notNull(),
+    completedAt: integer("completed_at").notNull(),
+    overallLatencyMs: integer("overall_latency_ms").notNull(),
+    providerLatencyMs: integer("provider_latency_ms"),
+    firstTokenLatencyMs: integer("first_token_latency_ms"),
+    inputTokens: integer("input_tokens"),
+    outputTokens: integer("output_tokens"),
+    reasoningTokens: integer("reasoning_tokens"),
+    knownCostNano: integer("known_cost_nano"),
+    usageRecordCount: integer("usage_record_count").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("ai_tutor_response_diagnostics_trace_unique").on(table.responseTraceId),
+    uniqueIndex("ai_tutor_response_diagnostics_response_unique").on(table.responseId),
+    index("ai_tutor_response_diagnostics_principal_time_index").on(table.analyticsPrincipalId, table.completedAt),
+    check("ai_tutor_response_diagnostics_id_valid", sql`length(trim(${table.id})) between 1 and 240 and ${table.id} not glob '*[^A-Za-z0-9._:-]*'`),
+    check("ai_tutor_response_diagnostics_status_valid", sql`${table.terminalStatus} in ('COMPLETED','BLOCKED','FAILED','CANCELLED') and ${table.groundingValidationStatus} in ('PASSED','FAILED','NOT_RUN') and ${table.citationValidationStatus} in ('PASSED','FAILED','NOT_RUN')`),
+    check("ai_tutor_response_diagnostics_latency_valid", sql`${table.overallLatencyMs} between 0 and 8640000000000 and (${table.providerLatencyMs} is null or ${table.providerLatencyMs} between 0 and 8640000000000) and (${table.firstTokenLatencyMs} is null or ${table.firstTokenLatencyMs} between 0 and 8640000000000)`),
+    check("ai_tutor_response_diagnostics_usage_valid", sql`(${table.inputTokens} is null or ${table.inputTokens} between 0 and 9007199254740991) and (${table.outputTokens} is null or ${table.outputTokens} between 0 and 9007199254740991) and (${table.reasoningTokens} is null or ${table.reasoningTokens} between 0 and 9007199254740991) and (${table.knownCostNano} is null or ${table.knownCostNano} between 0 and 9007199254740991) and ${table.usageRecordCount} between 0 and 100`),
+    check("ai_tutor_response_diagnostics_time_valid", sql`${table.startedAt} >= 0 and ${table.completedAt} >= ${table.startedAt} and ${table.createdAt} >= ${table.completedAt}`),
+  ],
+);
+
+/** Structured response feedback; free-form feedback text is intentionally absent. */
+export const aiFeedbackEvents = sqliteTable(
+  "ai_feedback_events",
+  {
+    id: text("id").primaryKey(),
+    dedupeKey: text("dedupe_key").notNull(),
+    feedbackType: text("feedback_type").$type<AITelemetryFeedbackType>().notNull(),
+    reasonCode: text("reason_code").$type<AITelemetryFeedbackReasonCode>(),
+    sourceSurface: text("source_surface").$type<AITelemetryFeedbackSurface>().notNull(),
+    responseId: text("response_id").notNull().references(() => aiConversationResponses.id, { onDelete: "restrict" }),
+    conversationId: text("conversation_id").notNull().references(() => aiConversations.id, { onDelete: "restrict" }),
+    responseTraceId: text("response_trace_id").references(() => aiTutorResponseTraces.id, { onDelete: "restrict" }),
+    analyticsPrincipalId: text("analytics_principal_id").notNull().references(() => aiAnalyticsPrincipals.id, { onDelete: "restrict" }),
+    subjectKey: text("subject_key").notNull().references(() => canonicalMaterials.subjectKey, { onDelete: "restrict" }),
+    privacyClass: text("privacy_class").$type<AITelemetryPrivacyClass>().notNull(),
+    occurredAt: integer("occurred_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("ai_feedback_events_dedupe_unique").on(table.dedupeKey),
+    uniqueIndex("ai_feedback_events_response_type_unique").on(table.responseId, table.analyticsPrincipalId, table.feedbackType),
+    index("ai_feedback_events_principal_time_index").on(table.analyticsPrincipalId, table.occurredAt),
+    check("ai_feedback_events_id_valid", sql`length(trim(${table.id})) between 1 and 240 and ${table.id} not glob '*[^A-Za-z0-9._:-]*'`),
+    check("ai_feedback_events_dedupe_valid", sql`length(trim(${table.dedupeKey})) between 1 and 240 and ${table.dedupeKey} not glob '*[^A-Za-z0-9._:-]*'`),
+    check("ai_feedback_events_type_valid", sql`${table.feedbackType} in ('POSITIVE','NEGATIVE','REPORT')`),
+    check("ai_feedback_events_reason_valid", sql`${table.reasonCode} is null or ${table.reasonCode} in ('HELPFUL','NOT_HELPFUL','INCORRECT','MISSING_EVIDENCE','UNSAFE','OTHER')`),
+    check("ai_feedback_events_surface_valid", sql`${table.sourceSurface} in ('TUTOR','INTERNAL') and ${table.privacyClass} = 'DEIDENTIFIED_METADATA'`),
+    check("ai_feedback_events_time_valid", sql`${table.occurredAt} >= 0`),
+  ],
+);
+
+/** Closed append-only intelligence events; all fields are bounded metadata. */
+export const aiTelemetryEvents = sqliteTable(
+  "ai_telemetry_events",
+  {
+    id: text("id").primaryKey(),
+    dedupeKey: text("dedupe_key").notNull(),
+    eventType: text("event_type").$type<AITelemetryEventType>().notNull(),
+    eventVersion: integer("event_version").notNull().default(1),
+    privacyClass: text("privacy_class").$type<AITelemetryPrivacyClass>().notNull(),
+    analyticsPrincipalId: text("analytics_principal_id").references(() => aiAnalyticsPrincipals.id, { onDelete: "restrict" }),
+    subjectKey: text("subject_key").references(() => canonicalMaterials.subjectKey, { onDelete: "restrict" }),
+    conversationId: text("conversation_id").references(() => aiConversations.id, { onDelete: "restrict" }),
+    responseId: text("response_id").references(() => aiConversationResponses.id, { onDelete: "restrict" }),
+    responseTraceId: text("response_trace_id").references(() => aiTutorResponseTraces.id, { onDelete: "restrict" }),
+    retrievalTraceId: text("retrieval_trace_id").references(() => aiRetrievalTraces.id, { onDelete: "restrict" }),
+    costOperationId: text("cost_operation_id").references(() => aiCostOperations.id, { onDelete: "restrict" }),
+    modelConfigId: text("model_config_id").references(() => aiModelConfigs.id, { onDelete: "restrict" }),
+    modelConfigRevision: integer("model_config_revision"),
+    providerConfigId: text("provider_config_id").references(() => aiProviderConfigs.id, { onDelete: "restrict" }),
+    providerConfigRevision: integer("provider_config_revision"),
+    tutorConfigId: text("tutor_config_id").references(() => aiTutorConfigs.id, { onDelete: "restrict" }),
+    tutorConfigRevision: integer("tutor_config_revision"),
+    contextPolicyId: text("context_policy_id").references(() => aiContextPolicies.id, { onDelete: "restrict" }),
+    contextPolicyRevision: integer("context_policy_revision"),
+    retrievalConfigId: text("retrieval_config_id").references(() => aiRetrievalConfigs.id, { onDelete: "restrict" }),
+    retrievalConfigRevision: integer("retrieval_config_revision"),
+    memoryPolicyId: text("memory_policy_id").references(() => aiMemoryPolicies.id, { onDelete: "restrict" }),
+    memoryPolicyRevision: integer("memory_policy_revision"),
+    memoryId: text("memory_id").references(() => aiMemories.id, { onDelete: "restrict" }),
+    memoryRevision: integer("memory_revision"),
+    failureCode: text("failure_code").$type<AITelemetryFailureCode>(),
+    durationMs: integer("duration_ms"),
+    providerLatencyMs: integer("provider_latency_ms"),
+    firstTokenLatencyMs: integer("first_token_latency_ms"),
+    inputTokens: integer("input_tokens"),
+    outputTokens: integer("output_tokens"),
+    reasoningTokens: integer("reasoning_tokens"),
+    knownCostNano: integer("known_cost_nano"),
+    retrievalCandidateCount: integer("retrieval_candidate_count"),
+    retrievalSelectedEvidenceCount: integer("retrieval_selected_evidence_count"),
+    retrievalRerankerUsed: integer("retrieval_reranker_used", { mode: "boolean" }),
+    memoryScope: text("memory_scope").$type<AITelemetryMemoryScope>(),
+    memoryKind: text("memory_kind").$type<AITelemetryMemoryKind>(),
+    memoryOrigin: text("memory_origin").$type<AITelemetryMemoryOrigin>(),
+    memoryAction: text("memory_action").$type<AITelemetryMemoryAction>(),
+    occurredAt: integer("occurred_at").notNull(),
+    utcDay: text("utc_day").notNull(),
+    utcWeek: text("utc_week").notNull(),
+    utcMonth: text("utc_month").notNull(),
+  },
+  (table) => [
+    uniqueIndex("ai_telemetry_events_dedupe_unique").on(table.dedupeKey),
+    index("ai_telemetry_events_time_index").on(table.occurredAt),
+    index("ai_telemetry_events_principal_time_index").on(table.analyticsPrincipalId, table.occurredAt),
+    index("ai_telemetry_events_subject_time_index").on(table.subjectKey, table.occurredAt),
+    index("ai_telemetry_events_type_time_index").on(table.eventType, table.occurredAt),
+    check("ai_telemetry_events_id_valid", sql`length(trim(${table.id})) between 1 and 240 and ${table.id} not glob '*[^A-Za-z0-9._:-]*'`),
+    check("ai_telemetry_events_dedupe_valid", sql`length(trim(${table.dedupeKey})) between 1 and 240 and ${table.dedupeKey} not glob '*[^A-Za-z0-9._:-]*'`),
+    check("ai_telemetry_events_type_valid", sql`${table.eventType} in ('TUTOR_REQUEST_STARTED','TUTOR_REQUEST_COMPLETED','TUTOR_REQUEST_FAILED','RETRIEVAL_STARTED','RETRIEVAL_COMPLETED','RETRIEVAL_INSUFFICIENT','RETRIEVAL_FAILED','GROUNDING_VALIDATION_PASSED','GROUNDING_VALIDATION_FAILED','MEMORY_MUTATION_APPLIED','MEMORY_MUTATION_REJECTED','COMPACTION_SCHEDULED','COMPACTION_COMPLETED','COMPACTION_FAILED','FEEDBACK_POSITIVE','FEEDBACK_NEGATIVE','FEEDBACK_REPORTED')`),
+    check("ai_telemetry_events_version_privacy_valid", sql`${table.eventVersion} = 1 and ${table.privacyClass} = 'DEIDENTIFIED_METADATA'`),
+    check("ai_telemetry_events_failure_valid", sql`${table.failureCode} is null or ${table.failureCode} in ('ADMISSION_REJECTED','RATE_LIMITED','BUDGET_REJECTED','CONCURRENCY_LIMITED','CIRCUIT_OPEN','RETRIEVAL_INSUFFICIENT','RETRIEVAL_FAILED','PROVIDER_ERROR','PROVIDER_TIMEOUT','GROUNDING_INVALID','CITATION_INVALID','INPUT_LOST','CANCELLED','CONFIGURATION_CHANGED','MEMORY_CONFLICT','MEMORY_POLICY_DISABLED','COMPACTION_SOURCE_INVALID','INTERNAL_ERROR')`),
+    check("ai_telemetry_events_duration_valid", sql`(${table.durationMs} is null or ${table.durationMs} between 0 and 8640000000000) and (${table.providerLatencyMs} is null or ${table.providerLatencyMs} between 0 and 8640000000000) and (${table.firstTokenLatencyMs} is null or ${table.firstTokenLatencyMs} between 0 and 8640000000000)`),
+    check("ai_telemetry_events_usage_valid", sql`(${table.inputTokens} is null or ${table.inputTokens} between 0 and 9007199254740991) and (${table.outputTokens} is null or ${table.outputTokens} between 0 and 9007199254740991) and (${table.reasoningTokens} is null or ${table.reasoningTokens} between 0 and 9007199254740991) and (${table.knownCostNano} is null or ${table.knownCostNano} between 0 and 9007199254740991)`),
+    check("ai_telemetry_events_retrieval_valid", sql`(${table.retrievalCandidateCount} is null or ${table.retrievalCandidateCount} between 0 and 1000000) and (${table.retrievalSelectedEvidenceCount} is null or ${table.retrievalSelectedEvidenceCount} between 0 and 50) and (${table.retrievalRerankerUsed} is null or ${table.retrievalRerankerUsed} in (0,1))`),
+    check("ai_telemetry_events_memory_valid", sql`(${table.memoryScope} is null or ${table.memoryScope} in ('GLOBAL','SUBJECT')) and (${table.memoryKind} is null or ${table.memoryKind} in ('LEARNING_PREFERENCE','EXPLANATION_PREFERENCE','RESPONSE_DEPTH_PREFERENCE','FORM_OF_ADDRESS','PREFERRED_NAME','LEARNING_DIFFICULTY','STUDY_GOAL','STUDY_PROGRESS','LEARNING_STRATEGY_PREFERENCE')) and (${table.memoryOrigin} is null or ${table.memoryOrigin} in ('EXPLICIT','INFERRED','LEGACY_SUBJECT')) and (${table.memoryAction} is null or ${table.memoryAction} in ('NOOP','CREATE','UPDATE','ADD_EVIDENCE','ACTIVATE','RESOLVE','DELETE'))`),
+    check("ai_telemetry_events_time_buckets_valid", sql`length(${table.utcDay}) = 10 and ${table.utcDay} not glob '*[^0-9-]*' and length(${table.utcWeek}) = 8 and substr(${table.utcWeek},5,2) = '-W' and ${table.utcWeek} not glob '*[^0-9W-]*' and length(${table.utcMonth}) = 7 and ${table.utcMonth} not glob '*[^0-9-]*'`),
+    check("ai_telemetry_events_time_valid", sql`${table.occurredAt} >= 0`),
+    check("ai_telemetry_events_revision_pairs_valid", sql`(${table.modelConfigId} is null and ${table.modelConfigRevision} is null) or (${table.modelConfigId} is not null and ${table.modelConfigRevision} >= 1)`),
+  ],
+);
+
 export type ChangeSetRow = typeof changeSets.$inferSelect;
 export type ChangeSetItemRow = typeof changeSetItems.$inferSelect;
 export type ChangeSetEventRow = typeof changeSetEvents.$inferSelect;
@@ -4436,3 +4744,11 @@ export type AIMemoryExecutionConfigRow = typeof aiMemoryExecutionConfigs.$inferS
 export type AIMemoryExecutionConfigRevisionRow = typeof aiMemoryExecutionConfigRevisions.$inferSelect;
 export type AIMemoryExecutionRow = typeof aiMemoryExecutions.$inferSelect;
 export type AIMemoryExecutionMemoryLinkRow = typeof aiMemoryExecutionMemoryLinks.$inferSelect;
+export type AIAnalyticsPrincipalRow = typeof aiAnalyticsPrincipals.$inferSelect;
+export type AIRetrievalTraceRow = typeof aiRetrievalTraces.$inferSelect;
+export type AIRetrievalTraceOriginRow = typeof aiRetrievalTraceOrigins.$inferSelect;
+export type AIRetrievalTraceProjectionRow = typeof aiRetrievalTraceProjections.$inferSelect;
+export type AIRetrievalTraceItemRow = typeof aiRetrievalTraceItems.$inferSelect;
+export type AITutorResponseDiagnosticsRow = typeof aiTutorResponseDiagnostics.$inferSelect;
+export type AIFeedbackEventRow = typeof aiFeedbackEvents.$inferSelect;
+export type AITelemetryEventRow = typeof aiTelemetryEvents.$inferSelect;

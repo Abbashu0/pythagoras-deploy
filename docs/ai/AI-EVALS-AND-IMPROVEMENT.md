@@ -73,6 +73,10 @@ Key invariants and delivered architectural boundaries include:
 11. **Strict Baseline Comparability:** Baseline comparisons require exact identity match across Judge configuration, protocol, model revision, and provider revision. Divergence results in `BASELINE_NOT_COMPARABLE`.
 12. **Candidate Latency Purity:** The `MAX_LATENCY_MS` gate evaluates candidate target generation latency only, strictly excluding judge latency.
 
+### AI-M11 analytics handoff boundary
+
+AI-M11 is implemented pending independent review and provides only bounded, de-identified metadata/events and read DTOs for future Admin analytics and Agent 2. It does not perform clustering, generate insights, publish changes, or alter Eval truth. M3 Cost Operations/Usage Records and M9 Eval records remain canonical; telemetry references them without copying raw Student, Assistant, Evidence, Memory, Summary, Provider, or Judge content.
+
 ## 3. Agent 2 is read-only intelligence
 
 Agent 2 is not a free-running autonomous agent. Its baseline pipeline is:

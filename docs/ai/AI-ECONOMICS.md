@@ -136,6 +136,10 @@ M3B uncertain reservations are recovered without duplicating settlement arithmet
 
 AI-M9A does not execute targets or supplementary judges and does not create admission reservations. Its durable Eval Runs may reference the existing `ai_cost_operations.eval_run_id` and `EVALS` cost center so M9B can bind live evaluation work to the canonical accounting ledger. Deterministic cost gates require a terminal EVALS operation with complete usage records, exact Run/subject ownership, and one safe currency total; open, empty, partial, unknown, multi-currency, or unsafe accounting remains unavailable rather than becoming zero. A terminal operation with no usage record is not treated as provable zero. They do not trust caller-supplied dollar values or create a competing Eval ledger. `PASS_RECOMMENDED` remains advisory and cannot publish a configuration.
 
+### AI-M11 economics observability boundary
+
+AI-M11 is implemented pending independent review through migration `0045_sturdy_bill_hollister`. Telemetry reads existing M3 Cost Operations and Usage Cost Records for bounded diagnostics/analytics; it never creates a second billing ledger, changes reservation/settlement state, or trusts client-supplied cost. Unknown, partial, mixed-currency, or unsafe canonical accounting remains unavailable in telemetry rather than becoming zero. Cost Operation, Model/Provider, and configuration revisions are safe correlation metadata only.
+
 ## 6. Expensive background work
 
 Knowledge indexing, compaction, historical extraction compatibility, Agent 2, and Evals run as durable jobs with cost attribution before work begins. A failed or retried job records attempts and actual usage; it does not charge a Student unless its cost center and Product policy explicitly say so. New Agent-1 Memory decisions do not create a separate background extraction cost.

@@ -52,6 +52,10 @@ M8B adds the first execution boundary without weakening those controls: only the
 
 M10R/M10A2/B2/C/D keeps Memory private to one server-resolved principal and an explicit `GLOBAL` or canonical `SUBJECT` scope. The kind vocabulary is closed to low-risk educational preferences/progress; generic personal facts, sensitive/private profile data, and transient mood are not Memory semantics. `PROPOSED` inferred state is non-eligible and can carry only bounded text plus safe turn references; one same-call Agent-1 command may request a mutation, but activation is granted only by current-policy server validation. Conversation origin, completed non-partial provenance, optimistic revisions, quotas, lifecycle, deletion reconciliation, and principal purge are enforced at both service and SQLite boundaries. There is no second extraction call or production Provider.
 
+## 3.6 M11 telemetry and de-identification controls
+
+AI-M11 is implemented pending independent review through migration `0045_sturdy_bill_hollister`. Events, Retrieval Traces, Tutor diagnostics, Memory/Compaction lifecycle records, feedback, and analytics read DTOs are closed, bounded, append-only metadata projections. They retain safe correlation IDs, revisions, counts, scores, durations, and usage references, never raw Conversation, Memory, Summary, Evidence, prompt, Provider, credential, or chain-of-thought content. A server-owned pseudonymous analytics identity is separate from canonical Student ownership; synthetic/evaluation events without that identity are excluded from Student active-user metrics. Controlled relational principal purge removes identifying telemetry, and M11 does not implement Agent 2 or any autonomous insight/publication path.
+
 ## 4. Security requirements for provider calls
 
 - Provider adapters receive only the minimum context required for the operation.
