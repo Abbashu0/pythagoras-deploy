@@ -50,7 +50,7 @@ M8B adds the first execution boundary without weakening those controls: only the
 
 ## 3.5 Scoped Student Memory controls
 
-M10R/M10A2 keeps Memory private to one server-resolved principal and an explicit `GLOBAL` or canonical `SUBJECT` scope. The kind vocabulary is closed to low-risk educational preferences/progress; generic personal facts, sensitive/private profile data, and transient mood are not Memory semantics. `PROPOSED` inferred state is non-eligible and can carry only bounded text plus safe turn references; activation is a future trusted Agent 1 decision. Conversation origin, completed non-partial provenance, optimistic revisions, quotas, lifecycle, deletion reconciliation, and principal purge are enforced at both service and SQLite boundaries. M10A2 does not add Agent 1 tools, Gateway tool calling, sidecar extraction, or Provider execution.
+M10R/M10A2/B2/C/D keeps Memory private to one server-resolved principal and an explicit `GLOBAL` or canonical `SUBJECT` scope. The kind vocabulary is closed to low-risk educational preferences/progress; generic personal facts, sensitive/private profile data, and transient mood are not Memory semantics. `PROPOSED` inferred state is non-eligible and can carry only bounded text plus safe turn references; one same-call Agent-1 command may request a mutation, but activation is granted only by current-policy server validation. Conversation origin, completed non-partial provenance, optimistic revisions, quotas, lifecycle, deletion reconciliation, and principal purge are enforced at both service and SQLite boundaries. There is no second extraction call or production Provider.
 
 ## 4. Security requirements for provider calls
 

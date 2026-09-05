@@ -24,6 +24,8 @@ import type {
   AITutorExecutionStatus,
 } from "./contracts";
 import { AITutorExecutionError } from "./errors";
+import { AIMemoryService } from "../../memory";
+import { parseAIMemoryCommand, type AIMemoryCommand } from "../../memory/command";
 
 const MAX_SAFE_TIMESTAMP = 8_640_000_000_000_000;
 const OPERATION_IDEMPOTENCY_VERSION = 1;
@@ -37,15 +39,18 @@ const OPERATION_IDEMPOTENCY_VERSION = 1;
 export class AITutorExecutionService {
   private readonly clock: () => number;
   private readonly outputValidator: Pick<AITutorOutputValidator, "validate">;
+  private readonly memory: AIMemoryService;
 
   constructor(private readonly dependencies: AITutorExecutionDependencies) {
     this.clock = dependencies.clock ?? Date.now;
     this.outputValidator = dependencies.outputValidator ?? new AITutorOutputValidator();
+    this.memory = dependencies.memory ?? new AIMemoryService(dependencies.database);
     validateEstimator(dependencies.estimator);
   }
 
   async execute(input: AITutorExecutionInput): Promise<AITutorExecutionResult> {
     validateExecutionInput(input);
+    this.memory.recoverPendingMutationIntents({ limit: 100, now: this.safeNow() });
     const replay = this.replayExistingExecution(input);
     if (replay) return replay;
     const linked = createLinkedAbortController(input.signal);
@@ -390,6 +395,7 @@ export class AITutorExecutionService {
     let finishReason: AIConversationFinishReason | null = null;
     let overflow = false;
     let providerError: unknown = null;
+    let memoryCommand: AIMemoryCommand | null = null;
     let responseBytes = this.safeResponseBytes(plan.principal, plan.responseId);
     let nextSequence = this.safeResponseSequence(plan.principal, plan.responseId);
 
@@ -419,6 +425,8 @@ export class AITutorExecutionService {
         if (responseState !== "STREAMING") throw new AITutorExecutionError("AI_TUTOR_EXECUTION_CONFIGURATION_CHANGED", "The Tutor Response changed during execution.");
         if (event.type === "USAGE") {
           usage.observe(event.usage);
+        } else if (event.type === "MEMORY_COMMAND") {
+          memoryCommand = parseAIMemoryCommand(event.command);
         } else if (event.type === "TEXT_DELTA") {
           for (const piece of splitUtf8(event.text, AI_CONVERSATION_MAX_CHUNK_BYTES)) {
             const pieceResponseState = this.readResponseExecutionState(plan);
@@ -497,7 +505,21 @@ export class AITutorExecutionService {
           citationProtocolRevision: generationPlan.citationProtocolRevision,
         });
         if (validation.status !== "VALID") throw new AITutorExecutionError("AI_TUTOR_EXECUTION_OUTPUT_INVALID", "The Tutor output did not pass grounded response validation.");
-        this.dependencies.conversations.completeResponse(plan.principal, plan.responseId, finishReason!);
+        const mutationCommandId = memoryCommand ? this.prepareMemoryIntent(plan, memoryCommand) : null;
+        try {
+          this.dependencies.conversations.completeResponse(plan.principal, plan.responseId, finishReason!);
+        } catch (error) {
+          if (mutationCommandId) this.cancelMemoryIntent(mutationCommandId);
+          throw error;
+        }
+        if (mutationCommandId) {
+          try {
+            this.memory.applyMutationIntent(mutationCommandId, this.safeNow());
+          } catch {
+            // The Tutor response remains canonical; invalid/stale Memory intent
+            // is already scrubbed/terminalized by the mutation boundary.
+          }
+        }
         this.transitionTrace(trace, "COMPLETED", this.safeNow());
         const settlement = this.closeOperationAndSettle(operation.id, reservationId, "COMPLETED");
         return this.result(plan, "COMPLETED", finishReason, trace.id, operation.id, reservationId, settlement, plan.conversationId);
@@ -531,6 +553,40 @@ export class AITutorExecutionService {
     const settlement = this.closeOperationAndSettle(operation.id, reservationId, "COMPLETED");
     void reason;
     return this.result(plan, "BLOCKED", "OTHER", trace.id, operation.id, reservationId, settlement, plan.conversationId);
+  }
+
+  private prepareMemoryIntent(plan: AITutorPreflightPlan, command: AIMemoryCommand): string | null {
+    if (command.action === "NOOP") return null;
+    const commandId = `tutor-memory-command-v1:${plan.responseId}`;
+    const existing = this.memory.getMutationIntent(commandId);
+    if (existing) {
+      if (existing.responseId !== plan.responseId || existing.conversationId !== plan.conversationId || existing.principalRef !== plan.principalRef) throw new AITutorExecutionError("AI_TUTOR_EXECUTION_OPERATION_CONFLICT", "The Tutor Memory command identity is inconsistent.");
+      if (["FAILED", "CANCELLED"].includes(existing.status)) throw new AITutorExecutionError("AI_TUTOR_EXECUTION_OPERATION_CONFLICT", "The Tutor Memory command is already terminal.");
+      return commandId;
+    }
+    const action = command.action === "ADD_EVIDENCE" || command.action === "ACTIVATE" ? "UPDATE" as const : command.action;
+    const origin = command.action === "ACTIVATE" ? "INFERRED" as const : command.origin;
+    this.memory.createMutationIntent({
+      commandId,
+      principal: plan.principal,
+      responseId: plan.responseId,
+      conversationId: plan.conversationId,
+      scope: command.scope,
+      subjectKey: command.subjectKey,
+      action,
+      memoryId: command.memoryId,
+      expectedRevision: command.expectedRevision,
+      kind: command.action === "ADD_EVIDENCE" || command.action === "ACTIVATE" ? null : command.kind,
+      origin,
+      confidenceUnits: command.action === "ADD_EVIDENCE" || command.action === "ACTIVATE" ? null : command.confidenceUnits,
+      memoryText: command.action === "CREATE" || command.action === "UPDATE" ? command.memoryText : null,
+      createdAt: this.safeNow(),
+    });
+    return commandId;
+  }
+
+  private cancelMemoryIntent(commandId: string): void {
+    try { this.memory.cancelMutationIntent(commandId, this.safeNow()); } catch { /* preserve the response terminal truth */ }
   }
 
   private finishCancelledAfterAdmission(

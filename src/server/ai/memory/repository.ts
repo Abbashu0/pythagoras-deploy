@@ -60,6 +60,7 @@ export class SQLiteAIMemoryRepository implements AIMemoryRepository {
         input.subjectKey === null ? isNull(aiMemoryPolicies.subjectKey) : eq(aiMemoryPolicies.subjectKey, input.subjectKey),
         eq(aiMemoryPolicies.scope, input.scope),
         eq(aiMemoryPolicyRevisions.enabled, true),
+        sql`exists (select 1 from json_each(${aiMemoryPolicyRevisions.allowedKinds}) allowed_kind where allowed_kind.value = ${aiMemories.kind})`,
       )).orderBy(
         desc(aiMemories.confidenceUnits),
         desc(aiMemories.updatedAt),
@@ -87,6 +88,14 @@ export class SQLiteAIMemoryRepository implements AIMemoryRepository {
       eq(aiMemories.scope, input.scope),
       input.subjectKey === null ? isNull(aiMemories.subjectKey) : eq(aiMemories.subjectKey, input.subjectKey),
       eq(aiMemories.status, input.status),
+    )).get();
+    return Number(row?.value ?? 0);
+  }
+
+  countPurgeableForPrincipal(principalRef: string): number {
+    const row = this.database.db.select({ value: count() }).from(aiMemories).where(and(
+      eq(aiMemories.principalRef, principalRef),
+      inArray(aiMemories.status, ["PROPOSED", "ACTIVE"]),
     )).get();
     return Number(row?.value ?? 0);
   }

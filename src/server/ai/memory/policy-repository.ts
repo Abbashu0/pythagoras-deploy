@@ -33,6 +33,7 @@ export class SQLiteAIMemoryPolicyRepository implements AIMemoryPolicyRepository 
     return {
       ...revision,
       id: row.id,
+      m10a2MutationAuthority: row.m10a2MutationAuthority,
       currentRevision: row.currentRevision,
       currentRevisionId: revision.revisionId,
       createdAt: row.createdAt,
@@ -85,6 +86,7 @@ export class SQLiteAIMemoryPolicyRepository implements AIMemoryPolicyRepository 
           key: content.key,
           scope: content.scope ?? "SUBJECT",
           subjectKey: content.subjectKey,
+          m10a2MutationAuthority: true,
           currentRevision: 1,
           createdAt: input.now,
           updatedAt: input.now,

@@ -371,7 +371,7 @@ test("migration 0002 applies to fresh databases and upgrades an existing M2 data
   const m2Migrations = createTemporaryDirectory("pythagoras-m2-migrations-");
   try {
     const fresh = openContentDatabase({ dataDirectory: freshRoot, migrationsDirectory });
-    assert.equal(getContentDatabaseStatus(fresh).migrationsApplied, 44);
+    assert.equal(getContentDatabaseStatus(fresh).migrationsApplied, 45);
     assert.ok(
       fresh.client.prepare("select name from sqlite_master where name = 'assets'").get(),
     );
@@ -415,7 +415,7 @@ test("migration 0002 applies to fresh databases and upgrades an existing M2 data
     m2Database.close();
 
     const upgraded = openContentDatabase({ dataDirectory: upgradeRoot, migrationsDirectory });
-    assert.equal(getContentDatabaseStatus(upgraded).migrationsApplied, 44);
+    assert.equal(getContentDatabaseStatus(upgraded).migrationsApplied, 45);
     assert.ok(
       upgraded.client.prepare("select name from sqlite_master where name = 'assets'").get(),
     );

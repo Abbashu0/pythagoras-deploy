@@ -831,6 +831,7 @@ export const aiMemoryPolicies = sqliteTable(
     key: text("key").notNull(),
     scope: text("scope").$type<AIMemoryScope>().notNull().default("SUBJECT"),
     subjectKey: text("subject_key").references(() => canonicalMaterials.subjectKey, { onDelete: "restrict" }),
+    m10a2MutationAuthority: integer("m10a2_mutation_authority", { mode: "boolean" }).notNull().default(false),
     currentRevision: integer("current_revision").notNull().default(1),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),

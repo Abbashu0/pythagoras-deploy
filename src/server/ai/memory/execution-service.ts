@@ -28,10 +28,8 @@ import type {
   AIMemoryExecutionSourceMessage,
 } from "./execution-contracts";
 import {
-  AI_MEMORY_EXECUTION_KINDS,
   AI_MEMORY_EXECUTION_PAYLOAD_VERSION,
   AI_MEMORY_EXECUTION_MAX_OUTPUT_BYTES,
-  AI_MEMORY_EXTRACTION_JOB_KIND,
   AI_MEMORY_COMPACTION_JOB_KIND,
 } from "./execution-contracts";
 import { AIMemoryExecutionError } from "./execution-errors";
@@ -108,8 +106,11 @@ export class AIMemoryExecutionService implements AIJobTerminalReconciler {
       execution = this.reconcileTerminalFinancial(execution);
       return resultFromExecution(execution, this.executions.listExtractionResults(execution.id).map((link) => link.memoryId));
     }
+    if (execution.executionKind === "EXTRACTION") {
+      throw new AIMemoryExecutionError("AI_MEMORY_EXECUTION_CONFIG_INVALID", "Legacy Memory Extraction execution is disabled after the M10A2 cutover.");
+    }
     if (context) {
-      const expectedJobKind = execution.executionKind === "EXTRACTION" ? "ai.memory.extraction" : "ai.memory.compaction";
+      const expectedJobKind = "ai.memory.compaction";
       if (context.job.kind !== expectedJobKind || context.job.payloadVersion !== 1) throw new AIMemoryExecutionError("AI_MEMORY_EXECUTION_INVALID", "The Memory Job kind does not match its canonical execution.");
       execution = this.executions.bindJob(execution.id, context.job.id, this.safeNow());
       if (isTerminal(execution.status)) {
@@ -180,6 +181,7 @@ export class AIMemoryExecutionService implements AIJobTerminalReconciler {
     const sourceMessages = execution.executionKind === "EXTRACTION"
       ? this.source.listMessages({ principalRef: execution.principalRef, conversationId: execution.conversationId, fromOrdinal: execution.requestOrdinal, toOrdinal: execution.assistantOrdinal })
       : this.compactionMessages(execution);
+    if (execution.executionKind === "COMPACTION" && !isContiguousCompletedTurnRange(sourceMessages, execution.baseSummaryCoverage ?? 0, execution.targetCutoffOrdinal!)) throw new AIMemoryExecutionError("AI_MEMORY_EXECUTION_SOURCE_INVALID", "Conversation Compaction requires a contiguous complete turn range.");
     const previousSummary = execution.executionKind === "COMPACTION" ? this.previousSummary(execution) : null;
     const maxOutputTokens = execution.executionKind === "EXTRACTION" ? config.extractionMaxOutputTokens : config.compactionMaxOutputTokens;
     const request = execution.executionKind === "EXTRACTION"
@@ -493,7 +495,8 @@ export class AIMemoryExecutionService implements AIJobTerminalReconciler {
     if ((current?.id ?? null) !== expectedId || (current?.revision ?? null) !== expectedRevision || (current?.coversThroughOrdinal ?? null) !== expectedCoverage) throw new AIMemoryExecutionError("AI_MEMORY_EXECUTION_SOURCE_INVALID", "The Conversation Summary advanced before compaction could commit.");
     if (execution.targetCutoffOrdinal === null) throw new AIMemoryExecutionError("AI_MEMORY_EXECUTION_SOURCE_INVALID", "The compaction cutoff is missing.");
     const revision = (expectedRevision ?? 0) + 1;
-    return this.summaries.insertRevision({ id: this.idFactory(), conversationId: execution.conversationId, principalRef: execution.principalRef, subjectKey: execution.subjectKey, revision, summaryText, coversThroughOrdinal: execution.targetCutoffOrdinal, sourceStartOrdinal: 1, sourceEndOrdinal: execution.targetCutoffOrdinal, sourceMessageCount: execution.targetCutoffOrdinal, createdAt: this.safeNow() });
+    const sourceStartOrdinal = (expectedCoverage ?? 0) + 1;
+    return this.summaries.insertRevision({ id: this.idFactory(), conversationId: execution.conversationId, principalRef: execution.principalRef, subjectKey: execution.subjectKey, revision, summaryText, coversThroughOrdinal: execution.targetCutoffOrdinal, sourceStartOrdinal, sourceEndOrdinal: execution.targetCutoffOrdinal, sourceMessageCount: execution.targetCutoffOrdinal - sourceStartOrdinal + 1, createdAt: this.safeNow() });
   }
 
   private databaseRowsForTerminalRecovery(limit: number): Array<{ id: string; job: AIJob }> {
@@ -538,14 +541,14 @@ export class DailyMemoryBudgetPeriodResolver implements AIMemoryBudgetPeriodReso
 }
 
 export function createAIMemoryExecutionJobHandlers(service: AIMemoryExecutionService): AIJobHandlerDefinition[] {
-  return AI_MEMORY_EXECUTION_KINDS.map((executionKind) => ({
-    kind: executionKind === "EXTRACTION" ? AI_MEMORY_EXTRACTION_JOB_KIND : AI_MEMORY_COMPACTION_JOB_KIND,
+  return [{
+    kind: AI_MEMORY_COMPACTION_JOB_KIND,
     payloadVersion: AI_MEMORY_EXECUTION_PAYLOAD_VERSION,
     validatePayload: validateExecutionPayload,
     execute: async (payload: Record<string, unknown>, context: AIJobExecutionContext) => {
       await service.executeJob(String(payload.executionId), context);
     },
-  }));
+  }];
 }
 
 export function validateAIMemoryExecutionPayload(value: unknown): Record<string, unknown> {
@@ -578,8 +581,19 @@ function assertOperation(operation: AICostOperation, execution: AIMemoryExecutio
   if (operation.costCenter !== "STUDENT_GENERATION" || (operation.idempotencyKey !== null && operation.idempotencyKey !== expectedKey) || operation.opaquePrincipalRef !== execution.principalRef || operation.subjectKey !== execution.subjectKey || operation.conversationId !== execution.conversationId || operation.responseId !== execution.responseId || operation.evalRunId !== null || operation.knowledgeRevision !== null || (execution.jobId !== null && operation.jobId !== execution.jobId && operation.jobId !== null)) throw new AIMemoryExecutionError("AI_MEMORY_EXECUTION_INVALID", "The Memory Cost Operation identity is inconsistent.");
 }
 
+function isContiguousCompletedTurnRange(messages: readonly { ordinal: number; role: string; isPartial?: boolean }[], baseCoverage: number, cutoffOrdinal: number): boolean {
+  if (!messages.length || messages[0]!.ordinal !== baseCoverage + 1 || messages.at(-1)!.ordinal !== cutoffOrdinal) return false;
+  for (let index = 0; index < messages.length; index += 2) {
+    const user = messages[index];
+    const assistant = messages[index + 1];
+    if (!user || !assistant || user.role !== "USER" || assistant.role !== "ASSISTANT" || user.isPartial || assistant.isPartial || assistant.ordinal !== user.ordinal + 1) return false;
+    if (index + 2 < messages.length && messages[index + 2]!.ordinal !== assistant.ordinal + 1) return false;
+  }
+  return true;
+}
+
 function mergeUsage(target: { inputTokens: number | null; outputTokens: number | null; reasoningTokens: number | null; cacheHitInputTokens: number | null; cacheMissInputTokens: number | null }, event: GatewayGenerationStreamEvent): void {
-  if (event.type === "STARTED" || event.type === "TEXT_DELTA") return;
+  if (event.type === "STARTED" || event.type === "TEXT_DELTA" || event.type === "MEMORY_COMMAND") return;
   for (const field of ["inputTokens", "outputTokens", "reasoningTokens", "cacheHitInputTokens", "cacheMissInputTokens"] as const) {
     const value = event.usage[field];
     if (value !== null && (target[field] === null || value > target[field]!)) target[field] = value;

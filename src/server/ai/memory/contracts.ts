@@ -87,6 +87,7 @@ export interface AIMemoryPolicyRevision extends AIMemoryPolicyContent {
 
 export interface AIMemoryPolicy extends AIMemoryPolicyContent {
   id: string;
+  m10a2MutationAuthority: boolean;
   currentRevision: number;
   currentRevisionId: string;
   createdAt: number;
@@ -162,6 +163,15 @@ export interface AIMemoryRepository {
   listProvenance(memoryId: string, memoryRevision?: number): AIMemoryProvenance[];
   purgeForConversationInTransaction(input: { conversationId: string; principalRef: string; at: number }): number;
   purgeForPrincipalInTransaction(input: { principalRef: string; at: number; limit?: number }): number;
+  countPurgeableForPrincipal(principalRef: string): number;
+}
+
+export interface AIMemoryPurgeResult {
+  memoriesChanged: number;
+  intentsCancelled: number;
+  remainingMemories: number;
+  remainingIntents: number;
+  remainingWork: boolean;
 }
 
 export interface AIMemoryProvenance {
@@ -225,7 +235,9 @@ export interface AIMemoryMutationRepository {
   insertIntent(input: Omit<AIMemoryMutationIntent, "id" | "contentSha256"> & { id: string; contentSha256: string | null }): AIMemoryMutationIntent;
   markIntentApplied(commandId: string, appliedAt: number): AIMemoryMutationIntent;
   markIntentFailed(commandId: string, safeErrorCode: string, at: number): AIMemoryMutationIntent;
+  markIntentCancelled(commandId: string, at: number): AIMemoryMutationIntent;
   cancelPendingForPrincipal(principalRef: string, at: number, limit: number): number;
+  countPendingForPrincipal(principalRef: string): number;
   listPendingIntents(limit: number): AIMemoryMutationIntent[];
   insertRecord(input: Omit<AIMemoryMutationRecord, "id"> & { id: string }): AIMemoryMutationRecord;
   getRecord(commandId: string): AIMemoryMutationRecord | null;

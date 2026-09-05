@@ -147,7 +147,7 @@ AI-M8A, AI-M8B, and AI-M8C are approved; AI-M8 Grounded Tutor is complete at `e7
 
 ## AI-M10 — Memory & Compaction
 
-**Status:** The M10R rebaseline is APPROVED/COMPLETE. The former M10A subject-only and former M10B extraction contracts are historical/superseded; AI-M10A2 is implemented pending independent review, AI-M10 is reopened/incomplete, and M10B2, M10C, M10D, and M11 are not started.
+**Status:** The M10R rebaseline is APPROVED/COMPLETE. The former M10A subject-only and former M10B extraction contracts are historical/superseded; AI-M10A2, M10B2, M10C, and M10D are implemented pending independent review, AI-M10 is implemented pending independent review, and M11 is not started.
 
 ### AI-M10A — Memory, Conversation Summaries & Context Selection
 
@@ -157,24 +157,39 @@ AI-M8A, AI-M8B, and AI-M8C are approved; AI-M8 Grounded Tutor is complete at `e7
 ### AI-M10B — Historical Extraction, Compaction Jobs & Runtime Hardening
 
 **Status:** Historical implementation under the superseded Memory mutation contract; not production-approved for the rebaselined M10 architecture.
-**Historical boundary:** Migrations `0041_violet_nico_minoru` and `0042_memory-execution-commit-safety` remain readable for audit and compatibility. M10A2 schedules no new `memory-extraction-v1` executions; Conversation Compaction remains a separate future M10D concern. No new Provider execution or automatic runtime Memory mutation is enabled by this rebaseline.
+**Historical boundary:** Migrations `0041_violet_nico_minoru` and `0042_memory-execution-commit-safety` remain readable for audit and compatibility. M10D schedules no new `memory-extraction-v1` executions; the active M10D path is Student-only Conversation Compaction. M10B2's same-call Agent-1 command is the current Memory mutation path.
 
 ### AI-M10R — Scoped Student Memory rebaseline
 
 **Status:** APPROVED/COMPLETE as the new architecture baseline.
-**Contract:** Memory is private to one server-resolved principal and has either `GLOBAL` scope with `subjectKey = NULL` or `SUBJECT` scope with one canonical subject. The closed educational kind vocabulary excludes generic personal-profile facts; Global `PREFERRED_NAME` and `FORM_OF_ADDRESS` are explicit-only. Current Memory state uses `PROPOSED`, `ACTIVE`, `RESOLVED`, `EXPIRED`, and `DELETED`; only `ACTIVE` is Context-eligible. Inferred proposals retain bounded semantic text and metadata-only evidence until a future trusted Agent 1 boundary can activate them; M10A2 does not make semantic decisions automatically. Explicit and inferred provenance is reference-only and rejects partial, cross-scope, and synthetic Eval turns.
+**Contract:** Memory is private to one server-resolved principal and has either `GLOBAL` scope with `subjectKey = NULL` or `SUBJECT` scope with one canonical subject. The closed educational kind vocabulary excludes generic personal-profile facts; Global `PREFERRED_NAME` and `FORM_OF_ADDRESS` are explicit-only. Current Memory state uses `PROPOSED`, `ACTIVE`, `RESOLVED`, `EXPIRED`, and `DELETED`; only `ACTIVE` is Context-eligible. Agent 1 may request one bounded Memory command in the same Tutor Generation; the server validates and applies it, while inferred proposals remain non-eligible until current-policy confidence/evidence and review rules permit activation. Explicit and inferred provenance is reference-only and rejects partial, cross-scope, and synthetic Eval turns.
 
 ### AI-M10A2 — Scoped Student Memory Storage, Policy, Provenance & Lifecycle Foundation
 
 **Status:** Implemented pending independent review.
-**Delivered boundary:** Migration `0043_scoped-student-memory-foundation` adds scoped policies, stable/revisioned current Memory state, bounded provenance, metadata-only mutation intents/records, Conversation origin protection, deletion reconciliation, and principal purge. Global Memory is deliberately not injected into M5 Context yet; no Agent 1 tools, Gateway tool calling, sidecar extraction, new Memory Generation, UI/API, Provider, or keyword-based Memory engine is added. The old second-pass extraction path is cut over for new work while historical execution/config/job rows remain preserved.
+**Delivered boundary:** Migrations `0043_scoped-student-memory-foundation` and `0044_slippery_joshua_kane` add scoped policies, current-policy mutation authority/threshold triggers, stable/revisioned current Memory state, bounded provenance, metadata-only mutation intents/records, Conversation origin protection, deletion reconciliation, and repeatable principal purge. Historical Policy identities remain readable but cannot authorize new semantic mutation unless they are a newly governed cutover identity. The old second-pass extraction path is disabled for new work while historical execution/config/job rows remain preserved.
+
+### AI-M10B2 — Trusted Agent-1 Memory mutation
+
+**Status:** Implemented pending independent review.
+**Delivered boundary:** The AI Provider Gateway accepts at most one strict `memory-command-v1@1` event alongside the visible Tutor answer. The command is runtime-only until a bounded metadata-only mutation intent is created after successful response validation; the same completed Tutor Generation applies it idempotently, with no second extraction Provider call. Failed, cancelled, partial, synthetic, stale, or invalid responses cannot create Memory.
+
+### AI-M10C — Global + Subject Memory Context
+
+**Status:** Implemented pending independent review.
+**Delivered boundary:** M5 Context selects current-policy-eligible ACTIVE Global Memory for the principal and exact-subject ACTIVE Memory, with deterministic per-scope limits, memory-token budgeting, no cross-principal/subject leakage, and metadata-only Context Snapshots. Memory remains low-priority student personalization and never becomes policy or Evidence.
+
+### AI-M10D — Conversation Compaction completion
+
+**Status:** Implemented pending independent review.
+**Delivered boundary:** Student-only completed turns can schedule bounded Compaction from a contiguous uncovered range ending at an Assistant message. Summary revisions are append-only and coverage is monotonic; deletion/input-loss fences prevent resurrection; duplicate Job replay is idempotent. New legacy Memory Extraction scheduling is disabled.
 
 ## Remaining future milestones
 
 | Milestone | Coherent boundary | Independent exit gate |
 | --- | --- | --- |
 | **AI-M9 Evals V1** | Versioned Eval Suite, deterministic graders, supplementary judge adapter, regression cases, security/cost/latency gates | Baseline suites cover all required dimensions and block an unsafe or materially regressed promotion |
-| **AI-M10 Memory & Compaction** | M10R approved baseline; M10A2 scoped Memory foundation implemented pending review; M10B2/M10C/M10D not started | No cross-user memory; proposals remain non-eligible until a future trusted activation boundary; deletion propagates; M10 remains incomplete until the rebaselined checkpoints are reviewed |
+| **AI-M10 Memory & Compaction** | M10R approved baseline; M10A2/M10B2/M10C/M10D implemented pending review | No cross-user memory; server-owned same-call Memory commands; deterministic Global/Subject Context; bounded Student Compaction; no second-pass extraction; M10 remains pending independent review |
 | **AI-M11 Intelligence Telemetry** | Retrieval traces, feedback/events, de-identified analytics, usage dashboards/data contracts, and privacy-safe operational metrics | Analytics cannot reveal raw PII by default; response/retrieval/cost traces correlate end to end |
 | **AI-M12 Agent 2 Read-only** | Deterministic event/SQL inputs, representative samples, optional clustering, structured analysis, and bounded Insight candidates | Agent 2 cannot publish, mutate truth/credentials, message students, or bypass privacy/Evals; outputs are reproducible |
 | **AI-M13 Second Brain** | Relational Insight, evidence, typed relations, QuestionCluster, Misconception, KnowledgeGap, ExplanationPattern, RetrievalProblem | Typed relationships and provenance are queryable/visualizable; insights remain separate from curriculum truth |

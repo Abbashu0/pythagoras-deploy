@@ -78,6 +78,7 @@ import {
   SQLiteAITutorConfigRepository,
   type AITutorConfigContent,
 } from "../src/server/ai/tutor";
+import { AI_MEMORY_POLICY_RESOURCE_TYPE } from "../src/server/ai/memory";
 import { AIConversationService, SQLiteAIConversationRepository, type AIStudentPrincipal } from "../src/server/ai/conversations";
 import { createChangeManagementService } from "../src/server/change-management";
 import { createCanonicalContentRepository } from "../src/server/canonical-content/service";
@@ -98,6 +99,7 @@ type GenerationBehavior = {
   finalUsage: NormalizedProviderUsage;
   failure?: { code: "UNAVAILABLE" | "TIMEOUT" | "AUTHENTICATION"; afterUsage?: boolean };
   waitForAbort?: boolean;
+  memoryCommand?: Readonly<Record<string, unknown>>;
 };
 
 const knownUsage = (inputTokens: number, outputTokens: number): NormalizedProviderUsage => ({
@@ -139,6 +141,7 @@ class IntegrationGenerationAdapter implements GenerationProviderAdapter {
     this.startedResolver?.();
     yield { type: "STARTED", providerRequestId: `integration-request-${this.calls}` };
     for (const delta of this.behavior.deltas) yield { type: "TEXT_DELTA", text: delta };
+    if (this.behavior.memoryCommand) yield { type: "MEMORY_COMMAND", command: this.behavior.memoryCommand };
     for (const usage of this.behavior.usageEvents) yield { type: "USAGE", usage };
     if (this.behavior.waitForAbort) {
       await new Promise<void>((resolve) => {
@@ -540,6 +543,122 @@ test("M8 final grounded Tutor path composes governed M8A through real M7C and on
     const metadata = JSON.stringify({ operation: fixture.database.client.prepare("select * from ai_cost_operations where id=?").get(result.costOperationId), usage, reservation: fixture.database.client.prepare("select * from ai_budget_reservations where id=?").get(result.budgetReservationId), events: fixture.database.client.prepare("select * from ai_rate_limit_events where operation_id=?").all(result.costOperationId), trace, projectionRefs, evidence: fixture.traces.listEvidenceRefs(trace.id) });
     assert.equal(metadata.includes(QUERY_MARKER), false);
     assert.equal(metadata.includes(EVIDENCE_MARKER), false);
+  } finally { fixture.close(); }
+});
+
+test("M10B2 applies one Agent-1 Memory command from the same Tutor Generation", async () => {
+  const fixture = await createFixture();
+  try {
+    const changes = createChangeManagementService(fixture.database);
+    const memoryPolicyId = uuidv7();
+    publishChange(changes, fixture.owner, AI_MEMORY_POLICY_RESOURCE_TYPE, memoryPolicyId, {
+      key: `m10b2-memory-${uuidv7()}`,
+      scope: "SUBJECT",
+      subjectKey: "biology",
+      displayName: "M10B2 Biology Memory",
+      enabled: true,
+      allowedKinds: ["LEARNING_DIFFICULTY"],
+      targetActiveCount: 10,
+      hardActiveMaximum: 10,
+      maxSelectedPerRequest: 10,
+      proposedHardMaximum: 10,
+      perMemoryMaxBytes: 4096,
+      retentionDays: 365,
+      mutationEnabled: true,
+      explicitMinConfidenceUnits: 0,
+      inferredMinConfidenceUnits: 900_000,
+      inferredMinDistinctEvidenceTurns: 1,
+      candidateReviewRequired: false,
+      maxSelectedMemories: 10,
+    });
+    const memoryText = "The Student repeatedly confuses metaphase and anaphase.";
+    fixture.generation.behavior = {
+      finishReason: "STOP",
+      deltas: ["Grounded answer [E1]"],
+      usageEvents: [],
+      finalUsage: knownUsage(20, 3),
+      memoryCommand: {
+        protocolKey: "memory-command-v1",
+        protocolRevision: 1,
+        action: "CREATE",
+        scope: "SUBJECT",
+        subjectKey: "biology",
+        memoryId: null,
+        expectedRevision: null,
+        kind: "LEARNING_DIFFICULTY",
+        origin: "INFERRED",
+        confidenceUnits: 950_000,
+        memoryText,
+      },
+    };
+    const turn = beginTurn(fixture);
+    const result = await fixture.execution().execute({ principal: fixture.principal, responseId: turn.responseId, tutorConfigId: fixture.tutorConfigs.list()[0]!.id });
+    assert.equal(result.status, "COMPLETED");
+    assert.equal(fixture.generation.calls, 1);
+    const memory = fixture.database.client.prepare("select status, creation_origin, safe_review_code, memory_text from ai_memories where principal_ref=?").get(fixture.principal.principalRef) as { status: string; creation_origin: string; safe_review_code: string; memory_text: string };
+    assert.deepEqual(memory, { status: "ACTIVE", creation_origin: "INFERRED", safe_review_code: "INFERRED_ACTIVATED", memory_text: memoryText });
+    const mutation = fixture.database.client.prepare("select status, memory_text from ai_memory_mutation_intents where response_id=?").get(turn.responseId) as { status: string; memory_text: string | null };
+    assert.deepEqual(mutation, { status: "APPLIED", memory_text: null });
+    assert.equal(Number((fixture.database.client.prepare("select count(*) as count from ai_memory_executions where execution_kind='EXTRACTION'").get() as { count: number }).count), 0);
+    const operationalMetadata = ["ai_memory_mutation_intents", "ai_memory_mutation_records", "ai_memory_executions", "ai_jobs", "ai_outbox_events", "ai_cost_operations", "ai_usage_cost_records"].map((table) => JSON.stringify(fixture.database.client.prepare(`select * from ${table}`).all())).join("\n");
+    assert.equal(operationalMetadata.includes(memoryText), false);
+    const assistant = fixture.conversations.listMessages(fixture.principal, turn.conversationId).find((message) => message.role === "ASSISTANT");
+    assert.ok(assistant);
+    assert.equal(assistant.content.includes(memoryText), false);
+  } finally { fixture.close(); }
+});
+
+test("M10B2 applies an explicit Agent-1 Memory command without a second Generation", async () => {
+  const fixture = await createFixture();
+  try {
+    const changes = createChangeManagementService(fixture.database);
+    const memoryPolicyId = uuidv7();
+    publishChange(changes, fixture.owner, AI_MEMORY_POLICY_RESOURCE_TYPE, memoryPolicyId, {
+      key: `m10b2-explicit-memory-${uuidv7()}`,
+      scope: "SUBJECT",
+      subjectKey: "biology",
+      displayName: "M10B2 Explicit Memory",
+      enabled: true,
+      allowedKinds: ["EXPLANATION_PREFERENCE"],
+      targetActiveCount: 10,
+      hardActiveMaximum: 10,
+      maxSelectedPerRequest: 10,
+      proposedHardMaximum: 10,
+      perMemoryMaxBytes: 4096,
+      retentionDays: 365,
+      mutationEnabled: true,
+      explicitMinConfidenceUnits: 800_000,
+      inferredMinConfidenceUnits: 900_000,
+      inferredMinDistinctEvidenceTurns: 2,
+      candidateReviewRequired: true,
+      maxSelectedMemories: 10,
+    });
+    const memoryText = "Always show a worked example before the biology rule.";
+    fixture.generation.behavior = {
+      finishReason: "STOP",
+      deltas: ["Grounded answer [E1]"],
+      usageEvents: [],
+      finalUsage: knownUsage(20, 3),
+      memoryCommand: {
+        protocolKey: "memory-command-v1",
+        protocolRevision: 1,
+        action: "CREATE",
+        scope: "SUBJECT",
+        subjectKey: "biology",
+        memoryId: null,
+        expectedRevision: null,
+        kind: "EXPLANATION_PREFERENCE",
+        origin: "EXPLICIT",
+        confidenceUnits: 900_000,
+        memoryText,
+      },
+    };
+    const turn = beginTurn(fixture);
+    const result = await fixture.execution().execute({ principal: fixture.principal, responseId: turn.responseId, tutorConfigId: fixture.tutorConfigs.list()[0]!.id });
+    assert.equal(result.status, "COMPLETED");
+    assert.equal(fixture.generation.calls, 1);
+    assert.deepEqual(fixture.database.client.prepare("select status, creation_origin, safe_review_code, memory_text from ai_memories where principal_ref=?").get(fixture.principal.principalRef), { status: "ACTIVE", creation_origin: "EXPLICIT", safe_review_code: "EXPLICIT_CREATED", memory_text: memoryText });
+    assert.equal(Number((fixture.database.client.prepare("select count(*) as count from ai_memory_executions where execution_kind='EXTRACTION'").get() as { count: number }).count), 0);
   } finally { fixture.close(); }
 });
 

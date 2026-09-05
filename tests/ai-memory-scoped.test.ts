@@ -191,6 +191,32 @@ test("M10A2 updates one logical Memory, rejects stale revisions, and controls li
   } finally { fixture.close(); }
 });
 
+test("M10A2 SQLite and service mutation boundaries require the current Policy thresholds", () => {
+  const fixture = createFixture();
+  try {
+    const policy = publishPolicy(fixture, policyContent("SUBJECT", "biology"));
+    const first = completeTurn(fixture, PRINCIPAL_A, "biology", "I confuse stages.", "Let us compare them.", BASE_TIME + 10);
+    const second = completeTurn(fixture, PRINCIPAL_A, "biology", "I still confuse them.", "Here is another distinction.", BASE_TIME + 20);
+    const inferred = fixture.memory.proposeInferred(PRINCIPAL_A, { scope: "SUBJECT", subjectKey: "biology", kind: "LEARNING_DIFFICULTY", text: "low-confidence inferred memory", confidenceUnits: 800_000, source: first.source, memoryPolicyId: policy.id, memoryPolicyRevision: policy.revision, now: BASE_TIME + 30 });
+    fixture.memory.addProposedEvidence(PRINCIPAL_A, { memoryId: inferred.id, scope: "SUBJECT", subjectKey: "biology", expectedRevision: inferred.revision, source: second.source, now: BASE_TIME + 31 });
+    assert.throws(() => fixture.database.client.prepare("update ai_memories set status='ACTIVE', reviewed_at=?, safe_review_code='INFERRED_ACTIVATED' where id=?").run(BASE_TIME + 32, inferred.id), /current|policy|mutation|confidence|constraint/i);
+
+    const current = fixture.policies.getCurrentRevision(policy.id)!;
+    const stricter = policyContent("SUBJECT", "biology");
+    stricter.key = current.key;
+    stricter.inferredMinConfidenceUnits = 950_000;
+    let change = fixture.changes.createChangeSet({ title: "Stricter Memory Policy", initialItem: { resourceType: AI_MEMORY_POLICY_RESOURCE_TYPE, resourceId: policy.id, expectedRevision: current.revision, operation: "UPDATE", desired: stricter } }, fixture.admin);
+    change = fixture.changes.submit(change.changeSet.id, change.changeSet.revision, fixture.admin);
+    change = fixture.changes.approve(change.changeSet.id, change.changeSet.revision, fixture.owner);
+    fixture.changes.publish(change.changeSet.id, change.changeSet.revision, fixture.owner);
+    assert.throws(() => fixture.memory.createExplicitActive(PRINCIPAL_A, { scope: "SUBJECT", subjectKey: "biology", kind: "LEARNING_PREFERENCE", text: "historical bypass", confidenceUnits: 900_000, source: first.source, memoryPolicyId: policy.id, memoryPolicyRevision: 1, now: BASE_TIME + 40 }), /historical|revision|current|confidence/i);
+
+    const globalPolicy = publishPolicy(fixture, policyContent("GLOBAL", null));
+    const globalInsert = fixture.database.client.prepare("insert into ai_memories (id,principal_ref,scope,subject_key,memory_policy_id,memory_policy_revision,revision,status,visibility_scope,creation_origin,kind,source_conversation_id,source_start_ordinal,source_end_ordinal,memory_text,confidence_units,created_at,updated_at,reviewed_at,resolved_at,deleted_at,expires_at,safe_review_code,content_sha256) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+    assert.throws(() => globalInsert.run(uuidv7(), PRINCIPAL_A.principalRef, "GLOBAL", null, globalPolicy.id, 1, 1, "PROPOSED", "PRINCIPAL_GLOBAL", "INFERRED", "PREFERRED_NAME", first.conversation.id, 1, 2, "inferred global name", 950_000, BASE_TIME + 41, BASE_TIME + 41, null, null, null, BASE_TIME + 41 + 30 * 86_400_000, "INFERRED_PROPOSED", null), /global|policy|mutation|invalid|constraint/i);
+  } finally { fixture.close(); }
+});
+
 test("M10A2 inferred proposals accumulate distinct evidence and activate only through the internal gate", () => {
   const fixture = createFixture();
   try {
@@ -208,6 +234,20 @@ test("M10A2 inferred proposals accumulate distinct evidence and activate only th
     assert.equal(active.status, "ACTIVE");
     assert.equal(active.revision, 2);
     assert.equal(fixture.memory.listEligible(PRINCIPAL_A, "biology", { at: BASE_TIME + 51 }).length, 1);
+  } finally { fixture.close(); }
+});
+
+test("M10B2 keeps an inferred Agent command as PROPOSED when Student review is required", () => {
+  const fixture = createFixture();
+  try {
+    const policy = publishPolicy(fixture, { ...policyContent("SUBJECT", "biology"), candidateReviewRequired: true, inferredMinDistinctEvidenceTurns: 1 });
+    const turn = completeTurn(fixture, PRINCIPAL_A, "biology", "I mix two stages.", "Let us compare them.", BASE_TIME + 10);
+    const intent = fixture.memory.createMutationIntent({ commandId: `agent-command-${uuidv7()}`, principal: PRINCIPAL_A, responseId: turn.source.responseId, conversationId: turn.source.conversationId, scope: "SUBJECT", subjectKey: "biology", action: "CREATE", kind: "LEARNING_DIFFICULTY", origin: "INFERRED", confidenceUnits: 950_000, memoryText: "The Student mixes two stages.", createdAt: BASE_TIME + 20 });
+    const record = fixture.memory.applyMutationIntent(intent.commandId, BASE_TIME + 21);
+    assert.equal(record.status, "APPLIED");
+    const memory = fixture.memory.get(PRINCIPAL_A, record.memoryId!, "biology")!;
+    assert.equal(memory.status, "PROPOSED");
+    assert.equal(fixture.memory.listEligible(PRINCIPAL_A, "biology", { at: BASE_TIME + 22 }).length, 0);
   } finally { fixture.close(); }
 });
 
@@ -293,6 +333,15 @@ test("M10A2 mutation intents are bounded C4, idempotent, and scrub raw text afte
     fixture.memory.purgePrincipalInTransaction(PRINCIPAL_A.principalRef, BASE_TIME + 200);
     assert.equal(fixture.memory.getMutationIntent(pending.commandId)!.status, "CANCELLED");
     assert.equal(fixture.memory.getMutationIntent(pending.commandId)!.memoryText, null);
+    for (let index = 0; index < 101; index += 1) {
+      fixture.memory.createMutationIntent({ commandId: `purge-pending-${uuidv7()}`, principal: PRINCIPAL_A, responseId: turn.source.responseId, conversationId: turn.source.conversationId, scope: "GLOBAL", subjectKey: null, action: "CREATE", kind: "STUDY_GOAL", origin: "EXPLICIT", confidenceUnits: 800_000, memoryText: `PRIVATE_PENDING_PURGE_${index}`, createdAt: BASE_TIME + 300 + index });
+    }
+    const firstBatch = fixture.memory.purgePrincipalBatch(PRINCIPAL_A.principalRef, BASE_TIME + 500);
+    assert.equal(firstBatch.remainingWork, true);
+    assert.equal(firstBatch.remainingIntents, 1);
+    const secondBatch = fixture.memory.purgePrincipalBatch(PRINCIPAL_A.principalRef, BASE_TIME + 501);
+    assert.equal(secondBatch.remainingWork, false);
+    assert.equal(secondBatch.remainingIntents, 0);
   } finally { fixture.close(); }
 });
 
@@ -328,12 +377,68 @@ test("M10A2 migrates a populated 0042 database to scoped legacy Subject Memory w
     oldDatabase.close();
     oldDatabase = null;
     upgraded = openContentDatabase({ dataDirectory: root, migrationsDirectory });
-    assert.equal((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 44);
+    assert.equal((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 45);
     assert.equal((upgraded.client.prepare("select count(*) as count from ai_memories where scope='GLOBAL'").get() as { count: number }).count, 0);
     assert.deepEqual(upgraded.client.prepare("select scope,subject_key,creation_origin,status,memory_text from ai_memories").get(), { scope: "SUBJECT", subject_key: "biology", creation_origin: "LEGACY_SUBJECT", status: "PROPOSED", memory_text: "LEGACY_MEMORY_TEXT" });
     assert.deepEqual(upgraded.client.prepare("select scope,subject_key from ai_memory_policies where id=?").get(policyId), { scope: "SUBJECT", subject_key: "biology" });
+    assert.equal((upgraded.client.prepare("select m10a2_mutation_authority from ai_memory_policies where id=?").get(policyId) as { m10a2_mutation_authority: number }).m10a2_mutation_authority, 0);
     assert.equal((upgraded.client.prepare("select origin from ai_conversations where id=?").get(conversation.id) as { origin: string }).origin, "STUDENT");
-    for (const trigger of ["ai_memories_insert_valid", "ai_memories_lifecycle_valid", "ai_memories_no_delete", "ai_memory_provenance_insert_valid", "ai_memory_mutation_intents_insert_valid", "ai_memory_executions_lifecycle_valid"]) assert.ok(upgraded.client.prepare("select name from sqlite_master where type='trigger' and name=?").get(trigger));
+    for (const trigger of ["ai_memories_insert_valid", "ai_memories_lifecycle_valid", "ai_memories_no_delete", "ai_memories_current_policy_insert_valid", "ai_memories_current_policy_update_valid", "ai_memory_provenance_insert_valid", "ai_memory_mutation_intents_insert_valid", "ai_memory_executions_lifecycle_valid"]) assert.ok(upgraded.client.prepare("select name from sqlite_master where type='trigger' and name=?").get(trigger));
+  } finally {
+    oldDatabase?.close();
+    upgraded?.close();
+    try { rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 }); } catch { /* Windows may retain a WAL handle briefly. */ }
+    try { rmSync(oldMigrations, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 }); } catch { /* Windows may retain a WAL handle briefly. */ }
+  }
+});
+
+test("M10A2 migrates populated 0043 Memory rows and cuts over legacy mutation authority", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "pythagoras-ai-memory-0043-upgrade-"));
+  const oldMigrations = mkdtempSync(path.join(os.tmpdir(), "pythagoras-ai-memory-0043-migrations-"));
+  let oldDatabase: ContentDatabase | null = null;
+  let upgraded: ContentDatabase | null = null;
+  try {
+    mkdirSync(path.join(oldMigrations, "meta"), { recursive: true });
+    const journal = JSON.parse(readFileSync(path.join(migrationsDirectory, "meta", "_journal.json"), "utf8")) as { entries: Array<{ idx: number; tag: string }> };
+    const entries = journal.entries.slice(0, 44);
+    for (const entry of entries) {
+      copyFileSync(path.join(migrationsDirectory, `${entry.tag}.sql`), path.join(oldMigrations, `${entry.tag}.sql`));
+      const snapshot = `${entry.idx.toString().padStart(4, "0")}_snapshot.json`;
+      if (existsSync(path.join(migrationsDirectory, "meta", snapshot))) copyFileSync(path.join(migrationsDirectory, "meta", snapshot), path.join(oldMigrations, "meta", snapshot));
+    }
+    writeFileSync(path.join(oldMigrations, "meta", "_journal.json"), JSON.stringify({ ...journal, entries }));
+    oldDatabase = openContentDatabase({ dataDirectory: root, migrationsDirectory: oldMigrations });
+    assert.equal((oldDatabase.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 44);
+    new SQLiteCanonicalContentRepository(oldDatabase, () => BASE_TIME).bootstrap();
+    const ownerUser = new SQLiteAdminIdentityRepository(oldDatabase).createInitialOwner({ id: uuidv7(), email: `${uuidv7()}@memory-0043-upgrade.test`, displayName: "Memory 0043 Owner", passwordHash: "fixture", createdAt: BASE_TIME });
+    const policyId = uuidv7();
+    oldDatabase.client.prepare("insert into ai_memory_policies (id,key,scope,subject_key,current_revision,created_at,updated_at,created_by,updated_by) values (?,?,?,?,?,?,?,?,?)").run(policyId, "memory-0043-policy", "SUBJECT", "biology", 1, BASE_TIME + 1, BASE_TIME + 1, ownerUser.id, ownerUser.id);
+    oldDatabase.client.prepare("insert into ai_memory_policy_revisions (id,memory_policy_id,revision,display_name,enabled,candidate_review_required,allowed_kinds,target_active_count,hard_active_maximum,max_selected_per_request,proposed_hard_maximum,per_memory_max_bytes,retention_days,max_selected_memories,mutation_enabled,explicit_min_confidence_units,inferred_min_confidence_units,inferred_min_distinct_evidence_turns,created_at,created_by) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(uuidv7(), policyId, 1, "Memory 0043 Policy", 1, 1, JSON.stringify(["LEARNING_PREFERENCE"]), 3, 10, 3, 5, 4096, 30, 3, 1, 0, 900_000, 2, BASE_TIME + 1, ownerUser.id);
+    const conversations = new AIConversationService(oldDatabase, { clock: () => BASE_TIME + 2 });
+    const principal: AIStudentPrincipal = { principalRef: "memory-0043-student", status: "ACTIVE" };
+    const conversation = conversations.createConversation(principal, "biology");
+    const turn = conversations.beginTurn(principal, { conversationId: conversation.id, idempotencyKey: `memory-0043-turn-${uuidv7()}`, userContent: "I prefer worked examples." });
+    conversations.startResponse(principal, turn.response.id);
+    conversations.appendResponseChunk(principal, turn.response.id, 0, "Here is one.");
+    conversations.completeResponse(principal, turn.response.id, "STOP");
+    const memoryId = uuidv7();
+    const createdAt = BASE_TIME + 10;
+    oldDatabase.client.prepare("insert into ai_memories (id,principal_ref,scope,subject_key,memory_policy_id,memory_policy_revision,revision,status,visibility_scope,creation_origin,kind,source_conversation_id,source_start_ordinal,source_end_ordinal,memory_text,confidence_units,created_at,updated_at,reviewed_at,resolved_at,deleted_at,expires_at,safe_review_code,content_sha256) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(memoryId, principal.principalRef, "SUBJECT", "biology", policyId, 1, 1, "PROPOSED", "PRINCIPAL_SUBJECT", "INFERRED", "LEARNING_PREFERENCE", conversation.id, 1, 2, "UPGRADE_0043_MEMORY_TEXT", 900_000, createdAt, createdAt, null, null, null, createdAt + 30 * 86_400_000, "INFERRED_PROPOSED", null);
+    oldDatabase.close();
+    oldDatabase = null;
+
+    upgraded = openContentDatabase({ dataDirectory: root, migrationsDirectory });
+    assert.equal((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 45);
+    assert.deepEqual(upgraded.client.prepare("select key,scope,subject_key,current_revision,m10a2_mutation_authority from ai_memory_policies where id=?").get(policyId), { key: "memory-0043-policy", scope: "SUBJECT", subject_key: "biology", current_revision: 1, m10a2_mutation_authority: 0 });
+    assert.deepEqual(upgraded.client.prepare("select status,creation_origin,kind,memory_text,confidence_units from ai_memories where id=?").get(memoryId), { status: "PROPOSED", creation_origin: "INFERRED", kind: "LEARNING_PREFERENCE", memory_text: "UPGRADE_0043_MEMORY_TEXT", confidence_units: 900_000 });
+    for (const trigger of ["ai_memory_policies_m10a2_authority_immutable", "ai_memories_current_policy_insert_valid", "ai_memories_current_policy_update_valid", "ai_memories_current_inferred_evidence_valid"]) assert.ok(upgraded.client.prepare("select name from sqlite_master where type='trigger' and name=?").get(trigger));
+    const upgradedConversations = new AIConversationService(upgraded, { clock: () => BASE_TIME + 100 });
+    const newConversation = upgradedConversations.createConversation(principal, "biology");
+    const newTurn = upgradedConversations.beginTurn(principal, { conversationId: newConversation.id, idempotencyKey: `memory-0043-new-${uuidv7()}`, userContent: "new mutation" });
+    upgradedConversations.startResponse(principal, newTurn.response.id);
+    upgradedConversations.appendResponseChunk(principal, newTurn.response.id, 0, "answer");
+    upgradedConversations.completeResponse(principal, newTurn.response.id, "STOP");
+    assert.throws(() => new AIMemoryService(upgraded!).createExplicitActive(principal, { scope: "SUBJECT", subjectKey: "biology", kind: "LEARNING_PREFERENCE", text: "must not mutate under legacy authority", confidenceUnits: 1_000_000, memoryPolicyId: policyId, memoryPolicyRevision: 1, source: { conversationId: newConversation.id, responseId: newTurn.response.id, requestMessageId: newTurn.userMessage.id, assistantMessageId: upgradedConversations.getResponse(principal, newTurn.response.id).assistantMessageId!, sourceStartOrdinal: 1, sourceEndOrdinal: 2 } }), /authority|policy|scope|mutation/i);
   } finally {
     oldDatabase?.close();
     upgraded?.close();

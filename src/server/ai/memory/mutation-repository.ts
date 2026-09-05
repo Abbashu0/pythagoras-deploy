@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, count, eq, inArray } from "drizzle-orm";
 
 import type { ContentDatabase } from "../../content/database";
 import {
@@ -74,6 +74,17 @@ export class SQLiteAIMemoryMutationRepository implements AIMemoryMutationReposit
     return intentFromRow(row);
   }
 
+  markIntentCancelled(commandId: string, at: number): AIMemoryMutationIntent {
+    validateTimestamp(at);
+    const row = this.database.db.update(aiMemoryMutationIntents).set({ status: "CANCELLED", memoryText: null, appliedAt: at }).where(and(eq(aiMemoryMutationIntents.commandId, commandId), eq(aiMemoryMutationIntents.status, "PENDING"))).returning().get();
+    if (!row) {
+      const existing = this.getIntent(commandId);
+      if (existing?.status === "CANCELLED") return existing;
+      throw new AIMemoryError("AI_MEMORY_MUTATION_INVALID", "The Memory mutation intent changed before cancellation.");
+    }
+    return intentFromRow(row);
+  }
+
   cancelPendingForPrincipal(principalRef: string, at: number, limit: number): number {
     validateTimestamp(at);
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new AIMemoryError("AI_MEMORY_MUTATION_INVALID", "The Memory purge limit is invalid.");
@@ -83,6 +94,12 @@ export class SQLiteAIMemoryMutationRepository implements AIMemoryMutationReposit
     if (!rows.length) return 0;
     return this.database.db.update(aiMemoryMutationIntents).set({ status: "CANCELLED", memoryText: null, appliedAt: at })
       .where(and(eq(aiMemoryMutationIntents.status, "PENDING"), inArray(aiMemoryMutationIntents.id, rows.map((row) => row.id)))).run().changes;
+  }
+
+  countPendingForPrincipal(principalRef: string): number {
+    const row = this.database.db.select({ value: count() }).from(aiMemoryMutationIntents)
+      .where(and(eq(aiMemoryMutationIntents.principalRef, principalRef), eq(aiMemoryMutationIntents.status, "PENDING"))).get();
+    return Number(row?.value ?? 0);
   }
 
   listPendingIntents(limit: number): AIMemoryMutationIntent[] {

@@ -32,6 +32,7 @@ import {
   AI_GATEWAY_MAX_GENERATION_INSTRUCTIONS_BYTES,
   AI_GATEWAY_MAX_GENERATION_MESSAGE_BYTES,
   AI_GATEWAY_MAX_GENERATION_MESSAGES,
+  AI_GATEWAY_MAX_MEMORY_COMMAND_BYTES,
   AI_PROVIDER_ERROR_CODES,
   GENERATION_FINISH_REASONS,
 } from "./contracts";
@@ -295,6 +296,7 @@ export class AIProviderGateway {
               })();
           let started = false;
           let terminal = false;
+          let memoryCommandSeen = false;
           let latestUsage: NormalizedProviderUsage | null = null;
           try {
             while (true) {
@@ -303,6 +305,7 @@ export class AIProviderGateway {
               const providerEvent = validateProviderGenerationEvent(next.value, {
                 started,
                 terminal,
+                memoryCommandSeen,
               });
               if (providerEvent.type === "STARTED") {
                 started = true;
@@ -310,6 +313,9 @@ export class AIProviderGateway {
                   trace.providerRequestId = providerEvent.providerRequestId;
                 }
               } else if (providerEvent.type === "TEXT_DELTA") {
+                partialOutput = true;
+              } else if (providerEvent.type === "MEMORY_COMMAND") {
+                memoryCommandSeen = true;
                 partialOutput = true;
               } else if (providerEvent.type === "COMPLETED") {
                 assertCumulativeUsage(latestUsage, providerEvent.usage, true);
@@ -868,7 +874,7 @@ function validateRerankRequest(request: RerankGatewayRequest): void {
 
 function validateProviderGenerationEvent(
   value: unknown,
-  state: { started: boolean; terminal: boolean },
+  state: { started: boolean; terminal: boolean; memoryCommandSeen: boolean },
 ): ProviderGenerationStreamEvent {
   if (!isPlainObject(value) || typeof value.type !== "string") {
     throw new GatewayProtocolError();
@@ -887,6 +893,12 @@ function validateProviderGenerationEvent(
       throw new GatewayProtocolError();
     }
     return { type: "TEXT_DELTA", text: value.text };
+  }
+  if (value.type === "MEMORY_COMMAND") {
+    if (state.started && !state.terminal && !state.memoryCommandSeen && isPlainObject(value.command) && safeJsonBytes(value.command) <= AI_GATEWAY_MAX_MEMORY_COMMAND_BYTES) {
+      return { type: "MEMORY_COMMAND", command: structuredClone(value.command) };
+    }
+    throw new GatewayProtocolError();
   }
   if (value.type === "USAGE") {
     if (!state.started || state.terminal) throw new GatewayProtocolError();
@@ -919,6 +931,8 @@ function toGatewayGenerationEvent(
   switch (event.type) {
     case "TEXT_DELTA":
       return { type: "TEXT_DELTA", text: event.text };
+    case "MEMORY_COMMAND":
+      return { type: "MEMORY_COMMAND", command: event.command };
     case "USAGE":
       return { type: "USAGE", usage: event.usage };
     case "COMPLETED":
@@ -1290,4 +1304,12 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const prototype = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
+}
+
+function safeJsonBytes(value: unknown): number {
+  try {
+    return Buffer.byteLength(JSON.stringify(value), "utf8");
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
 }

@@ -4,7 +4,7 @@ import { v7 as uuidv7 } from "uuid";
 import { assertActiveStudentPrincipal } from "../conversations/principal";
 import type { AIStudentPrincipal } from "../conversations/contracts";
 import { SQLiteAIConversationRepository } from "../conversations/sqlite-repository";
-import { AIMemoryError, AI_MEMORY_CONFIDENCE_SCALE, AI_MEMORY_MAX_EVIDENCE_PER_REVISION, AI_MEMORY_MAX_PROPOSED_PER_SCOPE, AI_MEMORY_PURGE_BATCH_SIZE, type AIMemory, type AIMemoryCreationOrigin, type AIMemoryKind, type AIMemoryMutationIntent, type AIMemoryMutationRecord, type AIMemoryPolicyRepository, type AIMemoryProvenance, type AIMemoryRepository, type AIMemoryScope } from "./contracts";
+import { AIMemoryError, AI_MEMORY_CONFIDENCE_SCALE, AI_MEMORY_MAX_EVIDENCE_PER_REVISION, AI_MEMORY_MAX_PROPOSED_PER_SCOPE, AI_MEMORY_PURGE_BATCH_SIZE, type AIMemory, type AIMemoryCreationOrigin, type AIMemoryKind, type AIMemoryMutationIntent, type AIMemoryMutationRecord, type AIMemoryPolicyRepository, type AIMemoryProvenance, type AIMemoryPurgeResult, type AIMemoryRepository, type AIMemoryScope } from "./contracts";
 import { SQLiteAIMemoryPolicyRepository } from "./policy-repository";
 import { SQLiteAIMemoryRepository } from "./repository";
 import { SQLiteAIMemoryMutationRepository } from "./mutation-repository";
@@ -115,6 +115,7 @@ export class AIMemoryService {
       this.requireKind(policy, input.kind);
       const text = this.validateMemoryText(input.text, policy.perMemoryMaxBytes);
       validateConfidence(input.confidenceUnits);
+      if (input.confidenceUnits < (policy.explicitMinConfidenceUnits ?? 0)) throw new AIMemoryError("AI_MEMORY_MUTATION_INVALID", "The explicit Memory confidence is below current Policy.");
       this.requireActiveQuota(activePrincipal.principalRef, input.scope, subjectKey, policy.hardActiveMaximum ?? 1);
       const now = input.now ?? this.safeNow();
       const memory = this.memories.insertMemory(this.newMemory({
@@ -222,6 +223,7 @@ export class AIMemoryService {
       if (current.revision !== input.expectedRevision) throw new AIMemoryError("AI_MEMORY_REVISION_CONFLICT", "The inferred Memory proposal changed before activation.");
       const policy = this.requirePolicy(current.scope, current.subjectKey, current.memoryPolicyId, current.memoryPolicyRevision);
       this.requireMutationPolicy(policy);
+      if (policy.candidateReviewRequired !== false) throw new AIMemoryError("AI_MEMORY_LIFECYCLE_CONFLICT", "The current Memory Policy requires Student review before inferred activation.");
       if (current.confidenceUnits < (policy.inferredMinConfidenceUnits ?? 900_000)) throw new AIMemoryError("AI_MEMORY_LIFECYCLE_CONFLICT", "The inferred Memory confidence is below policy.");
       const evidence = this.memories.listProvenance(current.id, current.revision).filter((item) => item.sourceState === "ACTIVE");
       const evidenceCount = new Set(evidence.map((item) => item.responseId)).size;
@@ -236,19 +238,36 @@ export class AIMemoryService {
   }
 
   updateExplicitActive(principal: AIStudentPrincipal, input: { memoryId: string; scope: AIMemoryScope; subjectKey: string | null; expectedRevision: number; kind: AIMemoryKind; text: string; confidenceUnits: number; source: AIMemorySourceEvidenceInput; now?: number }): AIMemory {
+    return this.updateActive(principal, input);
+  }
+
+  updateActive(principal: AIStudentPrincipal, input: { memoryId: string; scope: AIMemoryScope; subjectKey: string | null; expectedRevision: number; kind: AIMemoryKind; text: string; confidenceUnits: number; source: AIMemorySourceEvidenceInput; now?: number }): AIMemory {
     return this.atomic(() => {
       const activePrincipal = assertActiveStudentPrincipal(principal);
       const subjectKey = normalizeScopedSubject(input.scope, input.subjectKey);
       const current = this.requireOwnedCurrent(activePrincipal.principalRef, input.memoryId, input.scope, subjectKey);
-      if (current.status !== "ACTIVE" || current.creationOrigin !== "EXPLICIT") throw new AIMemoryError("AI_MEMORY_LIFECYCLE_CONFLICT", "The Memory lifecycle permits updates only for an active explicit Memory.");
+      if (current.status !== "ACTIVE" || !["EXPLICIT", "INFERRED"].includes(current.creationOrigin)) throw new AIMemoryError("AI_MEMORY_LIFECYCLE_CONFLICT", "The Memory lifecycle permits updates only for active semantic Memory.");
       if (current.revision !== input.expectedRevision) throw new AIMemoryError("AI_MEMORY_REVISION_CONFLICT", "The Memory changed before it could be updated.");
       const policy = this.requirePolicy(current.scope, current.subjectKey, current.memoryPolicyId, current.memoryPolicyRevision);
       this.requireMutationPolicy(policy);
+      if (current.creationOrigin === "INFERRED" && policy.candidateReviewRequired !== false) throw new AIMemoryError("AI_MEMORY_LIFECYCLE_CONFLICT", "The current Memory Policy requires Student review before inferred activation or update.");
       this.requireKind(policy, input.kind);
       const text = this.validateMemoryText(input.text, policy.perMemoryMaxBytes);
       validateConfidence(input.confidenceUnits);
+      const minimumConfidence = current.creationOrigin === "EXPLICIT" ? policy.explicitMinConfidenceUnits ?? 0 : policy.inferredMinConfidenceUnits ?? 900_000;
+      if (input.confidenceUnits < minimumConfidence) throw new AIMemoryError("AI_MEMORY_MUTATION_INVALID", "The Memory confidence is below current Policy.");
       const source = this.validateSource(activePrincipal.principalRef, input.scope, subjectKey, input.source);
       const now = input.now ?? this.safeNow();
+      if (current.creationOrigin === "INFERRED") {
+        const allEvidence = this.memories.listProvenance(current.id).filter((row) => row.sourceState === "ACTIVE");
+        if (allEvidence.some((row) => row.responseId === source.responseId) || allEvidence.length >= AI_MEMORY_MAX_EVIDENCE_PER_REVISION) throw new AIMemoryError("AI_MEMORY_PROVENANCE_INVALID", "The Memory evidence turn is already attached or the evidence bound is reached.");
+        this.memories.insertProvenance({ id: this.idFactory(), ...source, memoryId: current.id, memoryRevision: current.revision, principalRef: activePrincipal.principalRef, scope: input.scope, subjectKey, sourceState: "ACTIVE", createdAt: now });
+        const evidence = this.memories.listProvenance(current.id, current.revision).filter((row) => row.sourceState === "ACTIVE");
+        if (new Set(evidence.map((row) => row.responseId)).size < (policy.inferredMinDistinctEvidenceTurns ?? 2)) throw new AIMemoryError("AI_MEMORY_PROVENANCE_INVALID", "The inferred Memory does not have enough distinct completed evidence turns.");
+        const updated = this.memories.updateCurrent({ id: current.id, principalRef: activePrincipal.principalRef, expectedRevision: current.revision, revision: current.revision + 1, updatedAt: now, patch: { status: "ACTIVE", kind: input.kind, memoryText: text, confidenceUnits: input.confidenceUnits, reviewedAt: now, resolvedAt: null, deletedAt: null, safeReviewCode: "INFERRED_ACTIVATED", contentSha256: hash(text), expiresAt: current.expiresAt } });
+        this.copyProvenance(evidence, updated, now);
+        return updated;
+      }
       const updated = this.memories.updateCurrent({ id: current.id, principalRef: activePrincipal.principalRef, expectedRevision: current.revision, revision: current.revision + 1, updatedAt: now, patch: { status: "ACTIVE", kind: input.kind, memoryText: text, confidenceUnits: input.confidenceUnits, reviewedAt: now, resolvedAt: null, deletedAt: null, safeReviewCode: "EXPLICIT_CREATED", contentSha256: hash(text), expiresAt: current.expiresAt } });
       this.memories.insertProvenance({ id: this.idFactory(), ...source, memoryId: updated.id, memoryRevision: updated.revision, principalRef: activePrincipal.principalRef, scope: input.scope, subjectKey, sourceState: "ACTIVE", createdAt: now });
       return updated;
@@ -313,6 +332,11 @@ export class AIMemoryService {
     return this.mutations.getIntent(commandId);
   }
 
+  cancelMutationIntent(commandId: string, now = this.safeNow()): AIMemoryMutationIntent {
+    validateCommandId(commandId);
+    return this.mutations.markIntentCancelled(commandId, now);
+  }
+
   listProvenance(memoryId: string, memoryRevision?: number): AIMemoryProvenance[] {
     if (!UUID_PATTERN.test(memoryId)) throw new AIMemoryError("AI_MEMORY_PROVENANCE_INVALID", "The Memory identity is invalid.");
     return this.memories.listProvenance(memoryId, memoryRevision);
@@ -331,10 +355,23 @@ export class AIMemoryService {
         if (intent.action === "CREATE") {
           const principal = { principalRef: intent.principalRef, status: "ACTIVE" } as AIStudentPrincipal;
           if (intent.origin === "EXPLICIT") memory = this.createExplicitActive(principal, { scope: intent.scope, subjectKey: intent.subjectKey, kind: intent.kind!, text: intent.memoryText!, confidenceUnits: intent.confidenceUnits ?? 0, source });
-          else if (intent.origin === "INFERRED") memory = this.proposeInferred(principal, { scope: intent.scope, subjectKey: intent.subjectKey, kind: intent.kind!, text: intent.memoryText!, confidenceUnits: intent.confidenceUnits ?? 0, source });
+          else if (intent.origin === "INFERRED") {
+            memory = this.proposeInferred(principal, { scope: intent.scope, subjectKey: intent.subjectKey, kind: intent.kind!, text: intent.memoryText!, confidenceUnits: intent.confidenceUnits ?? 0, source });
+            memory = this.maybeAutoActivate(principal, memory, now);
+          }
           else throw new AIMemoryError("AI_MEMORY_MUTATION_INVALID", "The Memory mutation origin is invalid.");
         } else if (intent.action === "UPDATE") {
-          memory = this.updateExplicitActive({ principalRef: intent.principalRef, status: "ACTIVE" } as AIStudentPrincipal, { memoryId: intent.memoryId!, scope: intent.scope, subjectKey: intent.subjectKey, expectedRevision: intent.expectedRevision!, kind: intent.kind!, text: intent.memoryText!, confidenceUnits: intent.confidenceUnits ?? 0, source });
+          const principal = { principalRef: intent.principalRef, status: "ACTIVE" } as AIStudentPrincipal;
+          if (intent.memoryText === null && intent.kind === null && intent.confidenceUnits === null) {
+            if (intent.origin === "INFERRED") {
+              memory = this.activateInferred(principal, { memoryId: intent.memoryId!, scope: intent.scope, subjectKey: intent.subjectKey, expectedRevision: intent.expectedRevision!, now });
+            } else {
+              this.addProposedEvidence(principal, { memoryId: intent.memoryId!, scope: intent.scope, subjectKey: intent.subjectKey, expectedRevision: intent.expectedRevision!, source, now });
+              memory = this.requireOwnedCurrent(intent.principalRef, intent.memoryId!, intent.scope, intent.subjectKey);
+            }
+          } else {
+            memory = this.updateActive(principal, { memoryId: intent.memoryId!, scope: intent.scope, subjectKey: intent.subjectKey, expectedRevision: intent.expectedRevision!, kind: intent.kind!, text: intent.memoryText!, confidenceUnits: intent.confidenceUnits ?? 0, source });
+          }
         } else if (intent.action === "RESOLVE") {
           memory = this.resolve({ principalRef: intent.principalRef, status: "ACTIVE" } as AIStudentPrincipal, { memoryId: intent.memoryId!, scope: intent.scope, subjectKey: intent.subjectKey, expectedRevision: intent.expectedRevision!, now });
         } else if (intent.action === "DELETE") {
@@ -356,7 +393,20 @@ export class AIMemoryService {
     let applied = 0;
     let skipped = 0;
     for (const intent of pending) {
-      try { this.applyMutationIntent(intent.commandId, input.now ?? this.safeNow()); applied += 1; } catch { skipped += 1; }
+      try {
+        const response = this.conversations.getResponse(intent.principalRef, intent.responseId, true);
+        const conversation = response ? this.conversations.getConversation(intent.principalRef, intent.conversationId, true) : null;
+        const now = input.now ?? this.safeNow();
+        if (!response || !conversation || conversation.status === "DELETED" || ["FAILED", "CANCELLED"].includes(response.status)) {
+          this.cancelMutationIntent(intent.commandId, now);
+          applied += 1;
+        } else if (response.status === "COMPLETED" && conversation.status === "ACTIVE") {
+          this.applyMutationIntent(intent.commandId, now);
+          applied += 1;
+        } else {
+          skipped += 1;
+        }
+      } catch { skipped += 1; }
     }
     return { scanned: pending.length, applied, skipped };
   }
@@ -366,11 +416,17 @@ export class AIMemoryService {
   }
 
   purgePrincipalInTransaction(principalRef: string, at: number, limit?: number): number {
+    return this.purgePrincipalBatch(principalRef, at, limit).memoriesChanged;
+  }
+
+  purgePrincipalBatch(principalRef: string, at: number, limit?: number): AIMemoryPurgeResult {
     const boundedLimit = limit ?? AI_MEMORY_PURGE_BATCH_SIZE;
     return this.atomic(() => {
-      const purged = this.memories.purgeForPrincipalInTransaction({ principalRef, at, limit: boundedLimit });
-      this.mutations.cancelPendingForPrincipal(principalRef, at, boundedLimit);
-      return purged;
+      const memoriesChanged = this.memories.purgeForPrincipalInTransaction({ principalRef, at, limit: boundedLimit });
+      const intentsCancelled = this.mutations.cancelPendingForPrincipal(principalRef, at, boundedLimit);
+      const remainingMemories = this.memories.countPurgeableForPrincipal(principalRef);
+      const remainingIntents = this.mutations.countPendingForPrincipal(principalRef);
+      return { memoriesChanged, intentsCancelled, remainingMemories, remainingIntents, remainingWork: remainingMemories > 0 || remainingIntents > 0 };
     });
   }
 
@@ -393,15 +449,28 @@ export class AIMemoryService {
 
   private requirePolicy(scope: AIMemoryScope, subjectKey: string | null, id?: string, revision?: number) {
     assertScope(scope, subjectKey);
-    const identity = id === undefined ? this.policies.getByScope(scope, subjectKey) : null;
-    const found = id === undefined ? identity ? this.policies.getCurrentRevision(identity.id) : null : this.policies.getRevision(id, revision ?? 0);
-    if (!found || (found.scope ?? "SUBJECT") !== scope || found.subjectKey !== subjectKey) throw new AIMemoryError("AI_MEMORY_POLICY_NOT_FOUND", "The scoped Memory Policy is unavailable.");
-    if (!found.enabled) throw new AIMemoryError("AI_MEMORY_POLICY_DISABLED", "The scoped Memory Policy is disabled.");
+    const identity = id === undefined ? this.policies.getByScope(scope, subjectKey) : this.policies.getById(id);
+    if (!identity || (identity.scope ?? "SUBJECT") !== scope || identity.subjectKey !== subjectKey) throw new AIMemoryError("AI_MEMORY_POLICY_NOT_FOUND", "The scoped Memory Policy is unavailable.");
+    if (!identity.m10a2MutationAuthority) throw new AIMemoryError("AI_MEMORY_POLICY_SCOPE_INVALID", "The scoped Memory Policy has not established M10A2 mutation authority.");
+    if (revision !== undefined && revision !== identity.currentRevision) throw new AIMemoryError("AI_MEMORY_REVISION_CONFLICT", "The requested historical Memory Policy revision cannot authorize new mutation.");
+    const found = this.policies.getCurrentRevision(identity.id);
+    if (!found || found.revision !== identity.currentRevision || (found.scope ?? "SUBJECT") !== scope || found.subjectKey !== subjectKey) throw new AIMemoryError("AI_MEMORY_POLICY_NOT_FOUND", "The current scoped Memory Policy revision is unavailable.");
+    if (!found.enabled) throw new AIMemoryError("AI_MEMORY_POLICY_DISABLED", "The Memory Policy is disabled.");
     return found;
   }
 
-  private requireMutationPolicy(policy: { mutationEnabled?: boolean }): void {
+  private requireMutationPolicy(policy: { mutationEnabled?: boolean; m10a2MutationAuthority?: boolean }): void {
+    if (policy.m10a2MutationAuthority === false) throw new AIMemoryError("AI_MEMORY_POLICY_SCOPE_INVALID", "The scoped Memory Policy has not established M10A2 mutation authority.");
     if (policy.mutationEnabled === false) throw new AIMemoryError("AI_MEMORY_POLICY_DISABLED", "Memory mutation is disabled by Policy.");
+  }
+
+  private maybeAutoActivate(principal: AIStudentPrincipal, memory: AIMemory, now: number): AIMemory {
+    if (memory.status !== "PROPOSED" || memory.creationOrigin !== "INFERRED") return memory;
+    const policy = this.requirePolicy(memory.scope, memory.subjectKey, memory.memoryPolicyId, memory.memoryPolicyRevision);
+    if (policy.candidateReviewRequired !== false || memory.confidenceUnits < (policy.inferredMinConfidenceUnits ?? 900_000)) return memory;
+    const evidence = this.memories.listProvenance(memory.id, memory.revision).filter((row) => row.sourceState === "ACTIVE");
+    if (new Set(evidence.map((row) => row.responseId)).size < (policy.inferredMinDistinctEvidenceTurns ?? 2)) return memory;
+    return this.activateInferred(principal, { memoryId: memory.id, scope: memory.scope, subjectKey: memory.subjectKey, expectedRevision: memory.revision, now });
   }
 
   private requireKind(policy: { allowedKinds?: AIMemoryKind[] }, kind: AIMemoryKind): void {

@@ -108,11 +108,7 @@ export class AIContextService {
         throw new AIContextError("AI_CONTEXT_SUMMARY_INVALID", "Context Summary text must come from the canonical current Summary revision.");
       }
       const summary = currentSummaryRecord ? summaryContext(currentSummaryRecord) : undefined;
-      const memoryPolicy = this.memoryDomainAvailable ? this.memoryPolicies.getBySubjectKey(conversation.subjectKey) : null;
-      const memoryLimit = memoryPolicy?.maxSelectedPerRequest ?? memoryPolicy?.maxSelectedMemories ?? 1;
-      const memories = memoryPolicy?.enabled && memoryLimit > 0
-        ? this.memories.listEligible({ principalRef: activePrincipal.principalRef, subjectKey: conversation.subjectKey, at: this.safeNow(), limit: memoryLimit })
-        : [];
+      const memories = this.selectScopedMemories(activePrincipal.principalRef, conversation.subjectKey);
       const previousMessages = this.conversations.listMessagesBefore({
         principalRef: activePrincipal.principalRef,
         conversationId: conversation.id,
@@ -233,6 +229,24 @@ export class AIContextService {
   private hasMemoryDomainTables(): boolean {
     const rows = this.database.client.prepare("select name from sqlite_master where type='table' and name in ('ai_memories','ai_memory_policies','ai_memory_policy_revisions','ai_conversation_summary_revisions')").all() as Array<{ name: string }>;
     return rows.length === 4;
+  }
+
+  private selectScopedMemories(principalRef: string, subjectKey: string): import("../memory/contracts").AIContextMemory[] {
+    if (!this.memoryDomainAvailable) return [];
+    const selected: import("../memory/contracts").AIContextMemory[] = [];
+    const at = this.safeNow();
+    for (const [scope, scopedSubject] of [["GLOBAL", null], ["SUBJECT", subjectKey]] as const) {
+      const policy = this.memoryPolicies.getByScope(scope, scopedSubject);
+      if (!policy?.enabled) continue;
+      const limit = policy.maxSelectedPerRequest ?? policy.maxSelectedMemories ?? 1;
+      if (limit < 1) continue;
+      selected.push(...this.memories.listEligibleByScope({ principalRef, scope, subjectKey: scopedSubject, at, limit: Math.min(limit, 100) }));
+    }
+    const deduplicated = new Map<string, import("../memory/contracts").AIContextMemory>();
+    for (const memory of selected) deduplicated.set(`${memory.memoryId}:${memory.revision}`, memory);
+    return [...deduplicated.values()]
+      .sort((left, right) => right.confidenceUnits - left.confidenceUnits || (left.scope === right.scope ? 0 : left.scope === "SUBJECT" ? -1 : 1) || right.createdAt - left.createdAt || left.memoryId.localeCompare(right.memoryId))
+      .slice(0, 100);
   }
 }
 

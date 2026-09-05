@@ -36,6 +36,7 @@ export {
   type AIMemoryMutationIntent,
   type AIMemoryMutationRecord,
   type AIMemoryMutationRepository,
+  type AIMemoryPurgeResult,
 } from "./contracts";
 export {
   AI_CONVERSATION_SUMMARY_MAX_BYTES,
@@ -51,6 +52,7 @@ export { SQLiteAIMemoryPolicyRepository } from "./policy-repository";
 export { AIMemoryPolicyChangeAdapter } from "./policy-change-adapter";
 export { SQLiteAIMemoryRepository } from "./repository";
 export { SQLiteAIMemoryMutationRepository } from "./mutation-repository";
+export { AI_MEMORY_COMMAND_MAX_BYTES, AI_MEMORY_COMMAND_PROTOCOL_KEY, AI_MEMORY_COMMAND_PROTOCOL_REVISION, AI_MEMORY_COMMAND_ACTIONS, parseAIMemoryCommand, type AIMemoryCommand, type AIMemoryCommandAction } from "./command";
 export { AIMemoryService, type AIMemoryServiceDependencies } from "./service";
 export type { AIMemoryCreateInput, AIMemorySourceEvidenceInput, AIMemoryMutationIntentInput } from "./service";
 export { SQLiteAIConversationSummaryRepository } from "./summary-repository";

@@ -35,6 +35,7 @@ import type { AITutorResponseTrace, AITutorResponseTraceService } from "../trace
 import type { AITutorOutputValidator } from "../validation";
 import type { AIEvidencePack, HybridRetrievalService } from "../../retrieval";
 import type { AIContextTokenEstimator } from "../../context";
+import type { AIMemoryService } from "../../memory";
 
 export interface AITutorExecutionInput {
   principal: AIStudentPrincipal;
@@ -114,6 +115,7 @@ export interface AITutorExecutionDependencies {
   retrieval: AITutorExecutionRetrieval;
   planner: Pick<AITutorGenerationPlanner, "plan">;
   outputValidator?: Pick<AITutorOutputValidator, "validate">;
+  memory?: AIMemoryService;
   traces: AITutorExecutionTraceService;
   gateway: AITutorExecutionGateway;
   estimator: AIContextTokenEstimator;

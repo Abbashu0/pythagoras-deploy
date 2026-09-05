@@ -15,8 +15,6 @@ import {
   AI_CONVERSATION_COMPACTION_PROTOCOL_KEY,
   AI_CONVERSATION_COMPACTION_PROTOCOL_REVISION,
   AI_MEMORY_EXECUTION_PAYLOAD_VERSION,
-  AI_MEMORY_EXTRACTION_JOB_KIND,
-  AI_MEMORY_EXTRACTION_OUTBOX_EVENT_TYPE,
   AI_MEMORY_COMPACTION_JOB_KIND,
   AI_MEMORY_COMPACTION_OUTBOX_EVENT_TYPE,
 } from "./execution-contracts";
@@ -72,6 +70,7 @@ export class AIMemoryOrchestrator {
       const currentSummary = this.summaries.getCurrentForConversation({ principalRef: activePrincipal.principalRef, conversationId: source.conversation.id, subjectKey: source.conversation.subjectKey });
       const baseCoverage = currentSummary?.coversThroughOrdinal ?? 0;
       const postSummaryMessages = this.conversations.listMessagesBefore({ principalRef: activePrincipal.principalRef, conversationId: source.conversation.id, beforeOrdinal: source.assistantMessage.ordinal + 1, afterOrdinal: baseCoverage, limit: 10_000, excludePartial: true }).sort((left, right) => left.ordinal - right.ordinal);
+      if (!isContiguousCompletedTurnRange(postSummaryMessages, baseCoverage)) throw new AIMemoryExecutionError("AI_MEMORY_EXECUTION_SOURCE_INVALID", "Conversation Compaction requires a contiguous complete turn range.");
       if (postSummaryMessages.length >= configRevision.compactionTriggerMessageCount) {
         const cutoff = this.findCompactionCutoff(postSummaryMessages, configRevision.compactionRetainRecentMessageCount, baseCoverage);
         if (cutoff !== null) {
@@ -186,7 +185,7 @@ export class AIMemoryOrchestrator {
     const conversation = response ? this.conversations.getConversation(principalRef, response.conversationId) : null;
     const requestMessage = response?.requestMessageId ? this.conversations.getMessage(response.requestMessageId) : null;
     const assistantMessage = response?.assistantMessageId ? this.conversations.getMessage(response.assistantMessageId) : null;
-    if (!conversation || !response || response.status !== "COMPLETED" || !requestMessage || !assistantMessage || requestMessage.conversationId !== conversation.id || assistantMessage.conversationId !== conversation.id || requestMessage.role !== "USER" || assistantMessage.role !== "ASSISTANT" || requestMessage.isPartial || assistantMessage.isPartial || assistantMessage.ordinal !== requestMessage.ordinal + 1 || !response.finishReason || ["FAILED", "CANCELLED"].includes(response.finishReason)) throw new AIMemoryExecutionError("AI_MEMORY_EXECUTION_SOURCE_INVALID", "Only a complete non-partial Student Tutor turn can schedule Memory work.");
+    if (!conversation || conversation.origin !== "STUDENT" || !response || response.status !== "COMPLETED" || !requestMessage || !assistantMessage || requestMessage.conversationId !== conversation.id || assistantMessage.conversationId !== conversation.id || requestMessage.role !== "USER" || assistantMessage.role !== "ASSISTANT" || requestMessage.isPartial || assistantMessage.isPartial || assistantMessage.ordinal !== requestMessage.ordinal + 1 || !response.finishReason || ["FAILED", "CANCELLED"].includes(response.finishReason)) throw new AIMemoryExecutionError("AI_MEMORY_EXECUTION_SOURCE_INVALID", "Only a complete non-partial Student Tutor turn can schedule Memory work.");
     return { conversation, response, requestMessage, assistantMessage };
   }
 
@@ -209,15 +208,23 @@ export class AIMemoryOrchestrator {
   }
 }
 
+function isContiguousCompletedTurnRange(messages: readonly { ordinal: number; role: string; isPartial?: boolean }[], baseCoverage: number): boolean {
+  if (!messages.length || messages[0]!.ordinal !== baseCoverage + 1) return false;
+  for (let index = 0; index < messages.length; index += 2) {
+    const user = messages[index];
+    const assistant = messages[index + 1];
+    if (!user || !assistant || user.role !== "USER" || assistant.role !== "ASSISTANT" || user.isPartial || assistant.isPartial || assistant.ordinal !== user.ordinal + 1) return false;
+    if (index + 2 < messages.length && messages[index + 2]!.ordinal !== assistant.ordinal + 1) return false;
+  }
+  return true;
+}
+
 export function createAIMemoryOrchestrator(dependencies: AIMemoryOrchestratorDependencies): AIMemoryOrchestrator {
   return new AIMemoryOrchestrator(dependencies);
 }
 
 export function createAIMemoryExecutionOutboxRouters(): AIOutboxRouterDefinition[] {
-  return [
-    outboxRoute(AI_MEMORY_EXTRACTION_OUTBOX_EVENT_TYPE, AI_MEMORY_EXTRACTION_JOB_KIND),
-    outboxRoute(AI_MEMORY_COMPACTION_OUTBOX_EVENT_TYPE, AI_MEMORY_COMPACTION_JOB_KIND),
-  ];
+  return [outboxRoute(AI_MEMORY_COMPACTION_OUTBOX_EVENT_TYPE, AI_MEMORY_COMPACTION_JOB_KIND)];
 }
 
 function outboxRoute(eventType: string, kind: string): AIOutboxRouterDefinition {

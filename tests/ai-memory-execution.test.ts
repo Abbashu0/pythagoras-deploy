@@ -153,6 +153,36 @@ test("M10A2 preserves Conversation Compaction as a separate bounded path", async
     assert.equal(execution.status, "COMPLETED");
     assert.equal((fixture.database.client.prepare("select count(*) as count from ai_conversation_summary_revisions where conversation_id=? and status='ACTIVE'").get(last.conversation.id) as { count: number }).count, 1);
     assert.equal(fixture.adapter.calls, 1);
+    await fixture.worker.runOnce(BASE_TIME + 101);
+    assert.equal((fixture.database.client.prepare("select count(*) as count from ai_conversation_summary_revisions where conversation_id=? and status='ACTIVE'").get(last.conversation.id) as { count: number }).count, 1);
+    assert.equal(fixture.adapter.calls, 1);
+  } finally { fixture.close(); }
+});
+
+test("M10D rejects Eval synthetic compaction and deletion before execution without Provider work", async () => {
+  const fixture = await createFixture();
+  try {
+    const syntheticPrincipal = { principalRef: "eval-synthetic-memory", status: "ACTIVE" } as AIStudentPrincipal;
+    const synthetic = fixture.database.client.transaction(() => fixture.conversations.createConversationInTransaction(syntheticPrincipal, { conversationId: uuidv7(), subjectKey: "biology", createdAt: BASE_TIME + 1, origin: "EVAL_SYNTHETIC" }))();
+    const syntheticTurn = fixture.conversations.beginTurn(syntheticPrincipal, { conversationId: synthetic.id, idempotencyKey: `synthetic-compaction-${uuidv7()}`, userContent: "synthetic" });
+    fixture.conversations.startResponse(syntheticPrincipal, syntheticTurn.response.id);
+    fixture.conversations.appendResponseChunk(syntheticPrincipal, syntheticTurn.response.id, 0, "synthetic answer");
+    fixture.conversations.completeResponse(syntheticPrincipal, syntheticTurn.response.id, "STOP");
+    assert.throws(() => fixture.orchestrator.scheduleForCompletedResponse(syntheticPrincipal, syntheticTurn.response.id), /Student|source|invalid/i);
+    assert.equal(fixture.adapter.calls, 0);
+
+    let last = completeTurn(fixture);
+    completeTurn(fixture, last.conversation.id);
+    completeTurn(fixture, last.conversation.id);
+    last = completeTurn(fixture, last.conversation.id);
+    const scheduled = fixture.orchestrator.scheduleForCompletedResponse(PRINCIPAL, last.response.id);
+    assert.ok(scheduled.compactionExecutionId);
+    fixture.conversations.deleteConversation(PRINCIPAL, last.conversation.id);
+    await fixture.worker.runOnce(BASE_TIME + 100);
+    const execution = fixture.executions.getById(scheduled.compactionExecutionId!)!;
+    assert.equal(execution.status, "INPUT_LOST");
+    assert.equal(fixture.adapter.calls, 0);
+    assert.equal((fixture.database.client.prepare("select count(*) as count from ai_conversation_summary_revisions where conversation_id=?").get(last.conversation.id) as { count: number }).count, 0);
   } finally { fixture.close(); }
 });
 

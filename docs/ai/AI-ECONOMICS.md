@@ -16,7 +16,7 @@ AI-M9B1 adds a governed Eval Execution Config and executes one exact target Case
 
 AI-M9B2 adds distinct `EVALS` Cost Accounting for Supplementary LLM Judge executions. Each Judge execution creates its own separate `EVALS` Cost Operation and Budget Reservation under the same code-owned `system-evals` scope. Private student identities, conversation, response, and job identities remain null. Usage and Rate Card pricing are accounted and settled completely independently from the target operation. Both target and Judge cost operations are bound to the Run (`evalRunId = run.id`) and are resolved together into the Run's immutable accounting basis for `MAX_COST_NANO` gate evaluations.
 
-The former M10B execution path used the existing `STUDENT_GENERATION` cost center for Memory Extraction and Conversation Compaction; its accounting contract remains historical compatibility data and is superseded for new Memory mutation work. M10A2 performs no Provider execution, creates no admission, reservation, settlement, or new extraction cost, and introduces only bounded metadata-only mutation intents. Pending intent text is temporary C4 and is scrubbed atomically on terminal application; no raw Memory text enters accounting metadata.
+The former M10B execution path used the existing `STUDENT_GENERATION` cost center for Memory Extraction and Conversation Compaction; its extraction contract remains historical compatibility data. M10D keeps Conversation Compaction as an explicit bounded `STUDENT_GENERATION` job with normal admission/accounting; M10B2 Memory mutation is part of the already-admitted Tutor Generation and creates no second operation, reservation, or Provider attempt. Pending intent text is temporary C4 and is scrubbed atomically on terminal application; no raw Memory text enters accounting metadata.
 
 ## 1. Cost centers
 
@@ -138,7 +138,7 @@ AI-M9A does not execute targets or supplementary judges and does not create admi
 
 ## 6. Expensive background work
 
-Knowledge indexing, compaction, memory extraction, Agent 2, and Evals run as durable jobs with cost attribution before work begins. A failed or retried job records attempts and actual usage; it does not charge a Student unless its cost center and Product policy explicitly say so.
+Knowledge indexing, compaction, historical extraction compatibility, Agent 2, and Evals run as durable jobs with cost attribution before work begins. A failed or retried job records attempts and actual usage; it does not charge a Student unless its cost center and Product policy explicitly say so. New Agent-1 Memory decisions do not create a separate background extraction cost.
 
 ## 7. Economics observability
 

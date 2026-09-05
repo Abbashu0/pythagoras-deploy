@@ -237,6 +237,46 @@ test("M10A Memory is private, reviewed explicitly, deterministic, expiring, and 
   }
 });
 
+test("M10C Context selects current Global and Subject Memory without cross-scope leakage", () => {
+  const fixture = createFixture();
+  try {
+    const globalPolicy = publishMemoryPolicy(fixture, memoryPolicyContent({ scope: "GLOBAL", subjectKey: null, candidateReviewRequired: false }));
+    const biologyPolicy = publishMemoryPolicy(fixture, memoryPolicyContent({ scope: "SUBJECT", subjectKey: "biology" }));
+    const mathPolicy = publishMemoryPolicy(fixture, memoryPolicyContent({ scope: "SUBJECT", subjectKey: "math" }));
+    const conversationA = fixture.conversations.createConversation(PRINCIPAL_A, "biology");
+    const firstA = completeTurn(fixture, PRINCIPAL_A, conversationA.id, "first biology turn", "biology answer");
+    const responseA = fixture.conversations.getResponse(PRINCIPAL_A, firstA.response.id)!;
+    const sourceA = { conversationId: conversationA.id, responseId: responseA.id, requestMessageId: firstA.userMessage.id, assistantMessageId: responseA.assistantMessageId!, sourceStartOrdinal: 1, sourceEndOrdinal: 2 };
+    fixture.memory.createExplicitActive(PRINCIPAL_A, { scope: "GLOBAL", subjectKey: null, kind: "RESPONSE_DEPTH_PREFERENCE", text: "GLOBAL_MEMORY_MARKER", confidenceUnits: 900_000, source: sourceA, memoryPolicyId: globalPolicy.id, memoryPolicyRevision: globalPolicy.revision });
+    fixture.memory.createExplicitActive(PRINCIPAL_A, { scope: "SUBJECT", subjectKey: "biology", kind: "LEARNING_PREFERENCE", text: "BIOLOGY_MEMORY_MARKER", confidenceUnits: 900_000, source: sourceA, memoryPolicyId: biologyPolicy.id, memoryPolicyRevision: biologyPolicy.revision });
+    const conversationMath = fixture.conversations.createConversation(PRINCIPAL_A, "math");
+    const firstMath = completeTurn(fixture, PRINCIPAL_A, conversationMath.id, "first math turn", "math answer");
+    const responseMath = fixture.conversations.getResponse(PRINCIPAL_A, firstMath.response.id)!;
+    fixture.memory.createExplicitActive(PRINCIPAL_A, { scope: "SUBJECT", subjectKey: "math", kind: "STUDY_GOAL", text: "MATH_MEMORY_MARKER", confidenceUnits: 900_000, source: { conversationId: conversationMath.id, responseId: responseMath.id, requestMessageId: firstMath.userMessage.id, assistantMessageId: responseMath.assistantMessageId!, sourceStartOrdinal: 1, sourceEndOrdinal: 2 }, memoryPolicyId: mathPolicy.id, memoryPolicyRevision: mathPolicy.revision });
+    const conversationB = fixture.conversations.createConversation(PRINCIPAL_B, "biology");
+    const firstB = completeTurn(fixture, PRINCIPAL_B, conversationB.id, "other principal turn", "other answer");
+    const responseB = fixture.conversations.getResponse(PRINCIPAL_B, firstB.response.id)!;
+    fixture.memory.createExplicitActive(PRINCIPAL_B, { scope: "SUBJECT", subjectKey: "biology", kind: "LEARNING_PREFERENCE", text: "OTHER_PRINCIPAL_MEMORY_MARKER", confidenceUnits: 900_000, source: { conversationId: conversationB.id, responseId: responseB.id, requestMessageId: firstB.userMessage.id, assistantMessageId: responseB.assistantMessageId!, sourceStartOrdinal: 1, sourceEndOrdinal: 2 }, memoryPolicyId: biologyPolicy.id, memoryPolicyRevision: biologyPolicy.revision });
+    const currentA = beginCurrent(fixture, PRINCIPAL_A, conversationA.id, "current biology question");
+    const built = fixture.context.build(PRINCIPAL_A, { responseId: currentA.response.id, contextPolicyId: fixture.contextPolicyId, estimator: unitEstimator() });
+    const selected = built.plan.memories.map((memory) => memory.text);
+    assert.deepEqual(selected.sort(), ["BIOLOGY_MEMORY_MARKER", "GLOBAL_MEMORY_MARKER"]);
+    assert.equal(selected.includes("MATH_MEMORY_MARKER"), false);
+    assert.equal(selected.includes("OTHER_PRINCIPAL_MEMORY_MARKER"), false);
+    assert.equal(JSON.stringify(fixture.context.getSnapshot(PRINCIPAL_A, currentA.response.id)).includes("GLOBAL_MEMORY_MARKER"), false);
+
+    const currentPolicy = fixture.memoryPolicies.getCurrentRevision(biologyPolicy.id)!;
+    let change = fixture.changes.createChangeSet({ title: "Disable current Biology Memory Policy", initialItem: { resourceType: AI_MEMORY_POLICY_RESOURCE_TYPE, resourceId: biologyPolicy.id, expectedRevision: currentPolicy.revision, operation: "UPDATE", desired: memoryPolicyContent({ key: currentPolicy.key, scope: "SUBJECT", subjectKey: "biology", enabled: false }) } }, fixture.admin);
+    change = fixture.changes.submit(change.changeSet.id, change.changeSet.revision, fixture.admin);
+    change = fixture.changes.approve(change.changeSet.id, change.changeSet.revision, fixture.owner);
+    fixture.changes.publish(change.changeSet.id, change.changeSet.revision, fixture.owner);
+    const disabledConversation = fixture.conversations.createConversation(PRINCIPAL_A, "biology");
+    const disabledCurrent = beginCurrent(fixture, PRINCIPAL_A, disabledConversation.id, "after policy disable");
+    const disabledPlan = fixture.context.build(PRINCIPAL_A, { responseId: disabledCurrent.response.id, contextPolicyId: fixture.contextPolicyId, estimator: unitEstimator() }).plan;
+    assert.deepEqual(disabledPlan.memories.map((memory) => memory.text), ["GLOBAL_MEMORY_MARKER"]);
+  } finally { fixture.close(); }
+});
+
 test("M10A approved Memory selection is owner/subject scoped, bounded by memoryBudgetTokens, and recorded as metadata", () => {
   const fixture = createFixture();
   try {
@@ -534,7 +574,7 @@ test("M10A migration 0039 is fresh and preserves a populated 0038 database", () 
   let upgraded: ContentDatabase | null = null;
   try {
     const fresh = openContentDatabase({ dataDirectory: freshRoot, migrationsDirectory });
-    assert.equal((fresh.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 44);
+    assert.equal((fresh.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 45);
     fresh.close();
 
     mkdirSync(path.join(oldMigrations, "meta"), { recursive: true });
@@ -555,7 +595,7 @@ test("M10A migration 0039 is fresh and preserves a populated 0038 database", () 
     oldDatabase = null;
 
     upgraded = openContentDatabase({ dataDirectory: oldRoot, migrationsDirectory });
-    assert.equal((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 44);
+    assert.equal((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 45);
     assert.ok(upgraded.client.prepare("select id from ai_conversations where id=?").get(conversation.id));
     for (const trigger of ["ai_memories_insert_valid", "ai_memories_lifecycle_valid", "ai_conversation_summary_revisions_insert_valid", "ai_memory_policy_revisions_no_update"]) assert.ok(upgraded.client.prepare("select name from sqlite_master where type='trigger' and name=?").get(trigger));
     assert.ok(owner.id);
@@ -576,7 +616,7 @@ test("M10A migration 0040 upgrades a populated 0039 database without rewriting M
   let upgraded: ContentDatabase | null = null;
   try {
     const fresh = openContentDatabase({ dataDirectory: freshRoot, migrationsDirectory });
-    assert.equal((fresh.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 44);
+    assert.equal((fresh.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 45);
     fresh.close();
 
     mkdirSync(path.join(oldMigrations, "meta"), { recursive: true });
@@ -623,7 +663,7 @@ test("M10A migration 0040 upgrades a populated 0039 database without rewriting M
     oldDatabase = null;
 
     upgraded = openContentDatabase({ dataDirectory: oldRoot, migrationsDirectory });
-    assert.equal((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 44);
+    assert.equal((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 45);
     assert.deepEqual(upgraded.client.prepare("select status,memory_text,safe_review_code from ai_memories where id=?").get(memoryId), { status: "ACTIVE", memory_text: "UPGRADE_MEMORY_TEXT", safe_review_code: "LEGACY_MIGRATED" });
     assert.deepEqual(upgraded.client.prepare("select status,summary_text,safe_deletion_code from ai_conversation_summary_revisions where id=?").get(summaryId), { status: "ACTIVE", summary_text: "UPGRADE_SUMMARY_TEXT", safe_deletion_code: null });
     assert.deepEqual(upgraded.client.prepare("select status,summary_text,safe_deletion_code from ai_conversation_summary_revisions where id=?").get(deletedSummaryId), { status: "DELETED", summary_text: null, safe_deletion_code: "CONVERSATION_DELETED" });

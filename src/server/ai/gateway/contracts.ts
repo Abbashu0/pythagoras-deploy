@@ -50,6 +50,7 @@ export type GenerationMessageRole = "system" | "user" | "assistant";
 export const AI_GATEWAY_MAX_GENERATION_MESSAGES = 128;
 export const AI_GATEWAY_MAX_GENERATION_MESSAGE_BYTES = 256 * 1_024;
 export const AI_GATEWAY_MAX_GENERATION_INSTRUCTIONS_BYTES = 256 * 1_024;
+export const AI_GATEWAY_MAX_MEMORY_COMMAND_BYTES = 16 * 1_024;
 
 export interface GenerationMessage {
   role: GenerationMessageRole;
@@ -100,6 +101,10 @@ export type ProviderGenerationStreamEvent =
       text: string;
     }
   | {
+      type: "MEMORY_COMMAND";
+      command: Readonly<Record<string, unknown>>;
+    }
+  | {
       type: "USAGE";
       usage: NormalizedProviderUsage;
     }
@@ -118,6 +123,10 @@ export type GatewayGenerationStreamEvent =
   | {
       type: "TEXT_DELTA";
       text: string;
+    }
+  | {
+      type: "MEMORY_COMMAND";
+      command: Readonly<Record<string, unknown>>;
     }
   | {
       type: "USAGE";
