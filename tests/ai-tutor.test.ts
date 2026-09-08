@@ -36,13 +36,15 @@ const BASE_TIME = 1_902_000_000_000;
 const PRINCIPAL: AIStudentPrincipal = { principalRef: "student-m8a", status: "ACTIVE" };
 
 class NoCallGenerationAdapter implements GenerationProviderAdapter {
-  readonly adapterKey = "test.m8a-generation";
+  readonly adapterKey: string;
   readonly capability = "GENERATION" as const;
   calls = 0;
   outputText = "";
   lastRequest: GenerationProviderRequest | null = null;
   usage = { inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cacheHitInputTokens: 0, cacheMissInputTokens: 0 };
   failure: AIProviderAdapterError | null = null;
+
+  constructor(adapterKey = "test.m8a-generation") { this.adapterKey = adapterKey; }
 
   async *generate(_request: GenerationProviderRequest, _context: ProviderAdapterExecutionContext): AsyncIterable<ProviderGenerationStreamEvent> {
     this.calls += 1;
@@ -83,6 +85,7 @@ interface TutorFixtureOptions {
   generationHasReasoningPrice?: boolean;
   currencies?: { embedding?: string; rerank?: string; generation?: string };
   generationHasOutputPrice?: boolean;
+  withFallback?: boolean;
 }
 
 interface TutorFixture {
@@ -105,6 +108,7 @@ interface TutorFixture {
   secrets: ReturnType<typeof createLocalAISecretStore>;
   gateway: AIProviderGateway;
   generationModelId: string;
+  fallbackGenerationModelId: string | null;
   embeddingModelId: string;
   rerankModelId: string | null;
   providerId: string;
@@ -114,6 +118,7 @@ interface TutorFixture {
   rateLimitPolicyId: string;
   adapters: ProviderAdapterRegistry;
   generation: NoCallGenerationAdapter;
+  fallbackGeneration: NoCallGenerationAdapter | null;
   embedding: NoCallEmbeddingAdapter;
   rerank: NoCallRerankAdapter;
   now: number;
@@ -136,6 +141,8 @@ async function createFixture(options: TutorFixtureOptions = {}, fixtureMigration
   const models = new SQLiteAIModelConfigRepository(database);
   const generationModelId = uuidv7();
   models.create({ id: generationModelId, content: { key: `m8a-generation-${uuidv7()}`, displayName: "M8A Generation", providerConfigId: providerId, providerModelId: "m8a-generation-model", capability: "GENERATION", adapterKey: "test.m8a-generation", enabled: true, contextWindowTokens: 10_000, maxOutputTokens: 100, embeddingDimensions: null, supportsStreaming: true, supportsReasoning: options.generationSupportsReasoning === true, supportsStructuredOutput: false }, actor: owner, now: now - 80 });
+  const fallbackGenerationModelId = options.withFallback ? uuidv7() : null;
+  if (fallbackGenerationModelId) models.create({ id: fallbackGenerationModelId, content: { key: `m8a-fallback-generation-${uuidv7()}`, displayName: "M8A Fallback Generation", providerConfigId: providerId, providerModelId: "m8a-fallback-generation-model", capability: "GENERATION", adapterKey: "test.m8a-fallback-generation", enabled: true, contextWindowTokens: 10_000, maxOutputTokens: 100, embeddingDimensions: null, supportsStreaming: true, supportsReasoning: false, supportsStructuredOutput: false }, actor: owner, now: now - 79 });
   const embeddingModelId = uuidv7();
   models.create({ id: embeddingModelId, content: { key: `m8a-embedding-${uuidv7()}`, displayName: "M8A Embedding", providerConfigId: providerId, providerModelId: "m8a-embedding-model", capability: "EMBEDDING", adapterKey: "test.m8a-embedding", enabled: true, contextWindowTokens: null, maxOutputTokens: null, embeddingDimensions: 3, supportsStreaming: false, supportsReasoning: false, supportsStructuredOutput: false }, actor: owner, now: now - 70 });
   const rerankModelId = options.withRerank ? uuidv7() : null;
@@ -164,11 +171,13 @@ async function createFixture(options: TutorFixtureOptions = {}, fixtureMigration
   createRateCard(rateCards, embeddingModelId, currencies.embedding ?? "USD", `m8a-embedding-rate-${uuidv7()}`, owner, now - 40);
   if (rerankModelId) createRateCard(rateCards, rerankModelId, currencies.rerank ?? "USD", `m8a-rerank-rate-${uuidv7()}`, owner, now - 39);
   createRateCard(rateCards, generationModelId, currencies.generation ?? "USD", `m8a-generation-rate-${uuidv7()}`, owner, now - 38, options.generationHasOutputPrice !== false, options.generationSupportsReasoning === true && options.generationHasReasoningPrice !== false);
+  if (fallbackGenerationModelId) createRateCard(rateCards, fallbackGenerationModelId, currencies.generation ?? "USD", `m8a-fallback-generation-rate-${uuidv7()}`, owner, now - 37, options.generationHasOutputPrice !== false, false);
 
   const generation = new NoCallGenerationAdapter();
+  const fallbackGeneration = fallbackGenerationModelId ? new NoCallGenerationAdapter("test.m8a-fallback-generation") : null;
   const embedding = new NoCallEmbeddingAdapter();
   const rerank = new NoCallRerankAdapter();
-  const adapters = new ProviderAdapterRegistry([generation, embedding, rerank]);
+  const adapters = new ProviderAdapterRegistry([generation, ...(fallbackGeneration ? [fallbackGeneration] : []), embedding, rerank]);
   const conversations = new AIConversationService(database, { clock: () => now++ });
   const context = new AIContextService(database, { clock: () => now++ });
   const changes = createChangeManagementService(database);
@@ -186,7 +195,7 @@ async function createFixture(options: TutorFixtureOptions = {}, fixtureMigration
   const admission = new AIBudgetAdmissionService(database, { clock: () => now });
   const tutorConfigs = new SQLiteAITutorConfigRepository(database);
   const preflight = new AITutorPreflightService(database, { context, models, providers, retrievalConfigs: retrievals, contextPolicies: contexts, adapters, clock: () => now });
-  return { root, database, owner, principal: PRINCIPAL, conversations, context, instructions, contexts, retrievals, models, changes, preflight, admission, accounting, accountingService, tutorConfigs, secrets, gateway, generationModelId, embeddingModelId, rerankModelId, providerId, contextPolicyId, retrievalConfigId, budgetPolicyId, rateLimitPolicyId, adapters, generation, embedding, rerank, now, close(removeFiles = true) { database.close(); if (removeFiles) rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 }); } };
+  return { root, database, owner, principal: PRINCIPAL, conversations, context, instructions, contexts, retrievals, models, changes, preflight, admission, accounting, accountingService, tutorConfigs, secrets, gateway, generationModelId, fallbackGenerationModelId, embeddingModelId, rerankModelId, providerId, contextPolicyId, retrievalConfigId, budgetPolicyId, rateLimitPolicyId, adapters, generation, fallbackGeneration, embedding, rerank, now, close(removeFiles = true) { database.close(); if (removeFiles) rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 }); } };
 }
 
 function createRateCard(repository: SQLiteAIRateCardRepository, modelConfigId: string, currency: string, key: string, actor: AdminActor, now: number, includeOutput = true, includeReasoning = false): void {
@@ -490,7 +499,7 @@ test("0029 and 0030 upgrade a populated 0028 database and keep existing Tutor Tr
 
     const upgradedDatabase = openContentDatabase({ dataDirectory: root, migrationsDirectory });
     upgraded = upgradedDatabase;
-    assert.equal(Number((upgradedDatabase.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count), 46);
+    assert.equal(Number((upgradedDatabase.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count), 47);
     for (const table of ["ai_tutor_configs", "ai_tutor_config_revisions", "ai_tutor_response_traces", "ai_tutor_trace_projection_refs", "ai_tutor_trace_evidence_refs"]) assert.ok(upgradedDatabase.client.prepare("select name from sqlite_master where type='table' and name=?").get(table));
     for (const trigger of ["ai_tutor_configs_identity_no_update", "ai_tutor_configs_revision_pointer", "ai_tutor_config_revisions_no_update", "ai_tutor_config_revisions_no_delete", "ai_tutor_response_traces_insert_integrity", "ai_tutor_response_traces_identity_no_update", "ai_tutor_response_traces_lifecycle", "ai_tutor_response_traces_refs_sealed_state", "ai_tutor_response_traces_requires_sealed_refs", "ai_tutor_trace_projection_refs_sealed_insert", "ai_tutor_trace_evidence_refs_sealed_insert"]) assert.ok(upgradedDatabase.client.prepare("select name from sqlite_master where type='trigger' and name=?").get(trigger));
     assert.equal((upgradedDatabase.client.prepare("select count(*) as count from ai_tutor_configs").get() as { count: number }).count, 1);
@@ -531,6 +540,19 @@ test("M8A preflight pins canonical Conversation, policies, retrieval, model/prov
     assert.equal(fixture.generation.calls, 0);
     assert.equal(fixture.embedding.calls, 0);
     assert.equal(fixture.rerank.calls, 0);
+  } finally { fixture.close(); }
+});
+
+test("M8A pins an ordered bounded fallback Generation list without Provider work", async () => {
+  const fixture = await createFixture({ withFallback: true });
+  try {
+    const tutor = publishTutor(fixture, tutorConfigContent(fixture, { fallbackGenerationModelConfigIds: [fixture.fallbackGenerationModelId!] }));
+    const turn = createPendingTurn(fixture, "Fallback planning");
+    const plan = fixture.preflight.preflight({ principal: fixture.principal, responseId: turn.response.id, tutorConfigId: tutor.id, estimator: estimator() });
+    assert.deepEqual(plan.modelSelectionPlan.attempts, [fixture.generationModelId, fixture.fallbackGenerationModelId]);
+    assert.deepEqual(plan.fallbackGenerationModelConfigIds, [fixture.fallbackGenerationModelId]);
+    assert.equal(plan.costEstimate.generationFallbacks?.length, 1);
+    assert.equal(fixture.generation.calls + (fixture.fallbackGeneration?.calls ?? 0) + fixture.embedding.calls + fixture.rerank.calls, 0);
   } finally { fixture.close(); }
 });
 

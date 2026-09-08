@@ -12,6 +12,8 @@ export interface AITutorCostEstimateComponent {
   providerConfigId: string;
   providerConfigRevision: number;
   providerModelId: string;
+  /** Runtime adapter identity is pinned when the component is generated. */
+  adapterKey?: string;
   rateCardId: string;
   rateCardRevision: number;
   inputTokenUpperBound: number;
@@ -28,6 +30,7 @@ export interface AITutorCostEstimate {
   queryEmbedding: AITutorCostEstimateComponent;
   rerank: AITutorCostEstimateComponent | null;
   generation: AITutorCostEstimateComponent;
+  generationFallbacks?: readonly AITutorCostEstimateComponent[];
 }
 
 export interface AITutorPreflightInput {
@@ -59,6 +62,7 @@ export interface AITutorPreflightPlan {
   retrievalConfigRevision: number;
   generationModelConfigId: string;
   generationModelConfigRevision: number;
+  fallbackGenerationModelConfigIds: readonly string[];
   generationProviderConfigId: string;
   generationProviderConfigRevision: number;
   providerModelId: string;
@@ -121,6 +125,7 @@ export interface AITutorGenerationPlan {
   costEstimate: Readonly<AITutorCostEstimate>;
   generationModelConfigId: string;
   generationModelConfigRevision: number;
+  fallbackGenerationModelConfigIds: readonly string[];
   generationProviderConfigId: string;
   generationProviderConfigRevision: number;
   providerModelId: string;

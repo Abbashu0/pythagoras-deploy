@@ -10,6 +10,8 @@ import { normalizeAITutorConfigContent } from "./validation";
 import { AI_TUTOR_CITATION_PROTOCOL_KEY, AI_TUTOR_CITATION_PROTOCOL_REVISION, AI_TUTOR_GROUNDING_PROTOCOL_KEY, AI_TUTOR_GROUNDING_PROTOCOL_REVISION } from "./contracts";
 
 export class SQLiteAITutorConfigRepository implements AITutorConfigRepository {
+  private fallbackColumnAvailable: boolean | null = null;
+
   constructor(private readonly database: ContentDatabase) {}
 
   getById(id: string): AITutorConfig | null {
@@ -31,7 +33,9 @@ export class SQLiteAITutorConfigRepository implements AITutorConfigRepository {
   }
 
   getRevision(id: string, revision: number): AITutorConfigRevision | null {
-    const row = this.database.db.select().from(aiTutorConfigRevisions).where(and(eq(aiTutorConfigRevisions.tutorConfigId, id), eq(aiTutorConfigRevisions.revision, revision))).get();
+    const row = this.hasFallbackColumn()
+      ? this.database.db.select().from(aiTutorConfigRevisions).where(and(eq(aiTutorConfigRevisions.tutorConfigId, id), eq(aiTutorConfigRevisions.revision, revision))).get()
+      : legacyRevisionRow(this.database, id, revision);
     return row ? this.revisionFromRow(row) : null;
   }
 
@@ -90,6 +94,24 @@ export class SQLiteAITutorConfigRepository implements AITutorConfigRepository {
   }
 
   private insertRevision(id: string, revision: number, content: AITutorConfigContent, actor: AdminActor, now: number): void {
+    if (!this.hasFallbackColumn()) {
+      this.database.client.prepare(`
+        insert into ai_tutor_config_revisions (
+          id, tutor_config_id, revision, display_name, enabled,
+          generation_model_config_id, context_policy_id, retrieval_config_id,
+          budget_policy_id, rate_limit_policy_id, max_output_tokens,
+          grounding_protocol_key, grounding_protocol_revision,
+          citation_protocol_key, citation_protocol_revision, created_at, created_by
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        uuidv7(), id, revision, content.displayName, content.enabled ? 1 : 0,
+        content.generationModelConfigId, content.contextPolicyId, content.retrievalConfigId,
+        content.budgetPolicyId, content.rateLimitPolicyId, content.maxOutputTokens,
+        AI_TUTOR_GROUNDING_PROTOCOL_KEY, AI_TUTOR_GROUNDING_PROTOCOL_REVISION,
+        AI_TUTOR_CITATION_PROTOCOL_KEY, AI_TUTOR_CITATION_PROTOCOL_REVISION, now, actor.actorUserId,
+      );
+      return;
+    }
     this.database.db.insert(aiTutorConfigRevisions).values({
       id: uuidv7(),
       tutorConfigId: id,
@@ -102,6 +124,7 @@ export class SQLiteAITutorConfigRepository implements AITutorConfigRepository {
       budgetPolicyId: content.budgetPolicyId,
       rateLimitPolicyId: content.rateLimitPolicyId,
       maxOutputTokens: content.maxOutputTokens,
+      fallbackGenerationModelConfigIds: [...(content.fallbackGenerationModelConfigIds ?? [])],
       groundingProtocolKey: AI_TUTOR_GROUNDING_PROTOCOL_KEY,
       groundingProtocolRevision: AI_TUTOR_GROUNDING_PROTOCOL_REVISION,
       citationProtocolKey: AI_TUTOR_CITATION_PROTOCOL_KEY,
@@ -128,6 +151,7 @@ export class SQLiteAITutorConfigRepository implements AITutorConfigRepository {
       budgetPolicyId: row.budgetPolicyId,
       rateLimitPolicyId: row.rateLimitPolicyId,
       maxOutputTokens: row.maxOutputTokens,
+      fallbackGenerationModelConfigIds: Object.freeze([...(row.fallbackGenerationModelConfigIds ?? [])]),
       groundingProtocolKey: row.groundingProtocolKey as typeof AI_TUTOR_GROUNDING_PROTOCOL_KEY,
       groundingProtocolRevision: row.groundingProtocolRevision as typeof AI_TUTOR_GROUNDING_PROTOCOL_REVISION,
       citationProtocolKey: row.citationProtocolKey as typeof AI_TUTOR_CITATION_PROTOCOL_KEY,
@@ -141,8 +165,33 @@ export class SQLiteAITutorConfigRepository implements AITutorConfigRepository {
     if (this.database.client.inTransaction) return operation();
     return this.database.client.transaction(operation).immediate();
   }
+
+  private hasFallbackColumn(): boolean {
+    if (this.fallbackColumnAvailable !== null) return this.fallbackColumnAvailable;
+    const columns = this.database.client.prepare("pragma table_info('ai_tutor_config_revisions')").all() as Array<{ name: string }>;
+    this.fallbackColumnAvailable = columns.some((column) => column.name === "fallback_generation_model_config_ids");
+    return this.fallbackColumnAvailable;
+  }
 }
 
 export function toSafeAITutorConfigDTO(config: AITutorConfig): SafeAITutorConfigDTO {
   return structuredClone(config);
+}
+
+function legacyRevisionRow(database: ContentDatabase, tutorConfigId: string, revision: number): AITutorConfigRevisionRow | undefined {
+  const row = database.client.prepare(`
+    select id, tutor_config_id as tutorConfigId, revision, display_name as displayName,
+      enabled, generation_model_config_id as generationModelConfigId,
+      context_policy_id as contextPolicyId, retrieval_config_id as retrievalConfigId,
+      budget_policy_id as budgetPolicyId, rate_limit_policy_id as rateLimitPolicyId,
+      max_output_tokens as maxOutputTokens,
+      '${AI_TUTOR_GROUNDING_PROTOCOL_KEY}' as groundingProtocolKey,
+      ${AI_TUTOR_GROUNDING_PROTOCOL_REVISION} as groundingProtocolRevision,
+      '${AI_TUTOR_CITATION_PROTOCOL_KEY}' as citationProtocolKey,
+      ${AI_TUTOR_CITATION_PROTOCOL_REVISION} as citationProtocolRevision,
+      created_at as createdAt, created_by as createdBy
+    from ai_tutor_config_revisions
+    where tutor_config_id = ? and revision = ?
+  `).get(tutorConfigId, revision) as (AITutorConfigRevisionRow & { fallbackGenerationModelConfigIds?: string[] }) | undefined;
+  return row;
 }

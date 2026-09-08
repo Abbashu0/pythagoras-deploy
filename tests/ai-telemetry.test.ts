@@ -138,7 +138,7 @@ test("M11 migration upgrades a populated 0044 database without losing existing M
     oldDatabase.close();
     oldDatabase = null;
     upgraded = openContentDatabase({ dataDirectory: root, migrationsDirectory });
-    assert.equal((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 46);
+    assert.equal((upgraded.client.prepare("select count(*) as count from __drizzle_migrations").get() as { count: number }).count, 47);
     assert.ok(upgraded.client.prepare("select id from ai_conversations where id=?").get(conversation.id));
     for (const trigger of ["ai_telemetry_events_no_update", "ai_feedback_events_owner_valid", "ai_analytics_principals_lifecycle_valid"]) assert.ok(upgraded.client.prepare("select name from sqlite_master where type='trigger' and name=?").get(trigger));
   } finally {

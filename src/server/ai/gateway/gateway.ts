@@ -288,6 +288,7 @@ export class AIProviderGateway {
                 .generate(providerRequest, {
                   signal: control.signal,
                   credential,
+                  providerBaseUrl: prepared.provider.baseUrl,
                   timeoutMs: attemptTimeoutMs,
                 })
                 [Symbol.asyncIterator]()
@@ -578,7 +579,7 @@ export class AIProviderGateway {
     for (let handshakeIndex = 0; handshakeIndex < MAX_SECRET_HANDSHAKE_RETRIES; handshakeIndex += 1) {
       const prepared = this.prepareAttempt(plan, modelConfigId, trace);
       validatePrepared?.(prepared);
-      this.assertExpectedIdentity(prepared, options.expectedIdentity);
+      this.assertExpectedIdentity(prepared, options.expectedIdentities?.[modelConfigId] ?? options.expectedIdentity);
       const circuitDecision = this.acquireCircuitPermit(prepared, options);
       if (circuitDecision?.kind === "DENIED") {
         const metadata = this.dependencies.secrets.getMetadata(prepared.provider.credentialRef!);

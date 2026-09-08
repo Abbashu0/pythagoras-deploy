@@ -18,6 +18,7 @@ export interface AITutorCostEstimatorInput {
   embeddingModel: AIModelConfig;
   rerankModel: AIModelConfig | null;
   generationModel: AIModelConfig;
+  generationFallbackModels?: readonly AIModelConfig[];
   maxOutputTokens: number;
   at: number;
 }
@@ -61,7 +62,8 @@ export class AIBoundedTutorCostEstimator implements AITutorCostEstimator {
         )
       : null;
     const generation = this.component(input.generationModel, "GENERATION", generationInput, input.at, input.maxOutputTokens);
-    const components = [queryEmbedding, ...(rerank ? [rerank] : []), generation];
+    const generationFallbacks = (input.generationFallbackModels ?? []).map((model) => this.component(model, "GENERATION", generationInput, input.at, input.maxOutputTokens));
+    const components = [queryEmbedding, ...(rerank ? [rerank] : []), generation, ...generationFallbacks];
     const currency = components[0]!.currency;
     if (components.some((component) => component.currency !== currency)) {
       throw new AITutorCostEstimationError("AI_TUTOR_COST_CURRENCY_MISMATCH", "Tutor cost components do not use one budget currency.");
@@ -74,10 +76,11 @@ export class AIBoundedTutorCostEstimator implements AITutorCostEstimator {
     return {
       currency,
       maxCostNano: Number(maxCostNano),
-      estimateBasis: "provider-neutral-max-v1: QUERY+rerank+Generation; reasoning=output-ceiling",
+      estimateBasis: "provider-neutral-max-v2: QUERY+rerank+ordered-Generation-attempts; reasoning=output-ceiling",
       queryEmbedding: toPublicComponent(queryEmbedding),
       rerank: rerank ? toPublicComponent(rerank) : null,
       generation: toPublicComponent(generation),
+      ...(generationFallbacks.length ? { generationFallbacks: generationFallbacks.map(toPublicComponent) } : {}),
     };
   }
 
@@ -116,6 +119,7 @@ export class AIBoundedTutorCostEstimator implements AITutorCostEstimator {
       providerConfigId: provider.id,
       providerConfigRevision: provider.revision,
       providerModelId: model.providerModelId,
+      adapterKey: model.adapterKey,
       rateCardId: rateCard.rateCardId,
       rateCardRevision: rateCard.rateCardRevision,
       currency: rateCard.currency,

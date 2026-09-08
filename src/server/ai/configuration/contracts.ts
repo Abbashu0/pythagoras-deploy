@@ -85,4 +85,8 @@ export interface AIProviderConfigRepository {
     actor: AdminActor;
     now: number;
   }): AIProviderConfig;
+  remove(input: {
+    id: string;
+    expectedRevision: number;
+  }): AIProviderConfig;
 }

@@ -29,6 +29,12 @@ AI-M0 through AI-M9 are approved/complete. AI-M10R is APPROVED/COMPLETE as the n
 
 ### Historical M7C context
 
+The current Tutor Config schema additionally stores up to three ordered
+fallback Generation Model identities through migration
+`0046_youthful_the_renegades`. The fallback list is read as governed runtime
+state and is identity-fenced before Gateway execution; no implicit fallback is
+introduced for configurations that do not pin one.
+
 M8A's final SQLite creation correction is migration `0030_require-unsealed-tutor-trace-creation`: new Response Traces must enter `PLANNED` and unsealed, while historical rows remain sealed.
 
 The current AI checkpoint supersedes the older M7B/M7C status wording below: AI-M7A, AI-M7B, and AI-M7C are approved, AI-M7 Retrieval Engine is complete, and AI-M8A/B/C are approved with AI-M8 Grounded Tutor complete at `e73d6dc5ba4ae18c1bf4dd614b093b605849d179`. AI-M9A is approved/complete at `860b474bd146abb944c15f774afa88578b463a80`; M9B1 is approved/complete at `61d6de1276735f511712dd47797a2c6a6304fcf3`; M9B2 is approved/complete at `815d9230dcbde77433f98d80a2d37e3b08e2faaa`; AI-M9 is complete; M10R is approved/complete; M10A2/B2/C/D and M10 are implemented pending independent review; and no production Provider or Student/Admin AI UI exists.
@@ -105,6 +111,6 @@ The prior Student Question Bank UI remains retired. Do not add Quiz Ready, MCQ g
 
 Material Question Bank topology can also be Product-defined rather than authored in Admin. For such materials, the Product Owner specifies the stable topology outside Admin and Codex commits a preset; Admin manages only the governed Package assignments inside its BANK slots. Arabic is the first preset: its CARDS root contains الأدب (a direct BANK) and القواعد (a SWITCHER GROUP) with these ordered BANK slots: الاستفهام، النفي، التقديم والتأخير، التوكيد، النداء، التعجب، المدح والذم، التمني والترجي، العرض والتحضيض. No structure for any other Material is inferred from this preset.
 
-Do not add Firebase, Supabase, or Prisma. Supabase/Postgres is only a future adapter behind repository/storage/search boundaries. Preserve the current Admin UI and Backend contracts; keep the Mobile foundation minimal until Product navigation is designed. New Admin server mutations must derive actor identity from the validated session and apply the shared same-origin mutation protection; never trust an actor ID or role sent by the browser.
+Do not add Firebase, Supabase, or Prisma. Supabase/Postgres is only a future adapter behind repository/storage/search boundaries. The Admin application surface is intentionally reset to a disconnected placeholder; preserve backend/domain contracts and keep the Mobile foundation minimal until Product navigation is designed. New server mutations must derive actor identity from the validated session and apply the shared same-origin mutation protection; never trust an actor ID or role sent by the browser.
 
 Graphify, Understand Anything, Obsidian, Pythagoras-Brain, local AI tooling, and local MCP state are local-only developer tools and must never be committed.

@@ -24,9 +24,12 @@ export interface AITutorConfigContent {
   budgetPolicyId: string;
   rateLimitPolicyId: string;
   maxOutputTokens: number;
+  /** Ordered operational fallback Generation Models; empty preserves primary-only behavior. */
+  fallbackGenerationModelConfigIds?: readonly string[];
 }
 
 export interface AITutorConfigRevision extends AITutorConfigContent {
+  fallbackGenerationModelConfigIds: readonly string[];
   tutorConfigId: string;
   revisionId: string;
   revision: number;
@@ -59,6 +62,7 @@ export interface AITutorConfigRepository {
 }
 
 export interface AITutorConfigSnapshot extends AITutorConfigContent {
+  fallbackGenerationModelConfigIds: readonly string[];
   groundingProtocolKey: typeof AI_TUTOR_GROUNDING_PROTOCOL_KEY;
   groundingProtocolRevision: typeof AI_TUTOR_GROUNDING_PROTOCOL_REVISION;
   citationProtocolKey: typeof AI_TUTOR_CITATION_PROTOCOL_KEY;

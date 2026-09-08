@@ -30,6 +30,7 @@ const FIELD_LABELS: Record<string, string> = {
   budgetPolicyId: "Budget Policy",
   rateLimitPolicyId: "Rate Limit Policy",
   maxOutputTokens: "Maximum output tokens",
+  fallbackGenerationModelConfigIds: "Fallback Generation Models",
 };
 
 export class AITutorConfigChangeAdapter implements ChangeResourceAdapter {
@@ -137,6 +138,7 @@ function snapshotFromContent(content: AITutorConfig | AITutorConfigContent | AIT
     budgetPolicyId: content.budgetPolicyId,
     rateLimitPolicyId: content.rateLimitPolicyId,
     maxOutputTokens: content.maxOutputTokens,
+    fallbackGenerationModelConfigIds: [...(content.fallbackGenerationModelConfigIds ?? [])],
     groundingProtocolKey: "groundingProtocolKey" in content ? content.groundingProtocolKey : AI_TUTOR_GROUNDING_PROTOCOL_KEY,
     groundingProtocolRevision: "groundingProtocolRevision" in content ? content.groundingProtocolRevision : AI_TUTOR_GROUNDING_PROTOCOL_REVISION,
     citationProtocolKey: "citationProtocolKey" in content ? content.citationProtocolKey : AI_TUTOR_CITATION_PROTOCOL_KEY,
@@ -161,6 +163,7 @@ function contentFromConfig(config: AITutorConfig): AITutorConfigContent {
     budgetPolicyId: config.budgetPolicyId,
     rateLimitPolicyId: config.rateLimitPolicyId,
     maxOutputTokens: config.maxOutputTokens,
+    fallbackGenerationModelConfigIds: [...config.fallbackGenerationModelConfigIds],
   };
 }
 
@@ -170,6 +173,14 @@ function assertDependencies(database: ContentDatabase, content: AITutorConfigCon
   if (!model || model.capability !== "GENERATION" || !model.enabled || !model.supportsStreaming || model.contextWindowTokens === null || model.maxOutputTokens === null || content.maxOutputTokens > model.maxOutputTokens) throw new AITutorConfigError("AI_TUTOR_CONFIG_DEPENDENCY_INVALID", "The Tutor Config generation Model is not an enabled streaming model with sufficient limits.");
   const provider = new SQLiteAIProviderConfigRepository(database).getById(model.providerConfigId);
   if (!provider || !provider.enabled || !provider.credentialRef) throw new AITutorConfigError("AI_TUTOR_CONFIG_DEPENDENCY_INVALID", "The Tutor Config generation Provider is not configured for execution.");
+  const fallbackIds = content.fallbackGenerationModelConfigIds ?? [];
+  if (fallbackIds.includes(content.generationModelConfigId) || new Set(fallbackIds).size !== fallbackIds.length) throw new AITutorConfigError("AI_TUTOR_CONFIG_DEPENDENCY_INVALID", "Tutor fallback Models must be distinct from the primary Model and from each other.");
+  for (const fallbackId of fallbackIds) {
+    const fallback = new SQLiteAIModelConfigRepository(database).getById(fallbackId);
+    if (!fallback || fallback.capability !== "GENERATION" || !fallback.enabled || !fallback.supportsStreaming || fallback.contextWindowTokens === null || fallback.maxOutputTokens === null || content.maxOutputTokens > fallback.maxOutputTokens) throw new AITutorConfigError("AI_TUTOR_CONFIG_DEPENDENCY_INVALID", "A Tutor fallback Model is not an enabled streaming model with sufficient limits.");
+    const fallbackProvider = new SQLiteAIProviderConfigRepository(database).getById(fallback.providerConfigId);
+    if (!fallbackProvider || !fallbackProvider.enabled || !fallbackProvider.credentialRef) throw new AITutorConfigError("AI_TUTOR_CONFIG_DEPENDENCY_INVALID", "A Tutor fallback Provider is not configured for execution.");
+  }
   const context = new SQLiteAIContextPolicyRepository(database).getById(content.contextPolicyId);
   if (!context || !context.enabled) throw new AITutorConfigError("AI_TUTOR_CONFIG_DEPENDENCY_INVALID", "The Tutor Config Context Policy is not enabled.");
   const retrieval = new SQLiteAIRetrievalConfigRepository(database).getById(content.retrievalConfigId);

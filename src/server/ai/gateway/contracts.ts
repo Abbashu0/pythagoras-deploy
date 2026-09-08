@@ -194,6 +194,8 @@ export interface ProviderAdapterExecutionContext {
   signal: AbortSignal;
   /** Plaintext is request-scoped and must never enter traces, errors, or logs. */
   credential: string;
+  /** Canonical Provider URL resolved by the server; clients cannot supply it. */
+  providerBaseUrl?: string;
   timeoutMs: number;
 }
 
@@ -297,6 +299,8 @@ export interface AIProviderGatewayOperationOptions {
   timeoutMs?: number;
   /** Exact server-owned Model/Provider identity pinned by the runtime plan. */
   expectedIdentity?: Readonly<AIProviderAttemptIdentity>;
+  /** Exact identity for each ordered fallback attempt, keyed by Model Config ID. */
+  expectedIdentities?: Readonly<Record<string, Readonly<AIProviderAttemptIdentity>>>;
   /** Server-owned exact Circuit Breaker Policy reference; clients must never provide this. */
   circuitPolicy?: {
     policyId: string;

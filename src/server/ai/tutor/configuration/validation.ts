@@ -10,8 +10,9 @@ export function normalizeAITutorConfigContent(value: unknown): AITutorConfigCont
   if (!isPlainObject(value)) invalid("Tutor Config must be an object.");
   requireExactKeys(value, [
     "key", "subjectKey", "displayName", "enabled", "generationModelConfigId",
-    "contextPolicyId", "retrievalConfigId", "budgetPolicyId", "rateLimitPolicyId", "maxOutputTokens",
+    "contextPolicyId", "retrievalConfigId", "budgetPolicyId", "rateLimitPolicyId", "maxOutputTokens", "fallbackGenerationModelConfigIds",
   ]);
+  const fallbackGenerationModelConfigIds = optionalFallbackIds(value.fallbackGenerationModelConfigIds);
   const content: AITutorConfigContent = {
     key: normalizedText(value.key, "key", 1, 120).toLowerCase(),
     subjectKey: normalizedText(value.subjectKey, "subjectKey", 1, 80).toLowerCase(),
@@ -23,6 +24,7 @@ export function normalizeAITutorConfigContent(value: unknown): AITutorConfigCont
     budgetPolicyId: uuid(value.budgetPolicyId, "budgetPolicyId"),
     rateLimitPolicyId: uuid(value.rateLimitPolicyId, "rateLimitPolicyId"),
     maxOutputTokens: positiveInteger(value.maxOutputTokens, "maxOutputTokens", AI_TUTOR_MAX_OUTPUT_TOKENS),
+    fallbackGenerationModelConfigIds,
   };
   if (!KEY_PATTERN.test(content.key)) invalid("Tutor Config key is invalid.");
   if (!SUBJECT_PATTERN.test(content.subjectKey)) invalid("Tutor Config subject is invalid.");
@@ -33,7 +35,7 @@ export function normalizeAITutorConfigSnapshot(value: unknown): AITutorConfigSna
   if (!isPlainObject(value)) invalid("Tutor Config snapshot must be an object.");
   requireExactKeys(value, [
     "key", "subjectKey", "displayName", "enabled", "generationModelConfigId",
-    "contextPolicyId", "retrievalConfigId", "budgetPolicyId", "rateLimitPolicyId", "maxOutputTokens",
+    "contextPolicyId", "retrievalConfigId", "budgetPolicyId", "rateLimitPolicyId", "maxOutputTokens", "fallbackGenerationModelConfigIds",
     "groundingProtocolKey", "groundingProtocolRevision", "citationProtocolKey", "citationProtocolRevision",
   ]);
   const content = normalizeAITutorConfigContent({
@@ -47,11 +49,13 @@ export function normalizeAITutorConfigSnapshot(value: unknown): AITutorConfigSna
     budgetPolicyId: value.budgetPolicyId,
     rateLimitPolicyId: value.rateLimitPolicyId,
     maxOutputTokens: value.maxOutputTokens,
+    fallbackGenerationModelConfigIds: value.fallbackGenerationModelConfigIds,
   });
   if (value.groundingProtocolKey !== AI_TUTOR_GROUNDING_PROTOCOL_KEY || value.groundingProtocolRevision !== AI_TUTOR_GROUNDING_PROTOCOL_REVISION) invalid("Tutor Config grounding protocol is server-owned.");
   if (value.citationProtocolKey !== AI_TUTOR_CITATION_PROTOCOL_KEY || value.citationProtocolRevision !== AI_TUTOR_CITATION_PROTOCOL_REVISION) invalid("Tutor Config citation protocol is server-owned.");
   return {
     ...content,
+    fallbackGenerationModelConfigIds: content.fallbackGenerationModelConfigIds ?? [],
     groundingProtocolKey: AI_TUTOR_GROUNDING_PROTOCOL_KEY,
     groundingProtocolRevision: AI_TUTOR_GROUNDING_PROTOCOL_REVISION,
     citationProtocolKey: AI_TUTOR_CITATION_PROTOCOL_KEY,
@@ -62,7 +66,19 @@ export function normalizeAITutorConfigSnapshot(value: unknown): AITutorConfigSna
 function requireExactKeys(value: Record<string, unknown>, keys: readonly string[]): void {
   const expected = [...keys].sort();
   const actual = Object.keys(value).sort();
-  if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) invalid("Tutor Config fields are invalid.");
+  const fallbackKey = "fallbackGenerationModelConfigIds";
+  const withoutFallback = expected.filter((key) => key !== fallbackKey);
+  const matchesRequired = actual.length === expected.length && actual.every((key, index) => key === expected[index]);
+  const legacyAllowed = keys.includes(fallbackKey) && actual.length === withoutFallback.length && actual.every((key, index) => key === withoutFallback[index]);
+  if (!matchesRequired && !legacyAllowed) invalid("Tutor Config fields are invalid.");
+}
+
+function optionalFallbackIds(value: unknown): string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 3) invalid("Tutor Config fallback models are invalid.");
+  const ids = value.map((id) => uuid(id, "fallbackGenerationModelConfigId"));
+  if (new Set(ids).size !== ids.length) invalid("Tutor Config fallback models must be unique.");
+  return ids;
 }
 
 function uuid(value: unknown, field: string): string {

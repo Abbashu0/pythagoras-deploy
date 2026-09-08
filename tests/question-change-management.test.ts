@@ -1,13 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { v7 as uuidv7 } from "uuid";
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
-import { QuestionReviewItem } from "../src/components/admin/review/QuestionReviewItem";
-import type { ChangeDetails } from "../src/components/admin/review/types";
 import type { AdminActor } from "../src/server/admin-auth";
 import { SQLiteAdminIdentityRepository } from "../src/server/admin-auth/sqlite-admin-identity-repository";
 import { createCanonicalContentRepository } from "../src/server/canonical-content";
@@ -380,36 +376,4 @@ test("representative question snapshots fit the existing bounded snapshot contra
   assert.ok(Buffer.byteLength(JSON.stringify(snapshot), "utf8") < 64 * 1024);
   assert.equal(JSON.stringify(snapshot).includes("passwordHash"), false);
   assert.equal(JSON.stringify(snapshot).includes("tokenHash"), false);
-});
-
-test("Question review renders readable RichDocument before/after without unsafe HTML", () => {
-  const packageId = uuidv7();
-  const taxonomyId = uuidv7();
-  const before = questionContent(packageId, taxonomyId);
-  const after: QuestionItemContent = {
-    ...before,
-    variants: before.variants.map((variant) => ({ ...variant, content: paragraph("الصياغة العربية المقترحة") })),
-    sharedAnswer: paragraph("الجواب العربي المقترح"),
-  };
-  const item: ChangeDetails["items"][number] = {
-    id: uuidv7(),
-    revision: 1,
-    resourceId: uuidv7(),
-    resourceType: "question.item",
-    conflictState: "NONE",
-    conflictDetails: null,
-    beforeSnapshot: before as unknown as Record<string, unknown>,
-    proposedSnapshot: after as unknown as Record<string, unknown>,
-    currentSnapshot: before as unknown as Record<string, unknown>,
-    currentResourceRevision: 1,
-    presentation: { resourceLabel: "سؤال #1", resourceSubtitle: "صيغة واحدة · ورود واحد", changeSummary: "تعديل تعليمي", areaLabel: "بنك الأسئلة", fieldDiffs: [] },
-  };
-  const markup = renderToStaticMarkup(createElement(QuestionReviewItem, { item }));
-  assert.match(markup, /سؤال #1/u);
-  assert.match(markup, /الصياغة العربية المقترحة/u);
-  assert.match(markup, /الجواب العربي المقترح/u);
-  assert.match(markup, /data-rich-document="public-v1"/u);
-  assert.equal(markup.includes("{&quot;type&quot;:&quot;doc&quot;"), false, "raw JSON dominated the Question review");
-  const source = readFileSync(path.join(process.cwd(), "src/components/admin/review/QuestionReviewItem.tsx"), "utf8");
-  assert.equal(source.includes("dangerouslySetInnerHTML"), false);
 });

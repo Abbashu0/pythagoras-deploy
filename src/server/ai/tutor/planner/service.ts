@@ -95,6 +95,7 @@ export class AITutorGenerationPlanner {
       costEstimate: cloneAndDeepFreeze(preflight.costEstimate),
       generationModelConfigId: preflight.generationModelConfigId,
       generationModelConfigRevision: preflight.generationModelConfigRevision,
+      fallbackGenerationModelConfigIds: [...preflight.fallbackGenerationModelConfigIds],
       generationProviderConfigId: preflight.generationProviderConfigId,
       generationProviderConfigRevision: preflight.generationProviderConfigRevision,
       providerModelId: preflight.providerModelId,
@@ -108,7 +109,7 @@ export class AITutorGenerationPlanner {
   }
 
   private validatePreflight(preflight: AITutorPreflightPlan): void {
-    if (!preflight || preflight.groundingProtocolKey !== AI_TUTOR_GROUNDING_PROTOCOL_KEY || preflight.groundingProtocolRevision !== AI_TUTOR_GROUNDING_PROTOCOL_REVISION || preflight.citationProtocolKey !== AI_TUTOR_CITATION_PROTOCOL_KEY || preflight.citationProtocolRevision !== AI_TUTOR_CITATION_PROTOCOL_REVISION || preflight.modelSelectionPlan.capability !== "GENERATION" || preflight.modelSelectionPlan.attempts.length !== 1 || preflight.modelSelectionPlan.attempts[0] !== preflight.generationModelConfigId || preflight.maxOutputTokens > preflight.modelMaxOutputTokens) {
+    if (!preflight || preflight.groundingProtocolKey !== AI_TUTOR_GROUNDING_PROTOCOL_KEY || preflight.groundingProtocolRevision !== AI_TUTOR_GROUNDING_PROTOCOL_REVISION || preflight.citationProtocolKey !== AI_TUTOR_CITATION_PROTOCOL_KEY || preflight.citationProtocolRevision !== AI_TUTOR_CITATION_PROTOCOL_REVISION || preflight.modelSelectionPlan.capability !== "GENERATION" || preflight.modelSelectionPlan.attempts.length < 1 || preflight.modelSelectionPlan.attempts.length > 4 || preflight.modelSelectionPlan.attempts[0] !== preflight.generationModelConfigId || preflight.maxOutputTokens > preflight.modelMaxOutputTokens || preflight.modelSelectionPlan.attempts.length !== preflight.fallbackGenerationModelConfigIds.length + 1 || preflight.modelSelectionPlan.attempts.slice(1).some((id, index) => id !== preflight.fallbackGenerationModelConfigIds[index])) {
       throw new AITutorPlanningError("AI_TUTOR_PLAN_INVALID", "The Tutor preflight plan is not a supported M8A Generation plan.");
     }
   }

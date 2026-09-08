@@ -3,7 +3,7 @@ import type { AIAdmissionPlan, AIAdmissionResult } from "../../admission";
 import { AIConversationError, AI_CONVERSATION_MAX_CHUNK_BYTES, AI_CONVERSATION_MAX_RESPONSE_BYTES, hashConversationText, type AIConversationFinishReason, type AIConversationResponse, type AIConversationStatus } from "../../conversations";
 import { AIContextError } from "../../context/errors";
 import { AIPolicyError } from "../../policy/errors";
-import { AIProviderGatewayError, isAIProviderGatewayError, type AIProviderAttemptTrace } from "../../gateway";
+import { AIProviderGatewayError, isAIProviderGatewayError, type AIProviderAttemptTrace, type NormalizedProviderUsage } from "../../gateway";
 import { AIGenerationUsageAccumulator } from "../../economics";
 import { AIAccountingError, type AICostOperation } from "../../economics";
 import { AIHybridRetrievalError, type AIEvidencePack, type AIHybridRetrievalTrace } from "../../retrieval";
@@ -425,19 +425,14 @@ export class AITutorExecutionService {
     let nextSequence = this.safeResponseSequence(plan.principal, plan.responseId);
 
     try {
+      const expectedIdentities = this.generationAttemptIdentities(plan);
       stream = this.dependencies.gateway.generate(
         generationPlan.modelSelectionPlan,
         generationPlan.request,
         {
           signal: linked.signal,
-          expectedIdentity: {
-            modelConfigId: plan.generationModelConfigId,
-            modelConfigRevision: plan.generationModelConfigRevision,
-            providerConfigId: plan.generationProviderConfigId,
-            providerConfigRevision: plan.generationProviderConfigRevision,
-            providerModelId: plan.providerModelId,
-            adapterKey: plan.adapterKey,
-          },
+          expectedIdentity: expectedIdentities[plan.generationModelConfigId],
+          expectedIdentities,
         },
       );
       for await (const event of stream.events) {
@@ -491,11 +486,15 @@ export class AITutorExecutionService {
     const providerInvoked = invokedAttempts.length > 0;
     if (providerInvoked) {
       try {
-        for (const attempt of invokedAttempts) {
+        for (const [index, attempt] of invokedAttempts.entries()) {
           this.dependencies.accounting.recordAttempt({
             operationId: operation.id,
             attempt,
-            normalizedUsage: usage.snapshot(),
+            // Gateway fallback can expose one cumulative final snapshot, but
+            // it cannot attribute that snapshot to an earlier failed attempt.
+            // Preserve those earlier attempts as unknown rather than charging
+            // the successful fallback's usage to the wrong Model.
+            normalizedUsage: index === invokedAttempts.length - 1 ? usage.snapshot() : emptyNormalizedUsage(),
             capability: attempt.capability,
             providerModelId: attempt.providerModelId ?? plan.providerModelId,
             at: attempt.startedAt,
@@ -785,7 +784,7 @@ export class AITutorExecutionService {
     }
 
     const tutor = this.dependencies.tutorConfigs.getById(plan.tutorConfigId);
-    if (!tutor || !tutor.enabled || tutor.currentRevision !== plan.tutorConfigRevision || tutor.subjectKey !== plan.subjectKey || tutor.generationModelConfigId !== plan.generationModelConfigId || tutor.contextPolicyId !== plan.contextPolicyId || tutor.retrievalConfigId !== plan.retrievalConfigId || tutor.budgetPolicyId !== plan.budgetPolicyId || tutor.rateLimitPolicyId !== plan.rateLimitPolicyId || tutor.maxOutputTokens !== plan.maxOutputTokens) throw new AITutorExecutionError("AI_TUTOR_EXECUTION_CONFIGURATION_CHANGED", "The Tutor Config changed before execution.");
+    if (!tutor || !tutor.enabled || tutor.currentRevision !== plan.tutorConfigRevision || tutor.subjectKey !== plan.subjectKey || tutor.generationModelConfigId !== plan.generationModelConfigId || JSON.stringify(tutor.fallbackGenerationModelConfigIds ?? []) !== JSON.stringify(plan.fallbackGenerationModelConfigIds) || tutor.contextPolicyId !== plan.contextPolicyId || tutor.retrievalConfigId !== plan.retrievalConfigId || tutor.budgetPolicyId !== plan.budgetPolicyId || tutor.rateLimitPolicyId !== plan.rateLimitPolicyId || tutor.maxOutputTokens !== plan.maxOutputTokens) throw new AITutorExecutionError("AI_TUTOR_EXECUTION_CONFIGURATION_CHANGED", "The Tutor Config changed before execution.");
 
     const snapshot = this.dependencies.context.getSnapshot(plan.principal, plan.responseId);
     if (snapshot.id !== plan.contextSnapshotId || snapshot.fingerprint !== plan.contextSnapshotFingerprint || snapshot.globalPolicyId !== plan.globalPolicyId || snapshot.globalPolicyRevision !== plan.globalPolicyRevision || snapshot.subjectPolicyId !== plan.subjectPolicyId || snapshot.subjectPolicyRevision !== plan.subjectPolicyRevision || snapshot.contextPolicyId !== plan.contextPolicyId || snapshot.contextPolicyRevision !== plan.contextPolicyRevision) throw new AITutorExecutionError("AI_TUTOR_EXECUTION_CONFIGURATION_CHANGED", "The Context Snapshot changed before execution.");
@@ -803,9 +802,48 @@ export class AITutorExecutionService {
     const rateLimit = this.dependencies.rateLimitPolicies.getRevision(plan.rateLimitPolicyId, plan.rateLimitPolicyRevision);
     if (!budget || !budget.enabled || budget.costCenter !== "STUDENT_GENERATION" || !rateLimit || !rateLimit.enabled) throw new AITutorExecutionError("AI_TUTOR_EXECUTION_CONFIGURATION_CHANGED", "The Tutor admission policies changed before execution.");
 
-    const model = this.dependencies.models.getById(plan.generationModelConfigId);
-    const provider = this.dependencies.providers.getById(plan.generationProviderConfigId);
-    if (!model || !provider || !model.enabled || !provider.enabled || !provider.credentialRef || model.revision !== plan.generationModelConfigRevision || model.providerConfigId !== plan.generationProviderConfigId || model.providerModelId !== plan.providerModelId || model.adapterKey !== plan.adapterKey || model.capability !== "GENERATION" || !model.supportsStreaming || provider.revision !== plan.generationProviderConfigRevision) throw new AITutorExecutionError("AI_TUTOR_EXECUTION_CONFIGURATION_CHANGED", "The Tutor Generation Model or Provider changed before execution.");
+    for (const modelId of plan.modelSelectionPlan.attempts) {
+      const model = this.dependencies.models.getById(modelId);
+      const provider = model ? this.dependencies.providers.getById(model.providerConfigId) : null;
+      const pinned = this.generationAttemptIdentities(plan)[modelId];
+      const isPrimary = modelId === plan.generationModelConfigId;
+      if (!model || !provider || !pinned || !model.enabled || !provider.enabled || !provider.credentialRef || model.capability !== "GENERATION" || !model.supportsStreaming || model.revision !== pinned.modelConfigRevision || model.providerConfigId !== pinned.providerConfigId || model.providerModelId !== pinned.providerModelId || model.adapterKey !== pinned.adapterKey || provider.revision !== pinned.providerConfigRevision || (isPrimary && (model.revision !== plan.generationModelConfigRevision || provider.revision !== plan.generationProviderConfigRevision))) throw new AITutorExecutionError("AI_TUTOR_EXECUTION_CONFIGURATION_CHANGED", "The Tutor Generation Model or Provider changed before execution.");
+    }
+  }
+
+  private generationAttemptIdentities(plan: AITutorPreflightPlan): Record<string, {
+    modelConfigId: string;
+    modelConfigRevision: number;
+    providerConfigId: string;
+    providerConfigRevision: number;
+    providerModelId: string;
+    adapterKey: string;
+  }> {
+    const identities: Record<string, {
+      modelConfigId: string;
+      modelConfigRevision: number;
+      providerConfigId: string;
+      providerConfigRevision: number;
+      providerModelId: string;
+      adapterKey: string;
+    }> = {};
+    const costComponents = [
+      plan.costEstimate.generation,
+      ...(plan.costEstimate.generationFallbacks ?? []),
+    ];
+    for (const modelId of plan.modelSelectionPlan.attempts) {
+      const pinned = costComponents.find((component) => component.modelConfigId === modelId);
+      if (!pinned) throw new AITutorExecutionError("AI_TUTOR_EXECUTION_CONFIGURATION_CHANGED", "The Tutor Generation fallback identity could not be resolved safely.");
+      identities[modelId] = {
+        modelConfigId: pinned.modelConfigId,
+        modelConfigRevision: pinned.modelConfigRevision,
+        providerConfigId: pinned.providerConfigId,
+        providerConfigRevision: pinned.providerConfigRevision,
+        providerModelId: pinned.providerModelId,
+        adapterKey: pinned.adapterKey ?? (modelId === plan.generationModelConfigId ? plan.adapterKey : (() => { throw new AITutorExecutionError("AI_TUTOR_EXECUTION_CONFIGURATION_CHANGED", "The Tutor fallback adapter identity could not be resolved safely."); })()),
+      };
+    }
+    return identities;
   }
 
   private safeResponseBytes(principal: AITutorPreflightPlan["principal"], responseId: string): number {
@@ -979,6 +1017,10 @@ function safeGetConversation(conversations: AITutorExecutionDependencies["conver
 
 function validateExecutionInput(input: AITutorExecutionInput): void {
   if (!input || typeof input !== "object" || !input.principal || typeof input.responseId !== "string" || typeof input.tutorConfigId !== "string") throw new AITutorExecutionError("AI_TUTOR_EXECUTION_INVALID", "The Tutor execution input is invalid.");
+}
+
+function emptyNormalizedUsage(): NormalizedProviderUsage {
+  return { inputTokens: null, outputTokens: null, reasoningTokens: null, cacheHitInputTokens: null, cacheMissInputTokens: null };
 }
 
 function validateEstimator(value: { estimatorKey: string; estimate(text: string): number }): void {

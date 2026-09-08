@@ -18,3 +18,5 @@ export * from "./retrieval-config";
 export * from "./tutor";
 export * from "./evals";
 export * from "./telemetry";
+export * from "./admin-read-service";
+export * from "./provider-connection";

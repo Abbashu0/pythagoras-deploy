@@ -122,6 +122,19 @@ export class AITutorPreflightService {
       }
       const generationProvider = this.providers.getById(generationModel.providerConfigId);
       if (!generationProvider || !generationProvider.enabled || !generationProvider.credentialRef) throw new AITutorPreflightError("AI_TUTOR_PROVIDER_INVALID", "The Tutor Generation Provider is not configured for execution.");
+      const fallbackGenerationModelConfigIds = [...(tutorConfig.fallbackGenerationModelConfigIds ?? [])];
+      if (fallbackGenerationModelConfigIds.includes(generationModel.id) || new Set(fallbackGenerationModelConfigIds).size !== fallbackGenerationModelConfigIds.length) throw new AITutorPreflightError("AI_TUTOR_MODEL_INVALID", "Tutor fallback Models must be distinct from the primary Model and from each other.");
+      const fallbackModels = fallbackGenerationModelConfigIds.map((fallbackId) => {
+        const fallback = this.models.getById(fallbackId);
+        if (!fallback || fallback.capability !== "GENERATION" || !fallback.enabled || !fallback.supportsStreaming || fallback.contextWindowTokens === null || fallback.maxOutputTokens === null || tutorConfig.maxOutputTokens > fallback.maxOutputTokens) throw new AITutorPreflightError("AI_TUTOR_MODEL_INVALID", "A Tutor fallback Model is not an enabled streaming model with sufficient limits.");
+        if (this.adapters) {
+          try { this.adapters.require(fallback.adapterKey, "GENERATION"); }
+          catch (error) { throw new AITutorPreflightError("AI_TUTOR_MODEL_INVALID", "A Tutor fallback Generation adapter is not registered.", {}, error); }
+        }
+        const fallbackProvider = this.providers.getById(fallback.providerConfigId);
+        if (!fallbackProvider || !fallbackProvider.enabled || !fallbackProvider.credentialRef) throw new AITutorPreflightError("AI_TUTOR_PROVIDER_INVALID", "A Tutor fallback Provider is not configured for execution.");
+        return fallback;
+      });
 
       const retrievalConfig = this.retrievalConfigs.getById(tutorConfig.retrievalConfigId);
       const retrievalRevision = this.retrievalConfigs.getCurrentRevision(tutorConfig.retrievalConfigId);
@@ -145,11 +158,12 @@ export class AITutorPreflightService {
         embeddingModel: this.requireOperationalModel(retrievalRevision.embeddingModelConfigId, "EMBEDDING", "The Tutor embedding Model is not operational."),
         rerankModel: retrievalRevision.rerankModelConfigId === null ? null : this.requireOperationalModel(retrievalRevision.rerankModelConfigId, "RERANK", "The Tutor rerank Model is not operational."),
         generationModel,
+        generationFallbackModels: fallbackModels,
         maxOutputTokens: tutorConfig.maxOutputTokens,
         at: this.safeNow(),
       });
       if (costEstimate.currency !== budgetPolicy.currency) throw new AITutorPreflightError("AI_TUTOR_COST_CURRENCY_MISMATCH", "The Tutor cost estimate does not match the Budget Policy currency.", { budgetCurrency: budgetPolicy.currency, estimateCurrency: costEstimate.currency });
-      const modelSelectionPlan: AIModelSelectionPlan = { capability: "GENERATION", attempts: [generationModel.id] };
+      const modelSelectionPlan: AIModelSelectionPlan = { capability: "GENERATION", attempts: [generationModel.id, ...fallbackGenerationModelConfigIds] };
       const planFingerprint = createPlanFingerprint({
         responseId,
         currentMessageId: currentMessage.id,
@@ -173,6 +187,7 @@ export class AITutorPreflightService {
         generationProviderConfigRevision: generationProvider.revision,
         providerModelId: generationModel.providerModelId,
         adapterKey: generationModel.adapterKey,
+        fallbackGenerationModelConfigIds,
         contextWindowTokens: generationModel.contextWindowTokens,
         modelMaxOutputTokens: generationModel.maxOutputTokens,
         budgetPolicyId: budgetPolicy.budgetPolicyId,
@@ -209,6 +224,7 @@ export class AITutorPreflightService {
         retrievalConfigRevision: retrievalRevision.revision,
         generationModelConfigId: generationModel.id,
         generationModelConfigRevision: generationModel.revision,
+        fallbackGenerationModelConfigIds,
         generationProviderConfigId: generationProvider.id,
         generationProviderConfigRevision: generationProvider.revision,
         providerModelId: generationModel.providerModelId,

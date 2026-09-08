@@ -203,4 +203,4 @@ AI-M8A, AI-M8B, and AI-M8C are approved; AI-M8 Grounded Tutor is complete at `e7
 
 ## Sequencing rule
 
-No Student AI UI, Admin AI dashboard/forms, or Second Brain graph visualization is a prerequisite for AI-M0. Those surfaces may be designed only after the backend contract needed by their milestone is reviewed. No milestone imports remaining Question/Literature data unless a separate Product decision authorizes it.
+No Student AI UI, Admin application surface, or Second Brain graph visualization is a prerequisite for AI-M0. No milestone imports remaining Question/Literature data unless a separate Product decision authorizes it.

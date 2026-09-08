@@ -127,6 +127,35 @@ export class SQLiteAIProviderConfigRepository
     }
     return providerConfigFromRow(row);
   }
+
+  remove(input: { id: string; expectedRevision: number }): AIProviderConfig {
+    try {
+      const row = this.database.db
+        .delete(aiProviderConfigs)
+        .where(
+          and(
+            eq(aiProviderConfigs.id, input.id),
+            eq(aiProviderConfigs.revision, input.expectedRevision),
+          ),
+        )
+        .returning()
+        .get();
+      if (!row) {
+        throw new AIProviderConfigError(
+          "AI_PROVIDER_CONFIG_CONFLICT",
+          "The AI Provider configuration changed before removal completed.",
+        );
+      }
+      return providerConfigFromRow(row);
+    } catch (error) {
+      if (error instanceof AIProviderConfigError) throw error;
+      throw new AIProviderConfigError(
+        "AI_PROVIDER_CONFIG_CONFLICT",
+        "The AI Provider configuration cannot be removed while it is referenced by another AI record.",
+        error,
+      );
+    }
+  }
 }
 
 export function toSafeAIProviderConfigDTO(
