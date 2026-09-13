@@ -1,0 +1,379 @@
+/* ============================================================================
+   Pythagoras Admin UI System — Design Tokens
+   Philosophy: "Warm Graphite / Admin variant"
+   - warm neutral light surfaces (never sterile #fff everywhere)
+   - warm graphite dark surfaces (never pure #000)
+   - restrained blue interaction accent
+   - colour always carries meaning
+   Every value used by a component must originate here.
+   ========================================================================== */
+
+:root {
+  color-scheme: light;
+
+  /* ---- Radius ------------------------------------------------------------ */
+  --radius-xs: 3px;
+  --radius-sm: 5px;
+  --radius-md: 7px;
+  --radius-lg: 10px;
+  --radius-xl: 13px;
+  --radius-2xl: 18px;
+  --radius-full: 9999px;
+
+  /* ---- Control geometry -------------------------------------------------- */
+  --control-h-2xs: 20px;
+  --control-h-xs: 24px;
+  --control-h-sm: 28px;
+  --control-h-md: 32px;
+  --control-h-lg: 36px;
+  --control-h-xl: 42px;
+
+  /* ---- Layout ------------------------------------------------------------ */
+  --sidebar-w: 264px;
+  --sidebar-w-collapsed: 56px;
+  --topbar-h: 52px;
+  --subbar-h: 42px;
+  --content-max: 1520px;
+  --content-max-narrow: 880px;
+  --content-max-reading: 720px;
+  --inspector-w: 380px;
+  --master-w: 340px;
+  --gutter: 24px;
+  --gutter-tight: 16px;
+
+  /* ---- Z-index ----------------------------------------------------------- */
+  --z-base: 0;
+  --z-raised: 10;
+  --z-sticky: 20;
+  --z-topbar: 30;
+  --z-sidebar: 35;
+  --z-dropdown: 40;
+  --z-overlay: 50;
+  --z-modal: 60;
+  --z-popover: 70;
+  --z-toast: 80;
+  --z-tooltip: 90;
+
+  /* ---- Motion ------------------------------------------------------------ */
+  --dur-instant: 0ms;
+  --dur-fast: 120ms;
+  --dur-base: 160ms;
+  --dur-medium: 200ms;
+  --dur-slow: 240ms;
+  --dur-slower: 320ms;
+  --ease-out: cubic-bezier(0.16, 0.84, 0.44, 1);
+  --ease-in: cubic-bezier(0.5, 0, 0.75, 0);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-emphasis: cubic-bezier(0.32, 1.06, 0.55, 1);
+
+  /* ---- Typography -------------------------------------------------------- */
+  --font-ui:
+    var(--font-plex-arabic), "IBM Plex Sans Arabic", "Segoe UI", system-ui,
+    -apple-system, "Helvetica Neue", sans-serif;
+  --font-mono:
+    var(--font-mono-stack), "JetBrains Mono", ui-monospace, "SFMono-Regular",
+    "Cascadia Mono", Menlo, Consolas, monospace;
+
+  --fs-2xs: 0.6875rem; /* 11 — micro labels, axis ticks */
+  --fs-xs: 0.75rem; /* 12 — captions, metadata */
+  --fs-sm: 0.8125rem; /* 13 — controls, table cells (workhorse) */
+  --fs-base: 0.875rem; /* 14 — body */
+  --fs-md: 0.9375rem; /* 15 — card / list titles */
+  --fs-lg: 1.0625rem; /* 17 — section titles */
+  --fs-xl: 1.3125rem; /* 21 — page titles */
+  --fs-2xl: 1.625rem; /* 26 — metric values */
+  --fs-3xl: 2.125rem; /* 34 — hero metric values (rare) */
+
+  --lh-tight: 1.25;
+  --lh-title: 1.4; /* Arabic titles need more than Latin */
+  --lh-ui: 1.5;
+  --lh-body: 1.75; /* Arabic body rhythm */
+  --lh-relaxed: 1.9;
+
+  --tracking-tight: -0.012em;
+  --tracking-normal: 0em;
+  --tracking-wide: 0.02em;
+  --tracking-caps: 0.06em;
+
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+
+  /* ======================================================================= */
+  /*  LIGHT — warm neutral                                                   */
+  /* ======================================================================= */
+
+  /* Surfaces */
+  --bg: #f8f6f3; /* app canvas — warm paper */
+  --bg-subtle: #f2efeb;
+  --surface: #ffffff; /* panels, cards */
+  --surface-secondary: #fbfaf8;
+  --elevated: #ffffff; /* popovers, menus, dialogs */
+  --inset: #f1eeea; /* wells, code blocks, table head */
+  --inset-strong: #e9e5e0;
+  --overlay-scrim: rgba(38, 34, 29, 0.32);
+
+  /* Interaction layers */
+  --hover: rgba(35, 31, 26, 0.045);
+  --hover-strong: rgba(35, 31, 26, 0.075);
+  --active: rgba(35, 31, 26, 0.09);
+  --selected: rgba(43, 95, 203, 0.09);
+  --selected-strong: rgba(43, 95, 203, 0.15);
+
+  /* Lines */
+  --border: #e4dfd8;
+  --border-strong: #d1cac1;
+  --border-subtle: #edeae5;
+  --separator: #eae6e1;
+  --ring: rgba(43, 95, 203, 0.42);
+  --ring-offset: #f8f6f3;
+
+  /* Text */
+  --text: #1b1917;
+  --text-secondary: #5b554d;
+  --text-tertiary: #8b8478;
+  --text-quaternary: #a8a196;
+  --text-inverted: #fbfaf8;
+  --text-on-accent: #ffffff;
+
+  /* Accent — restrained blue */
+  --accent: #2b5fcb;
+  --accent-hover: #24519f;
+  --accent-active: #1f4589;
+  --accent-text: #234fa8;
+  --accent-subtle: #eef2fd;
+  --accent-subtle-hover: #e0e8fb;
+  --accent-border: #c2d2f6;
+
+  /* Semantic — success */
+  --success: #1c7a4c;
+  --success-hover: #16653f;
+  --success-text: #176541;
+  --success-subtle: #eaf6ee;
+  --success-border: #bde0cc;
+
+  /* Semantic — warning */
+  --warning: #ab6d0a;
+  --warning-hover: #8f5a07;
+  --warning-text: #855405;
+  --warning-subtle: #fdf3e2;
+  --warning-border: #efd9ab;
+
+  /* Semantic — danger */
+  --danger: #bd3527;
+  --danger-hover: #a02b1f;
+  --danger-text: #a32a1e;
+  --danger-subtle: #fdecea;
+  --danger-border: #f2c9c3;
+
+  /* Semantic — information */
+  --info: #0d6c8f;
+  --info-hover: #0a5a78;
+  --info-text: #0a5876;
+  --info-subtle: #e9f4f9;
+  --info-border: #bcdce9;
+
+  /* Semantic — neutral / muted */
+  --neutral: #6f6a61;
+  --neutral-text: #5b554d;
+  --neutral-subtle: #f0edE8;
+  --neutral-border: #ddd8d0;
+
+  /* Semantic — future / coming soon */
+  --future: #6a53b8;
+  --future-text: #5a45a2;
+  --future-subtle: #f1eefb;
+  --future-border: #d3caf0;
+
+  /* Disabled */
+  --disabled-bg: #f2efeb;
+  --disabled-text: #a8a196;
+  --disabled-border: #e4dfd8;
+
+  /* Shadows */
+  --shadow-xs: 0 1px 1.5px rgba(31, 27, 22, 0.055);
+  --shadow-sm:
+    0 1px 2px rgba(31, 27, 22, 0.05), 0 1px 3px -1px rgba(31, 27, 22, 0.05);
+  --shadow-md:
+    0 2px 4px -2px rgba(31, 27, 22, 0.05), 0 6px 14px -4px rgba(31, 27, 22, 0.08);
+  --shadow-lg:
+    0 4px 8px -4px rgba(31, 27, 22, 0.06),
+    0 14px 32px -10px rgba(31, 27, 22, 0.14);
+  --shadow-xl:
+    0 8px 16px -8px rgba(31, 27, 22, 0.08),
+    0 28px 60px -16px rgba(31, 27, 22, 0.2);
+  --shadow-inset: inset 0 1px 2px rgba(31, 27, 22, 0.05);
+
+  /* Data visualisation — ordered categorical series */
+  --chart-1: #3a6cd8;
+  --chart-2: #1d8b98;
+  --chart-3: #b9821b;
+  --chart-4: #7455cf;
+  --chart-5: #bd4d68;
+  --chart-6: #3d8b51;
+  --chart-7: #8a8378;
+  --chart-8: #2a7ba4;
+
+  /* Data visualisation — semantic */
+  --chart-positive: #1c7a4c;
+  --chart-negative: #bd3527;
+  --chart-warning: #ab6d0a;
+  --chart-neutral: #9c958a;
+  --chart-comparison: #b6afa4; /* previous period */
+  --chart-grid: #e8e4de;
+  --chart-axis: #8b8478;
+  --chart-label: #5b554d;
+  --chart-cursor: rgba(35, 31, 26, 0.08);
+  --chart-track: #ece8e2;
+
+  /* Heatmap ramp (low → high) */
+  --heat-0: #f0edE8;
+  --heat-1: #dce6f8;
+  --heat-2: #b6cbf1;
+  --heat-3: #86a8e5;
+  --heat-4: #5382d8;
+  --heat-5: #2b5fcb;
+
+  /* Syntax / code shell */
+  --code-bg: #f7f5f2;
+  --code-border: #e7e3dd;
+  --code-text: #35302a;
+  --code-key: #234fa8;
+  --code-string: #176541;
+  --code-number: #a02b1f;
+  --code-punct: #8b8478;
+}
+
+.dark {
+  color-scheme: dark;
+
+  /* Surfaces — warm graphite */
+  --bg: #151412;
+  --bg-subtle: #100f0e;
+  --surface: #1c1b19;
+  --surface-secondary: #201f1d;
+  --elevated: #26241f;
+  --inset: #111110;
+  --inset-strong: #0c0c0b;
+  --overlay-scrim: rgba(8, 7, 6, 0.6);
+
+  --hover: rgba(255, 250, 240, 0.05);
+  --hover-strong: rgba(255, 250, 240, 0.08);
+  --active: rgba(255, 250, 240, 0.11);
+  --selected: rgba(112, 152, 255, 0.14);
+  --selected-strong: rgba(112, 152, 255, 0.22);
+
+  --border: #302e2a;
+  --border-strong: #423f3a;
+  --border-subtle: #262421;
+  --separator: #282622;
+  --ring: rgba(126, 163, 255, 0.5);
+  --ring-offset: #151412;
+
+  --text: #f1eee9;
+  --text-secondary: #a7a19a;
+  --text-tertiary: #7c766e;
+  --text-quaternary: #625d56;
+  --text-inverted: #1b1917;
+  --text-on-accent: #ffffff;
+
+  --accent: #3d6fe3;
+  --accent-hover: #4d7dee;
+  --accent-active: #5c89f3;
+  --accent-text: #93b4ff;
+  --accent-subtle: rgba(96, 140, 255, 0.13);
+  --accent-subtle-hover: rgba(96, 140, 255, 0.2);
+  --accent-border: rgba(120, 160, 255, 0.3);
+
+  --success: #2b9761;
+  --success-hover: #33a86d;
+  --success-text: #6fd79e;
+  --success-subtle: rgba(52, 180, 110, 0.13);
+  --success-border: rgba(70, 190, 125, 0.28);
+
+  --warning: #c58412;
+  --warning-hover: #d4901a;
+  --warning-text: #eebc5e;
+  --warning-subtle: rgba(220, 150, 30, 0.13);
+  --warning-border: rgba(230, 165, 50, 0.28);
+
+  --danger: #cf4a3d;
+  --danger-hover: #dd584a;
+  --danger-text: #ff9a8e;
+  --danger-subtle: rgba(230, 90, 75, 0.14);
+  --danger-border: rgba(240, 110, 95, 0.3);
+
+  --info: #2489b0;
+  --info-hover: #2d97c0;
+  --info-text: #79cdea;
+  --info-subtle: rgba(50, 160, 200, 0.14);
+  --info-border: rgba(70, 175, 215, 0.28);
+
+  --neutral: #7c766e;
+  --neutral-text: #a7a19a;
+  --neutral-subtle: rgba(255, 250, 240, 0.06);
+  --neutral-border: rgba(255, 250, 240, 0.13);
+
+  --future: #8a72d8;
+  --future-text: #b7a4f2;
+  --future-subtle: rgba(140, 115, 220, 0.14);
+  --future-border: rgba(155, 130, 230, 0.28);
+
+  --disabled-bg: rgba(255, 250, 240, 0.04);
+  --disabled-text: #625d56;
+  --disabled-border: #2b2925;
+
+  --shadow-xs: 0 1px 1.5px rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 3px -1px rgba(0, 0, 0, 0.35);
+  --shadow-md:
+    0 2px 4px -2px rgba(0, 0, 0, 0.4), 0 6px 14px -4px rgba(0, 0, 0, 0.45);
+  --shadow-lg:
+    0 4px 8px -4px rgba(0, 0, 0, 0.4), 0 14px 32px -10px rgba(0, 0, 0, 0.6);
+  --shadow-xl:
+    0 8px 16px -8px rgba(0, 0, 0, 0.45), 0 28px 60px -16px rgba(0, 0, 0, 0.7);
+  --shadow-inset: inset 0 1px 2px rgba(0, 0, 0, 0.3);
+
+  --chart-1: #5f8cf0;
+  --chart-2: #35aab8;
+  --chart-3: #dda939;
+  --chart-4: #9a80ee;
+  --chart-5: #e0748c;
+  --chart-6: #5cb073;
+  --chart-7: #a39b8e;
+  --chart-8: #4fa2c9;
+
+  --chart-positive: #43b87c;
+  --chart-negative: #e5695a;
+  --chart-warning: #e0a63c;
+  --chart-neutral: #7c766e;
+  --chart-comparison: #55504a;
+  --chart-grid: #2a2825;
+  --chart-axis: #7c766e;
+  --chart-label: #a7a19a;
+  --chart-cursor: rgba(255, 250, 240, 0.06);
+  --chart-track: #262421;
+
+  --heat-0: rgba(255, 250, 240, 0.05);
+  --heat-1: rgba(96, 140, 255, 0.16);
+  --heat-2: rgba(96, 140, 255, 0.3);
+  --heat-3: rgba(96, 140, 255, 0.46);
+  --heat-4: rgba(96, 140, 255, 0.66);
+  --heat-5: #6c9bff;
+
+  --code-bg: #131211;
+  --code-border: #2b2925;
+  --code-text: #ded9d2;
+  --code-key: #93b4ff;
+  --code-string: #6fd79e;
+  --code-number: #ff9a8e;
+  --code-punct: #7c766e;
+}
+
+/* Optional higher-density preference, toggled from the Lab toolbar. */
+:root[data-density="compact"] {
+  --control-h-sm: 26px;
+  --control-h-md: 30px;
+  --control-h-lg: 34px;
+  --gutter: 18px;
+  --gutter-tight: 12px;
+}

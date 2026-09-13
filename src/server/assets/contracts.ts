@@ -72,6 +72,20 @@ export interface UpdateAssetMetadata {
   actor: AdminActor;
 }
 
+export interface DeleteAssetMetadata {
+  id: string;
+  expectedRevision: number;
+  actor: AdminActor;
+}
+
+export interface AssetDependent {
+  id: string;
+  type: string;
+  name: string;
+  technicalId?: string;
+  href?: string;
+}
+
 export interface ListAssetsOptions {
   limit?: number;
   offset?: number;
@@ -103,8 +117,10 @@ export interface AssetRepository {
   list(options?: ListAssetsOptions): Asset[];
   findByIdWithCreator(id: string): AssetWithCreator | null;
   browse(options?: BrowseAssetsOptions): AssetPage;
+  listAll(): Asset[];
   getInventoryStats(): AssetInventoryStats;
   updateMetadata(input: UpdateAssetMetadata): Asset;
+  delete(input: DeleteAssetMetadata): Asset;
 }
 
 export interface IngestAssetInput {

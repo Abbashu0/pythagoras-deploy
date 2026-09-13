@@ -12,6 +12,7 @@ import type {
   AssetWithCreator,
   BrowseAssetsOptions,
   CreateAssetRecord,
+  DeleteAssetMetadata,
   ListAssetsOptions,
   UpdateAssetMetadata,
 } from "./contracts";
@@ -215,6 +216,15 @@ export class SQLiteAssetRepository implements AssetRepository {
       .map(toAsset);
   }
 
+  listAll(): Asset[] {
+    return this.database.db
+      .select()
+      .from(assets)
+      .orderBy(desc(assets.createdAt), desc(assets.id))
+      .all()
+      .map(toAsset);
+  }
+
   findByIdWithCreator(id: string): AssetWithCreator | null {
     const normalizedId = id.trim();
     if (!normalizedId) throw new AssetValidationError("Asset ID is required.");
@@ -314,5 +324,53 @@ export class SQLiteAssetRepository implements AssetRepository {
       if (!current) throw new AssetNotFoundError(input.id);
       throw new AssetConflictError(input.expectedRevision, current.revision);
     });
+  }
+
+  delete(input: DeleteAssetMetadata): Asset {
+    if (!input.id.trim()) throw new AssetValidationError("Asset ID is required.");
+    if (!Number.isInteger(input.expectedRevision) || input.expectedRevision < 1) {
+      throw new AssetValidationError("Expected asset revision is invalid.");
+    }
+
+    try {
+      return this.database.db.transaction((transaction) => {
+        const deleted = transaction
+          .delete(assets)
+          .where(
+            and(
+              eq(assets.id, input.id),
+              eq(assets.revision, input.expectedRevision),
+            ),
+          )
+          .returning()
+          .get();
+        if (deleted) return toAsset(deleted);
+
+        const current = transaction
+          .select({ revision: assets.revision })
+          .from(assets)
+          .where(eq(assets.id, input.id))
+          .get();
+        if (!current) throw new AssetNotFoundError(input.id);
+        throw new AssetConflictError(input.expectedRevision, current.revision);
+      });
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        "code" in error &&
+        String((error as Error & { code?: unknown }).code) ===
+          "SQLITE_CONSTRAINT_FOREIGNKEY"
+      ) {
+        const current = this.database.db
+          .select({ revision: assets.revision })
+          .from(assets)
+          .where(eq(assets.id, input.id))
+          .get();
+        if (current) {
+          throw new AssetConflictError(input.expectedRevision, current.revision);
+        }
+      }
+      throw error;
+    }
   }
 }

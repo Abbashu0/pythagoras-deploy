@@ -17,6 +17,7 @@ import type {
 import {
   AssetIntegrityError,
   AssetNotFoundError,
+  AssetStorageError,
   AssetValidationError,
 } from "./errors";
 import { inspectAssetFile } from "./file-inspection";
@@ -132,6 +133,10 @@ export class AssetService {
     return this.repository.list(options);
   }
 
+  listAll(): Asset[] {
+    return this.repository.listAll();
+  }
+
   browse(options: BrowseAssetsOptions = {}): AssetPage {
     return this.repository.browse(options);
   }
@@ -185,6 +190,31 @@ export class AssetService {
       expectedByteSize: asset.byteSize,
       actualByteSize: actual.byteSize,
     };
+  }
+
+  async hasStoredObject(assetOrId: Asset | string): Promise<boolean> {
+    const asset = typeof assetOrId === "string" ? this.getById(assetOrId) : assetOrId;
+    return this.storage.exists(asset.storageKey);
+  }
+
+  async delete(
+    id: string,
+    expectedRevision: number,
+    actor: AdminActor,
+  ): Promise<{ asset: Asset; storageCleanup: "complete" | "pending" }> {
+    this.assertActor(actor);
+    const asset = this.repository.delete({ id, expectedRevision, actor });
+    try {
+      await this.storage.delete(asset.storageKey);
+      return { asset, storageCleanup: "complete" };
+    } catch (error) {
+      // The metadata row is already gone, so retaining the content-addressed
+      // object is an orphan-safe cleanup concern rather than a broken Asset.
+      if (error instanceof AssetStorageError) {
+        return { asset, storageCleanup: "pending" };
+      }
+      return { asset, storageCleanup: "pending" };
+    }
   }
 
   async openContent(id: string): Promise<{

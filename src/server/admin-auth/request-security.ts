@@ -47,6 +47,45 @@ export function assertTrustedMutationRequest(request: Request): TrustedMutationC
   throw new AdminUntrustedOriginError();
 }
 
+function requestHostname(hostHeader: string | null): string {
+  if (!hostHeader) throw new AdminUntrustedOriginError();
+  try {
+    return normalizeHostname(new URL(`http://${hostHeader}`).hostname);
+  } catch {
+    throw new AdminUntrustedOriginError();
+  }
+}
+
+/** The rebuilt local Admin is intentionally unavailable to remote hosts. */
+export function assertLocalAdminRequest(request: Request): void {
+  if (!isLoopbackHostname(requestHostname(request.headers.get("host")))) {
+    throw new AdminUntrustedOriginError();
+  }
+}
+
+/** Same-origin protection plus the loopback-only local Admin boundary. */
+export function assertTrustedLocalAdminMutationRequest(
+  request: Request,
+): TrustedMutationContext {
+  const trusted = assertTrustedMutationRequest(request);
+  const originHeader = request.headers.get("origin");
+  let origin: URL;
+  try {
+    origin = new URL(originHeader ?? "");
+  } catch {
+    throw new AdminUntrustedOriginError();
+  }
+
+  if (
+    !isLoopbackHostname(origin.hostname) ||
+    !isLoopbackHostname(requestHostname(request.headers.get("host")))
+  ) {
+    throw new AdminUntrustedOriginError();
+  }
+
+  return trusted;
+}
+
 export async function readAdminAuthJsonBody(
   request: Request,
 ): Promise<Record<string, unknown>> {

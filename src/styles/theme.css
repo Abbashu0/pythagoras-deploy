@@ -1,0 +1,192 @@
+/* ============================================================================
+   Tailwind v4 theme mapping.
+   Tokens live in tokens.css; this file only exposes them as utilities so that
+   components never inline raw colour values.
+   ========================================================================== */
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme inline {
+  /* ---- Fonts ------------------------------------------------------------- */
+  --font-sans: var(--font-ui);
+  --font-mono: var(--font-mono);
+
+  /* ---- Colours: surfaces ------------------------------------------------- */
+  --color-bg: var(--bg);
+  --color-bg-subtle: var(--bg-subtle);
+  --color-surface: var(--surface);
+  --color-surface-secondary: var(--surface-secondary);
+  --color-elevated: var(--elevated);
+  --color-inset: var(--inset);
+  --color-inset-strong: var(--inset-strong);
+  --color-scrim: var(--overlay-scrim);
+
+  /* ---- Colours: interaction --------------------------------------------- */
+  --color-hover: var(--hover);
+  --color-hover-strong: var(--hover-strong);
+  --color-active: var(--active);
+  --color-selected: var(--selected);
+  --color-selected-strong: var(--selected-strong);
+
+  /* ---- Colours: lines --------------------------------------------------- */
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-border-subtle: var(--border-subtle);
+  --color-separator: var(--separator);
+  --color-ring: var(--ring);
+
+  /* ---- Colours: text ---------------------------------------------------- */
+  --color-fg: var(--text);
+  --color-fg-secondary: var(--text-secondary);
+  --color-fg-tertiary: var(--text-tertiary);
+  --color-fg-quaternary: var(--text-quaternary);
+  --color-fg-inverted: var(--text-inverted);
+  --color-on-accent: var(--text-on-accent);
+
+  /* ---- Colours: accent -------------------------------------------------- */
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-active: var(--accent-active);
+  --color-accent-text: var(--accent-text);
+  --color-accent-subtle: var(--accent-subtle);
+  --color-accent-subtle-hover: var(--accent-subtle-hover);
+  --color-accent-border: var(--accent-border);
+
+  /* ---- Colours: semantic ------------------------------------------------ */
+  --color-success: var(--success);
+  --color-success-hover: var(--success-hover);
+  --color-success-text: var(--success-text);
+  --color-success-subtle: var(--success-subtle);
+  --color-success-border: var(--success-border);
+
+  --color-warning: var(--warning);
+  --color-warning-hover: var(--warning-hover);
+  --color-warning-text: var(--warning-text);
+  --color-warning-subtle: var(--warning-subtle);
+  --color-warning-border: var(--warning-border);
+
+  --color-danger: var(--danger);
+  --color-danger-hover: var(--danger-hover);
+  --color-danger-text: var(--danger-text);
+  --color-danger-subtle: var(--danger-subtle);
+  --color-danger-border: var(--danger-border);
+
+  --color-info: var(--info);
+  --color-info-hover: var(--info-hover);
+  --color-info-text: var(--info-text);
+  --color-info-subtle: var(--info-subtle);
+  --color-info-border: var(--info-border);
+
+  --color-neutral: var(--neutral);
+  --color-neutral-text: var(--neutral-text);
+  --color-neutral-subtle: var(--neutral-subtle);
+  --color-neutral-border: var(--neutral-border);
+
+  --color-future: var(--future);
+  --color-future-text: var(--future-text);
+  --color-future-subtle: var(--future-subtle);
+  --color-future-border: var(--future-border);
+
+  --color-disabled-bg: var(--disabled-bg);
+  --color-disabled-fg: var(--disabled-text);
+  --color-disabled-border: var(--disabled-border);
+
+  /* ---- Colours: charts -------------------------------------------------- */
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-chart-6: var(--chart-6);
+  --color-chart-7: var(--chart-7);
+  --color-chart-8: var(--chart-8);
+  --color-chart-positive: var(--chart-positive);
+  --color-chart-negative: var(--chart-negative);
+  --color-chart-warning: var(--chart-warning);
+  --color-chart-neutral: var(--chart-neutral);
+  --color-chart-comparison: var(--chart-comparison);
+  --color-chart-grid: var(--chart-grid);
+  --color-chart-axis: var(--chart-axis);
+  --color-chart-label: var(--chart-label);
+  --color-chart-track: var(--chart-track);
+
+  --color-heat-0: var(--heat-0);
+  --color-heat-1: var(--heat-1);
+  --color-heat-2: var(--heat-2);
+  --color-heat-3: var(--heat-3);
+  --color-heat-4: var(--heat-4);
+  --color-heat-5: var(--heat-5);
+
+  /* ---- Colours: code ---------------------------------------------------- */
+  --color-code-bg: var(--code-bg);
+  --color-code-border: var(--code-border);
+  --color-code-fg: var(--code-text);
+
+  /* ---- Radii ------------------------------------------------------------ */
+  --radius-xs: var(--radius-xs);
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+  --radius-2xl: var(--radius-2xl);
+
+  /* ---- Shadows ---------------------------------------------------------- */
+  --shadow-xs: var(--shadow-xs);
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+  --shadow-xl: var(--shadow-xl);
+  --inset-shadow-well: var(--shadow-inset);
+
+  /* ---- Type scale ------------------------------------------------------- */
+  --text-2xs: var(--fs-2xs);
+  --text-2xs--line-height: 1.45;
+  --text-xs: var(--fs-xs);
+  --text-xs--line-height: 1.5;
+  --text-sm: var(--fs-sm);
+  --text-sm--line-height: 1.55;
+  --text-base: var(--fs-base);
+  --text-base--line-height: 1.65;
+  --text-md: var(--fs-md);
+  --text-md--line-height: 1.5;
+  --text-lg: var(--fs-lg);
+  --text-lg--line-height: 1.45;
+  --text-xl: var(--fs-xl);
+  --text-xl--line-height: 1.35;
+  --text-2xl: var(--fs-2xl);
+  --text-2xl--line-height: 1.25;
+  --text-3xl: var(--fs-3xl);
+  --text-3xl--line-height: 1.15;
+
+  /* ---- Tracking --------------------------------------------------------- */
+  --tracking-tighter: var(--tracking-tight);
+  --tracking-caps: var(--tracking-caps);
+
+  /* ---- Motion ----------------------------------------------------------- */
+  --ease-out: var(--ease-out);
+  --ease-in: var(--ease-in);
+  --ease-in-out: var(--ease-in-out);
+  --ease-emphasis: var(--ease-emphasis);
+
+  /* ---- Layout spacing aliases ------------------------------------------ */
+  --spacing-gutter: var(--gutter);
+  --spacing-gutter-tight: var(--gutter-tight);
+  --spacing-topbar: var(--topbar-h);
+  --spacing-subbar: var(--subbar-h);
+  --spacing-sidebar: var(--sidebar-w);
+  --spacing-sidebar-collapsed: var(--sidebar-w-collapsed);
+  --spacing-inspector: var(--inspector-w);
+  --spacing-master: var(--master-w);
+
+  --container-content: var(--content-max);
+  --container-narrow: var(--content-max-narrow);
+  --container-reading: var(--content-max-reading);
+
+  /* ---- Control heights ------------------------------------------------- */
+  --height-control-2xs: var(--control-h-2xs);
+  --height-control-xs: var(--control-h-xs);
+  --height-control-sm: var(--control-h-sm);
+  --height-control-md: var(--control-h-md);
+  --height-control-lg: var(--control-h-lg);
+  --height-control-xl: var(--control-h-xl);
+}

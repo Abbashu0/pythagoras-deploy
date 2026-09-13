@@ -55,11 +55,14 @@ export {
 } from "./next-session";
 export {
   ADMIN_AUTH_MAX_REQUEST_BYTES,
+  assertLocalAdminRequest,
   assertTrustedMutationRequest,
+  assertTrustedLocalAdminMutationRequest,
   getLoginAttemptKey,
   isLoopbackHostname,
   readAdminAuthJsonBody,
 } from "./request-security";
+export { getLocalAdminActor, LOCAL_ADMIN_OPERATOR_ID } from "./local-operator";
 export {
   ADMIN_SESSION_TOKEN_BYTES,
   generateAdminSessionToken,

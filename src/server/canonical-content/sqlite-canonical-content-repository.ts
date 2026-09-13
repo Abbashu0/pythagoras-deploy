@@ -17,7 +17,6 @@ import {
   type CanonicalMaterialRow,
 } from "../content/schema";
 import {
-  CANONICAL_BANNER_DEFAULTS,
   CANONICAL_BOOTSTRAP_VERSION,
   CANONICAL_CAROUSEL_SETTINGS_DEFAULT,
   CANONICAL_MATERIAL_DEFAULTS,
@@ -36,6 +35,7 @@ import type {
   PublicCanonicalAppContent,
 } from "./contracts";
 import { CanonicalContentError } from "./errors";
+import { isStudentVisibleBanner } from "./eligibility";
 
 const PENDING_STATUSES = ["DRAFT", "SUBMITTED", "NEEDS_CHANGES", "APPROVED", "CONFLICTED"] as const;
 
@@ -81,15 +81,6 @@ export class SQLiteCanonicalContentRepository implements CanonicalContentReposit
       }
 
       const now = this.clock();
-      this.database.db.insert(canonicalBanners).values(CANONICAL_BANNER_DEFAULTS.map((item) => ({
-        id: uuidv7(),
-        ...item,
-        assetId: null,
-        createdAt: now,
-        updatedAt: now,
-        updatedBy: null,
-        revision: 1,
-      }))).run();
       this.database.db.insert(canonicalMaterials).values(CANONICAL_MATERIAL_DEFAULTS.map((item) => ({
         id: uuidv7(),
         ...item,
@@ -167,7 +158,7 @@ export class SQLiteCanonicalContentRepository implements CanonicalContentReposit
       runtimeSourceMode: "CANONICAL",
       contentRevision: snapshot.contentRevision,
       content: {
-        banners: snapshot.banners.filter((item) => item.status === "ACTIVE").map(({ asset, assetId: _assetId, createdAt: _createdAt, updatedAt: _updatedAt, revision: _revision, ...item }) => ({ ...item, imageUrl: asset?.url ?? null })),
+        banners: snapshot.banners.filter((item) => isStudentVisibleBanner({ status: item.status, assetId: item.assetId, assetMimeType: item.asset?.mimeType ?? null, startsAt: item.startsAt, endsAt: item.endsAt }, Date.now())).slice(0, 5).map(({ asset, assetId: _assetId, startsAt: _startsAt, endsAt: _endsAt, createdAt: _createdAt, updatedAt: _updatedAt, revision: _revision, ...item }) => ({ ...item, imageUrl: asset?.url ?? null })),
         materials: snapshot.materials.filter((item) => item.available).map(({ asset, assetId: _assetId, createdAt: _createdAt, updatedAt: _updatedAt, revision: _revision, ...item }) => ({ ...item, imageUrl: asset?.url ?? null })),
         materialSettings: { id: "global", fadeIntensity: snapshot.materialSettings.fadeIntensity, textVerticalPosition: snapshot.materialSettings.textVerticalPosition, textScale: snapshot.materialSettings.textScale, cardHeight: snapshot.materialSettings.cardHeight },
         tools: snapshot.tools.map(({ createdAt: _createdAt, updatedAt: _updatedAt, revision: _revision, ...item }) => item),
@@ -198,7 +189,7 @@ export class SQLiteCanonicalContentRepository implements CanonicalContentReposit
   }
 
   private toBanner(row: CanonicalBannerRow, asset: AssetRow | null): CanonicalBanner {
-    return { id: row.id, bannerType: row.bannerType as CanonicalBanner["bannerType"], title: row.title, subtitle: row.subtitle, iconKey: row.iconKey, gradient: row.gradient, assetId: row.assetId, asset: assetReference(asset), status: row.status as CanonicalBanner["status"], displayOrder: row.displayOrder, offsetX: row.offsetX, offsetY: row.offsetY, scale: row.scale, createdAt: row.createdAt, updatedAt: row.updatedAt, revision: row.revision };
+    return { id: row.id, bannerType: row.bannerType as CanonicalBanner["bannerType"], title: row.title, subtitle: row.subtitle, iconKey: row.iconKey, gradient: row.gradient, assetId: row.assetId, asset: assetReference(asset), status: row.status as CanonicalBanner["status"], displayOrder: row.displayOrder, offsetX: row.offsetX, offsetY: row.offsetY, scale: row.scale, startsAt: row.startsAt, endsAt: row.endsAt, createdAt: row.createdAt, updatedAt: row.updatedAt, revision: row.revision };
   }
 
   private toMaterial(row: CanonicalMaterialRow, asset: AssetRow | null): CanonicalMaterial {
@@ -218,7 +209,7 @@ export class SQLiteCanonicalContentRepository implements CanonicalContentReposit
 
   private assertBootstrapShape(): void {
     const counts = this.countCanonicalRows();
-    const expected: Record<string, number> = { canonical_banners: 5, canonical_materials: 8, canonical_material_settings: 1, canonical_tools: 5, canonical_navigation: 5, canonical_carousel_settings: 1 };
+    const expected: Record<string, number> = { canonical_materials: 8, canonical_material_settings: 1, canonical_tools: 5, canonical_navigation: 5, canonical_carousel_settings: 1 };
     for (const [table, minimum] of Object.entries(expected)) {
       if ((counts[table] ?? 0) < minimum) throw new CanonicalContentError("CANONICAL_BOOTSTRAP_FAILED", `Canonical bootstrap invariant failed for ${table}.`);
     }

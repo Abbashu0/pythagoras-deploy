@@ -380,6 +380,8 @@ export const canonicalBanners = sqliteTable(
     offsetX: real("offset_x").notNull().default(0),
     offsetY: real("offset_y").notNull().default(0),
     scale: real("scale").notNull().default(1),
+    startsAt: integer("starts_at"),
+    endsAt: integer("ends_at"),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
     updatedBy: text("updated_by").references(() => adminUsers.id, { onDelete: "restrict" }),

@@ -1,7 +1,5 @@
+import { redirect } from "next/navigation";
+
 export default function AdminRebuildWorkspacePage() {
-  return (
-    <main>
-      <h1>Admin rebuild workspace</h1>
-    </main>
-  );
+  redirect("/admin/ads/banners");
 }

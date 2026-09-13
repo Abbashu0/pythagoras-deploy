@@ -31,6 +31,8 @@ export interface CanonicalBanner {
   offsetX: number;
   offsetY: number;
   scale: number;
+  startsAt: number | null;
+  endsAt: number | null;
   createdAt: number;
   updatedAt: number;
   revision: number;
@@ -121,7 +123,7 @@ export interface PublicCanonicalAppContent {
   runtimeSourceMode: CanonicalRuntimeSourceMode;
   contentRevision: number;
   content: null | {
-    banners: Array<Omit<CanonicalBanner, "asset" | "assetId" | "createdAt" | "updatedAt" | "revision"> & { imageUrl: string | null }>;
+    banners: Array<Omit<CanonicalBanner, "asset" | "assetId" | "createdAt" | "updatedAt" | "revision" | "startsAt" | "endsAt"> & { imageUrl: string | null }>;
     materials: Array<Omit<CanonicalMaterial, "asset" | "assetId" | "createdAt" | "updatedAt" | "revision"> & { imageUrl: string | null }>;
     materialSettings: Omit<CanonicalMaterialSettings, "updatedAt" | "revision">;
     tools: Array<Omit<CanonicalTool, "createdAt" | "updatedAt" | "revision">>;

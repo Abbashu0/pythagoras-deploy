@@ -6,6 +6,7 @@ export {
   toSafeAssetWithCreator,
   type Asset,
   type AssetCreatorSummary,
+  type AssetDependent,
   type AssetInventoryStats,
   type AssetIntegrityResult,
   type AssetMediaKind,
@@ -14,12 +15,14 @@ export {
   type AssetSort,
   type AssetWithCreator,
   type BrowseAssetsOptions,
+  type DeleteAssetMetadata,
   type IngestAssetInput,
   type IngestAssetResult,
   type ListAssetsOptions,
   type SafeAsset,
   type SafeAssetWithCreator,
 } from "./contracts";
+export { getAssetDependents } from "./dependencies";
 export {
   ASSET_ERROR_CODES,
   AssetConflictError,

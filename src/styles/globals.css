@@ -1,0 +1,10 @@
+@import "tailwindcss";
+
+@import "./tokens.css";
+@import "./theme.css";
+@import "./base.css";
+@import "./utilities.css";
+
+/* Tailwind v4 scans source files automatically; the demo + docs folders are
+   inside src so nothing extra is needed here. */
+@source "../";

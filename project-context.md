@@ -15,6 +15,10 @@ The Arabic Question Bank currently enters Grammar directly. Its nine Product-def
 
 For current visual and Product UI rules, read `docs/product/DESIGN-SYSTEM.md`. That document describes the active Pythagoras design language and is subordinate to newer explicit Product Owner decisions.
 
+### Current Admin rebuild surface
+
+The Admin application is being rebuilt page-by-page from the standalone `Abbashu0/Admin-Panel-Components-Library`. The permanent RTL shell now connects only the first two intentionally scoped pages: `/admin/ads/banners` and `/admin/content/storage`. These pages use direct local-admin mutations for their own backend domains and do not use the historical Change Set workflow. The current Admin surface has no login UX; historical Admin authentication and change-management modules remain dormant, and no other Admin domain is connected until its page is deliberately designed and integrated. The fresh local runtime does not seed demo banners. Analytics remain a zero baseline with no tracking, and `mobile/` is unchanged.
+
 Published Question data is runtime-owned under `PYTHAGORAS_DATA_DIR` and is never committed. The Student reads only the Question Packages and Material Bank placements that are currently published through the public APIs; do not re-import, mutate, delete, or re-publish runtime content as part of architecture work.
 
 Development currently uses Expo Go on the Product Owner's physical iPhone 17 Pro Max. Metro LAN and Fast Refresh have been physically verified. Expo Go is the fast development environment for now; a Development Build will be introduced only when a real native dependency or native configuration requires it. The Mobile app will consume the existing published-only, client-neutral public APIs. Backend/Admin architecture and Rich Content contracts remain unchanged.
@@ -111,6 +115,6 @@ The prior Student Question Bank UI remains retired. Do not add Quiz Ready, MCQ g
 
 Material Question Bank topology can also be Product-defined rather than authored in Admin. For such materials, the Product Owner specifies the stable topology outside Admin and Codex commits a preset; Admin manages only the governed Package assignments inside its BANK slots. Arabic is the first preset: its CARDS root contains الأدب (a direct BANK) and القواعد (a SWITCHER GROUP) with these ordered BANK slots: الاستفهام، النفي، التقديم والتأخير، التوكيد، النداء، التعجب، المدح والذم، التمني والترجي، العرض والتحضيض. No structure for any other Material is inferred from this preset.
 
-Do not add Firebase, Supabase, or Prisma. Supabase/Postgres is only a future adapter behind repository/storage/search boundaries. The Admin application surface is intentionally reset to a disconnected placeholder; preserve backend/domain contracts and keep the Mobile foundation minimal until Product navigation is designed. New server mutations must derive actor identity from the validated session and apply the shared same-origin mutation protection; never trust an actor ID or role sent by the browser.
+Do not add Firebase, Supabase, or Prisma. Supabase/Postgres is only a future adapter behind repository/storage/search boundaries. The Admin application surface is rebuilt page-by-page; preserve backend/domain contracts and keep the Mobile foundation minimal until each Product page is deliberately designed. New server mutations must derive actor identity from the validated local-admin boundary and apply same-origin mutation protection; never trust an actor ID or role sent by the browser.
 
 Graphify, Understand Anything, Obsidian, Pythagoras-Brain, local AI tooling, and local MCP state are local-only developer tools and must never be committed.
