@@ -29,3 +29,7 @@ export class QuestionDomainConflictError extends QuestionDomainError {
     this.name = "QuestionDomainConflictError";
   }
 }
+
+export function isQuestionDomainError(value: unknown): value is QuestionDomainError {
+  return value instanceof QuestionDomainError;
+}

@@ -1,8 +1,10 @@
 import type { NextRequest } from "next/server";
-import { AdminValidationError } from "@/server/admin-auth";
+import { AdminValidationError, LOCAL_ADMIN_OPERATOR_ID } from "@/server/admin-auth";
 import { getAssetService } from "@/server/assets";
 import { getContentDatabase } from "@/server/content";
 import { toLocalAdminAssetView } from "@/server/assets/admin-view";
+import { getQuestionPackageInspectionService } from "@/server/question-packages";
+import { getDirectQuestionPackageService, type QuestionPackageImportPreflight } from "@/server/question-import";
 import {
   localApiError,
   localJson,
@@ -12,6 +14,14 @@ import {
 } from "../../_shared";
 
 export const runtime = "nodejs";
+
+async function inspectQuestionPackage(assetId: string) {
+  try {
+    return await getQuestionPackageInspectionService().inspectAsset(assetId);
+  } catch {
+    return null;
+  }
+}
 
 function expectedRevision(value: unknown): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
@@ -24,9 +34,31 @@ async function detail(id: string) {
   const database = getContentDatabase();
   const service = getAssetService();
   const record = service.getByIdWithCreator(id);
-  const asset = await toLocalAdminAssetView(database, service, record);
+  const asset = await toLocalAdminAssetView(
+    database,
+    service,
+    record,
+    record.asset.mediaKind === "json"
+      ? await inspectQuestionPackage(record.asset.id)
+      : null,
+  );
   const integrity = await service.verifyIntegrity(record.asset);
-  return { asset, usage: { references: asset.references }, integrity };
+  let questionPackagePreflight: QuestionPackageImportPreflight | null = null;
+  if (record.asset.mediaKind === "json") {
+    try {
+      questionPackagePreflight = await getDirectQuestionPackageService().inspect(id, {
+        actorUserId: LOCAL_ADMIN_OPERATOR_ID,
+        actorRole: "ADMIN",
+      });
+    } catch {
+      questionPackagePreflight = null;
+    }
+  }
+  if (questionPackagePreflight) {
+    const { existingChangeSetId: _existingChangeSetId, ...safePreflight } = questionPackagePreflight;
+    return { asset, usage: { references: asset.references }, integrity, questionPackagePreflight: safePreflight };
+  }
+  return { asset, usage: { references: asset.references }, integrity, questionPackagePreflight: null };
 }
 
 export async function GET(

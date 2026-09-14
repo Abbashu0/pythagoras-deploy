@@ -2,6 +2,7 @@ import type { ContentDatabase } from "../content/database";
 import type { AssetWithCreator } from "./contracts";
 import { getAssetDependents } from "./dependencies";
 import type { AssetService } from "./asset-service";
+import type { QuestionPackageInspection } from "../question-packages";
 
 export interface LocalAdminAssetView {
   id: string;
@@ -17,6 +18,7 @@ export interface LocalAdminAssetView {
   integrity: "ok" | "missing" | "processing" | "failed";
   integrityDetail?: string;
   revision: number;
+  questionPackageInspection: QuestionPackageInspection | null;
   tags: string[];
   uploadedAt: number;
   uploadedBy?: string;
@@ -26,6 +28,7 @@ export async function toLocalAdminAssetView(
   database: ContentDatabase,
   service: AssetService,
   record: AssetWithCreator,
+  questionPackageInspection: QuestionPackageInspection | null = null,
 ): Promise<LocalAdminAssetView> {
   const references = getAssetDependents(database, record.asset.id);
   let integrity: LocalAdminAssetView["integrity"] = "ok";
@@ -54,6 +57,7 @@ export async function toLocalAdminAssetView(
     integrity,
     ...(integrityDetail ? { integrityDetail } : {}),
     revision: record.asset.revision,
+    questionPackageInspection,
     tags: [],
     uploadedAt: record.asset.createdAt,
     uploadedBy: record.creator.displayName,

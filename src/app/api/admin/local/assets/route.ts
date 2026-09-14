@@ -9,6 +9,7 @@ import {
 } from "@/server/assets";
 import { getContentDatabase } from "@/server/content";
 import { toLocalAdminAssetView } from "@/server/assets/admin-view";
+import { getQuestionPackageInspectionService } from "@/server/question-packages";
 import {
   localApiError,
   localJson,
@@ -17,6 +18,14 @@ import {
 } from "../_shared";
 
 export const runtime = "nodejs";
+
+async function inspectQuestionPackage(assetId: string) {
+  try {
+    return await getQuestionPackageInspectionService().inspectAsset(assetId);
+  } catch {
+    return null;
+  }
+}
 
 function optionalInteger(value: string | null): number | undefined {
   if (value === null) return undefined;
@@ -49,7 +58,16 @@ export async function GET(request: NextRequest) {
             : (sortValue as never),
     });
     const items = await Promise.all(
-      page.items.map((item) => toLocalAdminAssetView(database, service, item)),
+      page.items.map(async (item) =>
+        toLocalAdminAssetView(
+          database,
+          service,
+          item,
+          item.asset.mediaKind === "json"
+            ? await inspectQuestionPackage(item.asset.id)
+            : null,
+        ),
+      ),
     );
     return localJson({ ok: true, items, total: page.total, limit: page.limit, offset: page.offset });
   } catch (error) {
@@ -71,7 +89,14 @@ export async function POST(request: NextRequest) {
     const service = getAssetService();
     const result = await service.ingest(upload, actor);
     const record = service.getByIdWithCreator(result.asset.id);
-    const asset = await toLocalAdminAssetView(database, service, record);
+    const asset = await toLocalAdminAssetView(
+      database,
+      service,
+      record,
+      result.asset.mediaKind === "json"
+        ? await inspectQuestionPackage(result.asset.id)
+        : null,
+    );
     return localJson(
       { ok: true, asset, reused: result.reused },
       { status: result.reused ? 200 : 201 },

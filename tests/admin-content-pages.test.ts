@@ -12,7 +12,12 @@ import {
   getLocalAdminActor,
   type AdminActor,
 } from "../src/server/admin-auth";
-import { CanonicalContentError, createCanonicalContentRepository, createDirectBannerService } from "../src/server/canonical-content";
+import {
+  CanonicalContentError,
+  createCanonicalContentRepository,
+  createDirectBannerService,
+  createDirectCarouselSettingsService,
+} from "../src/server/canonical-content";
 import { openContentDatabase, type ContentDatabase } from "../src/server/content";
 import { adminUsers, assets } from "../src/server/content/schema";
 import {
@@ -314,6 +319,49 @@ test("local Admin APIs are loopback-only and use an attribution-only disabled op
       .prepare("select enabled from admin_users where id = ?")
       .get(actor.actorUserId) as { enabled: number };
     assert.equal(row.enabled, 0);
+  } finally {
+    state.close();
+  }
+});
+
+test("carousel interval uses the canonical setting, optimistic revision, and public API", () => {
+  const state = fixture();
+  try {
+    const canonical = createCanonicalContentRepository(state.database);
+    const carousel = createDirectCarouselSettingsService(state.database);
+    const initial = carousel.get();
+    assert.equal(initial.autoSlideInterval, 10_000);
+
+    const fiveSeconds = carousel.update(
+      { autoSlideInterval: 5_000 },
+      initial.revision,
+      state.actor,
+    );
+    assert.equal(fiveSeconds.autoSlideInterval, 5_000);
+    assert.equal(fiveSeconds.revision, initial.revision + 1);
+    assert.equal(canonical.getSnapshot().carouselSettings.autoSlideInterval, 5_000);
+    assert.equal(canonical.getPublicContent().content?.carouselSettings.autoSlideInterval, 5_000);
+
+    const thirtySeconds = createDirectCarouselSettingsService(state.database).update(
+      { autoSlideInterval: 30_000 },
+      fiveSeconds.revision,
+      state.actor,
+    );
+    assert.equal(thirtySeconds.autoSlideInterval, 30_000);
+    assert.equal(
+      createDirectCarouselSettingsService(state.database).get().autoSlideInterval,
+      30_000,
+    );
+    assert.equal(canonical.getPublicContent().content?.carouselSettings.autoSlideInterval, 30_000);
+
+    assert.throws(
+      () => carousel.update({ autoSlideInterval: 15_000 }, initial.revision, state.actor),
+      (error) => error instanceof CanonicalContentError && error.code === "CANONICAL_CONFLICT",
+    );
+    assert.throws(
+      () => carousel.update({ autoSlideInterval: 4_000 }, thirtySeconds.revision, state.actor),
+      (error) => error instanceof CanonicalContentError && error.code === "CANONICAL_VALIDATION_FAILED",
+    );
   } finally {
     state.close();
   }

@@ -52,93 +52,9 @@ export class SQLiteQuestionRepository implements QuestionRepository {
   materialize(plan: QuestionMaterializationPlan): QuestionPackageAggregate {
     assertMaterializationPlan(plan);
     try {
-      this.database.client.transaction(() => {
-        this.database.db.insert(questionPackages).values(plan.package).run();
-
-        for (const node of hierarchyInsertOrder(plan.taxonomy)) {
-          this.database.db.insert(questionTaxonomyNodes).values(node).run();
-        }
-        for (const node of hierarchyInsertOrder(plan.browseNodes)) {
-          this.database.db.insert(questionBankBrowseNodes).values(node).run();
-        }
-        if (plan.assetBindings.length) {
-          this.database.db
-            .insert(questionPackageAssetBindings)
-            .values(plan.assetBindings)
-            .run();
-        }
-
-        for (const question of plan.questions) {
-          this.database.db.insert(questions).values({
-            id: question.id,
-            packageId: question.packageId,
-            displayOrder: question.displayOrder,
-            sharedAnswer: question.sharedAnswer,
-            createdAt: question.createdAt,
-            updatedAt: question.updatedAt,
-            updatedBy: question.updatedBy,
-            revision: question.revision,
-          }).run();
-
-          for (const variant of question.variants) {
-            this.database.db.insert(questionVariants).values({
-              id: variant.id,
-              questionId: variant.questionId,
-              displayOrder: variant.displayOrder,
-              content: variant.content,
-              createdAt: variant.createdAt,
-              updatedAt: variant.updatedAt,
-              updatedBy: variant.updatedBy,
-              revision: variant.revision,
-            }).run();
-            for (const occurrence of variant.occurrences) {
-              this.database.db.insert(questionOccurrences).values({
-                id: occurrence.id,
-                variantId: occurrence.variantId,
-                displayOrder: occurrence.displayOrder,
-                sourceKind: occurrence.sourceKind,
-                year: occurrence.year,
-                roundCode: occurrence.roundCode,
-                session: occurrence.session,
-                sourceName: occurrence.sourceName,
-                notes: occurrence.notes,
-                rawLabel: occurrence.rawLabel,
-                createdAt: occurrence.createdAt,
-                updatedAt: occurrence.updatedAt,
-                updatedBy: occurrence.updatedBy,
-                revision: occurrence.revision,
-              }).run();
-              if (occurrence.branches.length) {
-                this.database.db.insert(questionOccurrenceBranches).values(
-                  occurrence.branches.map((value, position) => ({
-                    occurrenceId: occurrence.id,
-                    position,
-                    value,
-                  })),
-                ).run();
-              }
-              if (occurrence.qualifiers.length) {
-                this.database.db.insert(questionOccurrenceQualifiers).values(
-                  occurrence.qualifiers.map((value, position) => ({
-                    occurrenceId: occurrence.id,
-                    position,
-                    value,
-                  })),
-                ).run();
-              }
-            }
-          }
-
-          this.database.db.insert(questionPrimaryVariants).values({
-            questionId: question.id,
-            variantId: question.primaryVariantId,
-          }).run();
-          this.database.db
-            .insert(questionTaxonomyAssignments)
-            .values(question.taxonomyAssignments)
-            .run();
-        }
-      }).immediate();
+      this.database.client
+        .transaction(() => this.applyMaterializationPlanInTransaction(plan, null))
+        .immediate();
     } catch (error) {
       throw mapConstraintError(error);
     }
@@ -151,6 +67,224 @@ export class SQLiteQuestionRepository implements QuestionRepository {
       );
     }
     return aggregate;
+  }
+
+  /** Apply a create or additive/non-destructive update inside the caller's transaction. */
+  applyMaterializationPlanInTransaction(
+    plan: QuestionMaterializationPlan,
+    current: QuestionPackageAggregate | null,
+  ): void {
+    assertMaterializationPlan(plan);
+    if (!current) {
+      this.insertMaterializationPlanInTransaction(plan);
+      return;
+    }
+
+    if (current.package.id !== plan.package.id) {
+      invalid("Question Package identity is immutable after creation.");
+    }
+    if (plan.package.contentRevision < current.package.contentRevision) {
+      invalid("Question Package contentRevision cannot decrease.");
+    }
+
+    const currentBindings = this.listAssetBindings(plan.package.id).map(
+      ({ packageId: _packageId, ...binding }) => binding,
+    );
+    const nextBindings = plan.assetBindings.map(
+      ({ packageId: _packageId, ...binding }) => binding,
+    );
+    if (
+      plan.package.contentRevision === current.package.contentRevision &&
+      !sameJson(currentBindings, nextBindings)
+    ) {
+      invalid("Question Package source provenance requires a newer contentRevision.");
+    }
+
+    const updatedPackage = this.database.db
+      .update(questionPackages)
+      .set({
+        packageKey: plan.package.packageKey,
+        title: plan.package.title,
+        subjectKey: plan.package.subjectKey,
+        language: plan.package.language,
+        contentRevision: plan.package.contentRevision,
+        bankBrowseMode: plan.package.bankBrowseMode,
+        bankBrowseEntryKey: plan.package.bankBrowseEntryKey,
+        bankBrowseEntryLabel: plan.package.bankBrowseEntryLabel,
+        bankBrowseEntryOrder: plan.package.bankBrowseEntryOrder,
+        sourceAssetId: plan.package.sourceAssetId,
+        updatedAt: plan.package.updatedAt,
+        updatedBy: plan.actor.actorUserId,
+        revision: sql`${questionPackages.revision} + 1`,
+      })
+      .where(
+        and(
+          eq(questionPackages.id, plan.package.id),
+          eq(questionPackages.revision, current.package.revision),
+        ),
+      )
+      .returning({ id: questionPackages.id })
+      .get();
+    if (!updatedPackage) {
+      throw new QuestionDomainConflictError(
+        current.package.revision,
+        this.requirePackage(plan.package.id).revision,
+      );
+    }
+
+    this.database.db
+      .delete(questionPackageAssetBindings)
+      .where(eq(questionPackageAssetBindings.packageId, plan.package.id))
+      .run();
+    if (plan.assetBindings.length) {
+      this.database.db
+        .insert(questionPackageAssetBindings)
+        .values(plan.assetBindings)
+        .run();
+    }
+
+    const currentTaxonomy = new Map(current.taxonomy.map((node) => [node.id, node]));
+    for (const node of hierarchyInsertOrder(plan.taxonomy)) {
+      const existing = currentTaxonomy.get(node.id);
+      const content: QuestionTaxonomyContent = {
+        packageId: node.packageId,
+        nodeKey: node.nodeKey,
+        label: node.label,
+        kind: node.kind,
+        parentId: node.parentId,
+        displayOrder: node.displayOrder,
+      };
+      if (existing) {
+        this.updateTaxonomyNode({
+          id: node.id,
+          content,
+          expectedRevision: existing.revision,
+          actor: plan.actor,
+        });
+      } else {
+        this.createTaxonomyNode({ id: node.id, content, actor: plan.actor });
+      }
+    }
+
+    const currentBrowse = new Map(current.browseNodes.map((node) => [node.id, node]));
+    for (const node of hierarchyInsertOrder(plan.browseNodes)) {
+      const existing = currentBrowse.get(node.id);
+      const content: QuestionBrowseContent = {
+        packageId: node.packageId,
+        nodeKey: node.nodeKey,
+        label: node.label,
+        nodeType: node.nodeType,
+        parentId: node.parentId,
+        displayOrder: node.displayOrder,
+        taxonomyNodeId: node.taxonomyNodeId,
+        includeDescendants: node.includeDescendants,
+      };
+      if (existing) {
+        this.updateBrowseNode({
+          id: node.id,
+          content,
+          expectedRevision: existing.revision,
+          actor: plan.actor,
+        });
+      } else {
+        this.createBrowseNode({ id: node.id, content, actor: plan.actor });
+      }
+    }
+
+    const currentQuestions = new Map(current.questions.map((question) => [question.id, question]));
+    for (const question of plan.questions) {
+      const existing = currentQuestions.get(question.id);
+      const content: QuestionItemContent = {
+        packageId: question.packageId,
+        displayOrder: question.displayOrder,
+        primaryVariantId: question.primaryVariantId,
+        taxonomyAssignments: question.taxonomyAssignments.map(({ questionId: _questionId, ...assignment }) => assignment),
+        variants: question.variants.map((variant) => ({
+          id: variant.id,
+          displayOrder: variant.displayOrder,
+          content: variant.content,
+          occurrences: variant.occurrences.map(({ variantId: _variantId, createdAt: _createdAt, updatedAt: _updatedAt, updatedBy: _updatedBy, revision: _revision, ...occurrence }) => occurrence),
+        })),
+        sharedAnswer: question.sharedAnswer,
+      };
+      if (existing) {
+        this.updateQuestionAggregate({
+          id: question.id,
+          content,
+          expectedRevision: existing.revision,
+          actor: plan.actor,
+        });
+      } else {
+        this.createQuestionAggregate({ id: question.id, content, actor: plan.actor });
+      }
+    }
+  }
+
+  private insertMaterializationPlanInTransaction(plan: QuestionMaterializationPlan): void {
+    this.database.db.insert(questionPackages).values(plan.package).run();
+    for (const node of hierarchyInsertOrder(plan.taxonomy)) {
+      this.database.db.insert(questionTaxonomyNodes).values(node).run();
+    }
+    for (const node of hierarchyInsertOrder(plan.browseNodes)) {
+      this.database.db.insert(questionBankBrowseNodes).values(node).run();
+    }
+    if (plan.assetBindings.length) {
+      this.database.db.insert(questionPackageAssetBindings).values(plan.assetBindings).run();
+    }
+    for (const question of plan.questions) {
+      this.database.db.insert(questions).values({
+        id: question.id,
+        packageId: question.packageId,
+        displayOrder: question.displayOrder,
+        sharedAnswer: question.sharedAnswer,
+        createdAt: question.createdAt,
+        updatedAt: question.updatedAt,
+        updatedBy: question.updatedBy,
+        revision: question.revision,
+      }).run();
+      for (const variant of question.variants) {
+        this.database.db.insert(questionVariants).values({
+          id: variant.id,
+          questionId: variant.questionId,
+          displayOrder: variant.displayOrder,
+          content: variant.content,
+          createdAt: variant.createdAt,
+          updatedAt: variant.updatedAt,
+          updatedBy: variant.updatedBy,
+          revision: variant.revision,
+        }).run();
+        for (const occurrence of variant.occurrences) {
+          this.database.db.insert(questionOccurrences).values({
+            id: occurrence.id,
+            variantId: occurrence.variantId,
+            displayOrder: occurrence.displayOrder,
+            sourceKind: occurrence.sourceKind,
+            year: occurrence.year,
+            roundCode: occurrence.roundCode,
+            session: occurrence.session,
+            sourceName: occurrence.sourceName,
+            notes: occurrence.notes,
+            rawLabel: occurrence.rawLabel,
+            createdAt: occurrence.createdAt,
+            updatedAt: occurrence.updatedAt,
+            updatedBy: occurrence.updatedBy,
+            revision: occurrence.revision,
+          }).run();
+          if (occurrence.branches.length) {
+            this.database.db.insert(questionOccurrenceBranches).values(
+              occurrence.branches.map((value, position) => ({ occurrenceId: occurrence.id, position, value })),
+            ).run();
+          }
+          if (occurrence.qualifiers.length) {
+            this.database.db.insert(questionOccurrenceQualifiers).values(
+              occurrence.qualifiers.map((value, position) => ({ occurrenceId: occurrence.id, position, value })),
+            ).run();
+          }
+        }
+      }
+      this.database.db.insert(questionPrimaryVariants).values({ questionId: question.id, variantId: question.primaryVariantId }).run();
+      this.database.db.insert(questionTaxonomyAssignments).values(question.taxonomyAssignments).run();
+    }
   }
 
   getPackage(packageId: string): QuestionPackageEntity | null {

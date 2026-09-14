@@ -30,6 +30,27 @@ export class QuestionPackageImportService {
     this.changes = createChangeManagementService(database);
   }
 
+  /**
+   * Builds the same validated/materialized plan used by the historical import
+   * flow without creating a Change Set. The rebuilt local Admin uses this as
+   * the read/plan boundary before its own direct canonical transaction.
+   */
+  async createMaterializationPlan(assetId: string, actor: AdminActor): Promise<QuestionMaterializationPlan> {
+    assertActor(actor);
+    const validation = await this.loadAndValidate(assetId);
+    if (!validation.package) {
+      throw new QuestionImportError(
+        "QUESTION_IMPORT_INELIGIBLE",
+        "Asset is not a supported Question Package.",
+      );
+    }
+    return new QuestionPackageMaterializer(
+      new AssetLibraryQuestionPackageAssetResolver(this.assetRepository),
+    ).createPlan(getEligibleQuestionPackage(validation), actor, {
+      sourceAssetId: assetId,
+    });
+  }
+
   async preflight(assetId: string, actor: AdminActor): Promise<QuestionPackageImportPreflight> {
     assertActor(actor);
     const validation = await this.loadAndValidate(assetId);

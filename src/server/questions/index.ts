@@ -18,6 +18,7 @@ export * from "./contracts";
 export {
   QuestionDomainConflictError,
   QuestionDomainError,
+  isQuestionDomainError,
   type QuestionDomainErrorCode,
 } from "./errors";
 export {

@@ -9,6 +9,10 @@ import {
 import { isAssetError } from "@/server/assets";
 import { isCanonicalContentError } from "@/server/canonical-content";
 import { getContentDatabase } from "@/server/content";
+import { isMaterialQuestionBankError } from "@/server/material-question-bank";
+import { isQuestionImportError } from "@/server/question-import";
+import { isQuestionDomainError } from "@/server/questions";
+import { isQuestionSearchError } from "@/server/question-search";
 
 const LOCAL_JSON_MAX_BYTES = 64 * 1024;
 
@@ -92,6 +96,37 @@ export function localApiError(error: unknown): NextResponse {
           ? 409
           : 400;
     return localJson({ ok: false, code: error.code }, { status });
+  }
+
+  if (isMaterialQuestionBankError(error)) {
+    const status =
+      error.code === "MATERIAL_BANK_NOT_FOUND"
+        ? 404
+        : error.code === "MATERIAL_BANK_CONFLICT"
+          ? 409
+          : 400;
+    return localJson({ ok: false, code: error.code }, { status });
+  }
+
+  if (isQuestionImportError(error)) {
+    const status =
+      error.code === "QUESTION_IMPORT_NOT_FOUND"
+        ? 404
+        : error.code === "QUESTION_IMPORT_CONFLICT"
+          ? 409
+          : 400;
+    return localJson({ ok: false, code: error.code }, { status });
+  }
+
+  if (isQuestionDomainError(error)) {
+    return localJson(
+      { ok: false, code: error.code },
+      { status: error.code === "QUESTION_DOMAIN_NOT_FOUND" ? 404 : error.code === "QUESTION_DOMAIN_CONFLICT" ? 409 : 400 },
+    );
+  }
+
+  if (isQuestionSearchError(error)) {
+    return localJson({ ok: false, code: error.code }, { status: 400 });
   }
 
   console.error("[local-admin] request failed", "UNEXPECTED_ERROR");

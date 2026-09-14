@@ -34,11 +34,14 @@ import { InlineNote } from "@/components/admin-ui/feedback/banner";
 import { FormField } from "@/components/admin-ui/forms/field";
 import { TextField } from "@/components/admin-ui/forms/input";
 import { Switch } from "@/components/admin-ui/forms/toggle";
+import { Slider } from "@/components/admin-ui/forms/slider";
 import { Button } from "@/components/admin-ui/primitives/button";
+import { Panel, PanelHeader, Well } from "@/components/admin-ui/primitives/surface";
 import { Skeleton } from "@/components/admin-ui/primitives/skeleton";
 import { Badge } from "@/components/admin-ui/status/status-badge";
 import { PageHeader, PageShell, Section, TwoColumnLayout } from "@/components/admin-ui/layout/page";
 import { toast } from "@/components/admin-ui/feedback/toaster";
+import { formatNumber } from "@/lib/format";
 import {
   BannerArtworkEditor,
   type BannerArtworkDraft,
@@ -84,6 +87,12 @@ type ApiBanner = {
   analytics: NonNullable<Banner["analytics"]>;
   revision: number;
   updatedAt: number;
+};
+
+type ApiCarouselSettings = {
+  autoSlideInterval: number;
+  updatedAt: number;
+  revision: number;
 };
 
 function toAsset(value: ApiAsset): Asset {
@@ -139,9 +148,9 @@ function errorMessage(error: unknown): string {
   const code = error instanceof Error ? error.message : "";
   switch (code) {
     case "CANONICAL_CONFLICT":
-      return "تغيّر هذا البانر قبل الحفظ. حدّث الصفحة وحاول مجددًا.";
+      return "تغيّر الإعداد أو البانر قبل الحفظ. حدّث الصفحة وحاول مجددًا.";
     case "CANONICAL_VALIDATION_FAILED":
-      return "بيانات البانر غير صالحة أو تتجاوز حدّ البانرات الظاهرة.";
+      return "البيانات غير صالحة أو تتجاوز أحد الحدود المسموحة.";
     case "ASSET_CONFLICT":
       return "لا يمكن تنفيذ العملية لأن الملف مرتبط بمحتوى آخر.";
     case "ASSET_UNSUPPORTED_TYPE":
@@ -156,6 +165,8 @@ function errorMessage(error: unknown): string {
 export default function AdminBannersPage() {
   const [banners, setBanners] = React.useState<BannerModel[]>([]);
   const [assets, setAssets] = React.useState<Asset[]>([]);
+  const [carouselSettings, setCarouselSettings] = React.useState<ApiCarouselSettings | null>(null);
+  const [carouselSeconds, setCarouselSeconds] = React.useState<number | null>(null);
   const [filterDisabled, setFilterDisabled] = React.useState(false);
   const [editing, setEditing] = React.useState<BannerModel | null>(null);
   const [previewTarget, setPreviewTarget] = React.useState<BannerModel | null>(null);
@@ -168,6 +179,7 @@ export default function AdminBannersPage() {
   const [saving, setSaving] = React.useState(false);
   const [deleting, setDeleting] = React.useState(false);
   const [reordering, setReordering] = React.useState(false);
+  const [savingCarousel, setSavingCarousel] = React.useState(false);
   const uploadFiles = React.useRef(new Map<string, File>());
   const uploadTargets = React.useRef(new Map<string, string | null>());
 
@@ -175,12 +187,15 @@ export default function AdminBannersPage() {
     setLoading(true);
     setError(null);
     try {
-      const [bannerResponse, assetResponse] = await Promise.all([
+      const [bannerResponse, assetResponse, carouselResponse] = await Promise.all([
         requestJson<{ banners: ApiBanner[] }>("/api/admin/local/content/banners"),
         requestJson<{ items: ApiAsset[] }>("/api/admin/local/assets?limit=200&sort=newest"),
+        requestJson<{ settings: ApiCarouselSettings }>("/api/admin/local/content/carousel-settings"),
       ]);
       setBanners(bannerResponse.banners.map(toBanner));
       setAssets(assetResponse.items.map(toAsset));
+      setCarouselSettings(carouselResponse.settings);
+      setCarouselSeconds(carouselResponse.settings.autoSlideInterval / 1000);
       setLoaded(true);
     } catch (cause) {
       setError(errorMessage(cause));
@@ -287,6 +302,32 @@ export default function AdminBannersPage() {
       toast.success(enabled ? "تم تفعيل البانر." : "تم تعطيل البانر.");
     } catch (cause) {
       toast.error(errorMessage(cause));
+    }
+  };
+
+  const persistCarouselInterval = async (seconds: number) => {
+    if (!carouselSettings || savingCarousel) return;
+    const confirmedSeconds = carouselSettings.autoSlideInterval / 1000;
+    setSavingCarousel(true);
+    try {
+      const response = await requestJson<{ settings: ApiCarouselSettings }>(
+        "/api/admin/local/content/carousel-settings",
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            autoSlideInterval: seconds * 1000,
+            expectedRevision: carouselSettings.revision,
+          }),
+        },
+      );
+      setCarouselSettings(response.settings);
+      setCarouselSeconds(response.settings.autoSlideInterval / 1000);
+      toast.success("تم حفظ مدة تبديل البانرات.");
+    } catch (cause) {
+      setCarouselSeconds(confirmedSeconds);
+      toast.error(errorMessage(cause));
+    } finally {
+      setSavingCarousel(false);
     }
   };
 
@@ -447,7 +488,44 @@ export default function AdminBannersPage() {
             asidePosition="end"
             stickyAside
             className="lg:[&>aside]:w-[440px]"
-            aside={<BannerStudentPreview banners={banners} />}
+            aside={
+              <div className="space-y-4">
+                <BannerStudentPreview banners={banners} />
+                <Panel>
+                  <PanelHeader
+                    title="مدة تبديل البانرات"
+                    description="المدة بين الانتقال التلقائي من بانر إلى التالي."
+                    density="compact"
+                  />
+                  <div className="p-4">
+                    {carouselSettings && carouselSeconds !== null ? (
+                      <Well padding="sm">
+                        <Slider
+                          value={carouselSeconds}
+                          min={5}
+                          max={30}
+                          step={1}
+                          showValue
+                          disabled={savingCarousel}
+                          formatValue={(value) => `${formatNumber(value)} ث`}
+                          aria-label="مدة تبديل البانرات بالثواني"
+                          onValueChange={setCarouselSeconds}
+                          onValueCommit={(values) => {
+                            const seconds = values[0];
+                            if (seconds !== undefined) void persistCarouselInterval(seconds);
+                          }}
+                        />
+                        {savingCarousel ? (
+                          <p className="mt-2 text-2xs text-fg-quaternary">جارٍ حفظ الإعداد…</p>
+                        ) : null}
+                      </Well>
+                    ) : (
+                      <Skeleton className="h-12 w-full" />
+                    )}
+                  </div>
+                </Panel>
+              </div>
+            }
           >
             <div className="flex flex-col gap-6">
               <Section

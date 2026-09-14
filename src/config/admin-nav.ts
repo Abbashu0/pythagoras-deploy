@@ -1,4 +1,4 @@
-import { Archive, Images } from "lucide-react";
+import { Archive, BookOpen, Images } from "lucide-react";
 import type { NavSection } from "@/components/admin-ui/navigation/nav-config";
 
 export const ADMIN_NAV: NavSection[] = [
@@ -27,6 +27,12 @@ export const ADMIN_NAV: NavSection[] = [
         label: "مخزن صفحة الأدمن",
         href: "/admin/content/storage",
         icon: Archive,
+      },
+      {
+        key: "content-materials",
+        label: "إدارة المواد",
+        href: "/admin/content/materials",
+        icon: BookOpen,
       },
     ],
   },

@@ -21,6 +21,7 @@ import {
   EmptyState,
   ErrorState,
 } from "@/components/admin-ui/feedback/empty-state";
+import { InlineNote } from "@/components/admin-ui/feedback/banner";
 import {
   Dialog,
   DialogBody,
@@ -40,14 +41,70 @@ import {
   TwoColumnLayout,
 } from "@/components/admin-ui/layout/page";
 import { Button } from "@/components/admin-ui/primitives/button";
+import { Panel, PanelBody, PanelHeader } from "@/components/admin-ui/primitives/surface";
 import { Skeleton } from "@/components/admin-ui/primitives/skeleton";
 import { Badge } from "@/components/admin-ui/status/status-badge";
+import { StatusBadge } from "@/components/admin-ui/status/status-badge";
 import { QuickFilterGroup } from "@/components/admin-ui/tables/filters";
 import { toast } from "@/components/admin-ui/feedback/toaster";
 import { formatBytes } from "@/lib/format";
 
 type AssetKind = Asset["kind"];
-type AdminAsset = Asset & { revision: number };
+type ApiInspection = {
+  status: "GENERIC_JSON" | "VALID" | "VALID_WITH_WARNINGS" | "INVALID" | "UNSUPPORTED_VERSION";
+  format: string | null;
+  schemaVersion: string | null;
+  packageId: string | null;
+  packageKey: string | null;
+  title: string | null;
+  subjectKey: string | null;
+  questionCount: number;
+  variantCount: number;
+  errorCount: number;
+  warningCount: number;
+  diagnostics: Array<{ severity: "ERROR" | "WARNING" | "INFO"; code: string; message: string; jsonPointer: string }>;
+  inspectedAt: number;
+};
+
+type ApiPreflight = {
+  status: ApiInspection["status"];
+  operation: "CREATE" | "UPDATE";
+  eligible: boolean;
+  acknowledgementRequired: boolean;
+  alreadyImported: boolean;
+  update: { contentRevision: { from: number; to: number } } | null;
+  package: {
+    id: string;
+    key: string;
+    title: string;
+    subjectKey: string;
+    language: string;
+    schemaVersion: string;
+    contentRevision: number;
+    bankBrowseMode: "ALL_PACKAGE_QUESTIONS" | "TREE";
+    bankBrowseEntry: { key: string; label: string; order: number };
+  } | null;
+  counts: {
+    taxonomy: number;
+    browseNodes: number;
+    questions: number;
+    variants: number;
+    occurrences: number;
+    manifestAssets: number;
+    usedAssets: number;
+    resolvedAssets: number;
+    unresolvedAssets: number;
+    estimatedChangeItems: number;
+  };
+  warnings: ApiInspection["diagnostics"];
+  blockers: Array<{ code: string; message: string; entityId?: string }>;
+};
+
+type AdminAsset = Asset & {
+  revision: number;
+  questionPackageInspection: ApiInspection | null;
+  questionPackagePreflight?: ApiPreflight | null;
+};
 
 type ApiAsset = {
   id: string;
@@ -66,6 +123,7 @@ type ApiAsset = {
   uploadedAt: number;
   uploadedBy?: string;
   revision: number;
+  questionPackageInspection?: ApiInspection | null;
 };
 
 type AssetStats = {
@@ -103,7 +161,81 @@ const ASSET_FILTERS: Array<{ value: AssetKind; label: string }> = [
 ];
 
 function toAsset(value: ApiAsset): AdminAsset {
-  return { ...value, storageKey: value.id };
+  return {
+    ...value,
+    storageKey: value.id,
+    questionPackageInspection: value.questionPackageInspection ?? null,
+  };
+}
+
+function inspectionStatus(inspection: ApiInspection): { status: "active" | "warning" | "failed" | "notConfigured" | "unknown"; label: string } {
+  switch (inspection.status) {
+    case "VALID": return { status: "active", label: "صالحة" };
+    case "VALID_WITH_WARNINGS": return { status: "warning", label: "صالحة مع تحذيرات" };
+    case "INVALID": return { status: "failed", label: "غير صالحة" };
+    case "UNSUPPORTED_VERSION": return { status: "notConfigured", label: "إصدار غير مدعوم" };
+    default: return { status: "unknown", label: "JSON عام" };
+  }
+}
+
+function PackageInspectionPanel({ inspection }: { inspection: ApiInspection }) {
+  const state = inspectionStatus(inspection);
+  if (inspection.status === "GENERIC_JSON") {
+    return (
+      <Panel>
+        <PanelHeader title="تعرف الملف" description="هذا ملف JSON عام، وليس حزمة أسئلة Pythagoras." density="compact" />
+      </Panel>
+    );
+  }
+  const errors = inspection.diagnostics.filter((item) => item.severity === "ERROR");
+  const warnings = inspection.diagnostics.filter((item) => item.severity === "WARNING");
+  return (
+    <Panel>
+      <PanelHeader
+        title="حزمة أسئلة"
+        description="نتيجة الفحص البنيوي والدلالي من validator الحالي."
+        density="compact"
+        actions={<StatusBadge status={state.status} label={state.label} size="sm" />}
+      />
+      <PanelBody>
+        {inspection.title ? <p className="text-sm font-medium text-fg">{inspection.title}</p> : null}
+        <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-fg-secondary">
+          <span>المادة: <b className="text-fg">{inspection.subjectKey ?? "—"}</b></span>
+          <span>الإصدار: <b className="text-fg" dir="ltr">{inspection.schemaVersion ?? "—"}</b></span>
+          <span>الأسئلة: <b className="text-fg tnum">{inspection.questionCount}</b></span>
+          <span>الصيغ: <b className="text-fg tnum">{inspection.variantCount}</b></span>
+        </div>
+        {errors.length ? <InlineNote tone="danger" size="xs" className="mt-3">{errors.length} مانع يمنع الاستيراد الآمن.</InlineNote> : null}
+        {warnings.length ? <InlineNote tone="warning" size="xs" className="mt-2">{warnings.length} تحذير يحتاج مراجعة قبل التطبيق.</InlineNote> : null}
+        {inspection.packageKey ? <p className="mt-3 text-2xs text-fg-quaternary" dir="ltr">{inspection.packageKey}</p> : null}
+      </PanelBody>
+    </Panel>
+  );
+}
+
+function PackagePreflightDetails({ preflight }: { preflight: ApiPreflight }) {
+  if (!preflight.package) return null;
+  const { counts } = preflight;
+  return (
+    <Panel>
+      <PanelHeader
+        title="جاهزية الحزمة"
+        description="بيانات الاستيراد المحسوبة من المصدر الحالي."
+        density="compact"
+      />
+      <PanelBody>
+        <div className="grid grid-cols-2 gap-2 text-xs text-fg-secondary">
+          <span>الإصدار المنطقي: <b className="text-fg tnum">{preflight.package.contentRevision}</b></span>
+          <span>التصنيفات: <b className="text-fg tnum">{counts.taxonomy}</b></span>
+          <span>الورود: <b className="text-fg tnum">{counts.occurrences}</b></span>
+          <span>الأصول المحلولة: <b className="text-fg tnum">{counts.resolvedAssets}/{counts.manifestAssets}</b></span>
+        </div>
+        {counts.unresolvedAssets > 0 ? <InlineNote tone="danger" size="xs" className="mt-3">هناك أصول مطلوبة لم تُحل بصمتها بعد.</InlineNote> : null}
+        {preflight.blockers.length > 0 ? <InlineNote tone="danger" size="xs" className="mt-2">{preflight.blockers.length} مانع يمنع التطبيق المباشر.</InlineNote> : null}
+        {preflight.warnings.length > 0 ? <InlineNote tone="warning" size="xs" className="mt-2">{preflight.warnings.length} تحذير يحتاج تأكيدًا صريحًا.</InlineNote> : null}
+      </PanelBody>
+    </Panel>
+  );
 }
 
 async function requestJson<T>(url: string, init: RequestInit = {}): Promise<T> {
@@ -166,6 +298,7 @@ export default function AdminStoragePage() {
   const [kind, setKind] = React.useState<AssetKind | null>(null);
   const [view, setView] = React.useState<"grid" | "list">("grid");
   const [activeId, setActiveId] = React.useState<string | null>(null);
+  const [activePreflight, setActivePreflight] = React.useState<ApiPreflight | null>(null);
   const [referencesTarget, setReferencesTarget] = React.useState<AdminAsset | null>(null);
   const [deleteTarget, setDeleteTarget] = React.useState<AdminAsset | null>(null);
   const [uploadOpen, setUploadOpen] = React.useState(false);
@@ -206,7 +339,10 @@ export default function AdminStoragePage() {
   const activeAsset = assets.find((asset) => asset.id === activeId) ?? null;
 
   React.useEffect(() => {
-    if (activeId && !activeAsset) setActiveId(null);
+    if (activeId && !activeAsset) {
+      setActiveId(null);
+      setActivePreflight(null);
+    }
   }, [activeAsset, activeId]);
 
   React.useEffect(() => {
@@ -215,6 +351,7 @@ export default function AdminStoragePage() {
     void requestJson<{
       asset: ApiAsset;
       integrity: { ok: boolean; status: string };
+      questionPackagePreflight?: ApiPreflight | null;
     }>(`/api/admin/local/assets/${encodeURIComponent(activeId)}`)
       .then((response) => {
         if (cancelled) return;
@@ -226,6 +363,7 @@ export default function AdminStoragePage() {
         setAssets((current) =>
           current.map((asset) => (asset.id === next.id ? next : asset)),
         );
+        setActivePreflight(response.questionPackagePreflight ?? null);
       })
       .catch(() => {
         // The list remains usable when an on-demand integrity read is unavailable.
@@ -378,6 +516,7 @@ export default function AdminStoragePage() {
       }));
       setDeleteTarget(null);
       setActiveId(null);
+      setActivePreflight(null);
       toast.success("تم حذف الملف.");
     } catch (cause) {
       toast.error(errorMessage(cause));
@@ -423,13 +562,19 @@ export default function AdminStoragePage() {
             className="mt-7 lg:[&>aside]:w-[360px]"
             aside={
               activeAsset ? (
-                <AssetInspector
-                  asset={activeAsset}
-                  onRename={(name) => void renameAsset(activeAsset, name)}
-                  onDownload={() => downloadAsset(activeAsset)}
-                  onDelete={() => setDeleteTarget(activeAsset)}
-                  onViewReferences={() => setReferencesTarget(activeAsset)}
-                />
+                <div className="space-y-4">
+                  <AssetInspector
+                    asset={activeAsset}
+                    onRename={(name) => void renameAsset(activeAsset, name)}
+                    onDownload={() => downloadAsset(activeAsset)}
+                    onDelete={() => setDeleteTarget(activeAsset)}
+                    onViewReferences={() => setReferencesTarget(activeAsset)}
+                  />
+                  {activeAsset.questionPackageInspection ? (
+                    <PackageInspectionPanel inspection={activeAsset.questionPackageInspection} />
+                  ) : null}
+                  {activePreflight ? <PackagePreflightDetails preflight={activePreflight} /> : null}
+                </div>
               ) : (
                 <EmptyState
                   kind="noData"
@@ -503,7 +648,7 @@ export default function AdminStoragePage() {
                   activeId={activeId}
                   columns={4}
                   actions={{
-                    onOpen: (asset) => setActiveId(asset.id),
+                    onOpen: (asset) => { setActiveId(asset.id); setActivePreflight(null); },
                     onDownload: downloadAsset,
                     onDelete: (asset) => setDeleteTarget(asset as AdminAsset),
                   }}
@@ -514,7 +659,7 @@ export default function AdminStoragePage() {
                   assets={assets}
                   activeId={activeId}
                   actions={{
-                    onOpen: (asset) => setActiveId(asset.id),
+                    onOpen: (asset) => { setActiveId(asset.id); setActivePreflight(null); },
                     onDownload: downloadAsset,
                     onDelete: (asset) => setDeleteTarget(asset as AdminAsset),
                     onViewReferences: (asset) => setReferencesTarget(asset as AdminAsset),
