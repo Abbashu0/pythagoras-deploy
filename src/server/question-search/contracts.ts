@@ -1,5 +1,6 @@
 import type { SearchProvider } from "../content";
 import type { PublicRichDocument } from "@/lib/rich-content";
+import type { QuestionSourceKind } from "../questions";
 import type { PublicQuestionSourceSummary } from "../questions/public-provenance";
 
 export const QUESTION_SEARCH_INDEX_VERSION = 1;
@@ -24,6 +25,15 @@ export interface QuestionSearchQuery {
   query: string;
   offset?: number;
   limit?: number;
+  filters?: QuestionSearchFilters;
+}
+
+export interface QuestionSearchFilters {
+  sourceKinds?: readonly QuestionSourceKind[];
+  year?: number;
+  hasAnswer?: boolean;
+  variantCount?: "ONE" | "MULTIPLE";
+  occurrenceState?: "HAS" | "NONE";
 }
 
 export interface PublicQuestionSearchResult {

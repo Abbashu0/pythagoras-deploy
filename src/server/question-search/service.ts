@@ -3,7 +3,7 @@ import { getContentDatabase, type ContentDatabase } from "../content";
 import type { CanonicalRichDocument } from "../questions";
 import { loadPublicQuestionSourceSummaries } from "../questions/public-provenance";
 import { buildSafeFtsPrefixQuery, normalizeArabicSearchText } from "./arabic-normalization";
-import { QUESTION_SEARCH_INDEX_VERSION, type PublicQuestionSearchResult, type QuestionSearchHealth, type QuestionSearchMatchContext, type QuestionSearchPlacementScope, type QuestionSearchQuery } from "./contracts";
+import { QUESTION_SEARCH_INDEX_VERSION, type PublicQuestionSearchResult, type QuestionSearchFilters, type QuestionSearchHealth, type QuestionSearchMatchContext, type QuestionSearchPlacementScope, type QuestionSearchQuery } from "./contracts";
 import { QuestionSearchError } from "./errors";
 
 type Row = Record<string, unknown>;
@@ -13,7 +13,7 @@ const PRIORITY: Record<QuestionSearchMatchContext, number> = { PRIMARY_VARIANT: 
 export class QuestionSearchService {
   constructor(private readonly database: ContentDatabase) {}
 
-  async search(query: QuestionSearchQuery): Promise<PublicQuestionSearchResult> { return this.searchPlacement(query.scope, query.query, query.offset, query.limit); }
+  async search(query: QuestionSearchQuery): Promise<PublicQuestionSearchResult> { return this.searchPlacement(query.scope, query.query, query.offset, query.limit, query.filters); }
 
   getHealth(): QuestionSearchHealth {
     const canonicalQuestionCount = Number((this.database.client.prepare("select count(*) count from questions").get() as Row).count);
@@ -22,13 +22,13 @@ export class QuestionSearchService {
     return { canonicalQuestionCount, indexedQuestionCount, indexedSegmentCount, healthy: canonicalQuestionCount === indexedQuestionCount };
   }
 
-  searchPlacement(scope: QuestionSearchPlacementScope, query: string, offset = 0, limit = 25): PublicQuestionSearchResult {
+  searchPlacement(scope: QuestionSearchPlacementScope, query: string, offset = 0, limit = 25, filters: QuestionSearchFilters = {}): PublicQuestionSearchResult {
     const parsed = buildSafeFtsPrefixQuery(query);
     if (!parsed) throw new QuestionSearchError("QUESTION_SEARCH_EMPTY_QUERY", "A searchable query is required.");
     if (!this.getHealth().healthy) throw new QuestionSearchError("QUESTION_SEARCH_UNAVAILABLE", "Question search projection needs an OWNER rebuild.");
     const safeOffset = Math.max(0, Math.trunc(offset || 0));
     const safeLimit = Math.min(100, Math.max(1, Math.trunc(limit || 25)));
-    const filter = placementFilter(scope);
+    const filter = placementFilter(scope, filters);
     const rows = this.database.client.prepare(`
       select d.question_id, d.segment_type, d.display_text, bm25(question_search_fts) rank
       from question_search_fts
@@ -47,7 +47,7 @@ export class QuestionSearchService {
     }
     const ordered = [...best.entries()].sort((left, right) => PRIORITY[left[1].context] - PRIORITY[right[1].context] || left[1].rank - right[1].rank || left[0].localeCompare(right[0]));
     const page = ordered.slice(safeOffset, safeOffset + safeLimit);
-    const details = this.questionDetails(page.map(([id]) => id), scope);
+    const details = this.questionDetails(page.map(([id]) => id), scope, filters);
     return { query, normalizedQuery: parsed.normalizedQuery, total: ordered.length, offset: safeOffset, limit: safeLimit, items: page.flatMap(([questionId, match]) => {
       const item = details.get(questionId); return item ? [{ ...item, matchContext: match.context, matchPreview: preview(match.preview) }] : [];
     }) };
@@ -144,10 +144,10 @@ export class QuestionSearchService {
     return result;
   }
 
-  private questionDetails(ids: string[], scope: QuestionSearchPlacementScope) {
+  private questionDetails(ids: string[], scope: QuestionSearchPlacementScope, filters: QuestionSearchFilters = {}) {
     const values = new Map<string, { questionId: string; bankOrdinal: number; primaryPreview: string; primaryPreviewRich: PublicRichDocument; taxonomyBreadcrumb: string; variantCount: number; occurrenceCount: number; sourceSummary: import("../questions/public-provenance").PublicQuestionSourceSummary[]; hasAnswer: boolean }>();
     if (!ids.length) return values;
-    const filter = placementFilter(scope); const params = [...filter.params, ...ids]; const placeholders = ids.map(() => "?").join(",");
+    const filter = placementFilter(scope, filters); const params = [...filter.params, ...ids]; const placeholders = ids.map(() => "?").join(",");
     const rows = this.database.client.prepare(`select q.id,q.shared_answer,pvc.content primary_content,coalesce(vc.count,0) variant_count,coalesce(oc.count,0) occurrence_count,pa.taxonomy_node_id primary_taxonomy_id from questions q left join question_primary_variants pv on pv.question_id=q.id left join question_variants pvc on pvc.id=pv.variant_id left join (select question_id,count(*) count from question_variants group by question_id) vc on vc.question_id=q.id left join (select v.question_id,count(o.id) count from question_variants v left join question_occurrences o on o.variant_id=v.id group by v.question_id) oc on oc.question_id=q.id left join question_taxonomy_assignments pa on pa.question_id=q.id and pa.role='PRIMARY' where ${filter.sql} and q.id in (${placeholders}) order by q.display_order,q.id`).all(...params) as Row[];
     const allRows = this.database.client.prepare(`select q.id from questions q where ${filter.sql} order by q.display_order,q.id`).all(...filter.params) as Row[];
     const ordinal = new Map(allRows.map((row, index) => [String(row.id), index + 1]));
@@ -164,7 +164,49 @@ function groupedValues(rows: Row[]) { const map = new Map<string, string[]>(); f
 function parseDocument(value: unknown): CanonicalRichDocument | null { if (!value) return null; try { return typeof value === "string" ? JSON.parse(value) as CanonicalRichDocument : value as CanonicalRichDocument; } catch { return null; } }
 function breadcrumb(id: string, nodes: Map<string, { label: string; parentId: string | null }>) { const labels: string[] = []; const seen = new Set<string>(); let currentId: string | null = id; while (currentId && !seen.has(currentId)) { seen.add(currentId); const node = nodes.get(currentId); if (!node) break; labels.unshift(node.label); currentId = node.parentId; } return labels.join(" / ") || "غير مصنّف"; }
 function preview(value: string) { return value.slice(0, 220) || "محتوى بصري"; }
-function placementFilter(scope: QuestionSearchPlacementScope) { if (scope.targetMode !== "TAXONOMY_FILTER") return { sql: "q.package_id=?", params: [scope.packageId] as unknown[] }; if (!scope.taxonomyNodeIds.length) return { sql: "0=1", params: [] as unknown[] }; return { sql: `q.package_id=? and exists(select 1 from question_taxonomy_assignments a where a.question_id=q.id and a.taxonomy_node_id in (${scope.taxonomyNodeIds.map(() => "?").join(",")}))`, params: [scope.packageId, ...scope.taxonomyNodeIds] as unknown[] }; }
+function placementFilter(
+  scope: QuestionSearchPlacementScope,
+  filters: QuestionSearchFilters = {},
+) {
+  const clauses: string[] = ["q.package_id = ?"];
+  const params: unknown[] = [scope.packageId];
+
+  if (scope.targetMode === "TAXONOMY_FILTER") {
+    if (!scope.taxonomyNodeIds.length) return { sql: "0=1", params: [] as unknown[] };
+    clauses.push(
+      `exists(select 1 from question_taxonomy_assignments a where a.question_id=q.id and a.taxonomy_node_id in (${scope.taxonomyNodeIds.map(() => "?").join(",")}))`,
+    );
+    params.push(...scope.taxonomyNodeIds);
+  }
+
+  if (filters.sourceKinds?.length) {
+    clauses.push(
+      `exists(select 1 from question_occurrences o join question_variants v on v.id=o.variant_id where v.question_id=q.id and o.source_kind in (${filters.sourceKinds.map(() => "?").join(",")}))`,
+    );
+    params.push(...filters.sourceKinds);
+  }
+  if (filters.year !== undefined) {
+    clauses.push(
+      "exists(select 1 from question_occurrences o join question_variants v on v.id=o.variant_id where v.question_id=q.id and o.year=?)",
+    );
+    params.push(filters.year);
+  }
+  if (filters.hasAnswer !== undefined) {
+    clauses.push(filters.hasAnswer ? "q.shared_answer is not null" : "q.shared_answer is null");
+  }
+  if (filters.variantCount === "ONE") {
+    clauses.push("(select count(*) from question_variants v where v.question_id=q.id) = 1");
+  } else if (filters.variantCount === "MULTIPLE") {
+    clauses.push("(select count(*) from question_variants v where v.question_id=q.id) > 1");
+  }
+  if (filters.occurrenceState === "HAS") {
+    clauses.push("exists(select 1 from question_occurrences o join question_variants v on v.id=o.variant_id where v.question_id=q.id)");
+  } else if (filters.occurrenceState === "NONE") {
+    clauses.push("not exists(select 1 from question_occurrences o join question_variants v on v.id=o.variant_id where v.question_id=q.id)");
+  }
+
+  return { sql: clauses.join(" and "), params };
+}
 
 let singleton: QuestionSearchService | undefined;
 export function createQuestionSearchService(database: ContentDatabase) { return new QuestionSearchService(database); }

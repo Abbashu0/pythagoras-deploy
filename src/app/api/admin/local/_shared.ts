@@ -11,6 +11,7 @@ import { isCanonicalContentError } from "@/server/canonical-content";
 import { getContentDatabase } from "@/server/content";
 import { isMaterialQuestionBankError } from "@/server/material-question-bank";
 import { isQuestionImportError } from "@/server/question-import";
+import { isQuestionEditorError } from "@/server/question-editor";
 import { isQuestionDomainError } from "@/server/questions";
 import { isQuestionSearchError } from "@/server/question-search";
 
@@ -114,6 +115,17 @@ export function localApiError(error: unknown): NextResponse {
         ? 404
         : error.code === "QUESTION_IMPORT_CONFLICT"
           ? 409
+          : 400;
+    return localJson({ ok: false, code: error.code }, { status });
+  }
+
+  if (isQuestionEditorError(error)) {
+    const status = error.code === "QUESTION_EDITOR_NOT_FOUND"
+      ? 404
+      : error.code === "QUESTION_EDITOR_CONFLICT"
+        ? 409
+        : error.code === "QUESTION_EDITOR_FORBIDDEN"
+          ? 403
           : 400;
     return localJson({ ok: false, code: error.code }, { status });
   }
