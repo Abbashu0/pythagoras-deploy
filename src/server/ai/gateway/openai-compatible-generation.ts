@@ -28,11 +28,18 @@ export class OpenAICompatibleGenerationAdapter {
 
   async *generate(request: GenerationProviderRequest, context: ProviderAdapterExecutionContext): AsyncIterable<ProviderGenerationStreamEvent> {
     if (!context.providerBaseUrl) throw new AIProviderAdapterError("CONFIGURATION");
+    const reasoningEffort = request.reasoningEffort === undefined || request.reasoningEffort === "AUTO"
+      ? undefined
+      : request.reasoningEffort;
+    if (reasoningEffort !== undefined && !["NONE", "LOW", "MEDIUM", "HIGH"].includes(reasoningEffort)) {
+      throw new AIProviderAdapterError("INVALID_REQUEST", { fallbackEligible: false });
+    }
     const target = await this.dependencies.outboundPolicy.validate(context.providerBaseUrl);
     const payload = JSON.stringify({
       model: request.providerModelId,
       messages: request.instructions ? [{ role: "system", content: request.instructions }, ...request.messages] : request.messages,
       ...(request.maxOutputTokens === undefined ? {} : { max_tokens: request.maxOutputTokens }),
+      ...(reasoningEffort === undefined ? {} : { reasoning_effort: reasoningEffort.toLowerCase() }),
       ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
       stream: true,
       stream_options: { include_usage: true },

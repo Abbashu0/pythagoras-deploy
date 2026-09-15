@@ -52,6 +52,12 @@ export class OpenAIResponsesGenerationAdapter {
     request: GenerationProviderRequest,
     context: ProviderAdapterExecutionContext,
   ): AsyncIterable<ProviderGenerationStreamEvent> {
+    const reasoningEffort = request.reasoningEffort === undefined || request.reasoningEffort === "AUTO"
+      ? undefined
+      : request.reasoningEffort;
+    if (reasoningEffort !== undefined && !["LOW", "MEDIUM", "HIGH"].includes(reasoningEffort)) {
+      throw new AIProviderAdapterError("INVALID_REQUEST", { fallbackEligible: false });
+    }
     const payload = JSON.stringify({
       model: request.providerModelId,
       input: request.messages.map((message) => ({
@@ -62,6 +68,9 @@ export class OpenAIResponsesGenerationAdapter {
       ...(request.maxOutputTokens === undefined
         ? {}
         : { max_output_tokens: request.maxOutputTokens }),
+      ...(reasoningEffort === undefined
+        ? {}
+        : { reasoning: { effort: reasoningEffort.toLowerCase() } }),
       ...(request.temperature === undefined
         ? {}
         : { temperature: request.temperature }),

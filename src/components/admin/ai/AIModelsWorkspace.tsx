@@ -9,6 +9,7 @@ import {
   FileText,
   Image as ImageIcon,
   KeyRound,
+  MessageSquare,
   Pencil,
   Plus,
   Radio,
@@ -55,6 +56,10 @@ import { Badge, StatusBadge, StatusDot } from "@/components/admin-ui/status/stat
 import { Tooltip } from "@/components/admin-ui/primitives/tooltip";
 import { Panel } from "@/components/admin-ui/primitives/surface";
 import { Spinner } from "@/components/admin-ui/primitives/spinner";
+import {
+  EphemeralModelChat,
+  type EphemeralModelChatTarget,
+} from "./EphemeralModelChat";
 
 type Provider = {
   id: string;
@@ -189,6 +194,15 @@ function providerStatus(provider: Provider): {
   return { status: "warning", description: "مفتاح API غير مهيأ" };
 }
 
+function modelChatDisabledReason(provider: Provider, model: Model): string | null {
+  if (model.capability !== "GENERATION") return "هذه القدرة لا تدعم محادثة التوليد.";
+  if (!provider.enabled) return "فعّل المزوّد قبل فتح المحادثة المؤقتة.";
+  if (!provider.credentialConfigured) return "أضف مفتاح API فعّالًا قبل فتح المحادثة المؤقتة.";
+  if (!model.enabled) return "فعّل النموذج قبل فتح المحادثة المؤقتة.";
+  if (!model.supportsStreaming) return "هذا النموذج لا يدعم البث المطلوب للمحادثة المؤقتة.";
+  return null;
+}
+
 function baseUrlFieldValue(value: string): string {
   return value.replace(/^https?:\/\//iu, "").replace(/\/$/u, "");
 }
@@ -204,6 +218,8 @@ export function AIModelsWorkspace() {
   const [addingProvider, setAddingProvider] = React.useState(false);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<unknown>(null);
+  const [chatTarget, setChatTarget] = React.useState<EphemeralModelChatTarget | null>(null);
+  const [chatSessionId, setChatSessionId] = React.useState(0);
 
   const refresh = React.useCallback(async (preferredProviderId?: string) => {
     setError(null);
@@ -227,6 +243,21 @@ export function AIModelsWorkspace() {
 
   const selectedProvider = providers.find((provider) => provider.id === selectedProviderId) ?? null;
   const showProviderForm = addingProvider || providers.length === 0;
+
+  const openModelChat = (model: Model, provider: Provider) => {
+    setChatSessionId((current) => current + 1);
+    setChatTarget({
+      modelId: model.id,
+      providerModelId: model.providerModelId,
+      providerName: provider.displayName,
+      apiFormat: provider.apiFormat,
+      providerEnabled: provider.enabled,
+      modelEnabled: model.enabled,
+      credentialConfigured: provider.credentialConfigured,
+      supportsStreaming: model.supportsStreaming,
+      supportsReasoning: model.supportsReasoning,
+    });
+  };
 
   const createProvider = async (input: {
     displayName: string;
@@ -400,7 +431,8 @@ export function AIModelsWorkspace() {
   };
 
   return (
-    <PageShell width="full" padding="default" className="gap-6">
+    <>
+      <PageShell width="full" padding="default" className="gap-6">
       <PageHeader
         eyebrow="الذكاء الاصطناعي"
         title="النماذج والمزوّدون"
@@ -439,6 +471,7 @@ export function AIModelsWorkspace() {
                   onUpdateModel={updateModel}
                   onToggleModel={updateModelEnabled}
                   onDeleteModel={deleteModel}
+                  onOpenChat={(model) => openModelChat(model, selectedProvider)}
                 />
               ) : null}
             </main>
@@ -460,7 +493,15 @@ export function AIModelsWorkspace() {
           </div>
         </Panel>
       )}
-    </PageShell>
+      </PageShell>
+      {chatTarget ? (
+        <EphemeralModelChat
+          key={`${chatTarget.modelId}:${chatSessionId}`}
+          target={chatTarget}
+          onClose={() => setChatTarget(null)}
+        />
+      ) : null}
+    </>
   );
 }
 
@@ -541,6 +582,7 @@ function ProviderDetailPane({
   onUpdateModel,
   onToggleModel,
   onDeleteModel,
+  onOpenChat,
 }: {
   provider: Provider;
   onUpdate: (providerId: string, input: { displayName: string; baseUrl: string; apiFormat: AIProviderApiFormat; expectedRevision: number }) => Promise<void>;
@@ -551,6 +593,7 @@ function ProviderDetailPane({
   onUpdateModel: (modelId: string, input: { providerModelId: string; contextWindowTokens: number; maxOutputTokens: number; inputModalities: AIModelInputModality[]; expectedRevision: number }) => Promise<void>;
   onToggleModel: (model: Model, enabled: boolean) => Promise<void>;
   onDeleteModel: (model: Model) => Promise<void>;
+  onOpenChat: (model: Model) => void;
 }) {
   const [editing, setEditing] = React.useState(false);
   const [credentialOpen, setCredentialOpen] = React.useState(false);
@@ -585,7 +628,7 @@ function ProviderDetailPane({
         {editing ? <div className="flex flex-wrap justify-end gap-2 border-t border-border-subtle pt-4"><Button variant="ghost" onClick={() => setEditing(false)}>إلغاء</Button><Button variant="primary" icon={<Check aria-hidden />} disabled={!draft.displayName.trim() || !draft.baseUrl.trim()} onClick={saveProvider}>حفظ التغييرات</Button></div> : null}
       </section>
 
-      <ModelsSection provider={provider} onAdd={() => { setEditingModel(null); setModelOpen(true); }} onEdit={(model) => { setEditingModel(model); setModelOpen(true); }} onToggle={onToggleModel} onDelete={onDeleteModel} onTest={async (model) => { try { const result = await requestJson<{ ok: true; result?: { ok?: boolean; latencyMs: number | null; errorCode?: string } }>(`/api/admin/local/ai/models/${model.id}/test`, { method: "POST", body: JSON.stringify({}) }); return { ok: result.result?.ok ?? false, latencyMs: result.result?.latencyMs ?? null, errorMessage: result.result?.ok ? undefined : connectionErrorMessage(result.result?.errorCode) }; } catch (error) { return { ok: false, latencyMs: null, errorMessage: apiErrorMessage(error) }; } }} />
+      <ModelsSection provider={provider} onAdd={() => { setEditingModel(null); setModelOpen(true); }} onEdit={(model) => { setEditingModel(model); setModelOpen(true); }} onToggle={onToggleModel} onDelete={onDeleteModel} onOpenChat={onOpenChat} onTest={async (model) => { try { const result = await requestJson<{ ok: true; result?: { ok?: boolean; latencyMs: number | null; errorCode?: string } }>(`/api/admin/local/ai/models/${model.id}/test`, { method: "POST", body: JSON.stringify({}) }); return { ok: result.result?.ok ?? false, latencyMs: result.result?.latencyMs ?? null, errorMessage: result.result?.ok ? undefined : connectionErrorMessage(result.result?.errorCode) }; } catch (error) { return { ok: false, latencyMs: null, errorMessage: apiErrorMessage(error) }; } }} />
       <CredentialDialog open={credentialOpen} onOpenChange={setCredentialOpen} onSave={async (apiKey) => { await onReplaceCredential(provider.id, apiKey, provider.revision); setCredentialOpen(false); }} />
       <ConfirmDialog open={deleteOpen} onOpenChange={setDeleteOpen} title="حذف المزوّد؟" description="سيُزال إعداد المزوّد ويُبطل مفتاحه. لا يمكن التراجع عن هذه العملية." actionLabel="حذف المزوّد" onConfirm={async () => { await onDelete(provider); setDeleteOpen(false); }} />
       <ModelDialog open={modelOpen} onOpenChange={setModelOpen} model={editingModel} onSave={async (input) => { if (editingModel) await onUpdateModel(editingModel.id, { ...input, expectedRevision: editingModel.revision }); else await onCreateModel(provider.id, input); setModelOpen(false); }} />
@@ -603,6 +646,7 @@ function ModelsSection({
   onEdit,
   onToggle,
   onDelete,
+  onOpenChat,
   onTest,
 }: {
   provider: Provider;
@@ -610,12 +654,13 @@ function ModelsSection({
   onEdit: (model: Model) => void;
   onToggle: (model: Model, enabled: boolean) => Promise<void>;
   onDelete: (model: Model) => Promise<void>;
+  onOpenChat: (model: Model) => void;
   onTest: (model: Model) => Promise<TestOutcome>;
 }) {
-  return <section className="mt-5 border-t border-border-subtle pt-5" aria-labelledby="models-heading"><div className="flex items-baseline justify-between gap-3"><div><div className="eyebrow">إدارة التوليد</div><h3 id="models-heading" className="mt-1 text-md font-semibold text-fg">النماذج <span className="font-mono text-xs font-normal text-fg-tertiary">{formatNumber(provider.modelCount)}</span></h3></div></div>{provider.models.length ? <div className="mt-2 divide-y divide-border-subtle">{provider.models.map((model) => <ModelRow key={model.id} model={model} onEdit={onEdit} onToggle={onToggle} onDelete={onDelete} onTest={onTest} />)}</div> : <EmptyState size="sm" title="لا توجد نماذج لهذا المزوّد." description="أضف Model ID وإمكاناته الفيزيائية ليصبح جاهزًا للاختبار." /> }<div className="mt-3 border-t border-border-subtle pt-3"><Button variant="outline" size="sm" block icon={<Plus aria-hidden />} onClick={onAdd}>إضافة نموذج</Button></div></section>;
+  return <section className="mt-5 border-t border-border-subtle pt-5" aria-labelledby="models-heading"><div className="flex items-baseline justify-between gap-3"><div><div className="eyebrow">إدارة التوليد</div><h3 id="models-heading" className="mt-1 text-md font-semibold text-fg">النماذج <span className="font-mono text-xs font-normal text-fg-tertiary">{formatNumber(provider.modelCount)}</span></h3></div></div>{provider.models.length ? <div className="mt-2 divide-y divide-border-subtle">{provider.models.map((model) => <ModelRow key={model.id} model={model} provider={provider} onEdit={onEdit} onToggle={onToggle} onDelete={onDelete} onOpenChat={onOpenChat} onTest={onTest} />)}</div> : <EmptyState size="sm" title="لا توجد نماذج لهذا المزوّد." description="أضف Model ID وإمكاناته الفيزيائية ليصبح جاهزًا للاختبار." /> }<div className="mt-3 border-t border-border-subtle pt-3"><Button variant="outline" size="sm" block icon={<Plus aria-hidden />} onClick={onAdd}>إضافة نموذج</Button></div></section>;
 }
 
-function ModelRow({ model, onEdit, onToggle, onDelete, onTest }: { model: Model; onEdit: (model: Model) => void; onToggle: (model: Model, enabled: boolean) => Promise<void>; onDelete: (model: Model) => Promise<void>; onTest: (model: Model) => Promise<TestOutcome> }) {
+function ModelRow({ model, provider, onEdit, onToggle, onDelete, onOpenChat, onTest }: { model: Model; provider: Provider; onEdit: (model: Model) => void; onToggle: (model: Model, enabled: boolean) => Promise<void>; onDelete: (model: Model) => Promise<void>; onOpenChat: (model: Model) => void; onTest: (model: Model) => Promise<TestOutcome> }) {
   const [testing, setTesting] = React.useState(false);
   const [toggling, setToggling] = React.useState(false);
   const [deleting, setDeleting] = React.useState(false);
@@ -625,7 +670,8 @@ function ModelRow({ model, onEdit, onToggle, onDelete, onTest }: { model: Model;
   React.useEffect(() => () => { if (timeoutRef.current) clearTimeout(timeoutRef.current); }, []);
 
   const test = () => { setTesting(true); setOutcome(null); void onTest(model).then((result) => { setOutcome(result); if (timeoutRef.current) clearTimeout(timeoutRef.current); timeoutRef.current = setTimeout(() => setOutcome(null), 6000); }).catch(() => setOutcome({ ok: false, latencyMs: null, errorMessage: "تعذّر اختبار النموذج." })).finally(() => setTesting(false)); };
-  return <div className={cn("min-w-0 py-3", !model.enabled && "opacity-65")}><div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2"><div className="min-w-0 flex-1"><div className="flex min-w-0 flex-wrap items-center gap-2"><span dir="ltr" className="min-w-0 truncate font-mono text-sm font-medium text-fg">{model.providerModelId}</span><Badge variant="inset" size="sm">{model.contextWindowTokens != null ? formatContextWindow(model.contextWindowTokens) : "—"}</Badge>{model.maxOutputTokens != null ? <Badge variant="inset" size="sm">{formatNumber(model.maxOutputTokens)} إخراج</Badge> : null}{model.inputModalities.filter((modality) => modality !== "TEXT").map((modality) => <Badge key={modality} variant="subtle" tone="info" size="sm" icon={MODALITY_ICONS[modality]}>{AI_MODEL_MODALITY_LABELS[modality]}</Badge>)}</div></div><div className="flex shrink-0 items-center gap-0.5"><Tooltip content={model.enabled ? "تعطيل النموذج" : "تفعيل النموذج"}><span><Switch size="sm" checked={model.enabled} pending={toggling} aria-label={model.enabled ? "تعطيل النموذج" : "تفعيل النموذج"} onCheckedChange={(checked) => { setToggling(true); void onToggle(model, checked).catch(() => undefined).finally(() => setToggling(false)); }} /></span></Tooltip><Tooltip content={model.enabled ? "اختبار اتصال حقيقي خفيف" : "فعّل النموذج قبل الاختبار"}><IconButton label="اختبار اتصال النموذج" size="sm" variant="ghost" disabled={!model.enabled || testing} onClick={test}>{testing ? <Spinner size="sm" /> : <Radio aria-hidden />}</IconButton></Tooltip><Tooltip content="تعديل النموذج"><IconButton label="تعديل النموذج" size="sm" variant="ghost" onClick={() => onEdit(model)}><Pencil aria-hidden /></IconButton></Tooltip><Tooltip content="حذف النموذج"><IconButton label="حذف النموذج" size="sm" variant="dangerGhost" onClick={() => setDeleteOpen(true)}><Trash2 aria-hidden /></IconButton></Tooltip></div></div>{outcome ? <div role="status" aria-live="polite" className={cn("mt-2 text-xs", outcome.ok ? "text-success-text" : "text-danger-text")}>{outcome.ok ? `✓ تم الاتصال${outcome.latencyMs != null ? ` · ${formatNumber(outcome.latencyMs)}ms` : ""}` : `تعذّر الاتصال${outcome.errorMessage ? ` · ${outcome.errorMessage}` : ""}`}</div> : null}<ConfirmDialog open={deleteOpen} onOpenChange={setDeleteOpen} title="حذف النموذج؟" description="سيُحذف سجل النموذج فقط إذا لم يكن مستخدمًا في إعدادات أو سجلات AI أخرى." actionLabel="حذف النموذج" loading={deleting} onConfirm={async () => { setDeleting(true); try { await onDelete(model); setDeleteOpen(false); } finally { setDeleting(false); } }} /> </div>;
+  const chatDisabledReason = modelChatDisabledReason(provider, model);
+  return <div className={cn("min-w-0 py-3", !model.enabled && "opacity-65")}><div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2"><div className="min-w-0 flex-1"><div className="flex min-w-0 flex-wrap items-center gap-2"><span dir="ltr" className="min-w-0 truncate font-mono text-sm font-medium text-fg">{model.providerModelId}</span><Badge variant="inset" size="sm">{model.contextWindowTokens != null ? formatContextWindow(model.contextWindowTokens) : "—"}</Badge>{model.maxOutputTokens != null ? <Badge variant="inset" size="sm">{formatNumber(model.maxOutputTokens)} إخراج</Badge> : null}{model.inputModalities.filter((modality) => modality !== "TEXT").map((modality) => <Badge key={modality} variant="subtle" tone="info" size="sm" icon={MODALITY_ICONS[modality]}>{AI_MODEL_MODALITY_LABELS[modality]}</Badge>)}</div></div><div className="flex shrink-0 items-center gap-0.5"><Tooltip content={model.enabled ? "تعطيل النموذج" : "تفعيل النموذج"}><span><Switch size="sm" checked={model.enabled} pending={toggling} aria-label={model.enabled ? "تعطيل النموذج" : "تفعيل النموذج"} onCheckedChange={(checked) => { setToggling(true); void onToggle(model, checked).catch(() => undefined).finally(() => setToggling(false)); }} /></span></Tooltip><Tooltip content={model.enabled ? "اختبار اتصال حقيقي خفيف" : "فعّل النموذج قبل الاختبار"}><IconButton label="اختبار اتصال النموذج" size="sm" variant="ghost" disabled={!model.enabled || testing} onClick={test}>{testing ? <Spinner size="sm" /> : <Radio aria-hidden />}</IconButton></Tooltip><Tooltip content={chatDisabledReason ?? "محادثة اختبار مؤقتة"}><span><IconButton label="محادثة اختبار مؤقتة" size="sm" variant="ghost" disabled={Boolean(chatDisabledReason)} onClick={() => onOpenChat(model)}><MessageSquare aria-hidden /></IconButton></span></Tooltip><Tooltip content="تعديل النموذج"><IconButton label="تعديل النموذج" size="sm" variant="ghost" onClick={() => onEdit(model)}><Pencil aria-hidden /></IconButton></Tooltip><Tooltip content="حذف النموذج"><IconButton label="حذف النموذج" size="sm" variant="dangerGhost" onClick={() => setDeleteOpen(true)}><Trash2 aria-hidden /></IconButton></Tooltip></div></div>{outcome ? <div role="status" aria-live="polite" className={cn("mt-2 text-xs", outcome.ok ? "text-success-text" : "text-danger-text")}>{outcome.ok ? `✓ تم الاتصال${outcome.latencyMs != null ? ` · ${formatNumber(outcome.latencyMs)}ms` : ""}` : `تعذّر الاتصال${outcome.errorMessage ? ` · ${outcome.errorMessage}` : ""}`}</div> : null}<ConfirmDialog open={deleteOpen} onOpenChange={setDeleteOpen} title="حذف النموذج؟" description="سيُحذف سجل النموذج فقط إذا لم يكن مستخدمًا في إعدادات أو سجلات AI أخرى." actionLabel="حذف النموذج" loading={deleting} onConfirm={async () => { setDeleting(true); try { await onDelete(model); setDeleteOpen(false); } finally { setDeleting(false); } }} /> </div>;
 }
 
 function CredentialDialog({ open, onOpenChange, onSave }: { open: boolean; onOpenChange: (open: boolean) => void; onSave: (apiKey: string) => Promise<void> }) {

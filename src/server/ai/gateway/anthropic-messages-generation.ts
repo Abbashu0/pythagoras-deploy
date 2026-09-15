@@ -50,6 +50,9 @@ export class AnthropicMessagesGenerationAdapter {
     request: GenerationProviderRequest,
     context: ProviderAdapterExecutionContext,
   ): AsyncIterable<ProviderGenerationStreamEvent> {
+    if (request.reasoningEffort !== undefined && request.reasoningEffort !== "AUTO") {
+      throw new AIProviderAdapterError("INVALID_REQUEST", { fallbackEligible: false });
+    }
     const payload = JSON.stringify({
       model: request.providerModelId,
       max_tokens: request.maxOutputTokens ?? 16,

@@ -15,6 +15,7 @@ import { isQuestionEditorError } from "@/server/question-editor";
 import { isQuestionDomainError } from "@/server/questions";
 import { isQuestionSearchError } from "@/server/question-search";
 import { isAIAdminDirectError } from "@/server/ai/admin-direct-service";
+import { isEphemeralModelChatError } from "@/server/ai/ephemeral-model-chat-service";
 import { isAIProviderConfigError } from "@/server/ai/configuration";
 import { isAIModelConfigError } from "@/server/ai/model-registry";
 import { isAISecretStoreError } from "@/server/ai/secrets";
@@ -71,6 +72,30 @@ export function localJson(
 }
 
 export function localApiError(error: unknown): NextResponse {
+  if (isEphemeralModelChatError(error)) {
+    const status =
+      error.code === "AI_EPHEMERAL_MODEL_NOT_FOUND"
+        ? 404
+        : error.code === "AI_EPHEMERAL_PROVIDER_NOT_READY" ||
+            error.code === "AI_EPHEMERAL_MODEL_UNAVAILABLE"
+          ? 409
+          : error.code === "AI_EPHEMERAL_CHAT_FAILED"
+            ? error.providerErrorCode === "TIMEOUT"
+              ? 504
+              : 502
+            : 400;
+    return localJson(
+      {
+        ok: false,
+        code: error.code,
+        ...(error.providerErrorCode
+          ? { errorCode: error.providerErrorCode }
+          : {}),
+      },
+      { status },
+    );
+  }
+
   if (isAIAdminDirectError(error)) {
     const status =
       error.code.endsWith("_NOT_FOUND")

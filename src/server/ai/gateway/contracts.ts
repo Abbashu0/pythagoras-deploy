@@ -2,6 +2,7 @@ import type {
   AIModelCapability,
   AIModelConfigRepository,
 } from "../model-registry";
+import type { AIReasoningEffort } from "../../../lib/ai-reasoning";
 import type {
   AIProviderConfigRepository,
 } from "../configuration";
@@ -64,7 +65,7 @@ export interface GenerationProviderRequest {
   messages: readonly GenerationMessage[];
   /** Maximum generated-token ceiling, including provider-reported hidden reasoning usage. */
   maxOutputTokens?: number;
-  reasoningEffort?: string;
+  reasoningEffort?: AIReasoningEffort;
   temperature?: number;
   stream: boolean;
 }
@@ -76,7 +77,7 @@ export interface GenerationGatewayRequest {
   messages: readonly GenerationMessage[];
   /** Maximum generated-token ceiling that the adapter must enforce, including hidden reasoning usage. */
   maxOutputTokens?: number;
-  reasoningEffort?: string;
+  reasoningEffort?: AIReasoningEffort;
   temperature?: number;
   stream: boolean;
 }
