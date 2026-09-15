@@ -31,7 +31,7 @@ For appropriate system controls, prefer `@expo/ui` or other Expo/native platform
 
 ### Current M9/M10 status
 
-AI-M0 through AI-M9 are approved/complete. AI-M10R is APPROVED/COMPLETE as the new scoped Student Memory baseline; the former subject-only M10A and former M10B contracts are historical/superseded. AI-M10A2, M10B2, M10C, and M10D are implemented pending independent review through migration `0044_slippery_joshua_kane`; AI-M10 is implemented pending independent review; and AI-M11 is implemented pending independent review through migration `0045_sturdy_bill_hollister`. AI-M12-M15 are not started. No production Provider, Student/Admin/Mobile AI UI, or automatic publication is available.
+AI-M0 through AI-M9 are approved/complete. AI-M10R is APPROVED/COMPLETE as the new scoped Student Memory baseline; the former subject-only M10A and former M10B contracts are historical/superseded. AI-M10A2, M10B2, M10C, and M10D are implemented pending independent review through migration `0044_slippery_joshua_kane`; AI-M10 is implemented pending independent review; and AI-M11 is implemented pending independent review through migration `0045_sturdy_bill_hollister`. AI-M12-M15 are not started. The direct local Provider/Model Admin surface now exists, but no production Provider execution, Student/Mobile AI UI, or automatic publication is available.
 
 ### Historical M7C context
 
@@ -43,7 +43,7 @@ introduced for configurations that do not pin one.
 
 M8A's final SQLite creation correction is migration `0030_require-unsealed-tutor-trace-creation`: new Response Traces must enter `PLANNED` and unsealed, while historical rows remain sealed.
 
-The current AI checkpoint supersedes the older M7B/M7C status wording below: AI-M7A, AI-M7B, and AI-M7C are approved, AI-M7 Retrieval Engine is complete, and AI-M8A/B/C are approved with AI-M8 Grounded Tutor complete at `e73d6dc5ba4ae18c1bf4dd614b093b605849d179`. AI-M9A is approved/complete at `860b474bd146abb944c15f774afa88578b463a80`; M9B1 is approved/complete at `61d6de1276735f511712dd47797a2c6a6304fcf3`; M9B2 is approved/complete at `815d9230dcbde77433f98d80a2d37e3b08e2faaa`; AI-M9 is complete; M10R is approved/complete; M10A2/B2/C/D and M10 are implemented pending independent review; and no production Provider or Student/Admin AI UI exists.
+The current AI checkpoint supersedes the older M7B/M7C status wording below: AI-M7A, AI-M7B, and AI-M7C are approved, AI-M7 Retrieval Engine is complete, and AI-M8A/B/C are approved with AI-M8 Grounded Tutor complete at `e73d6dc5ba4ae18c1bf4dd614b093b605849d179`. AI-M9A is approved/complete at `860b474bd146abb944c15f774afa88578b463a80`; M9B1 is approved/complete at `61d6de1276735f511712dd47797a2c6a6304fcf3`; M9B2 is approved/complete at `815d9230dcbde77433f98d80a2d37e3b08e2faaa`; AI-M9 is complete; M10R is approved/complete; M10A2/B2/C/D and M10 are implemented pending independent review; the direct Provider/Model Admin surface is local infrastructure; and no production Provider execution or Student/Mobile AI UI exists.
 
 The reviewed AI-M6 correction also applies `0022_knowledge-package-source-subject-consistency`: the Question Knowledge Projector now accepts only canonical SQLite truth and preserves exact Question/Variant revision identities; cross-subject Package/Source pins are rejected at the database boundary. AI-M7A, AI-M7B, and AI-M7C are approved, and AI-M7 is complete.
 

@@ -198,6 +198,43 @@ test("API format changes synchronise Generation adapter identity and stale revis
   }
 });
 
+test("direct Provider enablement persists the requested boolean exactly once", async () => {
+  const f = fixture();
+  try {
+    const provider = await addProvider(f, "Enablement Provider");
+    const disabled = f.service.setProviderEnabled({
+      providerId: provider.id,
+      enabled: false,
+      expectedRevision: provider.revision,
+      actor: f.actor,
+    });
+    assert.equal(disabled.enabled, false);
+    assert.equal(disabled.revision, provider.revision + 1);
+    assert.equal(f.service.getProvider(provider.id).enabled, false);
+
+    const enabled = f.service.setProviderEnabled({
+      providerId: provider.id,
+      enabled: true,
+      expectedRevision: disabled.revision,
+      actor: f.actor,
+    });
+    assert.equal(enabled.enabled, true);
+    assert.equal(enabled.revision, disabled.revision + 1);
+    assert.equal(f.service.getProvider(provider.id).enabled, true);
+    assert.throws(
+      () => f.service.setProviderEnabled({
+        providerId: provider.id,
+        enabled: false,
+        expectedRevision: provider.revision,
+        actor: f.actor,
+      }),
+      (error: unknown) => error instanceof AIAdminDirectError && error.code === "AI_ADMIN_REVISION_CONFLICT",
+    );
+  } finally {
+    f.close();
+  }
+});
+
 test("all three model tests use the real Gateway protocol boundary without returning generated text", async () => {
   const f = fixture();
   try {

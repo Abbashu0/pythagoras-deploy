@@ -184,6 +184,7 @@ export class AIAdminDirectService {
     displayName: string;
     baseUrl: string;
     apiFormat: unknown;
+    enabled?: boolean;
     expectedRevision: number;
     actor: AdminActor;
   }): AIAdminProviderView {
@@ -196,21 +197,33 @@ export class AIAdminDirectService {
       baseUrl: prepareBaseUrl(input.baseUrl, apiFormat),
       apiFormat,
       credentialRef: current.credentialRef,
-      enabled: current.enabled,
+      enabled: input.enabled ?? current.enabled,
       retentionPolicy: current.retentionPolicy,
       trainingPolicy: current.trainingPolicy,
       zdrSupported: current.zdrSupported,
       zdrRequired: current.zdrRequired,
     });
     if (apiFormat === current.apiFormat) {
-      const updated = this.providers.update({
-        id: current.id,
-        content: candidate,
-        expectedRevision: input.expectedRevision,
-        actor: input.actor,
-        now: this.clock(),
-      });
-      return this.providerView(updated);
+      try {
+        const updated = this.providers.update({
+          id: current.id,
+          content: candidate,
+          expectedRevision: input.expectedRevision,
+          actor: input.actor,
+          now: this.clock(),
+        });
+        return this.providerView(updated);
+      } catch (error) {
+        if (isRevisionConflict(error)) {
+          throw new AIAdminDirectError(
+            "AI_ADMIN_REVISION_CONFLICT",
+            "The provider changed before saving completed.",
+            undefined,
+            error,
+          );
+        }
+        throw error;
+      }
     }
     const updated = this.updateProviderAndGenerationAdapters({
       current,
@@ -249,6 +262,7 @@ export class AIAdminDirectService {
       displayName: provider.displayName,
       baseUrl: provider.baseUrl,
       apiFormat: provider.apiFormat,
+      enabled: input.enabled,
       expectedRevision: input.expectedRevision,
       actor: input.actor,
     });
@@ -906,6 +920,14 @@ function errorCode(error: unknown, traceCode?: string): string {
     if (typeof code === "string" && /^[A-Z_]+$/u.test(code)) return code;
   }
   return "UNKNOWN";
+}
+
+function isRevisionConflict(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  if ("code" in error && String((error as { code?: unknown }).code ?? "").endsWith("_CONFLICT")) {
+    return true;
+  }
+  return error.message.toLowerCase().includes("changed before");
 }
 
 interface Dependency {
