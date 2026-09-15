@@ -416,7 +416,7 @@ export function AIModelsWorkspace() {
       ) : error ? (
         <ErrorState title="تعذّر تحميل المزوّدين" description={apiErrorMessage(error)} onRetry={() => void refresh()} />
       ) : (
-        <Panel clip className="min-h-0 overflow-hidden">
+        <Panel className="min-h-fit">
           <div dir="ltr" className="grid min-h-[34rem] min-w-0 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_17.5rem]">
             <main dir="rtl" className="order-1 min-w-0">
               {showProviderForm ? (
