@@ -32,6 +32,7 @@ import type {
   ChangeSnapshot,
 } from "../change-management/contracts";
 import type {
+  AIProviderApiFormat,
   AIProviderRetentionPolicy,
   AIProviderTrainingPolicy,
 } from "../ai/configuration/contracts";
@@ -64,7 +65,11 @@ import type { AIConversationSummarySafeDeletionCode, AIConversationSummaryStatus
 import type {
   AIInstructionPolicyScope,
 } from "../ai/policy/instruction-contracts";
-import type { AIModelCapability } from "../ai/model-registry/contracts";
+import type {
+  AIModelCapability,
+  AIModelInputModality,
+  AIModelOutputModality,
+} from "../ai/model-registry/contracts";
 import type {
   AICircuitEventType,
   AICircuitStateName,
@@ -2233,6 +2238,10 @@ export const aiProviderConfigs = sqliteTable(
     key: text("provider_key").notNull(),
     displayName: text("display_name").notNull(),
     baseUrl: text("base_url").notNull(),
+    apiFormat: text("api_format")
+      .$type<AIProviderApiFormat>()
+      .notNull()
+      .default("OPENAI_CHAT_COMPLETIONS"),
     credentialRef: text("credential_ref").references(() => aiSecretRefs.credentialRef, {
       onDelete: "restrict",
     }),
@@ -2277,6 +2286,10 @@ export const aiProviderConfigs = sqliteTable(
     ),
     check("ai_provider_configs_enabled_boolean", sql`${table.enabled} in (0,1)`),
     check(
+      "ai_provider_configs_api_format_valid",
+      sql`${table.apiFormat} in ('OPENAI_CHAT_COMPLETIONS','OPENAI_RESPONSES','ANTHROPIC_MESSAGES')`,
+    ),
+    check(
       "ai_provider_configs_retention_policy_valid",
       sql`${table.retentionPolicy} in ('UNKNOWN','ZERO_RETENTION','BOUNDED_RETENTION','PROVIDER_DEFINED')`,
     ),
@@ -2320,6 +2333,14 @@ export const aiModelConfigs = sqliteTable(
     supportsStructuredOutput: integer("supports_structured_output", { mode: "boolean" })
       .notNull()
       .default(false),
+    inputModalities: text("input_modalities", { mode: "json" })
+      .$type<AIModelInputModality[]>()
+      .notNull()
+      .default(["TEXT"]),
+    outputModalities: text("output_modalities", { mode: "json" })
+      .$type<AIModelOutputModality[]>()
+      .notNull()
+      .default(["TEXT"]),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
     createdBy: text("created_by")
@@ -2357,6 +2378,14 @@ export const aiModelConfigs = sqliteTable(
       sql`length(trim(${table.adapterKey})) between 1 and 120 and ${table.adapterKey} not glob '*[^a-z0-9.-]*'`,
     ),
     check("ai_model_configs_enabled_boolean", sql`${table.enabled} in (0,1)`),
+    check(
+      "ai_model_configs_input_modalities_json",
+      sql`json_valid(${table.inputModalities}) and json_type(${table.inputModalities}) = 'array' and json_array_length(${table.inputModalities}) between 1 and 4`,
+    ),
+    check(
+      "ai_model_configs_output_modalities_json",
+      sql`json_valid(${table.outputModalities}) and json_type(${table.outputModalities}) = 'array' and json_array_length(${table.outputModalities}) = 1 and json_extract(${table.outputModalities}, '$[0]') = 'TEXT'`,
+    ),
     check(
       "ai_model_configs_context_window_positive",
       sql`${table.contextWindowTokens} is null or ${table.contextWindowTokens} >= 1`,

@@ -1,4 +1,5 @@
 import {
+  AI_PROVIDER_API_FORMATS,
   AI_PROVIDER_RETENTION_POLICIES,
   AI_PROVIDER_TRAINING_POLICIES,
   type AIProviderConfigContent,
@@ -27,6 +28,7 @@ export function normalizeAIProviderConfigContent(
     "displayName",
     "baseUrl",
     "credentialRef",
+    "apiFormat",
     "enabled",
     "retentionPolicy",
     "trainingPolicy",
@@ -34,9 +36,11 @@ export function normalizeAIProviderConfigContent(
     "zdrRequired",
   ];
   const actualKeys = Object.keys(value).sort();
+  const sortedExpectedKeys = [...expectedKeys].sort();
+  const requiredKeys = sortedExpectedKeys.filter((key) => key !== "apiFormat");
   if (
-    actualKeys.length !== expectedKeys.length ||
-    actualKeys.some((key, index) => key !== [...expectedKeys].sort()[index])
+    actualKeys.some((key) => !sortedExpectedKeys.includes(key)) ||
+    requiredKeys.some((key) => !actualKeys.includes(key))
   ) {
     invalid("Provider configuration fields are invalid.");
   }
@@ -53,6 +57,14 @@ export function normalizeAIProviderConfigContent(
   if (credentialRef !== null && !isAISecretCredentialRef(credentialRef)) {
     invalid("Provider credential reference is invalid.");
   }
+
+  const apiFormat = enumValue(
+    value.apiFormat === undefined
+      ? "OPENAI_CHAT_COMPLETIONS"
+      : value.apiFormat,
+    AI_PROVIDER_API_FORMATS,
+    "apiFormat",
+  );
 
   const retentionPolicy = enumValue(
     value.retentionPolicy,
@@ -79,6 +91,7 @@ export function normalizeAIProviderConfigContent(
     displayName,
     baseUrl,
     credentialRef,
+    apiFormat,
     enabled,
     retentionPolicy,
     trainingPolicy,

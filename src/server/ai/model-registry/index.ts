@@ -1,7 +1,11 @@
 export {
   AI_MODEL_CAPABILITIES,
+  AI_MODEL_INPUT_MODALITIES,
+  AI_MODEL_OUTPUT_MODALITIES,
   AI_MODEL_CONFIG_RESOURCE_TYPE,
   type AIModelCapability,
+  type AIModelInputModality,
+  type AIModelOutputModality,
   type AIModelConfig,
   type AIModelConfigContent,
   type AIModelConfigRepository,

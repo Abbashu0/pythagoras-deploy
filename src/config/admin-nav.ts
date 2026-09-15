@@ -1,4 +1,4 @@
-import { Archive, BookOpen, Images } from "lucide-react";
+import { Archive, BookOpen, BrainCircuit, Images } from "lucide-react";
 import type { NavSection } from "@/components/admin-ui/navigation/nav-config";
 
 export const ADMIN_NAV: NavSection[] = [
@@ -33,6 +33,20 @@ export const ADMIN_NAV: NavSection[] = [
         label: "إدارة المواد",
         href: "/admin/content/materials",
         icon: BookOpen,
+      },
+    ],
+  },
+  {
+    key: "ai",
+    label: "الذكاء الاصطناعي",
+    collapsible: true,
+    defaultCollapsed: false,
+    items: [
+      {
+        key: "ai-models",
+        label: "النماذج والمزوّدون",
+        href: "/admin/ai/models",
+        icon: BrainCircuit,
       },
     ],
   },

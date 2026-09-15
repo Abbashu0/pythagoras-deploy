@@ -65,6 +65,8 @@ export class SQLiteAIModelConfigRepository implements AIModelConfigRepository {
           supportsStreaming: input.content.supportsStreaming,
           supportsReasoning: input.content.supportsReasoning,
           supportsStructuredOutput: input.content.supportsStructuredOutput,
+          inputModalities: input.content.inputModalities ?? ["TEXT"],
+          outputModalities: input.content.outputModalities ?? ["TEXT"],
           createdAt: input.now,
           updatedAt: input.now,
           createdBy: input.actor.actorUserId,
@@ -106,6 +108,8 @@ export class SQLiteAIModelConfigRepository implements AIModelConfigRepository {
         supportsStreaming: input.content.supportsStreaming,
         supportsReasoning: input.content.supportsReasoning,
         supportsStructuredOutput: input.content.supportsStructuredOutput,
+        inputModalities: input.content.inputModalities ?? ["TEXT"],
+        outputModalities: input.content.outputModalities ?? ["TEXT"],
         updatedAt: input.now,
         updatedBy: input.actor.actorUserId,
         revision: sql`${aiModelConfigs.revision} + 1`,
@@ -125,6 +129,35 @@ export class SQLiteAIModelConfigRepository implements AIModelConfigRepository {
       );
     }
     return modelConfigFromRow(row);
+  }
+
+  remove(input: { id: string; expectedRevision: number }): AIModelConfig {
+    try {
+      const row = this.database.db
+        .delete(aiModelConfigs)
+        .where(
+          and(
+            eq(aiModelConfigs.id, input.id),
+            eq(aiModelConfigs.revision, input.expectedRevision),
+          ),
+        )
+        .returning()
+        .get();
+      if (!row) {
+        throw new AIModelConfigError(
+          "AI_MODEL_CONFIG_CONFLICT",
+          "The AI Model configuration changed before removal completed.",
+        );
+      }
+      return modelConfigFromRow(row);
+    } catch (error) {
+      if (error instanceof AIModelConfigError) throw error;
+      throw new AIModelConfigError(
+        "AI_MODEL_CONFIG_CONFLICT",
+        "The AI Model configuration cannot be removed while it is referenced by another AI record.",
+        error,
+      );
+    }
   }
 }
 
@@ -148,6 +181,8 @@ function modelConfigFromRow(row: AIModelConfigRow): AIModelConfig {
     supportsStreaming: row.supportsStreaming,
     supportsReasoning: row.supportsReasoning,
     supportsStructuredOutput: row.supportsStructuredOutput,
+    inputModalities: Array.isArray(row.inputModalities) ? row.inputModalities : ["TEXT"],
+    outputModalities: Array.isArray(row.outputModalities) ? row.outputModalities : ["TEXT"],
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     createdBy: row.createdBy,

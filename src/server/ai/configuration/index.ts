@@ -1,9 +1,11 @@
 export {
   AI_PROVIDER_CONFIG_RESOURCE_TYPE,
+  AI_PROVIDER_API_FORMATS,
   AI_PROVIDER_RETENTION_POLICIES,
   AI_PROVIDER_TRAINING_POLICIES,
   type AIProviderConfig,
   type AIProviderConfigContent,
+  type AIProviderApiFormat,
   type AIProviderConfigRepository,
   type AIProviderCredentialStatus,
   type AIProviderRetentionPolicy,

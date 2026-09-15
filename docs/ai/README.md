@@ -47,6 +47,8 @@ The former AI-M10A subject-only checkpoint at `d106e5bb3b82095e3d1b3abeab1f15023
 
 ## AI-M11 — Intelligence Telemetry, Diagnostics & Feedback
 
+The first AI Product page is now `/admin/ai/models`: a direct local-admin workspace for managing Providers and Generation Models. It uses no Change Set, review, publish, login, Agent assignment, Memory/RAG, or Student AI UI. Provider API formats are explicit (`OpenAI Chat Completions`, `OpenAI Responses`, and `Anthropic Messages`); API keys remain write-only in the encrypted Secret Store, and Model connection tests use bounded real Gateway inference without creating Conversation, Memory, Cost, or Telemetry records. A Model context window is capability metadata only and does not alter Agent runtime context budgets.
+
 **Status:** Implemented pending independent review through migration `0045_sturdy_bill_hollister`.
 
 M11 adds a closed/versioned append-only event contract, persistent metadata-only Retrieval Traces, Tutor Response diagnostics, Memory and Compaction lifecycle events, and structured feedback bound to the same principal's completed Student Response. A stable server-owned analytics identity supports bounded UTC day/week/month aggregates and internal read DTOs for overview, time series, subject/model-provider breakdowns, failures, retrieval health, usage, and feedback. M3 remains the canonical cost/usage ledger; analytics reads it rather than creating a second billing store.

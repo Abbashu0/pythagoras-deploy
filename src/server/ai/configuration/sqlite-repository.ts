@@ -10,6 +10,7 @@ import type {
   AIProviderCredentialStatus,
   SafeAIProviderConfigDTO,
 } from "./contracts";
+import { AI_PROVIDER_API_FORMATS } from "@/lib/ai-provider-format";
 import { AIProviderConfigError } from "./errors";
 
 export class SQLiteAIProviderConfigRepository
@@ -59,6 +60,7 @@ export class SQLiteAIProviderConfigRepository
           displayName: input.content.displayName,
           baseUrl: input.content.baseUrl,
           credentialRef: input.content.credentialRef,
+          apiFormat: input.content.apiFormat ?? "OPENAI_CHAT_COMPLETIONS",
           enabled: input.content.enabled,
           retentionPolicy: input.content.retentionPolicy,
           trainingPolicy: input.content.trainingPolicy,
@@ -96,6 +98,7 @@ export class SQLiteAIProviderConfigRepository
         displayName: input.content.displayName,
         baseUrl: input.content.baseUrl,
         credentialRef: input.content.credentialRef,
+        apiFormat: input.content.apiFormat ?? "OPENAI_CHAT_COMPLETIONS",
         enabled: input.content.enabled,
         retentionPolicy: input.content.retentionPolicy,
         trainingPolicy: input.content.trainingPolicy,
@@ -170,6 +173,7 @@ export function toSafeAIProviderConfigDTO(
     key: config.key,
     displayName: config.displayName,
     baseUrl: config.baseUrl,
+    apiFormat: config.apiFormat,
     enabled: config.enabled,
     credentialConfigured: status === "ACTIVE",
     credentialStatus: status,
@@ -190,6 +194,9 @@ function providerConfigFromRow(row: AIProviderConfigRow): AIProviderConfig {
     displayName: row.displayName,
     baseUrl: row.baseUrl,
     credentialRef: row.credentialRef,
+    apiFormat: AI_PROVIDER_API_FORMATS.includes(row.apiFormat as (typeof AI_PROVIDER_API_FORMATS)[number])
+      ? row.apiFormat as (typeof AI_PROVIDER_API_FORMATS)[number]
+      : "OPENAI_CHAT_COMPLETIONS",
     enabled: row.enabled,
     retentionPolicy: row.retentionPolicy,
     trainingPolicy: row.trainingPolicy,

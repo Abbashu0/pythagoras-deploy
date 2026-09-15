@@ -1,6 +1,13 @@
 import type { AdminActor } from "../../admin-auth/contracts";
+import {
+  AI_PROVIDER_API_FORMATS,
+  type AIProviderApiFormat,
+} from "@/lib/ai-provider-format";
 
 export const AI_PROVIDER_CONFIG_RESOURCE_TYPE = "ai.provider-config" as const;
+
+export { AI_PROVIDER_API_FORMATS };
+export type { AIProviderApiFormat };
 
 export const AI_PROVIDER_RETENTION_POLICIES = [
   "UNKNOWN",
@@ -28,6 +35,8 @@ export interface AIProviderConfigContent {
   displayName: string;
   baseUrl: string;
   credentialRef: string | null;
+  /** Optional for historical Change Set snapshots; storage always defaults it. */
+  apiFormat?: AIProviderApiFormat;
   enabled: boolean;
   retentionPolicy: AIProviderRetentionPolicy;
   trainingPolicy: AIProviderTrainingPolicy;
@@ -36,6 +45,7 @@ export interface AIProviderConfigContent {
 }
 
 export interface AIProviderConfig extends AIProviderConfigContent {
+  apiFormat: AIProviderApiFormat;
   id: string;
   createdAt: number;
   updatedAt: number;
@@ -56,6 +66,7 @@ export interface SafeAIProviderConfigDTO {
   key: string;
   displayName: string;
   baseUrl: string;
+  apiFormat: AIProviderApiFormat;
   enabled: boolean;
   credentialConfigured: boolean;
   credentialStatus: AIProviderCredentialStatus;

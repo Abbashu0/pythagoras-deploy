@@ -39,6 +39,8 @@ const FIELD_LABELS: Record<string, string> = {
   supportsStreaming: "Streaming support",
   supportsReasoning: "Reasoning support",
   supportsStructuredOutput: "Structured output support",
+  inputModalities: "Input modalities",
+  outputModalities: "Output modalities",
 };
 
 export class AIModelConfigChangeAdapter implements ChangeResourceAdapter {
@@ -251,6 +253,8 @@ function snapshotFromContent(
     supportsStreaming: content.supportsStreaming,
     supportsReasoning: content.supportsReasoning,
     supportsStructuredOutput: content.supportsStructuredOutput,
+    inputModalities: content.inputModalities ?? ["TEXT"],
+    outputModalities: content.outputModalities ?? ["TEXT"],
   }) as ChangeSnapshot;
 }
 

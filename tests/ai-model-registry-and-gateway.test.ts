@@ -201,6 +201,8 @@ function modelContent(
     supportsStreaming: capability === "GENERATION",
     supportsReasoning: false,
     supportsStructuredOutput: false,
+    inputModalities: ["TEXT"],
+    outputModalities: ["TEXT"],
     ...overrides,
   };
 }
@@ -338,7 +340,7 @@ function expectGatewayCode(code: string) {
 test("AI M2 migration creates a safe Model Registry table without credential material", () => {
   const fixture = createFixture();
   try {
-    assert.equal(getContentDatabaseStatus(fixture.database).migrationsApplied, 47);
+    assert.equal(getContentDatabaseStatus(fixture.database).migrationsApplied, 49);
     const columns = fixture.database.client
       .prepare("pragma table_info(ai_model_configs)")
       .all() as Array<{ name: string }>;

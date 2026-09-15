@@ -20,3 +20,4 @@ export * from "./evals";
 export * from "./telemetry";
 export * from "./admin-read-service";
 export * from "./provider-connection";
+export * from "./admin-direct-service";

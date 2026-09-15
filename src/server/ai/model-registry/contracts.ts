@@ -1,4 +1,10 @@
 import type { AdminActor } from "../../admin-auth/contracts";
+import {
+  AI_MODEL_INPUT_MODALITIES,
+  AI_MODEL_OUTPUT_MODALITIES,
+  type AIModelInputModality,
+  type AIModelOutputModality,
+} from "@/lib/ai-model-modalities";
 
 export const AI_MODEL_CONFIG_RESOURCE_TYPE = "ai.model-config" as const;
 
@@ -9,6 +15,9 @@ export const AI_MODEL_CAPABILITIES = [
 ] as const;
 
 export type AIModelCapability = (typeof AI_MODEL_CAPABILITIES)[number];
+
+export { AI_MODEL_INPUT_MODALITIES, AI_MODEL_OUTPUT_MODALITIES };
+export type { AIModelInputModality, AIModelOutputModality };
 
 /** Safe, governed model-routing fields. Credentials are owned by the Provider. */
 export interface AIModelConfigContent {
@@ -25,9 +34,15 @@ export interface AIModelConfigContent {
   supportsStreaming: boolean;
   supportsReasoning: boolean;
   supportsStructuredOutput: boolean;
+  /** Optional for historical Change Set snapshots; storage defaults to TEXT. */
+  inputModalities?: AIModelInputModality[];
+  /** Optional for historical Change Set snapshots; output is TEXT-only in M11. */
+  outputModalities?: AIModelOutputModality[];
 }
 
 export interface AIModelConfig extends AIModelConfigContent {
+  inputModalities: AIModelInputModality[];
+  outputModalities: AIModelOutputModality[];
   id: string;
   createdAt: number;
   updatedAt: number;

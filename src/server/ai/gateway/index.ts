@@ -55,6 +55,23 @@ export { ProviderAdapterRegistry } from "./adapter-registry";
 export { AIProviderGateway } from "./gateway";
 export { AI_OPENAI_COMPATIBLE_GENERATION_ADAPTER_KEY, OpenAICompatibleGenerationAdapter, NativeOpenAICompatibleHttpTransport, createOpenAICompatibleGenerationAdapter, type OpenAICompatibleGenerationAdapterDependencies } from "./openai-compatible-generation";
 export {
+  AI_ANTHROPIC_MESSAGES_GENERATION_ADAPTER_KEY,
+  AI_GENERATION_ADAPTER_KEYS,
+  AI_OPENAI_RESPONSES_GENERATION_ADAPTER_KEY,
+  adapterKeyForProviderApiFormat,
+  createProviderOutboundPolicy,
+} from "./protocol";
+export {
+  AnthropicMessagesGenerationAdapter,
+  createAnthropicMessagesGenerationAdapter,
+  type AnthropicMessagesGenerationAdapterDependencies,
+} from "./anthropic-messages-generation";
+export {
+  OpenAIResponsesGenerationAdapter,
+  createOpenAIResponsesGenerationAdapter,
+  type OpenAIResponsesGenerationAdapterDependencies,
+} from "./openai-responses-generation";
+export {
   AI_PROVIDER_HTTP_LIMITS,
   REDACTED_PROVIDER_HEADER_NAMES,
   StrictOutboundTargetPolicy,

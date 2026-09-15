@@ -14,6 +14,10 @@ import { isQuestionImportError } from "@/server/question-import";
 import { isQuestionEditorError } from "@/server/question-editor";
 import { isQuestionDomainError } from "@/server/questions";
 import { isQuestionSearchError } from "@/server/question-search";
+import { isAIAdminDirectError } from "@/server/ai/admin-direct-service";
+import { isAIProviderConfigError } from "@/server/ai/configuration";
+import { isAIModelConfigError } from "@/server/ai/model-registry";
+import { isAISecretStoreError } from "@/server/ai/secrets";
 
 const LOCAL_JSON_MAX_BYTES = 64 * 1024;
 
@@ -67,6 +71,46 @@ export function localJson(
 }
 
 export function localApiError(error: unknown): NextResponse {
+  if (isAIAdminDirectError(error)) {
+    const status =
+      error.code.endsWith("_NOT_FOUND")
+        ? 404
+        : error.code.endsWith("_CONFLICT") ||
+            error.code.endsWith("_BLOCKED") ||
+            error.code === "AI_ADMIN_PROVIDER_NOT_READY"
+          ? 409
+          : error.code === "AI_ADMIN_MODEL_TEST_FAILED"
+            ? 422
+            : 400;
+    return localJson(
+      {
+        ok: false,
+        code: error.code,
+        message: error.message,
+        ...(error.details ? { details: error.details } : {}),
+      },
+      { status },
+    );
+  }
+
+  if (isAIProviderConfigError(error) || isAIModelConfigError(error)) {
+    const conflict = error.code.endsWith("_CONFLICT");
+    return localJson(
+      { ok: false, code: error.code },
+      { status: conflict ? 409 : 400 },
+    );
+  }
+
+  if (isAISecretStoreError(error)) {
+    const status =
+      error.code === "AI_SECRET_INPUT_INVALID" || error.code === "AI_SECRET_REF_INVALID"
+        ? 400
+        : error.code === "AI_SECRET_CONFLICT" || error.code === "AI_SECRET_VERSION_CHANGED"
+          ? 409
+          : 503;
+    return localJson({ ok: false, code: error.code }, { status });
+  }
+
   if (isAdminAuthError(error)) {
     return localJson(
       { ok: false, code: error.code },

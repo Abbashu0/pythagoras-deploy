@@ -337,6 +337,13 @@
       "when": 1789278243339,
       "tag": "0047_lyrical_morbius",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "6",
+      "when": 1789436816008,
+      "tag": "0048_spotty_swordsman",
+      "breakpoints": true
     }
   ]
 }
