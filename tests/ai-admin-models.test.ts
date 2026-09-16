@@ -12,6 +12,8 @@ import {
 import {
   EphemeralModelChatError,
   EphemeralModelChatService,
+  MAX_PROVIDER_ROUNDS_PER_TURN,
+  MAX_PYTHON_CALLS_PER_TURN,
   type EphemeralModelChatStreamEvent,
 } from "../src/server/ai/ephemeral-model-chat-service";
 import type {
@@ -49,6 +51,7 @@ class ProtocolTransport implements AIProviderHttpTransport {
   whitespaceOnlyDelta = false;
   reasoningMode: "none" | "openai" | "details" | "responses" | "anthropic" = "none";
   toolMode: "none" | "chat" | "responses" | "anthropic" = "none";
+  toolScenario: "none" | "stateless-retry" | "limit" = "none";
 
   async request(
     _target: ValidatedOutboundTarget,
@@ -57,6 +60,16 @@ class ProtocolTransport implements AIProviderHttpTransport {
     this.targets.push(_target);
     this.requests.push(request);
     const path = request.pathAndQuery;
+    if (this.toolScenario !== "none") {
+      const payload = request.body
+        ? JSON.parse(new TextDecoder().decode(request.body)) as Record<string, unknown>
+        : {};
+      return {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+        body: bytes(toolScenarioStream(path, payload, this.toolScenario)),
+      };
+    }
     if (this.toolMode !== "none") {
       const payload = request.body
         ? JSON.parse(new TextDecoder().decode(request.body)) as Record<string, unknown>
@@ -172,6 +185,33 @@ function toolStream(path: string, continuation: boolean): string {
 
 function sseJson(value: Record<string, unknown>, event?: string): string {
   return `${event ? `event: ${event}\n` : ""}data: ${JSON.stringify(value)}\n\n`;
+}
+
+function toolScenarioStream(
+  path: string,
+  payload: Record<string, unknown>,
+  scenario: "stateless-retry" | "limit",
+): string {
+  if (path !== "chat/completions") {
+    return toolScenarioStream("chat/completions", payload, scenario);
+  }
+  const messages = Array.isArray(payload.messages) ? payload.messages : [];
+  const toolResultCount = messages.filter(
+    (message) => isRecord(message) && message.role === "tool",
+  ).length;
+  if (scenario === "stateless-retry" && toolResultCount >= 2) {
+    return `${sseJson({ id: "scenario-final", choices: [{ delta: { content: "Recovered" }, finish_reason: "stop" }] })}data: [DONE]\n\n`;
+  }
+  const code = scenario === "limit"
+    ? '{"bad":true}'
+    : toolResultCount === 0
+      ? '{"code":"missing_variable"}'
+      : '{"code":"import math\\n2 + 2"}';
+  return [
+    sseJson({ id: "scenario-tool", choices: [{ delta: { tool_calls: [{ index: 0, id: "scenario-call", function: { name: "python", arguments: code } }] } }] }),
+    sseJson({ id: "scenario-tool", choices: [{ delta: {}, finish_reason: "tool_calls" }] }),
+    "data: [DONE]\n\n",
+  ].join("");
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -680,6 +720,63 @@ test("ephemeral Python tool loop uses server-owned automatic tools across suppor
     const offPayload = JSON.parse(new TextDecoder().decode(f.transport.requests.at(-1)!.body)) as Record<string, unknown>;
     assert.equal("tools" in offPayload, false);
     assert.equal("tool_choice" in offPayload, false);
+  } finally {
+    f.close();
+  }
+});
+
+test("stateless Python errors are recoverable through a self-contained retry", async () => {
+  const f = fixture();
+  try {
+    const provider = await addProvider(f, "Stateless Retry");
+    const model = await addModel(f, provider.id, "tool/stateless-retry");
+    f.transport.toolScenario = "stateless-retry";
+    const chat = EphemeralModelChatService.forDatabase(f.database, {
+      secrets: f.secrets,
+      outboundPolicy,
+      transport: f.transport,
+    });
+    const events: EphemeralModelChatStreamEvent[] = [];
+    for await (const event of chat.stream({
+      modelId: model.id,
+      messages: [{ role: "user", content: "Verify this calculation with Python." }],
+      pythonEnabled: true,
+    })) events.push(event);
+    assert.equal(events.filter((event) => event.type === "tool_result" && event.status === "error").length, 1);
+    assert.equal(events.some((event) => event.type === "tool_result" && event.status === "ok" && event.result === "4"), true);
+    assert.equal(events.some((event) => event.type === "text_delta" && event.text === "Recovered"), true);
+    assert.equal(events.at(-1)?.type, "completed");
+  } finally {
+    f.close();
+  }
+});
+
+test("Python and Provider loop limits remain bounded at 8 calls and 10 rounds", async () => {
+  assert.equal(MAX_PYTHON_CALLS_PER_TURN, 8);
+  assert.equal(MAX_PROVIDER_ROUNDS_PER_TURN, 10);
+  const f = fixture();
+  try {
+    const provider = await addProvider(f, "Tool Limit");
+    const model = await addModel(f, provider.id, "tool/limit");
+    f.transport.toolScenario = "limit";
+    const chat = EphemeralModelChatService.forDatabase(f.database, {
+      secrets: f.secrets,
+      outboundPolicy,
+      transport: f.transport,
+    });
+    const events: EphemeralModelChatStreamEvent[] = [];
+    await assert.rejects(
+      async () => {
+        for await (const event of chat.stream({
+          modelId: model.id,
+          messages: [{ role: "user", content: "Keep verifying." }],
+          pythonEnabled: true,
+        })) events.push(event);
+      },
+      (error: unknown) => error instanceof EphemeralModelChatError && error.detailCode === "TOOL_LIMIT",
+    );
+    assert.equal(events.filter((event) => event.type === "tool_result").length, 8);
+    assert.equal(f.transport.requests.length, 9);
   } finally {
     f.close();
   }

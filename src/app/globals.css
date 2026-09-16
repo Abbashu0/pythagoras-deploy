@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "katex/dist/katex.min.css";
 @import "../components/admin/rich-content/rich-document.css";
 
 @custom-variant dark (&:is(.dark *));
@@ -174,6 +175,38 @@
 }
 .admin-save-bar {
   animation: admin-save-bar-enter 200ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Ephemeral Model Chat math output. KaTeX owns the glyph layout; the wrapper
+   only provides safe direction and overflow behavior for a narrow floating chat. */
+.ephemeral-markdown .katex,
+.ephemeral-markdown .katex-display {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+.ephemeral-markdown .katex-display {
+  max-width: 100%;
+  margin: 1rem 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.25rem 0.125rem;
+  text-align: center;
+}
+.ephemeral-markdown .ephemeral-math-fallback {
+  color: var(--text-secondary);
+  direction: ltr;
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  white-space: pre-wrap;
+}
+.ephemeral-markdown > .ephemeral-math-fallback {
+  display: block;
+  max-width: 100%;
+  margin: 1rem 0;
+  overflow-x: auto;
+  padding: 0.25rem 0.125rem;
+  text-align: start;
+  white-space: pre;
 }
 
 /* Banner card used as a FLIP reorder item —

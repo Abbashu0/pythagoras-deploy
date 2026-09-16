@@ -3,11 +3,14 @@ import test from "node:test";
 
 import {
   applyEphemeralChatEvent,
+  groupEphemeralChatPresentation,
   isNearChatBottom,
   reasoningDurationSeconds,
   technicalUsageParts,
   truncateAfterUserTurn,
+  toggleWorkExpanded,
   type EphemeralChatTurn,
+  workDurationSeconds,
 } from "../src/components/admin/ai/ephemeral-chat-state";
 
 function user(id: string, content: string): EphemeralChatTurn {
@@ -19,6 +22,8 @@ function user(id: string, content: string): EphemeralChatTurn {
     status: "completed",
     reasoningStartedAt: null,
     reasoningCompletedAt: null,
+    workStartedAt: null,
+    workCompletedAt: null,
     usage: null,
     latencyMs: null,
     finishReason: null,
@@ -35,6 +40,8 @@ function assistant(id: string): EphemeralChatTurn {
     status: "pending",
     reasoningStartedAt: null,
     reasoningCompletedAt: null,
+    workStartedAt: null,
+    workCompletedAt: null,
     usage: null,
     latencyMs: null,
     finishReason: null,
@@ -104,4 +111,60 @@ test("ephemeral chat keeps Thought, Python, and answer segments in provider orde
     assert.equal(tool.code, "2 + 3");
     assert.equal(tool.result, "5");
   }
+});
+
+test("one Assistant turn groups all work phases outside its final answer", () => {
+  let turn = assistant("assistant-work");
+  turn = applyEphemeralChatEvent(turn, { type: "reasoning_delta", text: "Plan" }, 1_000);
+  turn = applyEphemeralChatEvent(turn, { type: "tool_call", callId: "call-1", toolName: "python", argumentsDelta: '{"code":"2+2"}' }, 2_000);
+  turn = applyEphemeralChatEvent(turn, { type: "tool_started", callId: "call-1", toolName: "python", code: "2+2" }, 2_100);
+  turn = applyEphemeralChatEvent(turn, { type: "tool_result", callId: "call-1", toolName: "python", status: "ok", result: "4", durationMs: 10 }, 2_200);
+  turn = applyEphemeralChatEvent(turn, { type: "reasoning_delta", text: "Check" }, 3_000);
+  turn = applyEphemeralChatEvent(turn, { type: "text_delta", text: "Final answer" }, 4_000);
+  const presentation = groupEphemeralChatPresentation(turn);
+  assert.deepEqual(presentation.workSegments.map((segment) => segment.type), ["reasoning", "tool", "reasoning"]);
+  assert.equal(presentation.answerText, "Final answer");
+  assert.equal(workDurationSeconds(turn), 3);
+});
+
+test("collapsing Work never hides a text_delta final answer", () => {
+  let turn = assistant("assistant-greeting");
+  turn = applyEphemeralChatEvent(turn, { type: "reasoning_delta", text: "thinking" }, 1_000);
+  turn = applyEphemeralChatEvent(turn, { type: "text_delta", text: "Hello" }, 2_000);
+
+  assert.equal(turn.reasoningText, "thinking");
+  assert.equal(turn.content, "Hello");
+  assert.deepEqual(turn.segments.map((segment) => segment.type), ["reasoning", "text"]);
+
+  const presentation = groupEphemeralChatPresentation(turn);
+  assert.deepEqual(presentation.workSegments.map((segment) => segment.type), ["reasoning"]);
+  assert.equal(presentation.answerText, "Hello");
+
+  const collapsed = toggleWorkExpanded({ [turn.id]: true }, turn.id);
+  assert.equal(collapsed[turn.id], false);
+  assert.equal(presentation.answerText, "Hello");
+});
+
+test("event kinds remain authoritative when reasoning resumes after answer text", () => {
+  let turn = assistant("assistant-interleaved");
+  turn = applyEphemeralChatEvent(turn, { type: "reasoning_delta", text: "a" }, 1_000);
+  turn = applyEphemeralChatEvent(turn, { type: "text_delta", text: "first" }, 2_000);
+  turn = applyEphemeralChatEvent(turn, { type: "reasoning_delta", text: "b" }, 3_000);
+  turn = applyEphemeralChatEvent(turn, { type: "text_delta", text: "final" }, 4_000);
+
+  const presentation = groupEphemeralChatPresentation(turn);
+  assert.deepEqual(turn.segments.map((segment) => segment.type), ["reasoning", "text", "reasoning", "text"]);
+  assert.deepEqual(presentation.workSegments.map((segment) => segment.type), ["reasoning", "reasoning"]);
+  assert.equal(presentation.answerText, "firstfinal");
+});
+
+test("answer-only turns have no Work section and Work expansion is independent per turn", () => {
+  const answerOnly = assistant("answer-only");
+  const presentation = groupEphemeralChatPresentation({ ...answerOnly, content: "Hello", segments: [{ type: "text", text: "Hello" }] });
+  assert.equal(presentation.workSegments.length, 0);
+  assert.equal(presentation.answerText, "Hello");
+
+  const independent = toggleWorkExpanded({ "turn-a": true, "turn-b": true }, "turn-a");
+  assert.equal(independent["turn-a"], false);
+  assert.equal(independent["turn-b"], true);
 });

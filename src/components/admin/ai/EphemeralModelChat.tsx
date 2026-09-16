@@ -4,6 +4,8 @@ import * as React from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
 import {
   ArrowDown,
   Check,
@@ -32,13 +34,19 @@ import { TextArea } from "@/components/admin-ui/forms/input";
 import { Switch } from "@/components/admin-ui/forms/toggle";
 import { toast } from "@/components/admin-ui/feedback/toaster";
 import {
+  normalizeEphemeralMathDelimiters,
+  rehypeEphemeralMathFallback,
+} from "@/lib/ephemeral-chat-markdown";
+import {
   applyEphemeralChatEvent,
+  groupEphemeralChatPresentation,
   isNearChatBottom,
-  reasoningDurationSeconds,
   technicalUsageParts,
+  toggleWorkExpanded,
   truncateAfterUserTurn,
   type EphemeralChatSegment,
   type EphemeralChatTurn,
+  workDurationSeconds,
 } from "./ephemeral-chat-state";
 
 export interface EphemeralModelChatTarget {
@@ -67,7 +75,7 @@ const CHAT_ERROR_MESSAGES: Record<string, string> = {
   TIMEOUT: "The Provider request timed out.",
   UNAVAILABLE: "The Provider is unavailable.",
   BAD_RESPONSE: "The Provider returned an unsupported response.",
-  TOOL_LIMIT: "Tool execution limit reached.",
+  TOOL_LIMIT: "Python tool execution limit reached.",
   PYTHON_TOOL_UNSUPPORTED: "Python tool calling is not supported by this Model configuration.",
   CANCELLED: "The request was stopped.",
   UNKNOWN: "The temporary Model request failed.",
@@ -98,12 +106,12 @@ const markdownComponents = {
     </blockquote>
   ),
   code: ({ className, children }: { className?: string; children?: React.ReactNode }) => (
-    <code className={cn("rounded-sm bg-inset px-1 py-0.5 font-mono text-[0.9em]", className)}>
+    <code dir="ltr" className={cn("rounded-sm bg-inset px-1 py-0.5 font-mono text-[0.9em]", className)}>
       {children}
     </code>
   ),
   pre: ({ children }: { children?: React.ReactNode }) => (
-    <pre className="mb-3 max-w-full overflow-x-auto rounded-md border border-border-subtle bg-inset p-3 font-mono text-xs leading-[1.7] last:mb-0">
+    <pre dir="ltr" className="mb-3 max-w-full overflow-x-auto rounded-md border border-border-subtle bg-inset p-3 font-mono text-xs leading-[1.7] last:mb-0">
       {children}
     </pre>
   ),
@@ -149,7 +157,7 @@ export function EphemeralModelChat({
   const [sending, setSending] = React.useState(false);
   const [pythonEnabled, setPythonEnabled] = React.useState(true);
   const [showJumpToLatest, setShowJumpToLatest] = React.useState(false);
-  const [expandedThought, setExpandedThought] = React.useState<Record<string, boolean>>({});
+  const [workExpanded, setWorkExpanded] = React.useState<Record<string, boolean>>({});
   const [copiedId, setCopiedId] = React.useState<string | null>(null);
   const panelRef = React.useRef<HTMLDivElement | null>(null);
   const scrollViewportRef = React.useRef<HTMLDivElement | null>(null);
@@ -292,9 +300,6 @@ export function EphemeralModelChat({
   const applyStreamEvent = React.useCallback(
     (assistantId: string, event: EphemeralChatStreamEvent) => {
       const now = Date.now();
-      if (event.type === "reasoning_delta") {
-        setExpandedThought((current) => ({ ...current, [assistantId]: true }));
-      }
       setTurns((current) =>
         current.map((turn) =>
           turn.id === assistantId ? applyEphemeralChatEvent(turn, event, now) : turn,
@@ -318,6 +323,8 @@ export function EphemeralModelChat({
         status: "pending",
         reasoningStartedAt: null,
         reasoningCompletedAt: null,
+        workStartedAt: null,
+        workCompletedAt: null,
         usage: null,
         latencyMs: null,
         finishReason: null,
@@ -419,6 +426,8 @@ export function EphemeralModelChat({
         status: "completed" as const,
         reasoningStartedAt: null,
         reasoningCompletedAt: null,
+        workStartedAt: null,
+        workCompletedAt: null,
         usage: null,
         latencyMs: null,
         finishReason: null,
@@ -548,14 +557,14 @@ export function EphemeralModelChat({
               <p className="mt-3 text-sm font-medium text-fg">Model ready</p>
             </div>
           ) : (
-            <div className="space-y-7" dir="rtl">
+            <div className="space-y-7">
               {turns.map((turn) => (
                 <ChatTurnView
                   key={turn.id}
                   turn={turn}
                   editing={editingUserId === turn.id}
                   editingDraft={editingDraft}
-                  expandedThought={expandedThought[turn.id] ?? true}
+                  workExpanded={workExpanded[turn.id] ?? true}
                   copied={copiedId === turn.id}
                   onCopy={() => void copyText(turn.id, turn.content)}
                   onEdit={() => {
@@ -568,7 +577,7 @@ export function EphemeralModelChat({
                      setEditingUserId(null);
                      setEditingDraft("");
                    }}
-                   onToggleThought={() => setExpandedThought((current) => ({ ...current, [turn.id]: !(current[turn.id] ?? true) }))}
+                   onToggleWork={() => setWorkExpanded((current) => toggleWorkExpanded(current, turn.id))}
                    onCopyTool={(suffix, text) => void copyText(`${turn.id}-${suffix}`, text)}
                  />
               ))}
@@ -647,32 +656,32 @@ function ChatTurnView({
   turn,
   editing,
   editingDraft,
-  expandedThought,
+  workExpanded,
   copied,
   onCopy,
   onEdit,
   onEditingDraftChange,
   onSaveEdit,
   onCancelEdit,
-  onToggleThought,
+  onToggleWork,
   onCopyTool,
 }: {
   turn: EphemeralChatTurn;
   editing: boolean;
   editingDraft: string;
-  expandedThought: boolean;
+  workExpanded: boolean;
   copied: boolean;
   onCopy: () => void;
   onEdit: () => void;
   onEditingDraftChange: (value: string) => void;
   onSaveEdit: () => void;
   onCancelEdit: () => void;
-  onToggleThought: () => void;
+  onToggleWork: () => void;
   onCopyTool: (suffix: string, text: string) => void;
 }) {
   if (turn.role === "user") {
     return (
-      <div className="group/user-turn ms-auto max-w-[78%]">
+      <div dir="auto" className="group/user-turn ms-auto max-w-[78%]">
         {editing ? (
           <div className="space-y-2 rounded-lg border border-accent-border bg-accent-subtle p-2">
             <TextArea
@@ -692,7 +701,7 @@ function ChatTurnView({
         ) : (
           <>
             <div className="rounded-lg bg-accent-subtle px-3.5 py-2.5 text-sm leading-[1.75] text-fg">
-              <p className="whitespace-pre-wrap break-words">{turn.content}</p>
+              <p dir="auto" className="whitespace-pre-wrap break-words">{turn.content}</p>
             </div>
             <div className="mt-1 flex justify-end gap-0.5 opacity-0 transition-opacity group-hover/user-turn:opacity-100 group-focus-within/user-turn:opacity-100">
               <Tooltip content={copied ? "Copied" : "Copy"}>
@@ -712,52 +721,24 @@ function ChatTurnView({
     );
   }
 
-  const duration = reasoningDurationSeconds(turn);
   const usageParts = technicalUsageParts(turn.usage);
-  const segments = turn.segments.length
-    ? turn.segments
-    : turn.content
-      ? [{ type: "text" as const, text: turn.content }]
-      : [];
+  const presentation = groupEphemeralChatPresentation(turn);
 
   return (
-    <article className="group/assistant-turn min-w-0 text-start text-sm text-fg" aria-live={turn.status === "streaming" ? "polite" : undefined}>
-      {segments.map((segment, index) => {
-        if (segment.type === "reasoning") {
-          return (
-            <div key={`reasoning-${index}`} className="mb-4 border-s border-border-strong ps-3">
-              <button
-                type="button"
-                className="flex items-center gap-2 text-xs text-fg-secondary outline-none transition-colors hover:text-fg focus-visible:text-fg"
-                aria-expanded={expandedThought}
-                onClick={onToggleThought}
-              >
-                <BrainCircuit className={cn("size-4", turn.status === "streaming" && "animate-pulse motion-reduce:animate-none")} aria-hidden />
-                <span>{turn.status === "streaming" && !turn.content ? "Thinking…" : duration !== null ? `Worked for ${duration}s` : "Thought"}</span>
-                <ChevronDown className={cn("size-3.5 text-fg-quaternary transition-transform", !expandedThought && "-rotate-90")} aria-hidden />
-              </button>
-              {expandedThought ? (
-                <div className="mt-2 whitespace-pre-wrap break-words text-xs leading-[1.75] text-fg-tertiary">
-                  <div className="mb-1 text-2xs text-fg-quaternary">{duration !== null ? `Thought · ${duration}s` : "Thought"}</div>
-                  {segment.text}
-                </div>
-              ) : null}
-            </div>
-          );
-        }
-        if (segment.type === "tool") {
-          return <PythonToolBlock key={`tool-${segment.callId}`} segment={segment} onCopy={onCopyTool} />;
-        }
-        return (
-          <div key={`text-${index}`} className="max-w-full overflow-hidden text-[0.925rem] leading-[1.8]">
-            <ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml components={markdownComponents} urlTransform={safeMarkdownUrl}>
-              {segment.text}
-            </ReactMarkdown>
-          </div>
-        );
-      })}
+    <article dir="auto" className="group/assistant-turn min-w-0 text-start text-sm text-fg" aria-live={turn.status === "streaming" ? "polite" : undefined}>
+      {presentation.workSegments.length ? (
+        <WorkSection
+          turn={turn}
+          segments={presentation.workSegments}
+          expanded={workExpanded}
+          onToggle={onToggleWork}
+          onCopyTool={onCopyTool}
+        />
+      ) : null}
 
-      {!segments.length && (turn.status === "pending" || turn.status === "streaming") ? (
+      {presentation.answerText ? (
+        <MarkdownContent text={presentation.answerText} />
+      ) : !presentation.workSegments.length && (turn.status === "pending" || turn.status === "streaming") ? (
         <TypingIndicator />
       ) : null}
 
@@ -774,7 +755,7 @@ function ChatTurnView({
       ) : null}
 
       {turn.status === "completed" || turn.status === "error" ? (
-        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-2xs text-fg-quaternary">
+        <div dir="ltr" className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-2xs text-fg-quaternary">
           {usageParts.length ? <span>{usageParts.join(" · ")}</span> : null}
           {turn.latencyMs !== null ? <span>Latency {formatLatency(turn.latencyMs)}</span> : null}
           <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover/assistant-turn:opacity-100 group-focus-within/assistant-turn:opacity-100">
@@ -787,6 +768,75 @@ function ChatTurnView({
         </div>
       ) : null}
     </article>
+  );
+}
+
+function WorkSection({
+  turn,
+  segments,
+  expanded,
+  onToggle,
+  onCopyTool,
+}: {
+  turn: EphemeralChatTurn;
+  segments: Extract<EphemeralChatSegment, { type: "reasoning" | "tool" }>[];
+  expanded: boolean;
+  onToggle: () => void;
+  onCopyTool: (suffix: string, text: string) => void;
+}) {
+  const duration = workDurationSeconds(turn);
+  const label = turn.status === "streaming" && duration === null
+    ? "Working…"
+    : duration === null
+      ? "Work"
+      : `Worked for ${duration}s`;
+  return (
+    <section className="mb-4 border-s border-border-strong ps-3" aria-label="Assistant work">
+      <button
+        type="button"
+        className="flex items-center gap-2 text-xs text-fg-secondary outline-none transition-colors hover:text-fg focus-visible:text-fg"
+        aria-expanded={expanded}
+        onClick={onToggle}
+      >
+        <BrainCircuit className={cn("size-4", turn.status === "streaming" && "animate-pulse motion-reduce:animate-none")} aria-hidden />
+        <span>{label}</span>
+        <ChevronDown className={cn("size-3.5 text-fg-quaternary transition-transform", !expanded && "-rotate-90")} aria-hidden />
+      </button>
+      {expanded ? (
+        <div className="mt-3 space-y-4">
+          {segments.map((segment, index) => segment.type === "reasoning" ? (
+            <div key={`thought-${index}`} dir="auto" className="whitespace-pre-wrap break-words text-xs leading-[1.75] text-fg-tertiary">
+              <div className="mb-1 flex items-center gap-1.5 text-2xs text-fg-quaternary">
+                <BrainCircuit className="size-3.5" aria-hidden />
+                <span>Thought</span>
+              </div>
+              {segment.text}
+            </div>
+          ) : (
+            <PythonToolBlock key={`tool-${segment.callId}`} segment={segment} onCopy={onCopyTool} />
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function MarkdownContent({ text }: { text: string }) {
+  return (
+    <div dir="auto" className="ephemeral-markdown max-w-full overflow-hidden">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[
+          [rehypeKatex, { throwOnError: false, strict: false }],
+          rehypeEphemeralMathFallback,
+        ]}
+        skipHtml
+        components={markdownComponents}
+        urlTransform={safeMarkdownUrl}
+      >
+        {normalizeEphemeralMathDelimiters(text)}
+      </ReactMarkdown>
+    </div>
   );
 }
 

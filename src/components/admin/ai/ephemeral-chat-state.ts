@@ -36,11 +36,18 @@ export interface EphemeralChatTurn extends EphemeralChatMessage {
   status: EphemeralChatTurnStatus;
   reasoningStartedAt: number | null;
   reasoningCompletedAt: number | null;
+  workStartedAt: number | null;
+  workCompletedAt: number | null;
   usage: EphemeralChatUsage | null;
   latencyMs: number | null;
   finishReason: EphemeralChatFinishReason | null;
   segments: EphemeralChatSegment[];
   error?: string;
+}
+
+export interface EphemeralChatPresentation {
+  workSegments: Extract<EphemeralChatSegment, { type: "reasoning" | "tool" }>[];
+  answerText: string;
 }
 
 export function applyEphemeralChatEvent(
@@ -58,6 +65,7 @@ export function applyEphemeralChatEvent(
         reasoningText: turn.reasoningText + event.text,
         segments: appendTextSegment(turn.segments, "reasoning", event.text),
         reasoningStartedAt: turn.reasoningStartedAt ?? now,
+        workStartedAt: turn.workStartedAt ?? now,
       };
     case "text_delta":
       return {
@@ -65,6 +73,10 @@ export function applyEphemeralChatEvent(
         status: "streaming",
         content: turn.content + event.text,
         segments: appendTextSegment(turn.segments, "text", event.text),
+        workCompletedAt:
+          turn.workStartedAt !== null && turn.workCompletedAt === null
+            ? now
+            : turn.workCompletedAt,
         reasoningCompletedAt:
           turn.reasoningStartedAt !== null && turn.reasoningCompletedAt === null
             ? now
@@ -74,6 +86,7 @@ export function applyEphemeralChatEvent(
       return {
         ...turn,
         status: "streaming",
+        workStartedAt: turn.workStartedAt ?? now,
         segments: upsertToolSegment(turn.segments, event.callId, (segment) => {
           const argumentsText = segment.argumentsText + event.argumentsDelta;
           return {
@@ -92,6 +105,7 @@ export function applyEphemeralChatEvent(
       return {
         ...turn,
         status: "streaming",
+        workStartedAt: turn.workStartedAt ?? now,
         segments: upsertToolSegment(turn.segments, event.callId, (segment) => ({
           ...segment,
           toolName: event.toolName,
@@ -103,6 +117,7 @@ export function applyEphemeralChatEvent(
       return {
         ...turn,
         status: "streaming",
+        workStartedAt: turn.workStartedAt ?? now,
         segments: upsertToolSegment(turn.segments, event.callId, (segment) => ({
           ...segment,
           toolName: event.toolName,
@@ -128,9 +143,21 @@ export function applyEphemeralChatEvent(
           turn.reasoningStartedAt !== null && turn.reasoningCompletedAt === null
             ? now
             : turn.reasoningCompletedAt,
+        workCompletedAt:
+          turn.workStartedAt !== null && turn.workCompletedAt === null
+            ? now
+            : turn.workCompletedAt,
       };
     case "error":
-      return { ...turn, status: "error", error: event.errorCode ?? event.code };
+      return {
+        ...turn,
+        status: "error",
+        error: event.errorCode ?? event.code,
+        workCompletedAt:
+          turn.workStartedAt !== null && turn.workCompletedAt === null
+            ? now
+            : turn.workCompletedAt,
+      };
   }
 }
 
@@ -217,6 +244,30 @@ export function reasoningDurationSeconds(turn: EphemeralChatTurn): number | null
     0,
     Math.round((turn.reasoningCompletedAt - turn.reasoningStartedAt) / 1000),
   );
+}
+
+export function workDurationSeconds(turn: EphemeralChatTurn): number | null {
+  if (turn.workStartedAt === null || turn.workCompletedAt === null) return null;
+  return Math.max(0, Math.round((turn.workCompletedAt - turn.workStartedAt) / 1000));
+}
+
+export function groupEphemeralChatPresentation(
+  turn: EphemeralChatTurn,
+): EphemeralChatPresentation {
+  return {
+    workSegments: turn.segments.filter(
+      (segment): segment is Extract<EphemeralChatSegment, { type: "reasoning" | "tool" }> =>
+        segment.type === "reasoning" || segment.type === "tool",
+    ),
+    answerText: turn.content,
+  };
+}
+
+export function toggleWorkExpanded(
+  expanded: Readonly<Record<string, boolean>>,
+  turnId: string,
+): Record<string, boolean> {
+  return { ...expanded, [turnId]: !(expanded[turnId] ?? true) };
 }
 
 export function technicalUsageParts(

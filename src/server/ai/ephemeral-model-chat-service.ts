@@ -91,8 +91,8 @@ const MAX_CHAT_MESSAGE_BYTES = 32 * 1024;
 const MAX_CHAT_TOTAL_BYTES = 48 * 1024;
 const MAX_CHAT_OUTPUT_BYTES = 512 * 1024;
 const CHAT_TIMEOUT_MS = 60_000;
-const MAX_PYTHON_CALLS_PER_TURN = 4;
-const MAX_PROVIDER_ROUNDS_PER_TURN = 6;
+export const MAX_PYTHON_CALLS_PER_TURN = 8;
+export const MAX_PROVIDER_ROUNDS_PER_TURN = 10;
 const MAX_TOOL_ARGUMENT_BYTES = 12 * 1024;
 
 export const EPHEMERAL_PYTHON_TOOL_NAME = "python" as const;
@@ -101,7 +101,7 @@ export const EPHEMERAL_PYTHON_TOOL_DEFINITION = Object.freeze({
   function: {
     name: EPHEMERAL_PYTHON_TOOL_NAME,
     description:
-      "Execute Python for exact or numerical computation, symbolic mathematics, verification, statistics, and data manipulation. Use it when computation would improve accuracy. Do not use it for ordinary conversation.",
+      "Execute isolated Python for exact or numerical computation, symbolic mathematics, verification, statistics, and data manipulation. Each execution is stateless: previous imports, variables, and results are not preserved. Include all imports and recreate all required data in every call. Use Python only when computation improves accuracy.",
     parameters: {
       type: "object",
       properties: {
@@ -387,9 +387,19 @@ export class EphemeralModelChatService {
             toolName: call.name,
             code,
           };
-          const result = parsed.code === null
-            ? invalidPythonArgumentsResult(parsed.error ?? "The Python tool arguments were invalid.")
-            : await executePythonInIsolatedWorker(parsed.code, { signal });
+          let result: PythonExecutionResult;
+          try {
+            result = parsed.code === null
+              ? invalidPythonArgumentsResult(parsed.error ?? "The Python tool arguments were invalid.")
+              : await executePythonInIsolatedWorker(parsed.code, { signal });
+          } catch (error) {
+            result = {
+              status: "error",
+              errorType: "PythonRuntimeError",
+              message: "Python execution failed.",
+              durationMs: 0,
+            };
+          }
           yield pythonResultEvent(call, result);
           history.push({
             role: "tool",

@@ -1,4 +1,4 @@
-import { parentPort, workerData } from "node:worker_threads";
+import { parentPort } from "node:worker_threads";
 import { loadPyodide } from "pyodide";
 
 const PYTHON_RUNNER = String.raw`
@@ -96,18 +96,36 @@ async function main() {
   try {
     const pyodide = await loadPyodide({ stdout: () => {}, stderr: () => {} });
     await pyodide.loadPackage(["numpy", "sympy"]);
-    const source = String(workerData?.code ?? "");
-    if (Buffer.byteLength(source, "utf8") > 12 * 1024) {
-      throw new Error("Python code exceeds the 12 KB limit.");
-    }
-    pyodide.globals.set("_source_code", source);
-    const result = await pyodide.runPythonAsync(`${PYTHON_RUNNER}\nexecute(_source_code)`);
-    parentPort?.postMessage(result?.toJs ? result.toJs({ dict_converter: Object.fromEntries }) : result);
-    result?.destroy?.();
+    parentPort?.postMessage({ type: "ready" });
+    parentPort?.once("message", async (message) => {
+      if (message?.type !== "execute") return;
+      try {
+        const source = String(message.code ?? "");
+        if (Buffer.byteLength(source, "utf8") > 12 * 1024) {
+          throw new Error("Python code exceeds the 12 KB limit.");
+        }
+        pyodide.globals.set("_source_code", source);
+        const result = await pyodide.runPythonAsync(`${PYTHON_RUNNER}\nexecute(_source_code)`);
+        parentPort?.postMessage({
+          type: "result",
+          result: result?.toJs ? result.toJs({ dict_converter: Object.fromEntries }) : result,
+        });
+        result?.destroy?.();
+      } catch (error) {
+        parentPort?.postMessage({
+          type: "result",
+          result: {
+            status: "error",
+            errorType: error?.name || "PythonError",
+            message: safePythonMessage(error),
+          },
+        });
+      }
+    });
   } catch (error) {
     parentPort?.postMessage({
-      status: "error",
-      errorType: error?.name || "PythonError",
+      type: "bootstrap_error",
+      errorType: error?.name || "PythonRuntimeError",
       message: safePythonMessage(error),
     });
   }
