@@ -45,17 +45,36 @@ export interface NormalizedProviderUsage {
   cacheMissInputTokens: number | null;
 }
 
-export type GenerationMessageRole = "system" | "user" | "assistant";
+export type GenerationMessageRole = "system" | "user" | "assistant" | "tool";
 
 /** Provider-neutral structural limits shared by planning and Gateway validation. */
 export const AI_GATEWAY_MAX_GENERATION_MESSAGES = 128;
 export const AI_GATEWAY_MAX_GENERATION_MESSAGE_BYTES = 256 * 1_024;
 export const AI_GATEWAY_MAX_GENERATION_INSTRUCTIONS_BYTES = 256 * 1_024;
 export const AI_GATEWAY_MAX_MEMORY_COMMAND_BYTES = 16 * 1_024;
+export const AI_GATEWAY_MAX_GENERATION_TOOLS = 8;
+export const AI_GATEWAY_MAX_GENERATION_TOOL_CALL_BYTES = 128 * 1_024;
+
+export interface GenerationToolDefinition {
+  type: "function";
+  function: {
+    name: string;
+    description?: string;
+    parameters: Readonly<Record<string, unknown>>;
+  };
+}
+
+export interface GenerationToolCall {
+  id: string;
+  name: string;
+  arguments: string;
+}
 
 export interface GenerationMessage {
   role: GenerationMessageRole;
   content: string;
+  toolCalls?: readonly GenerationToolCall[];
+  toolCallId?: string;
 }
 
 export interface GenerationProviderRequest {
@@ -67,6 +86,8 @@ export interface GenerationProviderRequest {
   maxOutputTokens?: number;
   reasoningEffort?: AIReasoningEffort;
   temperature?: number;
+  tools?: readonly GenerationToolDefinition[];
+  toolChoice?: "AUTO";
   stream: boolean;
 }
 
@@ -79,6 +100,8 @@ export interface GenerationGatewayRequest {
   maxOutputTokens?: number;
   reasoningEffort?: AIReasoningEffort;
   temperature?: number;
+  tools?: readonly GenerationToolDefinition[];
+  toolChoice?: "AUTO";
   stream: boolean;
 }
 
@@ -86,6 +109,7 @@ export const GENERATION_FINISH_REASONS = [
   "STOP",
   "LENGTH",
   "CONTENT_FILTER",
+  "TOOL_USE",
   "OTHER",
 ] as const;
 
@@ -98,8 +122,19 @@ export type ProviderGenerationStreamEvent =
       providerRequestId?: string;
     }
   | {
+      type: "REASONING_DELTA";
+      text: string;
+    }
+  | {
       type: "TEXT_DELTA";
       text: string;
+    }
+  | {
+      type: "TOOL_CALL_DELTA";
+      callId: string;
+      index: number;
+      name?: string;
+      argumentsDelta: string;
     }
   | {
       type: "MEMORY_COMMAND";
@@ -122,8 +157,19 @@ export type GatewayGenerationStreamEvent =
       type: "STARTED";
     }
   | {
+      type: "REASONING_DELTA";
+      text: string;
+    }
+  | {
       type: "TEXT_DELTA";
       text: string;
+    }
+  | {
+      type: "TOOL_CALL_DELTA";
+      callId: string;
+      index: number;
+      name?: string;
+      argumentsDelta: string;
     }
   | {
       type: "MEMORY_COMMAND";

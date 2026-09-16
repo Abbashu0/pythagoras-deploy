@@ -194,13 +194,16 @@ export function appendText(text: string, outputBytes: number): number {
 
 export function mapFinishReason(
   value: unknown,
-): "STOP" | "LENGTH" | "CONTENT_FILTER" | "OTHER" {
+): "STOP" | "LENGTH" | "CONTENT_FILTER" | "TOOL_USE" | "OTHER" {
   if (value === "stop" || value === "end_turn" || value === "stop_sequence") {
     return "STOP";
   }
   if (value === "length" || value === "max_tokens") return "LENGTH";
   if (value === "content_filter" || value === "refusal") {
     return "CONTENT_FILTER";
+  }
+  if (value === "tool_calls" || value === "tool_use" || value === "function_call") {
+    return "TOOL_USE";
   }
   return "OTHER";
 }

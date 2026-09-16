@@ -58,11 +58,23 @@ export class AnthropicMessagesGenerationAdapter {
       max_tokens: request.maxOutputTokens ?? 16,
       messages: request.messages
         .filter((message) => message.role !== "system")
-        .map((message) => ({ role: message.role, content: message.content })),
+        .flatMap(serializeAnthropicMessage),
       ...(request.instructions ? { system: request.instructions } : {}),
       ...(request.temperature === undefined
         ? {}
         : { temperature: request.temperature }),
+      ...(request.tools === undefined
+        ? {}
+        : {
+            tools: request.tools.map((tool) => ({
+              name: tool.function.name,
+              ...(tool.function.description === undefined
+                ? {}
+                : { description: tool.function.description }),
+              input_schema: tool.function.parameters,
+            })),
+            tool_choice: { type: "auto" },
+          }),
       stream: true,
     });
     assertGenerationRequestSize(payload);
@@ -95,9 +107,10 @@ export class AnthropicMessagesGenerationAdapter {
     let started = false;
     let completed = false;
     let providerRequestId: string | undefined;
-    let finishReason: "STOP" | "LENGTH" | "CONTENT_FILTER" | "OTHER" = "OTHER";
+    let finishReason: "STOP" | "LENGTH" | "CONTENT_FILTER" | "TOOL_USE" | "OTHER" = "OTHER";
     let latestUsage = emptyUsage();
     let outputBytes = 0;
+    const toolBlocks = new Map<number, { callId: string; name: string; arguments: string }>();
 
     for await (const frame of parseGenerationSse(response.body, context.signal)) {
       if (frame.data === "[DONE]") {
@@ -121,7 +134,51 @@ export class AnthropicMessagesGenerationAdapter {
           yield { type: "USAGE", usage: latestUsage };
         }
       }
+      if (value.type === "content_block_start" && isRecord(value.content_block) && value.content_block.type === "tool_use") {
+        const index = typeof value.index === "number" && Number.isSafeInteger(value.index) && value.index >= 0 ? value.index : toolBlocks.size;
+        const callId = typeof value.content_block.id === "string" && value.content_block.id.length > 0
+          ? value.content_block.id
+          : `tool-call-${index}`;
+        const name = typeof value.content_block.name === "string" ? value.content_block.name : "python";
+        const input = isRecord(value.content_block.input) && Object.keys(value.content_block.input).length > 0
+          ? JSON.stringify(value.content_block.input)
+          : "";
+        toolBlocks.set(index, { callId, name, arguments: input });
+        yield {
+          type: "TOOL_CALL_DELTA",
+          callId,
+          index,
+          name,
+          argumentsDelta: input,
+        };
+      }
       if (
+        value.type === "content_block_delta" &&
+        isRecord(value.delta) &&
+        value.delta.type === "thinking_delta" &&
+        typeof value.delta.thinking === "string"
+      ) {
+        outputBytes = appendText(value.delta.thinking, outputBytes);
+        yield { type: "REASONING_DELTA", text: value.delta.thinking };
+      } else if (
+        value.type === "content_block_delta" &&
+        isRecord(value.delta) &&
+        value.delta.type === "input_json_delta" &&
+        typeof value.delta.partial_json === "string"
+      ) {
+        const index = typeof value.index === "number" && Number.isSafeInteger(value.index) && value.index >= 0 ? value.index : 0;
+        const tool = toolBlocks.get(index);
+        if (tool) {
+          tool.arguments += value.delta.partial_json;
+          yield {
+            type: "TOOL_CALL_DELTA",
+            callId: tool.callId,
+            index,
+            name: tool.name,
+            argumentsDelta: value.delta.partial_json,
+          };
+        }
+      } else if (
         value.type === "content_block_delta" &&
         isRecord(value.delta) &&
         value.delta.type === "text_delta" &&
@@ -165,4 +222,34 @@ export function createAnthropicMessagesGenerationAdapter(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function serializeAnthropicMessage(
+  message: GenerationProviderRequest["messages"][number],
+): Record<string, unknown>[] {
+  if (message.role === "tool") {
+    return [{
+      role: "user",
+      content: [{
+        type: "tool_result",
+        tool_use_id: message.toolCallId,
+        content: message.content,
+      }],
+    }];
+  }
+  if (message.role === "assistant" && message.toolCalls?.length) {
+    const content: Record<string, unknown>[] = [];
+    if (message.content) content.push({ type: "text", text: message.content });
+    for (const toolCall of message.toolCalls) {
+      let input: unknown = {};
+      try {
+        input = JSON.parse(toolCall.arguments);
+      } catch {
+        input = {};
+      }
+      content.push({ type: "tool_use", id: toolCall.id, name: toolCall.name, input });
+    }
+    return [{ role: "assistant", content }];
+  }
+  return [{ role: message.role, content: message.content }];
 }

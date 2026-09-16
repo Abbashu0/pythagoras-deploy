@@ -1,17 +1,13 @@
 import { v7 as uuidv7 } from "uuid";
 
-import {
-  describeAIReasoningControl,
-  isAIReasoningEffort,
-  type AIReasoningControl,
-  type AIReasoningEffort,
-} from "../../lib/ai-reasoning";
 import type {
-  AIProviderConfig,
-} from "./configuration";
-import {
-  SQLiteAIProviderConfigRepository,
-} from "./configuration";
+  EphemeralChatMessage,
+  EphemeralChatFinishReason,
+  EphemeralChatStreamEvent,
+  EphemeralChatUsage,
+} from "../../lib/ephemeral-chat-contract";
+import type { AIProviderConfig } from "./configuration";
+import { SQLiteAIProviderConfigRepository } from "./configuration";
 import type { AIModelConfig } from "./model-registry";
 import { SQLiteAIModelConfigRepository } from "./model-registry";
 import {
@@ -25,18 +21,24 @@ import {
   type AIProviderErrorCode,
   type AIProviderHttpTransport,
   type NormalizedProviderUsage,
+  type GenerationFinishReason,
+  type GenerationMessage,
+  type GenerationToolCall,
   type OutboundTargetPolicy,
 } from "./gateway";
 import type { ContentDatabase } from "../content/database";
 import { createLocalAISecretStore } from "./secrets";
 import type { AISecretStoreAdapter } from "./secrets";
+import {
+  executePythonInIsolatedWorker,
+  type PythonExecutionResult,
+} from "./ephemeral-python/executor";
 
 export const EPHEMERAL_MODEL_CHAT_ERROR_CODES = [
   "AI_EPHEMERAL_CHAT_INVALID",
   "AI_EPHEMERAL_MODEL_NOT_FOUND",
   "AI_EPHEMERAL_MODEL_UNAVAILABLE",
   "AI_EPHEMERAL_PROVIDER_NOT_READY",
-  "AI_EPHEMERAL_REASONING_UNSUPPORTED",
   "AI_EPHEMERAL_CHAT_FAILED",
 ] as const;
 
@@ -47,6 +49,7 @@ export class EphemeralModelChatError extends Error {
   constructor(
     readonly code: EphemeralModelChatErrorCode,
     readonly providerErrorCode?: AIProviderErrorCode,
+    readonly detailCode?: string,
   ) {
     super("The temporary Model chat could not be completed.");
     this.name = "EphemeralModelChatError";
@@ -59,31 +62,21 @@ export function isEphemeralModelChatError(
   return value instanceof EphemeralModelChatError;
 }
 
-export interface EphemeralModelChatMessage {
-  role: "user" | "assistant";
-  content: string;
-}
+export type EphemeralModelChatMessage = EphemeralChatMessage;
+export type EphemeralModelChatStreamEvent = EphemeralChatStreamEvent;
 
 export interface EphemeralModelChatInput {
   modelId: string;
   messages: unknown;
-  reasoningEffort?: unknown;
-}
-
-export interface EphemeralModelChatUsage {
-  inputTokens: number | null;
-  outputTokens: number | null;
-  totalTokens: number | null;
-  reasoningTokens: number | null;
-  cachedInputTokens: number | null;
-  cacheMissInputTokens: number | null;
+  pythonEnabled?: unknown;
 }
 
 export interface EphemeralModelChatResult {
   text: string;
-  usage: EphemeralModelChatUsage;
+  reasoningText: string;
+  usage: EphemeralChatUsage;
   latencyMs: number | null;
-  reasoningControl: AIReasoningControl;
+  finishReason: EphemeralChatFinishReason;
 }
 
 export interface EphemeralModelChatServiceOptions {
@@ -98,13 +91,37 @@ const MAX_CHAT_MESSAGE_BYTES = 32 * 1024;
 const MAX_CHAT_TOTAL_BYTES = 48 * 1024;
 const MAX_CHAT_OUTPUT_BYTES = 512 * 1024;
 const CHAT_TIMEOUT_MS = 60_000;
+const MAX_PYTHON_CALLS_PER_TURN = 4;
+const MAX_PROVIDER_ROUNDS_PER_TURN = 6;
+const MAX_TOOL_ARGUMENT_BYTES = 12 * 1024;
 
-/**
- * The intentionally small, side-effect-free execution boundary for the
- * Admin's temporary raw-Model chat. It resolves one exact Model and invokes
- * the normal protocol Gateway without circuit, accounting, telemetry,
- * Conversation, Memory, Context, fallback, or retry dependencies.
- */
+export const EPHEMERAL_PYTHON_TOOL_NAME = "python" as const;
+export const EPHEMERAL_PYTHON_TOOL_DEFINITION = Object.freeze({
+  type: "function" as const,
+  function: {
+    name: EPHEMERAL_PYTHON_TOOL_NAME,
+    description:
+      "Execute Python for exact or numerical computation, symbolic mathematics, verification, statistics, and data manipulation. Use it when computation would improve accuracy. Do not use it for ordinary conversation.",
+    parameters: {
+      type: "object",
+      properties: {
+        code: {
+          type: "string",
+          description: "Python code to execute.",
+        },
+      },
+      required: ["code"],
+      additionalProperties: false,
+    },
+  },
+});
+
+interface PreparedChat {
+  model: AIModelConfig;
+  provider: AIProviderConfig;
+}
+
+/** Side-effect-free raw-Model execution for the Admin diagnostic chat. */
 export class EphemeralModelChatService {
   private readonly providers: SQLiteAIProviderConfigRepository;
   private readonly models: SQLiteAIModelConfigRepository;
@@ -132,29 +149,83 @@ export class EphemeralModelChatService {
     return new EphemeralModelChatService(database, options);
   }
 
+  /** Performs all local validation synchronously before response headers exist. */
+  stream(
+    input: EphemeralModelChatInput,
+    options: { signal?: AbortSignal } = {},
+  ): AsyncGenerator<EphemeralModelChatStreamEvent> {
+    const prepared = this.prepare(input);
+    const pythonEnabled = validatePythonEnabled(input.pythonEnabled);
+    return this.runStream(
+      prepared,
+      validateMessages(input.messages),
+      pythonEnabled,
+      options.signal,
+    );
+  }
+
+  /** Consumes the same stream for focused server-side tests. */
   async chat(
     input: EphemeralModelChatInput,
     options: { signal?: AbortSignal } = {},
   ): Promise<EphemeralModelChatResult> {
-    const model = this.models.getById(input.modelId);
-    if (!model) {
-      throw new EphemeralModelChatError("AI_EPHEMERAL_MODEL_NOT_FOUND");
+    let text = "";
+    let reasoningText = "";
+    let usage: EphemeralChatUsage | null = null;
+    let latencyMs: number | null = null;
+    let finishReason: EphemeralChatFinishReason = "UNKNOWN";
+    for await (const event of this.stream(input, options)) {
+      if (event.type === "text_delta") text += event.text;
+      else if (event.type === "reasoning_delta") reasoningText += event.text;
+      else if (event.type === "usage" || event.type === "completed") {
+        usage = event.usage;
+        if (event.type === "completed") {
+          latencyMs = event.latencyMs;
+          finishReason = event.finishReason;
+        }
+      }
     }
+    return {
+      text,
+      reasoningText,
+      usage: usage ?? emptyUsageDto(),
+      latencyMs,
+      finishReason,
+    };
+  }
+
+  private prepare(input: EphemeralModelChatInput): PreparedChat {
+    const model = this.models.getById(input.modelId);
+    if (!model) throw new EphemeralModelChatError("AI_EPHEMERAL_MODEL_NOT_FOUND");
     const provider = this.providers.getById(model.providerConfigId);
-    if (!provider) {
+    if (!provider) throw new EphemeralModelChatError("AI_EPHEMERAL_MODEL_UNAVAILABLE");
+    if (model.capability !== "GENERATION" || !model.enabled || !model.supportsStreaming) {
       throw new EphemeralModelChatError("AI_EPHEMERAL_MODEL_UNAVAILABLE");
     }
-    this.assertReady(model, provider);
+    if (
+      model.maxOutputTokens === null ||
+      !Number.isSafeInteger(model.maxOutputTokens) ||
+      model.maxOutputTokens < 1 ||
+      (model.contextWindowTokens !== null && model.maxOutputTokens > model.contextWindowTokens)
+    ) {
+      throw new EphemeralModelChatError("AI_EPHEMERAL_MODEL_UNAVAILABLE");
+    }
+    if (!provider.enabled || !provider.credentialRef) {
+      throw new EphemeralModelChatError("AI_EPHEMERAL_PROVIDER_NOT_READY");
+    }
+    const metadata = this.secrets.getMetadata(provider.credentialRef);
+    if (!metadata || metadata.status !== "ACTIVE") {
+      throw new EphemeralModelChatError("AI_EPHEMERAL_PROVIDER_NOT_READY");
+    }
+    return { model, provider };
+  }
 
-    const messages = validateMessages(input.messages);
-    const reasoningEffort = validateReasoningEffort(input.reasoningEffort);
-    const reasoningControl = describeAIReasoningControl({
-      supportsReasoning: model.supportsReasoning,
-      apiFormat: provider.apiFormat,
-    });
-    assertReasoningAllowed(reasoningControl, reasoningEffort);
-
-    const startedAt = this.clock();
+  private async *runStream(
+    prepared: PreparedChat,
+    messages: readonly EphemeralModelChatMessage[],
+    pythonEnabled: boolean,
+    signal?: AbortSignal,
+  ): AsyncGenerator<EphemeralModelChatStreamEvent> {
     const gateway = new AIProviderGateway(
       {
         providerConfigs: this.providers,
@@ -181,95 +252,250 @@ export class EphemeralModelChatService {
         clock: this.clock,
       },
     );
-    const stream = gateway.generate(
-      { capability: "GENERATION", attempts: [model.id] },
-      {
-        requestId: uuidv7(),
-        messages,
-        maxOutputTokens: Math.min(model.maxOutputTokens ?? 4096, 4096),
-        ...(reasoningEffort === "AUTO"
-          ? {}
-          : { reasoningEffort }),
-        stream: true,
-      },
-      {
-        signal: options.signal,
-        timeoutMs: CHAT_TIMEOUT_MS,
-        expectedIdentity: {
-          modelConfigId: model.id,
-          modelConfigRevision: model.revision,
-          providerConfigId: provider.id,
-          providerConfigRevision: provider.revision,
-          providerModelId: model.providerModelId,
-          adapterKey: model.adapterKey,
-        },
-      },
-    );
-
-    let text = "";
+    const startedAt = this.clock();
     let outputBytes = 0;
-    let latestUsage: NormalizedProviderUsage | null = null;
-    try {
-      for await (const event of stream.events) {
-        if (event.type === "TEXT_DELTA") {
-          outputBytes += Buffer.byteLength(event.text, "utf8");
-          if (outputBytes > MAX_CHAT_OUTPUT_BYTES) {
-            throw new EphemeralModelChatError(
-              "AI_EPHEMERAL_CHAT_FAILED",
-              "BAD_RESPONSE",
-            );
-          }
-          text += event.text;
-        } else if (event.type === "MEMORY_COMMAND") {
-          // This boundary is deliberately raw-Model-only. A future adapter
-          // emitting an Agent-1 command must fail closed rather than allowing
-          // the temporary chat to carry hidden Memory semantics.
-          throw new EphemeralModelChatError(
-            "AI_EPHEMERAL_CHAT_FAILED",
-            "INVALID_REQUEST",
-          );
-        } else if (event.type === "USAGE" || event.type === "COMPLETED") {
-          latestUsage = event.usage;
-        }
-      }
-      await stream.trace;
-    } catch (error) {
-      const trace = await stream.trace;
-      if (error instanceof EphemeralModelChatError) throw error;
-      const attempt = trace[trace.length - 1];
-      const providerErrorCode = isAIProviderGatewayError(error)
-        ? error.code
-        : attempt?.errorCode ?? "UNKNOWN";
-      throw new EphemeralModelChatError(
-        "AI_EPHEMERAL_CHAT_FAILED",
-        providerErrorCode,
+    let totalUsage: NormalizedProviderUsage | null = null;
+    let startedEmitted = false;
+    let pythonCalls = 0;
+    const history: GenerationMessage[] = messages.map((message) => ({
+      role: message.role,
+      content: message.content,
+    }));
+
+    for (let round = 0; round < MAX_PROVIDER_ROUNDS_PER_TURN; round += 1) {
+      const providerStream = gateway.generate(
+        { capability: "GENERATION", attempts: [prepared.model.id] },
+        {
+          requestId: uuidv7(),
+          messages: history,
+          maxOutputTokens: prepared.model.maxOutputTokens as number,
+          ...(pythonEnabled
+            ? {
+                tools: [EPHEMERAL_PYTHON_TOOL_DEFINITION],
+                toolChoice: "AUTO" as const,
+              }
+            : {}),
+          stream: true,
+        },
+        {
+          signal,
+          timeoutMs: CHAT_TIMEOUT_MS,
+          expectedIdentity: {
+            modelConfigId: prepared.model.id,
+            modelConfigRevision: prepared.model.revision,
+            providerConfigId: prepared.provider.id,
+            providerConfigRevision: prepared.provider.revision,
+            providerModelId: prepared.model.providerModelId,
+            adapterKey: prepared.model.adapterKey,
+          },
+        },
       );
+      const toolCalls = new Map<string, GenerationToolCall & { index: number }>();
+      let roundUsage: NormalizedProviderUsage | null = null;
+      let finishReason: GenerationFinishReason = "OTHER";
+
+      try {
+        for await (const event of providerStream.events) {
+          switch (event.type) {
+            case "STARTED":
+              if (!startedEmitted) {
+                startedEmitted = true;
+                yield { type: "started" };
+              }
+              break;
+            case "REASONING_DELTA":
+              outputBytes = observeOutputBytes(outputBytes, event.text);
+              yield { type: "reasoning_delta", text: event.text };
+              break;
+            case "TEXT_DELTA":
+              outputBytes = observeOutputBytes(outputBytes, event.text);
+              yield { type: "text_delta", text: event.text };
+              break;
+            case "TOOL_CALL_DELTA": {
+              const current = toolCalls.get(event.callId) ?? {
+                id: event.callId,
+                name: event.name ?? EPHEMERAL_PYTHON_TOOL_NAME,
+                arguments: "",
+                index: event.index,
+              };
+              const next = {
+                ...current,
+                name: event.name ?? current.name,
+                arguments: current.arguments + event.argumentsDelta,
+              };
+              if (Buffer.byteLength(next.arguments, "utf8") > MAX_TOOL_ARGUMENT_BYTES) {
+                throw new EphemeralModelChatError("AI_EPHEMERAL_CHAT_FAILED", "BAD_RESPONSE");
+              }
+              toolCalls.set(event.callId, next);
+              yield {
+                type: "tool_call",
+                callId: event.callId,
+                toolName: next.name,
+                argumentsDelta: event.argumentsDelta,
+              };
+              break;
+            }
+            case "USAGE":
+              roundUsage = event.usage;
+              yield { type: "usage", usage: usageDto(addUsage(totalUsage, roundUsage)) };
+              break;
+            case "COMPLETED":
+              roundUsage = event.usage;
+              finishReason = event.finishReason;
+              break;
+            case "MEMORY_COMMAND":
+              throw new EphemeralModelChatError("AI_EPHEMERAL_CHAT_FAILED", "INVALID_REQUEST");
+          }
+        }
+        await providerStream.trace;
+      } catch (error) {
+        const trace = await providerStream.trace;
+        if (error instanceof EphemeralModelChatError) throw error;
+        const attempt = trace[trace.length - 1];
+        const providerErrorCode = isAIProviderGatewayError(error)
+          ? error.code
+          : attempt?.errorCode ?? "UNKNOWN";
+        const detailCode = pythonEnabled && providerErrorCode === "INVALID_REQUEST"
+          ? "PYTHON_TOOL_UNSUPPORTED"
+          : undefined;
+        throw new EphemeralModelChatError("AI_EPHEMERAL_CHAT_FAILED", providerErrorCode, detailCode);
+      }
+
+      totalUsage = addUsage(totalUsage, roundUsage);
+      const requiresToolRound = finishReason === "TOOL_USE" || toolCalls.size > 0;
+      if (requiresToolRound) {
+        const calls = [...toolCalls.values()].sort((left, right) => left.index - right.index);
+        if (!pythonEnabled || calls.length === 0) {
+          throw new EphemeralModelChatError("AI_EPHEMERAL_CHAT_FAILED", "BAD_RESPONSE");
+        }
+        if (round === MAX_PROVIDER_ROUNDS_PER_TURN - 1 || pythonCalls + calls.length > MAX_PYTHON_CALLS_PER_TURN) {
+          throw new EphemeralModelChatError("AI_EPHEMERAL_CHAT_FAILED", undefined, "TOOL_LIMIT");
+        }
+
+        history.push({
+          role: "assistant",
+          content: "",
+          toolCalls: calls.map(({ id, name, arguments: toolArguments }) => ({ id, name, arguments: toolArguments })),
+        });
+        for (const call of calls) {
+          pythonCalls += 1;
+          const parsed = parsePythonToolArguments(call.name, call.arguments);
+          const code = parsed.code ?? "";
+          yield {
+            type: "tool_started",
+            callId: call.id,
+            toolName: call.name,
+            code,
+          };
+          const result = parsed.code === null
+            ? invalidPythonArgumentsResult(parsed.error ?? "The Python tool arguments were invalid.")
+            : await executePythonInIsolatedWorker(parsed.code, { signal });
+          yield pythonResultEvent(call, result);
+          history.push({
+            role: "tool",
+            toolCallId: call.id,
+            content: JSON.stringify(toModelPythonResult(result)),
+          });
+        }
+        continue;
+      }
+
+      yield {
+        type: "completed",
+        usage: usageDto(totalUsage),
+        latencyMs: boundedDuration(this.clock() - startedAt),
+        finishReason: normalizeFinishReason(finishReason),
+      };
+      return;
     }
 
-    return {
-      text,
-      usage: usageDto(latestUsage),
-      latencyMs: boundedDuration(this.clock() - startedAt),
-      reasoningControl,
-    };
+    throw new EphemeralModelChatError("AI_EPHEMERAL_CHAT_FAILED", undefined, "TOOL_LIMIT");
   }
+}
 
-  private assertReady(model: AIModelConfig, provider: AIProviderConfig): void {
-    if (
-      model.capability !== "GENERATION" ||
-      !model.enabled ||
-      !model.supportsStreaming
-    ) {
-      throw new EphemeralModelChatError("AI_EPHEMERAL_MODEL_UNAVAILABLE");
-    }
-    if (!provider.enabled || !provider.credentialRef) {
-      throw new EphemeralModelChatError("AI_EPHEMERAL_PROVIDER_NOT_READY");
-    }
-    const metadata = this.secrets.getMetadata(provider.credentialRef);
-    if (!metadata || metadata.status !== "ACTIVE") {
-      throw new EphemeralModelChatError("AI_EPHEMERAL_PROVIDER_NOT_READY");
-    }
+function parsePythonToolArguments(
+  toolName: string,
+  value: string,
+): { code: string | null; error: string | null } {
+  if (toolName !== EPHEMERAL_PYTHON_TOOL_NAME) {
+    return { code: null, error: "The requested tool is not available in this chat." };
   }
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!isRecord(parsed) || typeof parsed.code !== "string" || Object.keys(parsed).some((key) => key !== "code")) {
+      return { code: null, error: "The Python tool arguments must contain only a code string." };
+    }
+    return { code: parsed.code, error: null };
+  } catch {
+    return { code: null, error: "The Python tool arguments were not valid JSON." };
+  }
+}
+
+function invalidPythonArgumentsResult(message: string): PythonExecutionResult {
+  return {
+    status: "error",
+    errorType: "InvalidArgumentsError",
+    message,
+    durationMs: 0,
+  };
+}
+
+function pythonResultEvent(
+  call: GenerationToolCall,
+  result: PythonExecutionResult,
+): EphemeralChatStreamEvent {
+  return {
+    type: "tool_result",
+    callId: call.id,
+    toolName: call.name,
+    status: result.status,
+    durationMs: result.durationMs,
+    ...(result.stdout === undefined ? {} : { stdout: result.stdout }),
+    ...(result.result === undefined ? {} : { result: result.result }),
+    ...(result.stderr === undefined ? {} : { stderr: result.stderr }),
+    ...(result.errorType === undefined ? {} : { errorType: result.errorType }),
+    ...(result.message === undefined ? {} : { message: result.message }),
+  };
+}
+
+function toModelPythonResult(result: PythonExecutionResult): Record<string, unknown> {
+  return {
+    status: result.status,
+    ...(result.stdout === undefined ? {} : { stdout: result.stdout }),
+    ...(result.result === undefined ? {} : { result: result.result }),
+    ...(result.stderr === undefined ? {} : { stderr: result.stderr }),
+    ...(result.errorType === undefined ? {} : { errorType: result.errorType }),
+    ...(result.message === undefined ? {} : { message: result.message }),
+    durationMs: result.durationMs,
+  };
+}
+
+function addUsage(
+  previous: NormalizedProviderUsage | null,
+  next: NormalizedProviderUsage | null,
+): NormalizedProviderUsage | null {
+  if (!previous) return next;
+  if (!next) return previous;
+  return {
+    inputTokens: addOptionalToken(previous.inputTokens, next.inputTokens),
+    outputTokens: addOptionalToken(previous.outputTokens, next.outputTokens),
+    reasoningTokens: addOptionalToken(previous.reasoningTokens, next.reasoningTokens),
+    cacheHitInputTokens: addOptionalToken(previous.cacheHitInputTokens, next.cacheHitInputTokens),
+    cacheMissInputTokens: addOptionalToken(previous.cacheMissInputTokens, next.cacheMissInputTokens),
+  };
+}
+
+function addOptionalToken(left: number | null, right: number | null): number | null {
+  if (left === null) return right;
+  if (right === null) return left;
+  const total = left + right;
+  return Number.isSafeInteger(total) ? total : left;
+}
+
+function validatePythonEnabled(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (typeof value !== "boolean") throw new EphemeralModelChatError("AI_EPHEMERAL_CHAT_INVALID");
+  return value;
 }
 
 function validateMessages(value: unknown): EphemeralModelChatMessage[] {
@@ -282,10 +508,7 @@ function validateMessages(value: unknown): EphemeralModelChatMessage[] {
     if (!isRecord(item) || (item.role !== "user" && item.role !== "assistant")) {
       throw new EphemeralModelChatError("AI_EPHEMERAL_CHAT_INVALID");
     }
-    if (
-      typeof item.content !== "string" ||
-      (item.role === "user" && !item.content.trim())
-    ) {
+    if (typeof item.content !== "string" || (item.role === "user" && !item.content.trim())) {
       throw new EphemeralModelChatError("AI_EPHEMERAL_CHAT_INVALID");
     }
     const bytes = Buffer.byteLength(item.content, "utf8");
@@ -304,38 +527,45 @@ function validateMessages(value: unknown): EphemeralModelChatMessage[] {
   return messages;
 }
 
-function validateReasoningEffort(value: unknown): AIReasoningEffort {
-  if (value === undefined) return "AUTO";
-  if (!isAIReasoningEffort(value)) {
-    throw new EphemeralModelChatError("AI_EPHEMERAL_CHAT_INVALID");
+function observeOutputBytes(current: number, text: string): number {
+  const total = current + Buffer.byteLength(text, "utf8");
+  if (total > MAX_CHAT_OUTPUT_BYTES) {
+    throw new EphemeralModelChatError("AI_EPHEMERAL_CHAT_FAILED", "BAD_RESPONSE");
   }
-  return value;
+  return total;
 }
 
-function assertReasoningAllowed(
-  control: AIReasoningControl,
-  effort: AIReasoningEffort,
-): void {
-  if (effort === "AUTO") return;
-  if (!control.options.includes(effort)) {
-    throw new EphemeralModelChatError("AI_EPHEMERAL_REASONING_UNSUPPORTED");
-  }
-}
-
-function usageDto(usage: NormalizedProviderUsage | null): EphemeralModelChatUsage {
+function usageDto(usage: NormalizedProviderUsage | null): EphemeralChatUsage {
   const inputTokens = usage?.inputTokens ?? null;
   const outputTokens = usage?.outputTokens ?? null;
   return {
     inputTokens,
     outputTokens,
-    totalTokens:
-      inputTokens !== null && outputTokens !== null
-        ? inputTokens + outputTokens
-        : null,
+    totalTokens: inputTokens !== null && outputTokens !== null ? inputTokens + outputTokens : null,
     reasoningTokens: usage?.reasoningTokens ?? null,
     cachedInputTokens: usage?.cacheHitInputTokens ?? null,
     cacheMissInputTokens: usage?.cacheMissInputTokens ?? null,
   };
+}
+
+function emptyUsageDto(): EphemeralChatUsage {
+  return {
+    inputTokens: null,
+    outputTokens: null,
+    totalTokens: null,
+    reasoningTokens: null,
+    cachedInputTokens: null,
+    cacheMissInputTokens: null,
+  };
+}
+
+function normalizeFinishReason(
+  value: GenerationFinishReason,
+): EphemeralChatFinishReason {
+  if (value === "STOP" || value === "LENGTH" || value === "CONTENT_FILTER" || value === "TOOL_USE") {
+    return value;
+  }
+  return "UNKNOWN";
 }
 
 function boundedDuration(value: number): number | null {

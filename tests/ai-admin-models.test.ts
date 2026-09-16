@@ -12,6 +12,7 @@ import {
 import {
   EphemeralModelChatError,
   EphemeralModelChatService,
+  type EphemeralModelChatStreamEvent,
 } from "../src/server/ai/ephemeral-model-chat-service";
 import type {
   AIProviderHttpResponse,
@@ -41,6 +42,13 @@ class ProtocolTransport implements AIProviderHttpTransport {
   targets: ValidatedOutboundTarget[] = [];
   responseStatus = 200;
   includeUsage = true;
+  includeFinishReason = true;
+  finishReason: "stop" | "length" | "tool_calls" = "stop";
+  omitDone = false;
+  usageOnlyFinal = false;
+  whitespaceOnlyDelta = false;
+  reasoningMode: "none" | "openai" | "details" | "responses" | "anthropic" = "none";
+  toolMode: "none" | "chat" | "responses" | "anthropic" = "none";
 
   async request(
     _target: ValidatedOutboundTarget,
@@ -49,23 +57,55 @@ class ProtocolTransport implements AIProviderHttpTransport {
     this.targets.push(_target);
     this.requests.push(request);
     const path = request.pathAndQuery;
+    if (this.toolMode !== "none") {
+      const payload = request.body
+        ? JSON.parse(new TextDecoder().decode(request.body)) as Record<string, unknown>
+        : {};
+      const continuation = path === "responses"
+        ? Array.isArray(payload.input) && payload.input.some((item) => isRecord(item) && item.type === "function_call_output")
+        : path === "v1/messages"
+          ? Array.isArray(payload.messages) && payload.messages.some((item) => isRecord(item) && Array.isArray(item.content) && item.content.some((block) => isRecord(block) && block.type === "tool_result"))
+          : Array.isArray(payload.messages) && payload.messages.some((item) => isRecord(item) && item.role === "tool");
+      return {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+        body: bytes(toolStream(path, continuation)),
+      };
+    }
     const body = path === "responses"
       ? [
           'data: {"type":"response.created","response":{"id":"responses-1","status":"in_progress"}}\n\n',
+          ...(this.reasoningMode === "responses"
+            ? ['data: {"type":"response.reasoning_summary_text.delta","delta":"Thought"}\n\n']
+            : []),
           'data: {"type":"response.output_text.delta","delta":"OK"}\n\n',
           `data: {"type":"response.completed","response":{"id":"responses-1","status":"completed"${this.includeUsage ? ',"usage":{"input_tokens":1,"output_tokens":1}' : ""}}}\n\n`,
         ].join("")
       : path === "v1/messages"
         ? [
             `event: message_start\ndata: {"type":"message_start","message":{"id":"anthropic-1"${this.includeUsage ? ',"usage":{"input_tokens":1}' : ""}}}\n\n`,
+            ...(this.reasoningMode === "anthropic"
+              ? ['event: content_block_delta\ndata: {"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"Thought"}}\n\n']
+              : []),
             'event: content_block_delta\ndata: {"type":"content_block_delta","delta":{"type":"text_delta","text":"OK"}}\n\n',
             `event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"}${this.includeUsage ? ',"usage":{"output_tokens":1}' : ""}}\n\n`,
             'event: message_stop\ndata: {"type":"message_stop"}\n\n',
           ].join("")
         : [
             'data: {"id":"chat-1","choices":[{"delta":{}}]}\n\n',
-            `data: {"id":"chat-1","choices":[{"delta":{"content":"OK"},"finish_reason":"stop"}]${this.includeUsage ? ',"usage":{"prompt_tokens":1,"completion_tokens":1}' : ""}}\n\n`,
-            "data: [DONE]\n\n",
+            ...(this.whitespaceOnlyDelta
+              ? ['data: {"id":"chat-1","choices":[{"delta":{"content":"   "}}]}\n\n']
+              : []),
+            ...(this.reasoningMode === "openai"
+              ? ['data: {"id":"chat-1","choices":[{"delta":{"reasoning":"Thought"}}]}\n\n']
+              : this.reasoningMode === "details"
+              ? ['data: {"id":"chat-1","choices":[{"delta":{"reasoning_details":[{"type":"reasoning.encrypted","data":"SECRET"},{"type":"reasoning.future","payload":"ignore"},{"type":"reasoning.text","text":"Thought"}]}}]}\n\n']
+                : []),
+            `data: {"id":"chat-1","choices":[{"delta":{"content":"OK"}${this.includeFinishReason ? `,"finish_reason":"${this.finishReason}"` : ""}}]${this.includeUsage ? ',"usage":{"prompt_tokens":1,"completion_tokens":1}' : ""}}\n\n`,
+            ...(this.usageOnlyFinal
+              ? ['data: {"id":"chat-1","choices":[],"provider":"openrouter/free","usage":{"prompt_tokens":1,"completion_tokens":1}}\n\n']
+              : []),
+            ...(this.omitDone ? [] : ["data: [DONE]\n\n"]),
           ].join("");
     return {
       status: this.responseStatus,
@@ -73,6 +113,69 @@ class ProtocolTransport implements AIProviderHttpTransport {
       body: bytes(body),
     };
   }
+}
+
+function toolStream(path: string, continuation: boolean): string {
+  if (continuation) {
+    if (path === "responses") {
+      return [
+        'data: {"type":"response.created","response":{"id":"responses-tool-2","status":"in_progress"}}\n\n',
+        'data: {"type":"response.output_text.delta","delta":"5"}\n\n',
+        'data: {"type":"response.completed","response":{"id":"responses-tool-2","status":"completed","usage":{"input_tokens":2,"output_tokens":1}}}\n\n',
+      ].join("");
+    }
+    if (path === "v1/messages") {
+      return [
+        sseJson({ type: "message_start", message: { id: "anthropic-tool-2", usage: { input_tokens: 2 } } }, "message_start"),
+        sseJson({ type: "content_block_delta", delta: { type: "text_delta", text: "5" } }, "content_block_delta"),
+        sseJson({ type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 1 } }, "message_delta"),
+        sseJson({ type: "message_stop" }, "message_stop"),
+      ].join("");
+    }
+    return [
+      'data: {"id":"chat-tool-2","choices":[{"delta":{"content":"5"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":1}}\n\n',
+      "data: [DONE]\n\n",
+    ].join("");
+  }
+  if (path === "responses") {
+    return [
+      'data: {"type":"response.created","response":{"id":"responses-tool-1","status":"in_progress"}}\n\n',
+      'data: {"type":"response.output_item.added","item":{"type":"function_call","id":"item-1","call_id":"call-1","name":"python","arguments":""}}\n\n',
+      'data: {"type":"response.function_call_arguments.delta","item_id":"item-1","delta":"{\\"code\\":\\"2 + "}\n\n',
+      'data: {"type":"response.function_call_arguments.done","item_id":"item-1","arguments":"{\\"code\\":\\"2 + 3\\"}"}\n\n',
+      'data: {"type":"response.completed","response":{"id":"responses-tool-1","status":"completed","output":[{"type":"function_call","call_id":"call-1","name":"python","arguments":"{\\"code\\":\\"2 + 3\\"}"}]}}\n\n',
+    ].join("");
+  }
+  if (path === "v1/messages") {
+    return [
+      sseJson({ type: "message_start", message: { id: "anthropic-tool-1", usage: { input_tokens: 1 } } }, "message_start"),
+      sseJson({ type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "call-1", name: "python", input: {} } }, "content_block_start"),
+      sseJson({ type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: '{"code":"2 + ' } }, "content_block_delta"),
+      sseJson({ type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: '3"}' } }, "content_block_delta"),
+      sseJson({ type: "message_delta", delta: { stop_reason: "tool_use" }, usage: { output_tokens: 1 } }, "message_delta"),
+      sseJson({ type: "message_stop" }, "message_stop"),
+    ].join("");
+  }
+  return [
+    sseJson({
+      id: "chat-tool-1",
+      choices: [{ delta: { tool_calls: [{ index: 0, id: "call-1", function: { name: "python", arguments: '{"code":"2 + ' } }] } }],
+    }),
+    sseJson({
+      id: "chat-tool-1",
+      choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '3"}' } }] } }],
+    }),
+    sseJson({ id: "chat-tool-1", choices: [{ delta: {}, finish_reason: "tool_calls" }] }),
+    "data: [DONE]\n\n",
+  ].join("");
+}
+
+function sseJson(value: Record<string, unknown>, event?: string): string {
+  return `${event ? `event: ${event}\n` : ""}data: ${JSON.stringify(value)}\n\n`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 const outboundPolicy: OutboundTargetPolicy = {
@@ -139,12 +242,14 @@ async function addModel(
   fixtureValue: ReturnType<typeof fixture>,
   providerId: string,
   providerModelId = "model-name:free",
+  maxOutputTokens = 1024,
+  contextWindowTokens = 8192,
 ) {
   return fixtureValue.service.createModel({
     providerId,
     providerModelId,
-    contextWindowTokens: 8192,
-    maxOutputTokens: 1024,
+    contextWindowTokens,
+    maxOutputTokens,
     inputModalities: ["TEXT", "IMAGE"],
     actor: fixtureValue.actor,
   });
@@ -375,8 +480,9 @@ test("ephemeral Model chat resolves one exact Provider, serializes bounded multi
     ] as const).entries()) {
       const provider = await addProvider(f, `Ephemeral ${index}`, format);
       const model = await addModel(f, provider.id, `ephemeral/model-${index}`);
-      const result = await chat.chat({ modelId: model.id, messages, reasoningEffort: "AUTO" });
+      const result = await chat.chat({ modelId: model.id, messages });
       assert.equal(result.text, "OK");
+      assert.equal(result.reasoningText, "");
       assert.equal(JSON.stringify(result).includes("test-secret-"), false);
       assert.deepEqual(result.usage, {
         inputTokens: 1,
@@ -386,7 +492,6 @@ test("ephemeral Model chat resolves one exact Provider, serializes bounded multi
         cachedInputTokens: null,
         cacheMissInputTokens: null,
       });
-      assert.equal(result.reasoningControl.kind, "NONE");
 
       const request = f.transport.requests.at(-1);
       assert.ok(request?.body);
@@ -403,7 +508,6 @@ test("ephemeral Model chat resolves one exact Provider, serializes bounded multi
     const noUsage = await chat.chat({
       modelId: noUsageModel.id,
       messages: [{ role: "user", content: "No usage please" }],
-      reasoningEffort: "AUTO",
     });
     assert.deepEqual(noUsage.usage, {
       inputTokens: null,
@@ -420,7 +524,40 @@ test("ephemeral Model chat resolves one exact Provider, serializes bounded multi
   }
 });
 
-test("ephemeral Model chat is capability-aware, has no fallback, and never sends unsupported reasoning", async () => {
+test("ephemeral diagnostic uses the canonical output ceiling and normalizes LENGTH without failing the turn", async () => {
+  const f = fixture();
+  try {
+    const chat = EphemeralModelChatService.forDatabase(f.database, {
+      secrets: f.secrets,
+      outboundPolicy,
+      transport: f.transport,
+      clock: () => 1_900_000_000_450,
+    });
+    const provider = await addProvider(f, "Canonical Ceiling Provider");
+    const sixteenK = await addModel(f, provider.id, "ceiling/16k", 16_384, 20_000);
+    f.transport.finishReason = "length";
+    const lengthResult = await chat.chat({
+      modelId: sixteenK.id,
+      messages: [{ role: "user", content: "long reasoning" }],
+    });
+    const sixteenPayload = JSON.parse(new TextDecoder().decode(f.transport.requests.at(-1)!.body)) as Record<string, unknown>;
+    assert.equal(sixteenPayload.max_tokens, 16_384);
+    assert.equal(lengthResult.finishReason, "LENGTH");
+    assert.equal(lengthResult.usage.outputTokens, 1);
+
+    const eighteenK = await addModel(f, provider.id, "ceiling/18k", 18_709, 20_000);
+    f.transport.finishReason = "stop";
+    const browserAttempt = { modelId: eighteenK.id, messages: [{ role: "user", content: "hi" }], maxOutputTokens: 1 } as unknown as Parameters<typeof chat.chat>[0];
+    const stopResult = await chat.chat(browserAttempt);
+    const eighteenPayload = JSON.parse(new TextDecoder().decode(f.transport.requests.at(-1)!.body)) as Record<string, unknown>;
+    assert.equal(eighteenPayload.max_tokens, 18_709);
+    assert.equal(stopResult.finishReason, "STOP");
+  } finally {
+    f.close();
+  }
+});
+
+test("ephemeral Model chat streams text and Provider-exposed reasoning without persistence or fallback", async () => {
   const f = fixture();
   try {
     const chat = EphemeralModelChatService.forDatabase(f.database, {
@@ -429,72 +566,120 @@ test("ephemeral Model chat is capability-aware, has no fallback, and never sends
       transport: f.transport,
       clock: () => 1_900_000_000_500,
     });
-    const provider = await addProvider(f, "Reasoning Chat", "OPENAI_CHAT_COMPLETIONS");
-    const model = await addModel(f, provider.id, "reasoning/chat");
-    f.database.client.prepare("update ai_model_configs set supports_reasoning = 1 where id = ?").run(model.id);
-    const reasoning = await chat.chat({
-      modelId: model.id,
-      messages: [{ role: "user", content: "Reason" }],
-      reasoningEffort: "HIGH",
-    });
-    assert.equal(reasoning.reasoningControl.kind, "EFFORT_LEVELS");
-    const chatPayload = JSON.parse(new TextDecoder().decode(f.transport.requests.at(-1)!.body)) as Record<string, unknown>;
-    assert.equal(chatPayload.reasoning_effort, "high");
-
-    const responseProvider = await addProvider(f, "Reasoning Responses", "OPENAI_RESPONSES");
-    const responseModel = await addModel(f, responseProvider.id, "reasoning/responses");
-    f.database.client.prepare("update ai_model_configs set supports_reasoning = 1 where id = ?").run(responseModel.id);
-    const response = await chat.chat({
-      modelId: responseModel.id,
-      messages: [{ role: "user", content: "Reason responses" }],
-      reasoningEffort: "MEDIUM",
-    });
-    assert.deepEqual(response.reasoningControl.options, ["AUTO", "LOW", "MEDIUM", "HIGH"]);
-    const responsePayload = JSON.parse(new TextDecoder().decode(f.transport.requests.at(-1)!.body)) as Record<string, unknown>;
-    assert.deepEqual(responsePayload.reasoning, { effort: "medium" });
-
-    const unsupportedRequests = f.transport.requests.length;
-    await assert.rejects(
-      () => chat.chat({
-        modelId: responseModel.id,
-        messages: [{ role: "user", content: "No none" }],
-        reasoningEffort: "NONE",
-      }),
-      (error: unknown) => error instanceof EphemeralModelChatError && error.code === "AI_EPHEMERAL_REASONING_UNSUPPORTED",
-    );
-    assert.equal(f.transport.requests.length, unsupportedRequests);
-
-    const noCredentialProvider = await addProvider(f, "Reasoning Missing Credential");
-    const noCredentialModel = await addModel(f, noCredentialProvider.id, "reasoning/missing-credential");
-    const credentialRef = (f.database.client.prepare("select credential_ref as credentialRef from ai_provider_configs where id = ?").get(noCredentialProvider.id) as { credentialRef: string }).credentialRef;
-    await f.secrets.revoke({
-      credentialRef,
-      actor: { type: "ADMIN", actorUserId: f.actor.actorUserId },
-    });
-    let missingCredentialError: unknown;
-    try {
-      await chat.chat({
-        modelId: noCredentialModel.id,
-        messages: [{ role: "user", content: "Missing credential" }],
-        reasoningEffort: "AUTO",
-      });
-    } catch (error) {
-      missingCredentialError = error;
+    const untouchedTables = ["ai_conversations", "ai_memories", "ai_telemetry_events", "ai_cost_operations", "ai_jobs"];
+    const countRows = () => Object.fromEntries(untouchedTables.map((table) => [table, (f.database.client.prepare(`select count(*) as count from ${table}`).get() as { count: number }).count]));
+    const before = countRows();
+    const modes = [
+      ["OPENAI_CHAT_COMPLETIONS", "openai", "chat/reasoning"],
+      ["OPENAI_CHAT_COMPLETIONS", "details", "chat/details"],
+      ["OPENAI_RESPONSES", "responses", "responses/reasoning"],
+      ["ANTHROPIC_MESSAGES", "anthropic", "anthropic/reasoning"],
+    ] as const;
+    for (const [format, mode, modelId] of modes) {
+      const provider = await addProvider(f, `Streaming ${mode}`, format);
+      const model = await addModel(f, provider.id, modelId);
+      f.transport.reasoningMode = mode;
+      const events: EphemeralModelChatStreamEvent[] = [];
+      for await (const event of chat.stream({ modelId: model.id, messages: [{ role: "user", content: "Think" }] })) events.push(event);
+      assert.equal(events[0]?.type, "started");
+      assert.equal(events.some((event) => event.type === "text_delta" && event.text === "OK"), true, mode);
+      assert.equal(events.some((event) => event.type === "completed"), true, mode);
+      assert.equal(events.filter((event) => event.type === "reasoning_delta").map((event) => event.type === "reasoning_delta" ? event.text : "").join(""), "Thought", mode);
+      assert.equal(JSON.stringify(events).includes("SECRET"), false);
+      assert.equal(JSON.stringify(await chat.chat({ modelId: model.id, messages: [{ role: "user", content: "Follow up" }] })).includes("test-secret-"), false);
     }
-    assert.ok(missingCredentialError instanceof EphemeralModelChatError);
-    assert.equal(missingCredentialError.code, "AI_EPHEMERAL_PROVIDER_NOT_READY");
-    assert.equal(String(missingCredentialError).includes("test-secret-"), false);
+    const noDoneProvider = await addProvider(f, "Streaming No Done");
+    const noDoneModel = await addModel(f, noDoneProvider.id, "stream/no-done");
+    f.transport.reasoningMode = "openai";
+    f.transport.includeUsage = false;
+    f.transport.includeFinishReason = false;
+    f.transport.omitDone = true;
+    f.transport.whitespaceOnlyDelta = true;
+    const noDoneEvents: EphemeralModelChatStreamEvent[] = [];
+    for await (const event of chat.stream({ modelId: noDoneModel.id, messages: [{ role: "user", content: "No done" }] })) noDoneEvents.push(event);
+    assert.equal(noDoneEvents.some((event) => event.type === "text_delta"), true);
+    assert.equal(noDoneEvents.some((event) => event.type === "completed"), true);
 
-    f.transport.responseStatus = 401;
+    const usageOnlyProvider = await addProvider(f, "Streaming Usage Only");
+    const usageOnlyModel = await addModel(f, usageOnlyProvider.id, "stream/usage-only");
+    f.transport.reasoningMode = "none";
+    f.transport.includeUsage = true;
+    f.transport.includeFinishReason = true;
+    f.transport.omitDone = false;
+    f.transport.usageOnlyFinal = true;
+    f.transport.whitespaceOnlyDelta = false;
+    const usageOnlyEvents: EphemeralModelChatStreamEvent[] = [];
+    for await (const event of chat.stream({ modelId: usageOnlyModel.id, messages: [{ role: "user", content: "Usage only" }] })) usageOnlyEvents.push(event);
+    assert.deepEqual(usageOnlyEvents.at(-1), {
+      type: "completed",
+      usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, reasoningTokens: null, cachedInputTokens: null, cacheMissInputTokens: null },
+      latencyMs: 0,
+      finishReason: "STOP",
+    });
+    assert.deepEqual(countRows(), before);
+    assert.equal(f.transport.requests.length, modes.length * 2 + 2);
+
+    const noCredentialProvider = await addProvider(f, "Missing Credential");
+    const noCredentialModel = await addModel(f, noCredentialProvider.id, "missing/credential");
+    const credentialRef = (f.database.client.prepare("select credential_ref as credentialRef from ai_provider_configs where id = ?").get(noCredentialProvider.id) as { credentialRef: string }).credentialRef;
+    await f.secrets.revoke({ credentialRef, actor: { type: "ADMIN", actorUserId: f.actor.actorUserId } });
     await assert.rejects(
-      () => chat.chat({
-        modelId: model.id,
-        messages: [{ role: "user", content: "One attempt" }],
-        reasoningEffort: "AUTO",
-      }),
-      (error: unknown) => error instanceof EphemeralModelChatError && error.providerErrorCode === "AUTHENTICATION",
+      () => chat.chat({ modelId: noCredentialModel.id, messages: [{ role: "user", content: "Missing" }] }),
+      (error: unknown) => error instanceof EphemeralModelChatError && error.code === "AI_EPHEMERAL_PROVIDER_NOT_READY",
     );
-    assert.equal(f.transport.requests.length, unsupportedRequests + 1);
+  } finally {
+    f.close();
+  }
+});
+
+test("ephemeral Python tool loop uses server-owned automatic tools across supported protocols", async () => {
+  const f = fixture();
+  try {
+    const chat = EphemeralModelChatService.forDatabase(f.database, {
+      secrets: f.secrets,
+      outboundPolicy,
+      transport: f.transport,
+      clock: () => 1_900_000_000_600,
+    });
+    const modes = [
+      ["OPENAI_CHAT_COMPLETIONS", "chat"],
+      ["OPENAI_RESPONSES", "responses"],
+      ["ANTHROPIC_MESSAGES", "anthropic"],
+    ] as const;
+    for (const [format, toolMode] of modes) {
+      const provider = await addProvider(f, `Tool ${toolMode}`, format);
+      const model = await addModel(f, provider.id, `tool/${toolMode}`);
+      f.transport.toolMode = toolMode;
+      const events: EphemeralModelChatStreamEvent[] = [];
+      for await (const event of chat.stream({
+        modelId: model.id,
+        messages: [{ role: "user", content: "Calculate 2 + 3 with Python." }],
+        pythonEnabled: true,
+      })) events.push(event);
+      assert.equal(events.some((event) => event.type === "tool_call"), true, toolMode);
+      assert.equal(events.some((event) => event.type === "tool_started" && event.code === "2 + 3"), true, toolMode);
+      assert.equal(events.some((event) => event.type === "tool_result" && event.status === "ok" && event.result === "5"), true, toolMode);
+      assert.equal(events.some((event) => event.type === "text_delta" && event.text === "5"), true, toolMode);
+      assert.equal(events.at(-1)?.type, "completed", toolMode);
+
+      const firstPayload = JSON.parse(new TextDecoder().decode(f.transport.requests.at(-2)!.body)) as Record<string, unknown>;
+      assert.ok(firstPayload.tools, toolMode);
+      assert.ok(firstPayload.tool_choice, toolMode);
+      const secondPayload = JSON.parse(new TextDecoder().decode(f.transport.requests.at(-1)!.body)) as Record<string, unknown>;
+      assert.ok(JSON.stringify(secondPayload).includes("function_call_output") || JSON.stringify(secondPayload).includes("tool_result") || JSON.stringify(secondPayload).includes('"role":"tool"'), toolMode);
+    }
+
+    f.transport.toolMode = "none";
+    const offProvider = await addProvider(f, "Tool Off", "OPENAI_CHAT_COMPLETIONS");
+    const offModel = await addModel(f, offProvider.id, "tool/off");
+    await chat.chat({
+      modelId: offModel.id,
+      messages: [{ role: "user", content: "No tool." }],
+      pythonEnabled: false,
+    });
+    const offPayload = JSON.parse(new TextDecoder().decode(f.transport.requests.at(-1)!.body)) as Record<string, unknown>;
+    assert.equal("tools" in offPayload, false);
+    assert.equal("tool_choice" in offPayload, false);
   } finally {
     f.close();
   }

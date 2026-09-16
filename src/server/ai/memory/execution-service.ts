@@ -618,7 +618,7 @@ function isContiguousCompletedTurnRange(messages: readonly { ordinal: number; ro
 }
 
 function mergeUsage(target: { inputTokens: number | null; outputTokens: number | null; reasoningTokens: number | null; cacheHitInputTokens: number | null; cacheMissInputTokens: number | null }, event: GatewayGenerationStreamEvent): void {
-  if (event.type === "STARTED" || event.type === "TEXT_DELTA" || event.type === "MEMORY_COMMAND") return;
+  if (event.type === "STARTED" || event.type === "REASONING_DELTA" || event.type === "TEXT_DELTA" || event.type === "TOOL_CALL_DELTA" || event.type === "MEMORY_COMMAND") return;
   for (const field of ["inputTokens", "outputTokens", "reasoningTokens", "cacheHitInputTokens", "cacheMissInputTokens"] as const) {
     const value = event.usage[field];
     if (value !== null && (target[field] === null || value > target[field]!)) target[field] = value;

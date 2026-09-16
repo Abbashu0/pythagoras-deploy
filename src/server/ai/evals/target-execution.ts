@@ -245,7 +245,7 @@ export class AIEvalTargetExecutionService {
             output = next;
           } else if (event.type === "USAGE" || event.type === "COMPLETED") {
             usage.observe(event.usage);
-            if (event.type === "COMPLETED") finishReason = event.finishReason;
+            if (event.type === "COMPLETED") finishReason = event.finishReason === "TOOL_USE" ? "OTHER" : event.finishReason;
           }
         }
       } catch (error) { gatewayError = error; }

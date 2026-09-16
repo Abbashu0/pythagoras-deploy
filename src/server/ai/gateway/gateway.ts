@@ -32,6 +32,8 @@ import {
   AI_GATEWAY_MAX_GENERATION_INSTRUCTIONS_BYTES,
   AI_GATEWAY_MAX_GENERATION_MESSAGE_BYTES,
   AI_GATEWAY_MAX_GENERATION_MESSAGES,
+  AI_GATEWAY_MAX_GENERATION_TOOL_CALL_BYTES,
+  AI_GATEWAY_MAX_GENERATION_TOOLS,
   AI_GATEWAY_MAX_MEMORY_COMMAND_BYTES,
   AI_PROVIDER_ERROR_CODES,
   GENERATION_FINISH_REASONS,
@@ -280,6 +282,8 @@ export class AIProviderGateway {
             maxOutputTokens: request.maxOutputTokens,
             reasoningEffort: request.reasoningEffort,
             temperature: request.temperature,
+            tools: request.tools,
+            toolChoice: request.toolChoice,
             stream: true,
           };
           trace.providerInvoked = true;
@@ -314,6 +318,10 @@ export class AIProviderGateway {
                   trace.providerRequestId = providerEvent.providerRequestId;
                 }
               } else if (providerEvent.type === "TEXT_DELTA") {
+                partialOutput = true;
+              } else if (providerEvent.type === "REASONING_DELTA") {
+                partialOutput = true;
+              } else if (providerEvent.type === "TOOL_CALL_DELTA") {
                 partialOutput = true;
               } else if (providerEvent.type === "MEMORY_COMMAND") {
                 memoryCommandSeen = true;
@@ -797,12 +805,23 @@ function validateGenerationRequest(request: GenerationGatewayRequest): void {
   }
   if (request.stream !== true) throw invalidRequestError();
   for (const message of request.messages) {
-    if (
-      !isPlainObject(message) ||
-      !["system", "user", "assistant"].includes(String(message.role)) ||
-      !boundedText(message.content, AI_GATEWAY_MAX_GENERATION_MESSAGE_BYTES, true)
-    ) {
+    if (!isPlainObject(message) || !["system", "user", "assistant", "tool"].includes(String(message.role)) || !boundedText(message.content, AI_GATEWAY_MAX_GENERATION_MESSAGE_BYTES, message.role !== "assistant" || message.toolCalls === undefined)) {
       throw invalidRequestError();
+    }
+    if (message.role === "tool") {
+      if (!boundedToolId(message.toolCallId) || message.toolCalls !== undefined) throw invalidRequestError();
+    } else if (message.toolCallId !== undefined) {
+      throw invalidRequestError();
+    }
+    if (message.toolCalls !== undefined) {
+      if (message.role !== "assistant" || !Array.isArray(message.toolCalls) || message.toolCalls.length < 1 || message.toolCalls.length > AI_GATEWAY_MAX_GENERATION_TOOLS) {
+        throw invalidRequestError();
+      }
+      for (const toolCall of message.toolCalls) {
+        if (!isPlainObject(toolCall) || !boundedToolId(toolCall.id) || !boundedToolName(toolCall.name) || !boundedText(toolCall.arguments, AI_GATEWAY_MAX_GENERATION_TOOL_CALL_BYTES, false)) {
+          throw invalidRequestError();
+        }
+      }
     }
   }
   if (request.instructions !== undefined && !boundedText(request.instructions, AI_GATEWAY_MAX_GENERATION_INSTRUCTIONS_BYTES, false)) {
@@ -824,6 +843,19 @@ function validateGenerationRequest(request: GenerationGatewayRequest): void {
     request.temperature !== undefined &&
     (!Number.isFinite(request.temperature) || request.temperature < 0 || request.temperature > 2)
   ) {
+    throw invalidRequestError();
+  }
+  if (request.tools !== undefined) {
+    if (!Array.isArray(request.tools) || request.tools.length < 1 || request.tools.length > AI_GATEWAY_MAX_GENERATION_TOOLS) {
+      throw invalidRequestError();
+    }
+    for (const tool of request.tools) {
+      if (!isPlainObject(tool) || tool.type !== "function" || !isPlainObject(tool.function) || !boundedToolName(tool.function.name) || (tool.function.description !== undefined && !boundedText(tool.function.description, 8 * 1_024, false)) || !isPlainObject(tool.function.parameters) || safeJsonBytes(tool.function.parameters) > AI_GATEWAY_MAX_GENERATION_TOOL_CALL_BYTES) {
+        throw invalidRequestError();
+      }
+    }
+  }
+  if (request.toolChoice !== undefined && (request.toolChoice !== "AUTO" || request.tools === undefined)) {
     throw invalidRequestError();
   }
 }
@@ -890,10 +922,28 @@ function validateProviderGenerationEvent(
     };
   }
   if (value.type === "TEXT_DELTA") {
-    if (!state.started || state.terminal || !boundedText(value.text, MAX_GENERATION_DELTA_BYTES, true)) {
+    if (!state.started || state.terminal || !boundedText(value.text, MAX_GENERATION_DELTA_BYTES, false)) {
       throw new GatewayProtocolError();
     }
     return { type: "TEXT_DELTA", text: value.text };
+  }
+  if (value.type === "REASONING_DELTA") {
+    if (!state.started || state.terminal || !boundedText(value.text, MAX_GENERATION_DELTA_BYTES, false)) {
+      throw new GatewayProtocolError();
+    }
+    return { type: "REASONING_DELTA", text: value.text };
+  }
+  if (value.type === "TOOL_CALL_DELTA") {
+    if (!state.started || state.terminal || !boundedToolId(value.callId) || typeof value.index !== "number" || !Number.isSafeInteger(value.index) || value.index < 0 || value.index >= AI_GATEWAY_MAX_GENERATION_TOOLS || !boundedText(value.argumentsDelta, AI_GATEWAY_MAX_GENERATION_TOOL_CALL_BYTES, false) || (value.name !== undefined && !boundedToolName(value.name))) {
+      throw new GatewayProtocolError();
+    }
+    return {
+      type: "TOOL_CALL_DELTA",
+      callId: value.callId,
+      index: value.index,
+      ...(value.name === undefined ? {} : { name: value.name }),
+      argumentsDelta: value.argumentsDelta,
+    };
   }
   if (value.type === "MEMORY_COMMAND") {
     if (state.started && !state.terminal && !state.memoryCommandSeen && isPlainObject(value.command) && safeJsonBytes(value.command) <= AI_GATEWAY_MAX_MEMORY_COMMAND_BYTES) {
@@ -930,8 +980,18 @@ function toGatewayGenerationEvent(
   event: Exclude<ProviderGenerationStreamEvent, { type: "STARTED" }>,
 ): Exclude<GatewayGenerationStreamEvent, { type: "STARTED" }> {
   switch (event.type) {
+    case "REASONING_DELTA":
+      return { type: "REASONING_DELTA", text: event.text };
     case "TEXT_DELTA":
       return { type: "TEXT_DELTA", text: event.text };
+    case "TOOL_CALL_DELTA":
+      return {
+        type: "TOOL_CALL_DELTA",
+        callId: event.callId,
+        index: event.index,
+        ...(event.name === undefined ? {} : { name: event.name }),
+        argumentsDelta: event.argumentsDelta,
+      };
     case "MEMORY_COMMAND":
       return { type: "MEMORY_COMMAND", command: event.command };
     case "USAGE":
@@ -1282,6 +1342,14 @@ function boundedText(value: unknown, maxBytes: number, requireNonEmpty: boolean)
   if (typeof value !== "string") return false;
   if (requireNonEmpty && value.trim().length < 1) return false;
   return Buffer.byteLength(value, "utf8") <= maxBytes;
+}
+
+function boundedToolName(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9_.-]{1,64}$/u.test(value);
+}
+
+function boundedToolId(value: unknown): value is string {
+  return typeof value === "string" && value.length >= 1 && value.length <= 240;
 }
 
 function positiveBoundedInteger(value: number, maximum: number, field: string): number {

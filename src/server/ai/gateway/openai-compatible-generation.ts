@@ -35,12 +35,16 @@ export class OpenAICompatibleGenerationAdapter {
       throw new AIProviderAdapterError("INVALID_REQUEST", { fallbackEligible: false });
     }
     const target = await this.dependencies.outboundPolicy.validate(context.providerBaseUrl);
+    const messages = request.instructions
+      ? [{ role: "system" as const, content: request.instructions }, ...request.messages]
+      : request.messages;
     const payload = JSON.stringify({
       model: request.providerModelId,
-      messages: request.instructions ? [{ role: "system", content: request.instructions }, ...request.messages] : request.messages,
+      messages: messages.map(serializeChatMessage),
       ...(request.maxOutputTokens === undefined ? {} : { max_tokens: request.maxOutputTokens }),
       ...(reasoningEffort === undefined ? {} : { reasoning_effort: reasoningEffort.toLowerCase() }),
       ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
+      ...(request.tools === undefined ? {} : { tools: request.tools, tool_choice: "auto" }),
       stream: true,
       stream_options: { include_usage: true },
     });
@@ -69,9 +73,12 @@ export class OpenAICompatibleGenerationAdapter {
     let started = false;
     let completed = false;
     let providerRequestId: string | undefined;
-    let finishReason: "STOP" | "LENGTH" | "CONTENT_FILTER" | "OTHER" = "OTHER";
+    let finishReason: "STOP" | "LENGTH" | "CONTENT_FILTER" | "TOOL_USE" | "OTHER" = "OTHER";
     let latestUsage: NormalizedProviderUsage = emptyUsage();
     let outputBytes = 0;
+    let sawMeaningfulOutput = false;
+    let sawFinishReason = false;
+    const toolCallIds = new Map<number, string>();
 
     for await (const data of parseSse(response.body, context.signal)) {
       if (data === "[DONE]") {
@@ -91,17 +98,59 @@ export class OpenAICompatibleGenerationAdapter {
       const first = choices[0];
       if (isRecord(first)) {
         const delta = isRecord(first.delta) ? first.delta : null;
+        const reasoning = delta ? extractDisplayableReasoning(delta.reasoning_details) : "";
+        const legacyReasoning = delta
+          ? firstDisplayableString(delta.reasoning_content, delta.reasoning)
+          : "";
+        const reasoningText = reasoning || legacyReasoning;
+        if (reasoningText) {
+          sawMeaningfulOutput = true;
+          outputBytes += Buffer.byteLength(reasoningText, "utf8");
+          if (outputBytes > AI_OPENAI_COMPATIBLE_GENERATION_MAX_OUTPUT_BYTES) throw new AIProviderAdapterError("BAD_RESPONSE", { fallbackEligible: false });
+          yield { type: "REASONING_DELTA", text: reasoningText };
+        }
         const text = delta && typeof delta.content === "string" ? delta.content : "";
         if (text) {
+          sawMeaningfulOutput = true;
           outputBytes += Buffer.byteLength(text, "utf8");
           if (outputBytes > AI_OPENAI_COMPATIBLE_GENERATION_MAX_OUTPUT_BYTES) throw new AIProviderAdapterError("BAD_RESPONSE", { fallbackEligible: false });
           yield { type: "TEXT_DELTA", text };
         }
-        if (typeof first.finish_reason === "string") finishReason = mapFinishReason(first.finish_reason);
+        const toolCalls = delta && Array.isArray(delta.tool_calls) ? delta.tool_calls : [];
+        for (const rawToolCall of toolCalls) {
+          if (!isRecord(rawToolCall)) continue;
+          const index = typeof rawToolCall.index === "number" && Number.isSafeInteger(rawToolCall.index) && rawToolCall.index >= 0
+            ? rawToolCall.index
+            : 0;
+          const functionValue = isRecord(rawToolCall.function) ? rawToolCall.function : null;
+          const callId = safeProviderId(rawToolCall.id) ?? toolCallIds.get(index) ?? `tool-call-${index}`;
+          toolCallIds.set(index, callId);
+          const name = typeof functionValue?.name === "string" ? functionValue.name : undefined;
+          const argumentsDelta = typeof functionValue?.arguments === "string"
+            ? functionValue.arguments
+            : "";
+          if (name !== undefined || argumentsDelta || rawToolCall.id !== undefined) {
+            sawMeaningfulOutput = true;
+            yield {
+              type: "TOOL_CALL_DELTA",
+              callId,
+              index,
+              ...(name === undefined ? {} : { name }),
+              argumentsDelta,
+            };
+          }
+        }
+        if (typeof first.finish_reason === "string") {
+          sawFinishReason = true;
+          finishReason = mapFinishReason(first.finish_reason);
+        }
       }
     }
 
-    if (!started || !completed) throw new AIProviderAdapterError("BAD_RESPONSE", { fallbackEligible: false });
+    const usageObserved = Object.values(latestUsage).some((value) => value !== null);
+    if (!started || (!completed && !sawMeaningfulOutput && !usageObserved && !sawFinishReason)) {
+      throw new AIProviderAdapterError("BAD_RESPONSE", { fallbackEligible: false });
+    }
     yield { type: "COMPLETED", finishReason, usage: latestUsage, providerRequestId };
   }
 }
@@ -185,8 +234,50 @@ function mergeUsage(previous: NormalizedProviderUsage, next: NormalizedProviderU
 function normalizeUsage(value: unknown): NormalizedProviderUsage | null { if (!isRecord(value)) return null; const details = isRecord(value.completion_tokens_details) ? value.completion_tokens_details : null; const promptDetails = isRecord(value.prompt_tokens_details) ? value.prompt_tokens_details : null; return { inputTokens: safeToken(value.prompt_tokens), outputTokens: safeToken(value.completion_tokens), reasoningTokens: safeToken(details?.reasoning_tokens), cacheHitInputTokens: safeToken(promptDetails?.cached_tokens), cacheMissInputTokens: null }; }
 function safeToken(value: unknown): number | null { return Number.isSafeInteger(value) && (value as number) >= 0 ? value as number : null; }
 function safeProviderId(value: unknown): string | undefined { return typeof value === "string" && value.length > 0 && value.length <= 240 ? value : undefined; }
-function mapFinishReason(value: string): "STOP" | "LENGTH" | "CONTENT_FILTER" | "OTHER" { return value === "stop" ? "STOP" : value === "length" ? "LENGTH" : value === "content_filter" ? "CONTENT_FILTER" : "OTHER"; }
+function mapFinishReason(value: string): "STOP" | "LENGTH" | "CONTENT_FILTER" | "TOOL_USE" | "OTHER" { return value === "stop" ? "STOP" : value === "length" ? "LENGTH" : value === "content_filter" ? "CONTENT_FILTER" : value === "tool_calls" || value === "tool_use" || value === "function_call" ? "TOOL_USE" : "OTHER"; }
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
+
+function firstDisplayableString(...values: unknown[]): string {
+  return values.find((value): value is string => typeof value === "string" && value.length > 0) ?? "";
+}
+
+function extractDisplayableReasoning(value: unknown): string {
+  const details = Array.isArray(value) ? value : value ? [value] : [];
+  const chunks: string[] = [];
+  for (const detail of details) {
+    if (!isRecord(detail)) continue;
+    if (detail.type === "reasoning.encrypted") continue;
+    const text = detail.type === "reasoning.summary"
+      ? detail.summary
+      : detail.type === "reasoning.text"
+        ? detail.text
+        : undefined;
+    if (typeof text === "string" && text.length > 0 && !chunks.includes(text)) chunks.push(text);
+  }
+  return chunks.join("");
+}
+
+function serializeChatMessage(message: GenerationProviderRequest["messages"][number]): Record<string, unknown> {
+  if (message.role === "tool") {
+    return {
+      role: "tool",
+      tool_call_id: message.toolCallId,
+      content: message.content,
+    };
+  }
+  if (message.role === "assistant" && message.toolCalls?.length) {
+    return {
+      role: "assistant",
+      content: message.content || null,
+      tool_calls: message.toolCalls.map((toolCall) => ({
+        id: toolCall.id,
+        type: "function",
+        function: { name: toolCall.name, arguments: toolCall.arguments },
+      })),
+    };
+  }
+  return { role: message.role, content: message.content };
+}
 
 class NodeDnsAddressResolver {
   async resolve(hostname: string): Promise<readonly string[]> {

@@ -467,7 +467,7 @@ export class AITutorExecutionService {
           }
         } else if (event.type === "COMPLETED") {
           usage.observe(event.usage);
-          finishReason = event.finishReason;
+          finishReason = event.finishReason === "TOOL_USE" ? "OTHER" : event.finishReason;
         }
       }
     } catch (error) {

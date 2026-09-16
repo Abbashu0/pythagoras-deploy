@@ -250,12 +250,6 @@ export function AIModelsWorkspace() {
       modelId: model.id,
       providerModelId: model.providerModelId,
       providerName: provider.displayName,
-      apiFormat: provider.apiFormat,
-      providerEnabled: provider.enabled,
-      modelEnabled: model.enabled,
-      credentialConfigured: provider.credentialConfigured,
-      supportsStreaming: model.supportsStreaming,
-      supportsReasoning: model.supportsReasoning,
     });
   };
 
