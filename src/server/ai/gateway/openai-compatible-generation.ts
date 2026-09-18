@@ -1,5 +1,5 @@
-import { lookup } from "node:dns/promises";
-import { AI_PROVIDER_HTTP_LIMITS, StrictOutboundTargetPolicy, type AIProviderHttpResponse, type AIProviderHttpTransport, type OutboundTargetPolicy, type ValidatedOutboundTarget } from "./transport";
+import { createProviderOutboundPolicy } from "./protocol";
+import { AI_PROVIDER_HTTP_LIMITS, type AIProviderHttpResponse, type AIProviderHttpTransport, type OutboundTargetPolicy, type ValidatedOutboundTarget } from "./transport";
 import { AIProviderAdapterError } from "./errors";
 import type { GenerationProviderRequest, NormalizedProviderUsage, ProviderAdapterExecutionContext, ProviderGenerationStreamEvent } from "./contracts";
 
@@ -179,7 +179,7 @@ export class NativeOpenAICompatibleHttpTransport implements AIProviderHttpTransp
   }
 }
 
-export function createOpenAICompatibleGenerationAdapter(outboundPolicy: OutboundTargetPolicy = new StrictOutboundTargetPolicy(new NodeDnsAddressResolver())) {
+export function createOpenAICompatibleGenerationAdapter(outboundPolicy: OutboundTargetPolicy = createProviderOutboundPolicy()) {
   return new OpenAICompatibleGenerationAdapter({ outboundPolicy });
 }
 
@@ -277,11 +277,4 @@ function serializeChatMessage(message: GenerationProviderRequest["messages"][num
     };
   }
   return { role: message.role, content: message.content };
-}
-
-class NodeDnsAddressResolver {
-  async resolve(hostname: string): Promise<readonly string[]> {
-    const records = await lookup(hostname, { all: true, verbatim: true });
-    return records.map((record) => record.address);
-  }
 }

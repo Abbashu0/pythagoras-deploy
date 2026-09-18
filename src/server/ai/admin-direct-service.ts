@@ -141,18 +141,21 @@ export class AIAdminDirectService {
       );
     }
     const apiKey = requireCredential(input.apiKey);
-    const candidate = normalizeAIProviderConfigContent({
-      key,
-      displayName: input.displayName,
-      baseUrl: prepareBaseUrl(input.baseUrl, apiFormat),
-      apiFormat,
-      credentialRef: uuidv7(),
-      enabled: true,
-      retentionPolicy: "UNKNOWN",
-      trainingPolicy: "UNKNOWN",
-      zdrSupported: false,
-      zdrRequired: false,
-    });
+    const candidate = normalizeAIProviderConfigContent(
+      {
+        key,
+        displayName: input.displayName,
+        baseUrl: prepareBaseUrl(input.baseUrl, apiFormat),
+        apiFormat,
+        credentialRef: uuidv7(),
+        enabled: true,
+        retentionPolicy: "UNKNOWN",
+        trainingPolicy: "UNKNOWN",
+        zdrSupported: false,
+        zdrRequired: false,
+      },
+      { allowLocalOmniRoute: true },
+    );
     const secret = await this.secrets.create({
       secret: apiKey,
       actor: { type: "ADMIN", actorUserId: input.actor.actorUserId },
@@ -191,18 +194,21 @@ export class AIAdminDirectService {
     const current = this.requireProvider(input.providerId);
     assertRevision(input.expectedRevision);
     const apiFormat = requireApiFormat(input.apiFormat);
-    const candidate = normalizeAIProviderConfigContent({
-      key: current.key,
-      displayName: input.displayName,
-      baseUrl: prepareBaseUrl(input.baseUrl, apiFormat),
-      apiFormat,
-      credentialRef: current.credentialRef,
-      enabled: input.enabled ?? current.enabled,
-      retentionPolicy: current.retentionPolicy,
-      trainingPolicy: current.trainingPolicy,
-      zdrSupported: current.zdrSupported,
-      zdrRequired: current.zdrRequired,
-    });
+    const candidate = normalizeAIProviderConfigContent(
+      {
+        key: current.key,
+        displayName: input.displayName,
+        baseUrl: prepareBaseUrl(input.baseUrl, apiFormat),
+        apiFormat,
+        credentialRef: current.credentialRef,
+        enabled: input.enabled ?? current.enabled,
+        retentionPolicy: current.retentionPolicy,
+        trainingPolicy: current.trainingPolicy,
+        zdrSupported: current.zdrSupported,
+        zdrRequired: current.zdrRequired,
+      },
+      { allowLocalOmniRoute: true },
+    );
     if (apiFormat === current.apiFormat) {
       try {
         const updated = this.providers.update({

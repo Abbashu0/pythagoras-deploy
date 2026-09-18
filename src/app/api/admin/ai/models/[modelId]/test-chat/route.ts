@@ -3,6 +3,7 @@ import {
   AI_OPENAI_COMPATIBLE_GENERATION_ADAPTER_KEY,
   AIProviderGateway,
   ProviderAdapterRegistry,
+  createProviderOutboundPolicy,
   createOpenAICompatibleGenerationAdapter,
   isAIProviderGatewayError,
 } from "@/server/ai/gateway";
@@ -10,7 +11,6 @@ import { assertAITrustedMutation, aiApiError, aiJson, readAIJson, requireAIAdmin
 import { SQLiteAIModelConfigRepository } from "@/server/ai/model-registry";
 import { SQLiteAIProviderConfigRepository } from "@/server/ai/configuration";
 import { createLocalAISecretStore } from "@/server/ai/secrets";
-import { StrictOutboundTargetPolicy } from "@/server/ai/gateway";
 import { getContentDatabase } from "@/server/content";
 import { v7 as uuidv7 } from "uuid";
 
@@ -36,12 +36,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ mo
     if (model.adapterKey !== AI_OPENAI_COMPATIBLE_GENERATION_ADAPTER_KEY) return aiJson({ ok: false, code: "AI_MODEL_ADAPTER_UNSUPPORTED" }, { status: 409 });
     if (!model.enabled) return aiJson({ ok: false, code: "AI_MODEL_DISABLED" }, { status: 409 });
 
-    const outboundPolicy = new StrictOutboundTargetPolicy({
-      async resolve(hostname) {
-        const { lookup } = await import("node:dns/promises");
-        return (await lookup(hostname, { all: true, verbatim: true })).map((record) => record.address);
-      },
-    });
+    const outboundPolicy = createProviderOutboundPolicy();
     const gateway = new AIProviderGateway({
       providerConfigs: new SQLiteAIProviderConfigRepository(database),
       modelConfigs: new SQLiteAIModelConfigRepository(database),

@@ -204,6 +204,7 @@ function modelChatDisabledReason(provider: Provider, model: Model): string | nul
 }
 
 function baseUrlFieldValue(value: string): string {
+  if (/^http:\/\//iu.test(value)) return value;
   return value.replace(/^https?:\/\//iu, "").replace(/\/$/u, "");
 }
 

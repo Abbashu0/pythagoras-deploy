@@ -77,6 +77,7 @@ export {
 } from "./openai-responses-generation";
 export {
   AI_PROVIDER_HTTP_LIMITS,
+  LocalOmniRouteOutboundTargetPolicy,
   REDACTED_PROVIDER_HEADER_NAMES,
   StrictOutboundTargetPolicy,
   isDisallowedOutboundAddress,

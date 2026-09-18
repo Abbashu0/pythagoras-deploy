@@ -632,10 +632,17 @@ export const PasswordInput = React.forwardRef<
    URLInput / SlugField / CodeField
    ========================================================================== */
 
-export const URLInput = React.forwardRef<
-  HTMLInputElement,
-  Omit<TextFieldProps, "prefix" | "type">
->(function URLInput({ placeholder = "api.example.com/v1", ...props }, ref) {
+export type URLInputProps = Omit<TextFieldProps, "prefix" | "type"> & {
+  /** Hide the decorative scheme prefix when the value already includes one. */
+  schemePrefix?: string | null;
+};
+
+export const URLInput = React.forwardRef<HTMLInputElement, URLInputProps>(
+  function URLInput(
+    { placeholder = "api.example.com/v1", schemePrefix = "https://", value, ...props },
+    ref,
+  ) {
+  const hasExplicitScheme = typeof value === "string" && /^https?:\/\//iu.test(value.trim());
   return (
     <TextField
       ref={ref}
@@ -645,12 +652,14 @@ export const URLInput = React.forwardRef<
       divided
       spellCheck={false}
       autoComplete="off"
-      prefix={<span className="ltr-island font-mono text-2xs">https://</span>}
+      value={value}
+      prefix={!hasExplicitScheme && schemePrefix ? <span className="ltr-island font-mono text-2xs">{schemePrefix}</span> : undefined}
       placeholder={placeholder}
       {...props}
     />
   );
-});
+  },
+);
 
 /**
  * SlugField — technical keys (`openrouter`, `pi-tutor-global`). Normalises to

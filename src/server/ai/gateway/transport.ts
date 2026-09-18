@@ -1,4 +1,5 @@
 import { isIP } from "node:net";
+import { isLocalOmniRouteUrl, LOCAL_OMNIROUTE_PORT } from "../local-omniroute";
 import { AIProviderGatewayError, safeProviderErrorMessage } from "./errors";
 
 export const AI_PROVIDER_HTTP_LIMITS = {
@@ -116,6 +117,39 @@ export class StrictOutboundTargetPolicy implements OutboundTargetPolicy {
       port,
       resolvedAddresses,
     };
+  }
+}
+
+/**
+ * Normal Provider traffic remains strict HTTPS/public-network traffic. The
+ * only local exception is the exact OmniRoute development gateway target.
+ */
+export class LocalOmniRouteOutboundTargetPolicy implements OutboundTargetPolicy {
+  private readonly strict: StrictOutboundTargetPolicy;
+
+  constructor(resolver: OutboundAddressResolver) {
+    this.strict = new StrictOutboundTargetPolicy(resolver);
+  }
+
+  async validate(target: string | URL): Promise<ValidatedOutboundTarget> {
+    let url: URL;
+    try {
+      url = target instanceof URL ? new URL(target.toString()) : new URL(target);
+    } catch {
+      return this.strict.validate(target);
+    }
+
+    if (isLocalOmniRouteUrl(url)) {
+      const hostname = url.hostname.replace(/^\[|\]$/gu, "").toLowerCase();
+      return {
+        url: url.toString(),
+        hostname,
+        port: LOCAL_OMNIROUTE_PORT,
+        resolvedAddresses: [hostname === "::1" ? "::1" : "127.0.0.1"],
+      };
+    }
+
+    return this.strict.validate(url);
   }
 }
 

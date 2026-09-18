@@ -1,6 +1,9 @@
 import { lookup } from "node:dns/promises";
 import type { AIProviderApiFormat } from "@/lib/ai-provider-format";
-import { StrictOutboundTargetPolicy, type OutboundTargetPolicy } from "./transport";
+import {
+  LocalOmniRouteOutboundTargetPolicy,
+  type OutboundTargetPolicy,
+} from "./transport";
 
 export const AI_OPENAI_RESPONSES_GENERATION_ADAPTER_KEY =
   "openai-responses-generation-v1" as const;
@@ -20,7 +23,7 @@ export function adapterKeyForProviderApiFormat(
 }
 
 export function createProviderOutboundPolicy(): OutboundTargetPolicy {
-  return new StrictOutboundTargetPolicy({
+  return new LocalOmniRouteOutboundTargetPolicy({
     resolve: async (hostname) =>
       (await lookup(hostname, { all: true, verbatim: true })).map(
         (record) => record.address,

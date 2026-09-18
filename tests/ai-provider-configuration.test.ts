@@ -337,6 +337,31 @@ test("Provider base URLs are normalized and reject credentials, unsafe schemes, 
   );
 });
 
+test("local Admin OmniRoute opt-in accepts only the exact local gateway target", () => {
+  const base = providerContent(uuidv7(), { key: "omniroute-provider", enabled: true });
+  assert.equal(
+    normalizeAIProviderConfigContent(
+      { ...base, baseUrl: "http://localhost:20128/v1" },
+      { allowLocalOmniRoute: true },
+    ).baseUrl,
+    "http://localhost:20128/v1",
+  );
+  assert.throws(
+    () => normalizeAIProviderConfigContent({ ...base, baseUrl: "http://localhost:20128/v1" }),
+    (error) => error instanceof AIProviderConfigError && error.code === "AI_PROVIDER_CONFIG_INVALID",
+  );
+  for (const baseUrl of [
+    "http://localhost:20129/v1",
+    "http://localhost:20128/other",
+    "http://192.168.0.105:20128/v1",
+  ]) {
+    assert.throws(
+      () => normalizeAIProviderConfigContent({ ...base, baseUrl }, { allowLocalOmniRoute: true }),
+      (error) => error instanceof AIProviderConfigError && error.code === "AI_PROVIDER_CONFIG_INVALID",
+    );
+  }
+});
+
 test("secret rotation preserves credentialRef, increments version, and keeps the old secret on failed input", async () => {
   const fixture = createFixture();
   const firstSecret = fakeSecret();

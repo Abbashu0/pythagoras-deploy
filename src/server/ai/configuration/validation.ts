@@ -8,6 +8,7 @@ import {
 } from "./contracts";
 import { AIProviderConfigError } from "./errors";
 import { isAISecretCredentialRef } from "../secrets/contracts";
+import { isLocalOmniRouteUrl } from "../local-omniroute";
 
 const PROVIDER_KEY_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 const MAX_BASE_URL_LENGTH = 2_048;
@@ -15,6 +16,8 @@ const MAX_BASE_URL_LENGTH = 2_048;
 export interface AIProviderConfigValidationOptions {
   /** Only isolated tests may opt into loopback HTTP URLs. */
   allowLocalHttp?: boolean;
+  /** The local-admin AI surface may explicitly opt into the OmniRoute allowlist. */
+  allowLocalOmniRoute?: boolean;
 }
 
 export function normalizeAIProviderConfigContent(
@@ -140,10 +143,12 @@ function normalizeBaseUrl(
     url.protocol === "http:" &&
     options.allowLocalHttp === true &&
     isLoopbackHost(url.hostname);
-  if (!isHttps && !isLocalHttp) {
+  const isAllowedLocalOmniRoute =
+    options.allowLocalOmniRoute === true && isLocalOmniRouteUrl(url);
+  if (!isHttps && !isLocalHttp && !isAllowedLocalOmniRoute) {
     invalid("Provider base URL must use HTTPS.");
   }
-  if (enabled && !isHttps) {
+  if (enabled && !isHttps && !isAllowedLocalOmniRoute) {
     invalid("Enabled Provider configurations must use HTTPS.");
   }
 

@@ -14,6 +14,7 @@ import {
   AIProviderAdapterRegistryError,
   AIProviderGatewayError,
   AI_PROVIDER_HTTP_LIMITS,
+  createProviderOutboundPolicy,
   ProviderAdapterRegistry,
   StrictOutboundTargetPolicy,
   isDisallowedOutboundAddress,
@@ -1054,6 +1055,22 @@ test("Strict outbound target policy rejects restricted resolved addresses and re
     "x-api-key": "[REDACTED]",
     "content-type": "application/json",
   });
+});
+
+test("Provider outbound policy permits only the exact local OmniRoute target", async () => {
+  const policy = createProviderOutboundPolicy();
+  const target = await policy.validate("http://localhost:20128/v1");
+  assert.equal(target.url, "http://localhost:20128/v1");
+  assert.equal(target.port, 20128);
+  assert.deepEqual(target.resolvedAddresses, ["127.0.0.1"]);
+
+  for (const value of [
+    "http://localhost:20129/v1",
+    "http://localhost:20128/other",
+    "http://192.168.0.105:20128/v1",
+  ]) {
+    await assert.rejects(() => policy.validate(value), expectGatewayCode("CONFIGURATION"));
+  }
 });
 
 test("Gateway request validation rejects client-shaped provider selection and unsafe generation bounds", async () => {

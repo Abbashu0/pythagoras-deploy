@@ -2,7 +2,8 @@ import { lookup } from "node:dns/promises";
 
 import { getContentDatabase, type ContentDatabase } from "../content/database";
 import { SQLiteAIProviderConfigRepository } from "./configuration";
-import { AIProviderGatewayError, AI_PROVIDER_HTTP_LIMITS, StrictOutboundTargetPolicy, type AIProviderHttpRequest, type AIProviderHttpResponse, type AIProviderHttpTransport, type OutboundTargetPolicy, type ValidatedOutboundTarget } from "./gateway";
+import { AIProviderGatewayError, AI_PROVIDER_HTTP_LIMITS, createProviderOutboundPolicy, type AIProviderHttpRequest, type AIProviderHttpResponse, type AIProviderHttpTransport, type OutboundTargetPolicy, type ValidatedOutboundTarget } from "./gateway";
+import { isLocalOmniRouteUrl } from "./local-omniroute";
 import { createLocalAISecretStore, type AISecretStoreAdapter } from "./secrets";
 
 export const AI_PROVIDER_CONNECTION_STRATEGY = "OPENAI_COMPATIBLE_MODELS_V1" as const;
@@ -52,7 +53,7 @@ export class AIProviderConnectionTester {
   constructor(private readonly database: ContentDatabase, dependencies: AIProviderConnectionTesterDependencies = {}) {
     this.providers = new SQLiteAIProviderConfigRepository(database);
     this.secrets = dependencies.secrets ?? createLocalAISecretStore(database);
-    this.outboundPolicy = dependencies.outboundPolicy ?? new StrictOutboundTargetPolicy(new NodeDnsAddressResolver());
+    this.outboundPolicy = dependencies.outboundPolicy ?? createProviderOutboundPolicy();
     this.transport = dependencies.transport ?? new NativeFetchAIProviderHttpTransport();
     this.clock = dependencies.clock ?? Date.now;
     this.timeoutMs = dependencies.timeoutMs ?? AI_PROVIDER_CONNECTION_TIMEOUT_MS;
@@ -177,7 +178,7 @@ function buildModelsUrl(baseUrl: string, pathAndQuery: string): string {
   const base = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
   const path = pathAndQuery.replace(/^\/+/, "");
   const url = new URL(path, base);
-  if (url.protocol !== "https:") throw new AIProviderGatewayError("CONFIGURATION", "The Provider target is not secure.");
+  if (url.protocol !== "https:" && !isLocalOmniRouteUrl(url)) throw new AIProviderGatewayError("CONFIGURATION", "The Provider target is not secure.");
   return url.toString();
 }
 

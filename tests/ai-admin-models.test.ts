@@ -316,6 +316,24 @@ test("local AI Admin creates provider/model directly with safe defaults and exac
   }
 });
 
+test("local AI Admin accepts the exact OmniRoute development gateway target", async () => {
+  const f = fixture();
+  try {
+    const provider = await f.service.createProvider({
+      displayName: "OmniRoute",
+      baseUrl: "http://localhost:20128/v1",
+      apiFormat: "OPENAI_CHAT_COMPLETIONS",
+      apiKey: "omniroute-local-key",
+      actor: f.actor,
+    });
+    assert.equal(provider.baseUrl, "http://localhost:20128/v1");
+    assert.equal(provider.enabled, true);
+    assert.equal(provider.credentialConfigured, true);
+  } finally {
+    f.close();
+  }
+});
+
 test("API format changes synchronise Generation adapter identity and stale revisions fail closed", async () => {
   const f = fixture();
   try {
