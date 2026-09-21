@@ -38,6 +38,7 @@ function RootStack() {
 
   return (
     <Stack screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="chat" options={{ headerShown: false }} />
       <Stack.Screen name="profile" options={profileSheetOptions} />
       <Stack.Screen name="settings" options={settingsSheetOptions} />
       <Stack.Screen

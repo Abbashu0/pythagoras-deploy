@@ -11,6 +11,8 @@ The former `public/pythagoras/` vanilla HTML/CSS/JS Student harness was retired 
 
 The production Student client is `mobile/` with Expo SDK 57, React Native 0.86.x, React, TypeScript 6, Expo Router, and `@expo/ui`. The current approved client includes the four-item NativeTabs shell, Home with the approved Banner carousel and profile/settings actions, Materials, native Stack destinations, Settings/Appearance, Profile, and the Arabic Question Bank with search, Reader, local Favorites, and its fixed two-level Arabic section/topic selector control row.
 
+The current Mobile AI milestone adds an under-review iOS AI entry button beside the four normal NativeTabs. The button opens an empty UI-only Chat screen without SearchBar, backend calls, or Agent 1 integration. Agent 1 and all AI backend connections remain unconnected.
+
 The Arabic Question Bank currently enters Grammar directly. Its nine Product-defined Grammar topics and direct Literature bank come from the published Public Layout: the iOS control row uses a stable native `GlassView` trigger with a SwiftUI `Popover`, Android uses native Compose presentation, Search is scoped to the selected Bank, and Favorites remain subject-wide. Literature has no further Mobile subtopic selector yet; the Product-defined two-level section choice is now part of the approved shell.
 
 For current visual and Product UI rules, read `docs/product/DESIGN-SYSTEM.md`. That document describes the active Pythagoras design language and is subordinate to newer explicit Product Owner decisions.

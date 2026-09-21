@@ -52,7 +52,7 @@ import type {
 } from "../circuit-breaker/contracts";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
-const MAX_TIMEOUT_MS = 120_000;
+const MAX_TIMEOUT_MS = 300_000;
 const MAX_SELECTION_ATTEMPTS = 5;
 const MAX_TEXT_BYTES = 256 * 1_024;
 const MAX_EMBEDDING_BATCH = 128;

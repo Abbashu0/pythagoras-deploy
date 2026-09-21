@@ -16,7 +16,6 @@ import {
   Eraser,
   GripVertical,
   LoaderCircle,
-  MessageSquare,
   Pencil,
   Send,
   Square,
@@ -48,6 +47,7 @@ import {
   type EphemeralChatTurn,
   workDurationSeconds,
 } from "./ephemeral-chat-state";
+import { ModelBrandIcon } from "./model-brand-icon";
 
 export interface EphemeralModelChatTarget {
   modelId: string;
@@ -509,9 +509,10 @@ export function EphemeralModelChat({
       >
         <div className="flex min-w-0 items-start gap-3">
           <GripVertical className="mt-1 size-4 shrink-0 text-fg-quaternary" aria-hidden />
-          <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-accent-subtle text-accent-text">
-            <MessageSquare className="size-4" aria-hidden />
-          </span>
+          <ModelBrandIcon
+            providerModelId={target.providerModelId}
+            className="size-9 rounded-lg border-0 bg-accent-subtle text-accent-text"
+          />
           <div className="min-w-0">
             <p dir="ltr" title={target.providerModelId} className="line-clamp-2 break-all font-mono text-sm font-semibold leading-[1.45] text-fg">
               {target.providerModelId}
@@ -553,7 +554,11 @@ export function EphemeralModelChat({
         >
           {turns.length === 0 ? (
             <div className="flex min-h-full flex-col items-center justify-center py-20 text-center">
-              <MessageSquare className="size-8 text-fg-quaternary" aria-hidden />
+              <ModelBrandIcon
+                providerModelId={target.providerModelId}
+                className="size-8 border-0 bg-transparent"
+                markSize={24}
+              />
               <p className="mt-3 text-sm font-medium text-fg">Model ready</p>
             </div>
           ) : (

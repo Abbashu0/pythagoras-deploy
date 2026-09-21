@@ -1,6 +1,23 @@
 import { NativeTabs } from 'expo-router/unstable-native-tabs';
+import { useEffect } from 'react';
+import { useRouter, useSegments } from 'expo-router';
+
+import {
+  getLastNormalTab,
+  rememberNormalTab,
+  resolveNormalTabFromSegments,
+} from '@/navigation/last-normal-tab';
 
 export default function TabsLayout() {
+  const isIOS = process.env.EXPO_OS === 'ios';
+  const router = useRouter();
+  const segments = useSegments();
+
+  useEffect(() => {
+    const normalTab = resolveNormalTabFromSegments(segments);
+    if (normalTab) rememberNormalTab(normalTab);
+  }, [segments]);
+
   return (
     <NativeTabs>
       <NativeTabs.Trigger name="index">
@@ -33,6 +50,27 @@ export default function TabsLayout() {
           md="video_library"
         />
         <NativeTabs.Trigger.Label>المحاضرات</NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
+
+      <NativeTabs.Trigger
+        name="ai"
+        role={isIOS ? 'search' : undefined}
+        hidden={!isIOS}
+        disabled={isIOS}
+        accessibilityLabel="الذكاء الاصطناعي"
+        listeners={{
+          tabPress: () => {
+            if (isIOS) {
+              router.push({
+                pathname: '/chat',
+                params: { returnTab: getLastNormalTab() },
+              });
+            }
+          },
+        }}
+      >
+        <NativeTabs.Trigger.Icon sf="sparkles" md="auto_awesome" />
+        <NativeTabs.Trigger.Label>الذكاء الاصطناعي</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
     </NativeTabs>
   );
