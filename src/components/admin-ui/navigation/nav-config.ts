@@ -31,7 +31,7 @@ export interface NavItem {
   href: string;
   icon?: LucideIcon;
   badge?: NavBadge;
-  /** Nested children. One level only — deeper trees belong in the page. */
+  /** Nested, data-driven children. */
   children?: NavItem[];
   /** Not yet available. Rendered visibly disabled with a reason. */
   disabled?: boolean;
@@ -86,20 +86,16 @@ export function resolveNavTrail(
     (pathname === href || pathname.startsWith(`${href}/`));
 
   for (const section of sections) {
-    for (const item of section.items) {
-      if (matches(item.href)) {
-        candidates.push({ section, trail: [item], length: item.href.length });
-      }
-      for (const child of item.children ?? []) {
-        if (matches(child.href)) {
-          candidates.push({
-            section,
-            trail: [item, child],
-            length: child.href.length,
-          });
+    const walk = (items: NavItem[], ancestors: NavItem[]) => {
+      for (const item of items) {
+        const trail = [...ancestors, item];
+        if (matches(item.href)) {
+          candidates.push({ section, trail, length: item.href.length });
         }
+        if (item.children?.length) walk(item.children, trail);
       }
-    }
+    };
+    walk(section.items, []);
   }
 
   if (candidates.length === 0) return null;

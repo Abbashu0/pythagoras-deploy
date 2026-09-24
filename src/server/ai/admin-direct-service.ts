@@ -946,6 +946,8 @@ function findModelDependencies(
   modelId: string,
 ): Dependency[] {
   const checks: Array<[string, string]> = [
+    ["Agent 1 primary route", "select count(*) as count from ai_agent_runtime_configs where primary_model_config_id = ?"],
+    ["Agent 1 fallback route", "select count(*) as count from ai_agent_runtime_fallback_models where model_config_id = ?"],
     ["Tutor configurations", "select count(*) as count from ai_tutor_config_revisions where generation_model_config_id = ?"],
     ["Tutor fallback configurations", "select count(*) as count from ai_tutor_config_revisions where json_valid(fallback_generation_model_config_ids) and exists (select 1 from json_each(fallback_generation_model_config_ids) where value = ?)"],
     ["Retrieval configurations", "select count(*) as count from ai_retrieval_config_revisions where embedding_model_config_id = ? or rerank_model_config_id = ?"],

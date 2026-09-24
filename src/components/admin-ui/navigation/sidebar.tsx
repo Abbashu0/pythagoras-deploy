@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   ChevronDown,
@@ -20,6 +21,17 @@ import { CountBadge, StatusDot } from "../status/status-badge";
 import { IconButton } from "../primitives/button";
 import { Shortcut } from "../primitives/kbd";
 import {
+  Menu,
+  MenuContent,
+  MenuItem,
+  MenuLabel,
+  MenuSub,
+  MenuSubContent,
+  MenuSubTrigger,
+  MenuTrigger,
+} from "../overlays/menu";
+import {
+  flattenNav,
   isNavItemActive,
   type NavBadge,
   type NavItem,
@@ -104,7 +116,7 @@ export function Sidebar({
   );
 
   const allItems = React.useMemo(
-    () => sections.flatMap((s) => s.items.flatMap((i) => [i, ...(i.children ?? [])])),
+    () => sections.flatMap((section) => flattenNav([section])),
     [sections],
   );
   const pinnedItems = React.useMemo(
@@ -376,6 +388,23 @@ function NavRow({ item, depth }: { item: NavItem; depth: number }) {
       <span className={rowClass} aria-disabled title={item.disabledReason}>
         {body}
       </span>
+    ) : collapsed && hasChildren ? (
+      <Menu modal={false}>
+        <MenuTrigger asChild>
+          <button
+            type="button"
+            aria-label={item.label}
+            aria-haspopup="menu"
+            className={rowClass}
+          >
+            {body}
+          </button>
+        </MenuTrigger>
+        <MenuContent side="left" align="start" aria-label={item.label}>
+          <MenuLabel>{item.label}</MenuLabel>
+          <CollapsedNavItems items={item.children ?? []} pathname={pathname} />
+        </MenuContent>
+      </Menu>
     ) : hasChildren ? (
       <button
         type="button"
@@ -395,7 +424,7 @@ function NavRow({ item, depth }: { item: NavItem; depth: number }) {
       </Link>
     );
 
-  const wrapped = collapsed ? (
+  const wrapped = collapsed && !hasChildren ? (
     <Tooltip
       side="left"
       content={
@@ -479,6 +508,60 @@ function NavRow({ item, depth }: { item: NavItem; depth: number }) {
           ) : null}
         </AnimatePresence>
       ) : null}
+    </>
+  );
+}
+
+function CollapsedNavItems({
+  items,
+  pathname,
+}: {
+  items: NavItem[];
+  pathname: string;
+}) {
+  const router = useRouter();
+  const visibleItems = items.filter((item) => !item.hidden);
+  return (
+    <>
+      {visibleItems.map((item) => {
+        const Icon = item.icon;
+        if (item.disabled || item.href === "#") {
+          return (
+            <MenuItem
+              key={item.key}
+              disabled
+              icon={Icon ? <Icon aria-hidden /> : undefined}
+              hint={item.disabledReason}
+            >
+              {item.label}
+            </MenuItem>
+          );
+        }
+        if (item.children?.length) {
+          return (
+            <MenuSub key={item.key}>
+              <MenuSubTrigger icon={Icon ? <Icon aria-hidden /> : undefined}>
+                {item.label}
+              </MenuSubTrigger>
+              <MenuSubContent aria-label={item.label}>
+                <MenuLabel>{item.label}</MenuLabel>
+                <CollapsedNavItems items={item.children} pathname={pathname} />
+              </MenuSubContent>
+            </MenuSub>
+          );
+        }
+        return (
+          <MenuItem
+            key={item.key}
+            icon={Icon ? <Icon aria-hidden /> : undefined}
+            aria-current={pathname === item.href ? "page" : undefined}
+            className={pathname === item.href ? "bg-selected text-fg" : undefined}
+            onSelect={() => router.push(item.href)}
+          >
+            {item.label}
+          </MenuItem>
+        );
+      })}
     </>
   );
 }

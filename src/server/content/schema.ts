@@ -2425,6 +2425,56 @@ export const aiModelConfigs = sqliteTable(
   ],
 );
 
+/** Singleton operator-owned Agent 1 runtime routing control. */
+export const aiAgentRuntimeConfigs = sqliteTable(
+  "ai_agent_runtime_configs",
+  {
+    configKey: text("config_key").primaryKey(),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(false),
+    primaryModelConfigId: text("primary_model_config_id").references(
+      () => aiModelConfigs.id,
+      { onDelete: "restrict" },
+    ),
+    revision: integer("revision").notNull().default(1),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    createdBy: text("created_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+    updatedBy: text("updated_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+  },
+  (table) => [
+    check("ai_agent_runtime_configs_singleton_key", sql`${table.configKey} = 'agent-1'`),
+    check("ai_agent_runtime_configs_enabled_boolean", sql`${table.enabled} in (0,1)`),
+    check("ai_agent_runtime_configs_revision_positive", sql`${table.revision} >= 1`),
+    check("ai_agent_runtime_configs_created_nonnegative", sql`${table.createdAt} >= 0`),
+    check("ai_agent_runtime_configs_timestamps_ordered", sql`${table.updatedAt} >= ${table.createdAt}`),
+    index("ai_agent_runtime_configs_primary_model_index").on(table.primaryModelConfigId),
+  ],
+);
+
+/** Relational ordered fallback chain; the model registry remains canonical. */
+export const aiAgentRuntimeFallbackModels = sqliteTable(
+  "ai_agent_runtime_fallback_models",
+  {
+    configKey: text("config_key").notNull().references(
+      () => aiAgentRuntimeConfigs.configKey,
+      { onDelete: "restrict" },
+    ),
+    modelConfigId: text("model_config_id").notNull().references(
+      () => aiModelConfigs.id,
+      { onDelete: "restrict" },
+    ),
+    position: integer("position").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.configKey, table.position] }),
+    uniqueIndex("ai_agent_runtime_fallback_model_unique").on(table.configKey, table.modelConfigId),
+    index("ai_agent_runtime_fallback_model_index").on(table.modelConfigId),
+    check("ai_agent_runtime_fallback_position_valid", sql`${table.position} between 1 and 3`),
+    check("ai_agent_runtime_fallback_created_nonnegative", sql`${table.createdAt} >= 0`),
+  ],
+);
+
 /** Governed Circuit Breaker policy identity; behavior lives in immutable revisions. */
 export const aiCircuitBreakerPolicies = sqliteTable(
   "ai_circuit_breaker_policies",

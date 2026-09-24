@@ -19,6 +19,7 @@ import { isEphemeralModelChatError } from "@/server/ai/ephemeral-model-chat-serv
 import { isAIProviderConfigError } from "@/server/ai/configuration";
 import { isAIModelConfigError } from "@/server/ai/model-registry";
 import { isAISecretStoreError } from "@/server/ai/secrets";
+import { isAIAgent1RuntimeError } from "@/server/ai/agent-1-runtime/errors";
 
 const LOCAL_JSON_MAX_BYTES = 64 * 1024;
 
@@ -72,6 +73,28 @@ export function localJson(
 }
 
 export function localApiError(error: unknown): NextResponse {
+  if (isAIAgent1RuntimeError(error)) {
+    const status =
+      error.code === "AI_AGENT_1_RUNTIME_MODEL_NOT_FOUND"
+        ? 404
+        : error.code === "AI_AGENT_1_RUNTIME_CONFLICT" ||
+            error.code === "AI_AGENT_1_RUNTIME_MODEL_NOT_READY" ||
+            error.code === "AI_AGENT_1_RUNTIME_PRIMARY_REQUIRED"
+          ? 409
+          : error.code === "AI_AGENT_1_RUNTIME_CORRUPT"
+            ? 503
+            : 400;
+    return localJson(
+      {
+        ok: false,
+        code: error.code,
+        message: error.message,
+        ...(error.details ? { details: error.details } : {}),
+      },
+      { status },
+    );
+  }
+
   if (isEphemeralModelChatError(error)) {
     const status =
       error.code === "AI_EPHEMERAL_MODEL_NOT_FOUND"

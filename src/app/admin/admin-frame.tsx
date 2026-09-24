@@ -25,7 +25,10 @@ export function AdminFrame({ children }: { children: React.ReactNode }) {
     const items: Crumb[] = [];
     if (trail?.section.label) items.push({ label: trail.section.label });
     for (const item of trail?.trail ?? []) {
-      items.push({ label: item.label, href: item.href });
+      items.push({
+        label: item.label,
+        ...(item.children?.length ? {} : { href: item.href }),
+      });
     }
     return items;
   }, [trail]);

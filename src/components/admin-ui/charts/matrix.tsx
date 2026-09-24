@@ -441,6 +441,8 @@ export interface PipelineStage {
   /** Stage timing. */
   durationMs?: number;
   state: "ok" | "warning" | "failed" | "skipped" | "running";
+  /** Domain-specific idle/ready wording while retaining the semantic state. */
+  statusLabel?: string;
   /** Extra key/value detail shown under the stage. */
   detail?: { label: string; value: React.ReactNode }[];
   note?: string;
@@ -563,13 +565,13 @@ export function PipelineFlow({
                   </div>
                 ) : (
                   <div className={cn("mt-1.5 text-xs font-medium", style.text)}>
-                    {stage.state === "skipped"
+                    {stage.statusLabel ?? (stage.state === "skipped"
                       ? "متجاوَز"
                       : stage.state === "failed"
                         ? "فشل"
                         : stage.state === "running"
                           ? "جارٍ"
-                          : "تم"}
+                          : "تم")}
                   </div>
                 )}
 
