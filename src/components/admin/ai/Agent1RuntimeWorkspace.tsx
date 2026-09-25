@@ -35,7 +35,6 @@ import {
 import { Panel, PanelHeader } from "@/components/admin-ui/primitives/surface";
 import { Spinner } from "@/components/admin-ui/primitives/spinner";
 import { Badge, StatusBadge } from "@/components/admin-ui/status/status-badge";
-import { Agent1DevPairingPanel } from "./Agent1DevPairingPanel";
 
 interface RuntimeResponse extends AIAgent1RuntimeSnapshot {
   ok: true;
@@ -252,8 +251,6 @@ export function Agent1RuntimeWorkspace() {
         pending={savingEnabled}
         onToggle={() => void setEnabled(!enabled)}
       />
-
-      <Agent1DevPairingPanel ready={Boolean(snapshot.config.enabled && snapshot.primary?.ready)} />
 
       {actionError ? (
         <InlineNote tone={conflict ? "warning" : "danger"}>

@@ -5,11 +5,12 @@ import path from "node:path";
 import test from "node:test";
 import { v7 as uuidv7 } from "uuid";
 
-import { Agent1DevPairingRegistry } from "../src/server/ai/agent-1-runtime/dev-pairing";
 import {
   Agent1DevChatError,
   Agent1DevChatService,
+  type Agent1DevChatStreamEvent,
 } from "../src/server/ai/agent-1-runtime/ephemeral-chat-service";
+import { createAgent1DevChatStreamResponse } from "../src/server/ai/agent-1-runtime/dev-chat-stream-response";
 import { AIAdminDirectService } from "../src/server/ai/admin-direct-service";
 import type {
   AIProviderHttpRequest,
@@ -59,7 +60,9 @@ class FallbackTransport implements AIProviderHttpTransport {
       status: 200,
       headers: { "content-type": "text/event-stream" },
       body: bytes([
-        'data: {"id":"dev-chat","choices":[{"delta":{"content":"رد مؤقت"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":2}}\n\n',
+        'data: {"id":"dev-chat","choices":[{"delta":{"reasoning_content":"PRIVATE REASONING MUST NOT LEAVE SERVER"}}]}\n\n',
+        'data: {"id":"dev-chat","choices":[{"delta":{"content":"رد "}}]}\n\n',
+        'data: {"id":"dev-chat","choices":[{"delta":{"content":"مؤقت"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":2}}\n\n',
         "data: [DONE]\n\n",
       ].join("")),
     };
@@ -163,43 +166,94 @@ function aiTableCounts(database: ContentDatabase): Record<string, number> {
   );
 }
 
-test("one-time development pairing expires, rate-limits, and authorizes only bounded memory sessions", () => {
-  let now = BASE_TIME;
-  const registry = new Agent1DevPairingRegistry({
-    now: () => now,
-    createCode: () => "0123456789abcdefabcd",
-    createToken: () => "t".repeat(48),
-  });
-
-  const issued = registry.issueCode();
-  assert.equal(issued.expiresAt, BASE_TIME + 120_000);
-  const paired = registry.redeemCode(issued.code);
-  assert.equal(paired.ok, true);
-  if (!paired.ok) return;
-
-  assert.equal(registry.redeemCode(issued.code).ok, false);
-  for (let request = 0; request < 32; request += 1) {
-    assert.equal(registry.authorizeRequest(paired.token), true);
-  }
-  assert.equal(registry.authorizeRequest(paired.token), false);
-
-  const secondPairing = registry.issueCode();
-  const secondSession = registry.redeemCode(secondPairing.code);
-  assert.equal(secondSession.ok, true);
-  if (!secondSession.ok) return;
-  registry.revokeSession(secondSession.token);
-  assert.equal(registry.authorizeRequest(secondSession.token), false);
-
-  const expiring = registry.issueCode();
-  now += 120_001;
-  assert.equal(registry.redeemCode(expiring.code).ok, false);
-});
-
-test("mobile inference is development-only and the request cannot choose a model", () => {
+test("direct mobile chat is development-only and accepts only the server-owned route", () => {
   assert.equal(isDevMobileChatEnabled("development"), true);
   assert.equal(isDevMobileChatEnabled("production"), false);
   assert.equal(isDevMobileChatEnabled("test"), false);
+  assert.doesNotThrow(() => assertDevAgent1Fields({ messages: [] }, ["messages"]));
   assert.throws(() => assertDevAgent1Fields({ messages: [], modelId: "client-choice" }, ["messages"]));
+});
+
+test("development chat response flushes each NDJSON delta before generation completes", async () => {
+  let releaseSecondDelta: () => void = () => {};
+  const waitingForSecondDelta = new Promise<void>((resolve) => {
+    releaseSecondDelta = resolve;
+  });
+  const response = createAgent1DevChatStreamResponse(
+    new AbortController().signal,
+    async function* () {
+      yield { type: "started" };
+      yield { type: "text_delta", text: "الرد " };
+      await waitingForSecondDelta;
+      yield { type: "text_delta", text: "تدريجي" };
+      yield { type: "completed" };
+    },
+  );
+
+  assert.equal(response.headers.get("content-type"), "application/x-ndjson; charset=utf-8");
+  const reader = response.body?.getReader();
+  assert.ok(reader);
+  const decoder = new TextDecoder();
+  const first = await reader.read();
+  assert.deepEqual(JSON.parse(decoder.decode(first.value)), {
+    type: "started",
+  });
+
+  const firstText = await reader.read();
+  assert.deepEqual(JSON.parse(decoder.decode(firstText.value)), {
+    type: "text_delta",
+    text: "الرد ",
+  });
+  releaseSecondDelta();
+  const second = await reader.read();
+  assert.deepEqual(JSON.parse(decoder.decode(second.value)), {
+    type: "text_delta",
+    text: "تدريجي",
+  });
+  const done = await reader.read();
+  assert.deepEqual(JSON.parse(decoder.decode(done.value)), { type: "completed" });
+  assert.equal((await reader.read()).done, true);
+  reader.releaseLock();
+});
+
+test("development chat stream error frames never expose provider detail", async () => {
+  const response = createAgent1DevChatStreamResponse(
+    new AbortController().signal,
+    async function* () {
+      yield { type: "started" };
+      yield { type: "text_delta", text: "جزء" };
+      throw new Agent1DevChatError("PROVIDER_FAILED", "private-provider-detail");
+    },
+  );
+  const reader = response.body?.getReader();
+  assert.ok(reader);
+  const decoder = new TextDecoder();
+  await reader.read();
+  await reader.read();
+  const errorFrame = await reader.read();
+  const errorText = decoder.decode(errorFrame.value);
+  assert.deepEqual(JSON.parse(errorText), { type: "error", code: "PROVIDER_FAILED" });
+  assert.equal(errorText.includes("private-provider-detail"), false);
+  assert.equal((await reader.read()).done, true);
+  reader.releaseLock();
+});
+
+test("cancelling the mobile stream aborts the Agent 1 stream runner", async () => {
+  const response = createAgent1DevChatStreamResponse(
+    new AbortController().signal,
+    async function* (signal) {
+      yield { type: "started" };
+      await new Promise<void>((resolve) => {
+        signal.addEventListener("abort", () => resolve(), { once: true });
+      });
+    },
+  );
+  const reader = response.body?.getReader();
+  assert.ok(reader);
+  await reader.read();
+  await reader.cancel();
+  assert.equal((await reader.read()).done, true);
+  reader.releaseLock();
 });
 
 test("Agent 1 temporary chat follows the saved route and creates no chat, accounting, or telemetry rows", async () => {
@@ -218,6 +272,9 @@ test("Agent 1 temporary chat follows the saved route and creates no chat, accoun
 
     const before = aiTableCounts(f.database);
     const transport = new FallbackTransport("test-primary");
+    const receivedEvents: Agent1DevChatStreamEvent[] = [];
+    const textDeltasBeforeCompletion: boolean[] = [];
+    let sawCompleted = false;
     const service = Agent1DevChatService.forDatabase(f.database, {
       runtimeService: f.runtime,
       secrets: f.secrets,
@@ -225,12 +282,23 @@ test("Agent 1 temporary chat follows the saved route and creates no chat, accoun
       transport,
       timeoutMs: 2_000,
     });
-    const result = await service.chat({
+    for await (const event of service.stream({
       messages: [{ role: "user", content: "مرحبا" }],
-    });
+    })) {
+      if (event.type === "text_delta") textDeltasBeforeCompletion.push(!sawCompleted);
+      if (event.type === "completed") sawCompleted = true;
+      receivedEvents.push(event);
+    }
 
-    assert.deepEqual(Object.keys(result), ["reply"]);
-    assert.equal(result.reply, "رد مؤقت");
+    assert.deepEqual(receivedEvents, [
+      { type: "started" },
+      { type: "phase", phase: "thinking" },
+      { type: "text_delta", text: "رد " },
+      { type: "text_delta", text: "مؤقت" },
+      { type: "completed" },
+    ]);
+    assert.deepEqual(textDeltasBeforeCompletion, [true, true]);
+    assert.equal(JSON.stringify(receivedEvents).includes("PRIVATE REASONING MUST NOT LEAVE SERVER"), false);
     assert.deepEqual(transport.requestedModels, ["test-primary", "test-fallback"]);
     assert.deepEqual(aiTableCounts(f.database), before);
   } finally {
@@ -247,11 +315,19 @@ test("temporary Agent 1 chat refuses disabled runtime and malformed history befo
       outboundPolicy,
     });
     await assert.rejects(
-      service.chat({ messages: [{ role: "user", content: "مرحبا" }] }),
+      (async () => {
+        for await (const _event of service.stream({ messages: [{ role: "user", content: "مرحبا" }] })) {
+          // The stream should fail before exposing any event while Agent 1 is disabled.
+        }
+      })(),
       (error: unknown) => error instanceof Agent1DevChatError && error.code === "AGENT_1_DISABLED",
     );
     await assert.rejects(
-      service.chat({ messages: [{ role: "assistant", content: "رد" }] }),
+      (async () => {
+        for await (const _event of service.stream({ messages: [{ role: "assistant", content: "رد" }] })) {
+          // Invalid history must be rejected before provider access.
+        }
+      })(),
       (error: unknown) => error instanceof Agent1DevChatError && error.code === "CHAT_INVALID",
     );
   } finally {

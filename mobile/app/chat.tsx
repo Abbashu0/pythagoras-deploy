@@ -1,5 +1,11 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Keyboard, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import {
+  Keyboard,
+  StyleSheet,
+  View,
+  useWindowDimensions,
+  type LayoutChangeEvent,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Stack } from 'expo-router/stack';
@@ -18,12 +24,22 @@ import ReanimatedDrawerLayout, {
 } from 'react-native-gesture-handler/ReanimatedDrawerLayout';
 
 import { ChatComposer } from '@/ai/chat-composer';
-import { Agent1ChatApiError, clearAgent1DevPairing, hasAgent1DevPairing, sendAgent1DevChat } from '@/ai/agent-1-chat-api';
-import { DevChatPairingModal } from '@/ai/dev-chat-pairing-modal';
-import { MAX_TEMP_CHAT_MESSAGES, type ChatMessage } from '@/ai/chat-types';
+import { Agent1ChatApiError, sendAgent1DevChat } from '@/ai/agent-1-chat-api';
+import {
+  Agent1ChatRequestCoordinator,
+  applyAgent1ChatStreamEvent,
+  buildAgent1HistoryForNewTurn,
+  buildAgent1HistoryForRegenerate,
+  canRegenerateAgent1Turn,
+  failAgent1ChatTurn,
+  resetAgent1ChatTurnAttempt,
+} from '@/ai/agent-1-chat-state';
+import { MAX_TEMP_CHAT_MESSAGES, type ChatMessage, type ChatTurn } from '@/ai/chat-types';
 import { ChatTopControls } from '@/ai/chat-top-controls';
 import { usePreferences } from '@/preferences/preferences-provider';
 import { getPalette } from '@/theme';
+
+const StableChatTopControls = memo(ChatTopControls);
 
 export default function ChatScreen() {
   const { resolvedColorScheme } = usePreferences();
@@ -32,12 +48,31 @@ export default function ChatScreen() {
   const router = useRouter();
   const drawerRef = useRef<DrawerLayoutMethods | null>(null);
   const drawerOpenRef = useRef(false);
-  const activeRequestRef = useRef<AbortController | null>(null);
   const messageSequenceRef = useRef(0);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [sending, setSending] = useState(false);
-  const [sendError, setSendError] = useState<string | null>(null);
-  const [pairingVisible, setPairingVisible] = useState(false);
+  const [requestCoordinator] = useState(() => new Agent1ChatRequestCoordinator());
+  const [turns, setTurns] = useState<ChatTurn[]>([]);
+  const turnsRef = useRef<ChatTurn[]>([]);
+  const mountedRef = useRef(false);
+  const activeTurnIdRef = useRef<string | null>(null);
+  const regenerationInProgressRef = useRef(false);
+  const [activeTurnId, setActiveTurnId] = useState<string | null>(null);
+  const [submissionError, setSubmissionError] = useState<string | null>(null);
+  const [transcriptWidth, setTranscriptWidth] = useState(0);
+  const updateTurns = useCallback((update: (current: readonly ChatTurn[]) => ChatTurn[]) => {
+    const next = update(turnsRef.current);
+    turnsRef.current = next;
+    setTurns(next);
+  }, []);
+  const updateActiveTurn = useCallback((turnId: string | null) => {
+    activeTurnIdRef.current = turnId;
+    setActiveTurnId(turnId);
+  }, []);
+  const handleForegroundLayout = useCallback((event: LayoutChangeEvent) => {
+    const nextWidth = event.nativeEvent.layout.width;
+    setTranscriptWidth((current) =>
+      Math.abs(current - nextWidth) < 0.5 ? current : nextWidth,
+    );
+  }, []);
   const renderNavigationView = useCallback(
     () => <View style={[styles.sidebar, { backgroundColor: palette.surface }]} />,
     [palette.surface],
@@ -57,75 +92,114 @@ export default function ChatScreen() {
     Keyboard.dismiss();
     drawerRef.current?.openDrawer();
   }, []);
-  const handleSend = useCallback(async (draft: string): Promise<boolean> => {
+  const handleBackPress = useCallback(() => router.back(), [router]);
+  const executeAssistantTurn = useCallback(async (
+    turnId: string,
+    requestMessages: readonly Pick<ChatMessage, 'role' | 'content'>[],
+    signal: AbortSignal,
+    generation: number,
+  ) => {
+    try {
+      await sendAgent1DevChat(requestMessages, signal, (event) => {
+        if (!requestCoordinator.isCurrent(generation)) return;
+        updateTurns((current) => applyAgent1ChatStreamEvent(current, turnId, event));
+      });
+    } catch (error) {
+      if (signal.aborted || !requestCoordinator.isCurrent(generation)) return;
+      updateTurns((current) =>
+        failAgent1ChatTurn(current, turnId, agent1ChatErrorMessage(error)),
+      );
+    } finally {
+      if (
+        requestCoordinator.isCurrent(generation) &&
+        activeTurnIdRef.current === turnId
+      ) {
+        updateActiveTurn(null);
+      }
+    }
+  }, [requestCoordinator, updateActiveTurn, updateTurns]);
+
+  const handleSend = useCallback((draft: string): string | null => {
     const content = draft.trim();
-    if (!content || activeRequestRef.current) return false;
+    if (!content || requestCoordinator.isBusy || regenerationInProgressRef.current) return null;
     if (!__DEV__ || process.env.EXPO_OS !== 'ios') {
-      setSendError('محادثة Agent 1 متاحة حاليًا في بيئة التطوير على iPhone فقط.');
-      return false;
+      setSubmissionError('محادثة Agent 1 متاحة حاليًا في بيئة التطوير على iPhone فقط.');
+      return null;
     }
-    if (!hasAgent1DevPairing()) {
-      setPairingVisible(true);
-      setSendError(null);
-      return false;
-    }
-    if (messages.length >= MAX_TEMP_CHAT_MESSAGES) {
-      setSendError('انتهت سعة جلسة المحادثة المؤقتة. اخرج من الشات وارجع لبدء جلسة جديدة.');
-      return false;
+    const currentTurns = turnsRef.current;
+    const currentMessageCount = currentTurns.reduce(
+      (count, turn) => count + 1 + (turn.assistant ? 1 : 0),
+      0,
+    );
+    if (currentMessageCount >= MAX_TEMP_CHAT_MESSAGES) {
+      setSubmissionError('انتهت سعة جلسة المحادثة المؤقتة. اخرج من الشات وارجع لبدء جلسة جديدة.');
+      return null;
     }
 
-    const requestController = new AbortController();
+    const turnId = `turn-${Date.now()}-${messageSequenceRef.current++}`;
     const userMessage: ChatMessage = {
-      id: `chat-${Date.now()}-${messageSequenceRef.current++}`,
+      id: turnId,
       role: 'user',
       content,
     };
-    const requestMessages = [
-      ...messages.map(({ role, content: previousContent }) => ({
-        role,
-        content: previousContent,
-      })),
-      { role: 'user' as const, content },
-    ];
+    const requestMessages = buildAgent1HistoryForNewTurn(currentTurns, userMessage);
+    const turn: ChatTurn = {
+      id: turnId,
+      user: userMessage,
+      assistantAttempt: 0,
+      assistant: null,
+      assistantStatus: null,
+      errorMessage: null,
+    };
 
-    activeRequestRef.current = requestController;
-    setSendError(null);
-    setSending(true);
-    setMessages((current) => [...current, userMessage]);
-    try {
-      const reply = await sendAgent1DevChat(requestMessages, requestController.signal);
-      if (requestController.signal.aborted) return false;
-      setMessages((current) => [
-        ...current,
-        {
-          id: `chat-${Date.now()}-${messageSequenceRef.current++}`,
-          role: 'assistant',
-          content: reply,
-        },
-      ]);
-      return true;
-    } catch (error) {
-      if (requestController.signal.aborted) return false;
-      setMessages((current) => current.filter((message) => message.id !== userMessage.id));
-      if (error instanceof Agent1ChatApiError && error.code === 'PAIRING_REQUIRED') {
-        setPairingVisible(true);
-        setSendError(null);
-      } else {
-        setSendError(agent1ChatErrorMessage(error));
-      }
-      return false;
-    } finally {
-      if (activeRequestRef.current === requestController) {
-        activeRequestRef.current = null;
-        setSending(false);
-      }
+    setSubmissionError(null);
+    updateTurns((current) => [...current, turn]);
+    updateActiveTurn(turnId);
+    const started = requestCoordinator.start((signal, generation) =>
+      executeAssistantTurn(turnId, requestMessages, signal, generation),
+    );
+    if (!started) {
+      updateTurns((current) => current.filter((candidate) => candidate.id !== turnId));
+      updateActiveTurn(null);
+      setSubmissionError('تعذر بدء طلب جديد أثناء معالجة الطلب السابق. حاول مجددًا.');
+      return null;
     }
-  }, [messages]);
+    return turnId;
+  }, [executeAssistantTurn, requestCoordinator, updateActiveTurn, updateTurns]);
 
-  useEffect(() => () => {
-    activeRequestRef.current?.abort();
-    clearAgent1DevPairing();
-  }, []);
+  const handleRegenerate = useCallback((turnId: string) => {
+    if (regenerationInProgressRef.current) return;
+    const currentTurns = turnsRef.current;
+    if (!canRegenerateAgent1Turn(currentTurns, turnId, activeTurnIdRef.current)) return;
+    const requestMessages = buildAgent1HistoryForRegenerate(currentTurns, turnId);
+    if (!requestMessages) return;
+
+    regenerationInProgressRef.current = true;
+    setSubmissionError(null);
+    updateActiveTurn(turnId);
+    const replacement = requestCoordinator.replace((signal, generation) =>
+      executeAssistantTurn(turnId, requestMessages, signal, generation),
+    );
+    updateTurns((current) => resetAgent1ChatTurnAttempt(current, turnId));
+    void replacement.finally(() => {
+      regenerationInProgressRef.current = false;
+      if (
+        mountedRef.current &&
+        !requestCoordinator.isBusy &&
+        activeTurnIdRef.current === turnId
+      ) {
+        updateActiveTurn(null);
+      }
+    });
+  }, [executeAssistantTurn, requestCoordinator, updateActiveTurn, updateTurns]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      requestCoordinator.cancelAll();
+    };
+  }, [requestCoordinator]);
 
   return (
     <>
@@ -162,18 +236,21 @@ export default function ChatScreen() {
         {(drawerProgress) => (
           <ChatDrawerForeground
             drawerProgress={drawerProgress}
+            onLayout={handleForegroundLayout}
           >
             <ChatComposer
-              messages={messages}
+              turns={turns}
               onSend={handleSend}
-              sending={sending}
-              errorMessage={sendError}
+              onRegenerate={handleRegenerate}
+              activeTurnId={activeTurnId}
+              submissionError={submissionError}
+              transcriptWidth={transcriptWidth}
             />
             {process.env.EXPO_OS === 'ios' ? (
-              <ChatTopControls
+              <StableChatTopControls
                 colorScheme={resolvedColorScheme}
                 foregroundColor={palette.text}
-                onBack={() => router.back()}
+                onBack={handleBackPress}
                 onMenu={handleMenuPress}
               />
             ) : null}
@@ -181,17 +258,6 @@ export default function ChatScreen() {
         )}
       </ReanimatedDrawerLayout>
       <StatusBar style={resolvedColorScheme === 'dark' ? 'light' : 'dark'} />
-      {__DEV__ && process.env.EXPO_OS === 'ios' ? (
-        <DevChatPairingModal
-          visible={pairingVisible}
-          colorScheme={resolvedColorScheme}
-          onDismiss={() => setPairingVisible(false)}
-          onPaired={() => {
-            setPairingVisible(false);
-            setSendError(null);
-          }}
-        />
-      ) : null}
     </>
   );
 }
@@ -217,9 +283,11 @@ function agent1ChatErrorMessage(error: unknown): string {
 
 function ChatDrawerForeground({
   drawerProgress,
+  onLayout,
   children,
 }: {
   drawerProgress?: SharedValue<number>;
+  onLayout: (event: LayoutChangeEvent) => void;
   children: ReactNode;
 }) {
   const animatedScrim = useAnimatedStyle(
@@ -237,6 +305,7 @@ function ChatDrawerForeground({
   return (
     <Animated.View
       style={styles.container}
+      onLayout={onLayout}
     >
       {children}
       <Animated.View

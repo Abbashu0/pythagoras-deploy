@@ -52,6 +52,12 @@ export interface Agent1DevChatMessage {
   content: string;
 }
 
+export type Agent1DevChatStreamEvent =
+  | { type: "started" }
+  | { type: "phase"; phase: "thinking" }
+  | { type: "text_delta"; text: string }
+  | { type: "completed" };
+
 export const AGENT_1_DEV_CHAT_MAX_MESSAGES = 32;
 export const AGENT_1_DEV_CHAT_MAX_TOTAL_BYTES = 48 * 1_024;
 const MAX_MESSAGE_BYTES = 32 * 1_024;
@@ -89,10 +95,10 @@ export class Agent1DevChatService {
     return new Agent1DevChatService(database, options);
   }
 
-  async chat(
+  async *stream(
     input: { messages: unknown },
     options: { signal?: AbortSignal } = {},
-  ): Promise<{ reply: string }> {
+  ): AsyncGenerator<Agent1DevChatStreamEvent> {
     const messages = validateMessages(input.messages);
     const route = this.runtime.getSnapshot();
     if (!route.config.enabled) throw new Agent1DevChatError("AGENT_1_DISABLED");
@@ -191,20 +197,50 @@ export class Agent1DevChatService {
       },
     );
 
-    let reply = "";
     let responseBytes = 0;
+    let hasVisibleText = false;
+    let sawStarted = false;
+    let sawCompleted = false;
+    let emittedThinking = false;
     try {
       for await (const event of execution.events) {
+        if (options.signal?.aborted) throw new Agent1DevChatError("CANCELLED");
+        if (event.type === "STARTED") {
+          if (!sawStarted) {
+            sawStarted = true;
+            yield { type: "started" };
+          }
+          continue;
+        }
+        if (event.type === "REASONING_DELTA") {
+          if (!emittedThinking) {
+            emittedThinking = true;
+            yield { type: "phase", phase: "thinking" };
+          }
+          continue;
+        }
         if (event.type === "TEXT_DELTA") {
           responseBytes += Buffer.byteLength(event.text, "utf8");
           if (responseBytes > MAX_RESPONSE_BYTES) {
             throw new Agent1DevChatError("RESPONSE_TOO_LARGE");
           }
-          reply += event.text;
-        } else if (event.type === "MEMORY_COMMAND" || event.type === "TOOL_CALL_DELTA") {
+          hasVisibleText ||= Boolean(event.text.trim());
+          yield { type: "text_delta", text: event.text };
+          continue;
+        }
+        if (event.type === "COMPLETED") {
+          sawCompleted = true;
+          continue;
+        }
+        if (event.type === "MEMORY_COMMAND" || event.type === "TOOL_CALL_DELTA") {
           throw new Agent1DevChatError("PROVIDER_FAILED");
         }
       }
+
+      if (!sawCompleted || !hasVisibleText) {
+        throw new Agent1DevChatError("PROVIDER_FAILED", "EMPTY_RESPONSE");
+      }
+      yield { type: "completed" };
     } catch (error) {
       if (error instanceof Agent1DevChatError) throw error;
       if (options.signal?.aborted) throw new Agent1DevChatError("CANCELLED");
@@ -213,9 +249,6 @@ export class Agent1DevChatService {
       }
       throw new Agent1DevChatError("PROVIDER_FAILED");
     }
-
-    if (!reply.trim()) throw new Agent1DevChatError("PROVIDER_FAILED", "EMPTY_RESPONSE");
-    return { reply };
   }
 }
 
