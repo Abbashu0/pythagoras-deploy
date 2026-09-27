@@ -7,7 +7,9 @@ import {
   buildAgent1HistoryForNewTurn,
   buildAgent1HistoryForRegenerate,
   canRegenerateAgent1Turn,
+  createAcceptedAgent1ChatTurn,
   failAgent1ChatTurn,
+  getAgent1AssistantActionPolicy,
   resetAgent1ChatTurnAttempt,
   toggleChatReaction,
 } from "../mobile/src/ai/agent-1-chat-state";
@@ -75,7 +77,9 @@ test("regeneration history replaces only the latest assistant response and exclu
 });
 
 test("stream events update one turn and append deltas to one assistant message", () => {
-  let turns = [turn("first"), turn("second")];
+  const accepted = createAcceptedAgent1ChatTurn("second", "hello");
+  assert.equal(accepted.assistantStatus, "working");
+  let turns = [turn("first"), accepted];
   turns = applyAgent1ChatStreamEvent(turns, "second", { type: "started" });
   assert.equal(turns[0].assistantStatus, null);
   assert.equal(turns[1].assistantStatus, "working");
@@ -83,6 +87,11 @@ test("stream events update one turn and append deltas to one assistant message",
     type: "phase",
     phase: "thinking",
   });
+  assert.equal(turns[1].assistantStatus, "thinking");
+  assert.equal(
+    getAgent1AssistantActionPolicy(turns[1], true, true).showStatus,
+    true,
+  );
   turns = applyAgent1ChatStreamEvent(turns, "second", {
     type: "text_delta",
     text: "hello ",
@@ -99,8 +108,19 @@ test("stream events update one turn and append deltas to one assistant message",
   assert.equal(turns[1].assistant?.id, "second-assistant-0");
   assert.equal(turns[1].assistant?.content, "hello world");
   assert.equal(turns[1].assistantStatus, "streaming");
+  assert.equal(
+    getAgent1AssistantActionPolicy(turns[1], true, true).showStatus,
+    false,
+  );
   turns = applyAgent1ChatStreamEvent(turns, "second", { type: "completed" });
   assert.equal(turns[1].assistantStatus, "completed");
+  assert.deepEqual(getAgent1AssistantActionPolicy(turns[1], true, false), {
+    showStatus: false,
+    showFeedback: true,
+    showRegenerate: true,
+    showIncompleteNotice: false,
+    showError: false,
+  });
 });
 
 test("failure keeps the user turn, marks partial output incomplete, and does not invent an assistant", () => {
@@ -136,7 +156,7 @@ test("failure keeps the user turn, marks partial output incomplete, and does not
   }).some(({ content }) => content.includes("visible partial")), false);
 });
 
-test("regenerate is limited to the latest completed, incomplete, or active turn", () => {
+test("regenerate is limited to the latest completed or ended incomplete turn", () => {
   const turns = [
     turn("old", {
       assistant: { id: "a-old", role: "assistant", content: "old" },
@@ -145,7 +165,16 @@ test("regenerate is limited to the latest completed, incomplete, or active turn"
     turn("active", { assistantStatus: "thinking" }),
   ];
   assert.equal(canRegenerateAgent1Turn(turns, "old", null), false);
-  assert.equal(canRegenerateAgent1Turn(turns, "active", "active"), true);
+  assert.equal(canRegenerateAgent1Turn(turns, "active", "active"), false);
+  assert.equal(canRegenerateAgent1Turn([
+    turn("complete", {
+      assistant: { id: "a", role: "assistant", content: "done" },
+      assistantStatus: "completed",
+    }),
+  ], "complete", null), true);
+  assert.equal(canRegenerateAgent1Turn([
+    turn("empty-complete", { assistantStatus: "completed" }),
+  ], "empty-complete", null), false);
   assert.equal(canRegenerateAgent1Turn([
     turn("failed", { assistantStatus: "error" }),
   ], "failed", null), false);
@@ -155,6 +184,94 @@ test("regenerate is limited to the latest completed, incomplete, or active turn"
       assistantStatus: "incomplete",
     }),
   ], "incomplete", null), true);
+  assert.equal(canRegenerateAgent1Turn([
+    turn("incomplete", {
+      assistant: { id: "a", role: "assistant", content: "part" },
+      assistantStatus: "incomplete",
+    }),
+  ], "incomplete", "incomplete"), false);
+});
+
+test("assistant action policy matches active, historical, completed, incomplete, and error states", () => {
+  const activeWorking = getAgent1AssistantActionPolicy(
+    turn("working", { assistantStatus: "working" }),
+    true,
+    true,
+  );
+  assert.deepEqual(activeWorking, {
+    showStatus: true,
+    showFeedback: false,
+    showRegenerate: false,
+    showIncompleteNotice: false,
+    showError: false,
+  });
+
+  const activeStreaming = getAgent1AssistantActionPolicy(
+    turn("streaming", {
+      assistant: { id: "a", role: "assistant", content: "partial" },
+      assistantStatus: "streaming",
+    }),
+    true,
+    true,
+  );
+  assert.equal(activeStreaming.showStatus, false);
+  assert.equal(activeStreaming.showFeedback, false);
+  assert.equal(activeStreaming.showRegenerate, false);
+
+  const historicalComplete = getAgent1AssistantActionPolicy(
+    turn("historical", {
+      assistant: { id: "a-historical", role: "assistant", content: "done" },
+      assistantStatus: "completed",
+    }),
+    false,
+    false,
+  );
+  assert.equal(historicalComplete.showFeedback, true);
+  assert.equal(historicalComplete.showRegenerate, false);
+
+  const latestComplete = getAgent1AssistantActionPolicy(
+    turn("latest", {
+      assistant: { id: "a-latest", role: "assistant", content: "done" },
+      assistantStatus: "completed",
+    }),
+    true,
+    false,
+  );
+  assert.equal(latestComplete.showFeedback, true);
+  assert.equal(latestComplete.showRegenerate, true);
+
+  const latestIncomplete = getAgent1AssistantActionPolicy(
+    turn("incomplete", {
+      assistant: { id: "a-incomplete", role: "assistant", content: "partial" },
+      assistantStatus: "incomplete",
+    }),
+    true,
+    false,
+  );
+  assert.equal(latestIncomplete.showFeedback, false);
+  assert.equal(latestIncomplete.showRegenerate, true);
+  assert.equal(latestIncomplete.showIncompleteNotice, true);
+
+  const historicalIncomplete = getAgent1AssistantActionPolicy(
+    turn("older-incomplete", {
+      assistant: { id: "a-older-incomplete", role: "assistant", content: "partial" },
+      assistantStatus: "incomplete",
+    }),
+    false,
+    false,
+  );
+  assert.equal(historicalIncomplete.showIncompleteNotice, true);
+  assert.equal(historicalIncomplete.showRegenerate, false);
+
+  const beforeOutputError = getAgent1AssistantActionPolicy(
+    turn("error", { assistantStatus: "error", errorMessage: "safe" }),
+    true,
+    false,
+  );
+  assert.equal(beforeOutputError.showStatus, false);
+  assert.equal(beforeOutputError.showError, true);
+  assert.equal(beforeOutputError.showFeedback, false);
+  assert.equal(beforeOutputError.showRegenerate, false);
 });
 
 test("regeneration clears the prior assistant attempt before a replacement starts", () => {
@@ -164,7 +281,7 @@ test("regeneration clears the prior assistant attempt before a replacement start
   })];
   const reset = resetAgent1ChatTurnAttempt(current, "latest");
   assert.equal(reset[0].assistant, null);
-  assert.equal(reset[0].assistantStatus, null);
+  assert.equal(reset[0].assistantStatus, "working");
   assert.equal(reset[0].assistantAttempt, 1);
 });
 

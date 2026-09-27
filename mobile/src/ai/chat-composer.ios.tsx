@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import * as Clipboard from 'expo-clipboard';
+import { AccessibilityInfo } from 'react-native';
 import {
   Button,
   Circle,
@@ -18,6 +19,8 @@ import {
 } from '@expo/ui/swift-ui';
 import {
   accessibilityLabel,
+  animation,
+  Animation,
   background,
   containerRelativeFrame,
   buttonStyle,
@@ -34,18 +37,17 @@ import {
   lineLimit,
   multilineTextAlignment,
   onTapGesture,
+  onAppear,
+  opacity,
   padding,
   scrollPosition,
   scrollTargetLayout,
   shapes,
-  symbolEffect,
   strokeBorder,
   textSelection,
   textFieldStyle,
 } from '@expo/ui/swift-ui/modifiers';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-
-import { canRegenerateAgent1Turn, toggleChatReaction } from './agent-1-chat-state';
+import { getAgent1AssistantActionPolicy, toggleChatReaction } from './agent-1-chat-state';
 import type { ChatComposerProps, ChatReaction, ChatTurn } from './chat-types';
 import { usePreferences } from '@/preferences/preferences-provider';
 import { getPalette } from '@/theme';
@@ -62,6 +64,15 @@ const TRANSCRIPT_HORIZONTAL_INSET = 22;
 const CHAT_TURN_SPACING = 28;
 const CHAT_TURN_CONTENT_SPACING = 10;
 const COPY_FEEDBACK_DURATION_MS = 1_300;
+const CHAT_TOP_CONTROLS_HEIGHT = 44;
+const CHAT_TRANSCRIPT_TOP_GAP = 20;
+const ASSISTANT_ACTION_LAYOUT_SIZE = 32;
+const ASSISTANT_ACTION_ICON_SIZE = 17;
+const ASSISTANT_ACTION_SPACING = 3;
+const STATUS_SWEEP_HALF_CYCLE_MS = 700;
+const STATUS_SWEEP_TRANSITION_SECONDS = 0.65;
+const STATUS_SWEEP_WIDTH = 0.4;
+const STATUS_USER_MESSAGE_EXTRA_GAP = 5;
 
 export function ChatComposer({
   turns,
@@ -73,7 +84,6 @@ export function ChatComposer({
 }: ChatComposerProps) {
   const { resolvedColorScheme } = usePreferences();
   const palette = getPalette(resolvedColorScheme);
-  const insets = useSafeAreaInsets();
   const transcriptContentWidth = Math.max(
     0,
     transcriptWidth - TRANSCRIPT_HORIZONTAL_INSET * 2,
@@ -198,6 +208,7 @@ export function ChatComposer({
             modifiers={[
               defaultScrollAnchorForRole('top', 'initialOffset'),
               defaultScrollAnchorForRole(null, 'sizeChanges'),
+              defaultScrollAnchorForRole('top', 'alignment'),
               scrollPosition(scrollPositionState, { anchor: 'top' }),
               // Keep the approved tap-outside blur behavior while allowing normal native scrolling.
               // eslint-disable-next-line react-hooks/refs
@@ -209,7 +220,7 @@ export function ChatComposer({
               spacing={CHAT_TURN_SPACING}
               modifiers={[
                 padding({
-                  top: insets.top + 68,
+                  top: CHAT_TOP_CONTROLS_HEIGHT + CHAT_TRANSCRIPT_TOP_GAP,
                   horizontal: TRANSCRIPT_HORIZONTAL_INSET,
                   bottom: COMPOSER_MIN_HEIGHT + 24,
                 }),
@@ -219,12 +230,12 @@ export function ChatComposer({
                 scrollTargetLayout(),
               ]}
             >
-              {turns.map((turn) => (
+              {turns.map((turn, index) => (
                 <ChatTranscriptTurn
                   key={turn.id}
                   turn={turn}
+                  isLatest={index === turns.length - 1}
                   isActive={activeTurnId === turn.id}
-                  canRegenerate={canRegenerateAgent1Turn(turns, turn.id, activeTurnId)}
                   contentWidth={transcriptContentWidth}
                   palette={palette}
                   reaction={turn.assistant ? reactions[turn.assistant.id] : undefined}
@@ -415,8 +426,8 @@ const ChatComposerControls = memo(function ChatComposerControls({
 
 const ChatTranscriptTurn = memo(function ChatTranscriptTurn({
   turn,
+  isLatest,
   isActive,
-  canRegenerate,
   contentWidth,
   palette,
   reaction,
@@ -426,8 +437,8 @@ const ChatTranscriptTurn = memo(function ChatTranscriptTurn({
   onRegenerate,
 }: {
   turn: ChatTurn;
+  isLatest: boolean;
   isActive: boolean;
-  canRegenerate: boolean;
   contentWidth: number;
   palette: ReturnType<typeof getPalette>;
   reaction?: ChatReaction;
@@ -437,9 +448,8 @@ const ChatTranscriptTurn = memo(function ChatTranscriptTurn({
   onRegenerate: (turnId: string) => void;
 }) {
   const assistant = turn.assistant;
-  const isCompleted = turn.assistantStatus === 'completed' && Boolean(assistant);
-  const isIncomplete = turn.assistantStatus === 'incomplete' && Boolean(assistant);
-  const showRegenerateOnly = canRegenerate && (isActive || isIncomplete);
+  const actionPolicy = getAgent1AssistantActionPolicy(turn, isLatest, isActive);
+  const showRegenerateOnly = actionPolicy.showRegenerate && !actionPolicy.showFeedback;
   const handleRegenerate = useCallback(() => onRegenerate(turn.id), [onRegenerate, turn.id]);
 
   return (
@@ -455,7 +465,8 @@ const ChatTranscriptTurn = memo(function ChatTranscriptTurn({
     >
       <ChatUserBubble message={turn.user} contentWidth={contentWidth} palette={palette} />
 
-      {turn.assistantStatus === 'working' || turn.assistantStatus === 'thinking' ? (
+      {actionPolicy.showStatus &&
+      (turn.assistantStatus === 'working' || turn.assistantStatus === 'thinking') ? (
         <Agent1TurnStatus status={turn.assistantStatus} palette={palette} />
       ) : null}
 
@@ -477,11 +488,11 @@ const ChatTranscriptTurn = memo(function ChatTranscriptTurn({
         </Text>
       ) : null}
 
-      {turn.errorMessage ? (
+      {turn.errorMessage && (actionPolicy.showIncompleteNotice || actionPolicy.showError) ? (
         <ChatInlineNotice message={turn.errorMessage} contentWidth={contentWidth} palette={palette} />
       ) : null}
 
-      {isCompleted && assistant ? (
+      {actionPolicy.showFeedback && assistant ? (
         <ChatAssistantActions
           assistantId={assistant.id}
           content={assistant.content}
@@ -489,7 +500,7 @@ const ChatTranscriptTurn = memo(function ChatTranscriptTurn({
           reaction={reaction}
           copied={copied}
           showFeedback
-          showRegenerate={canRegenerate}
+          showRegenerate={actionPolicy.showRegenerate}
           onCopy={onCopy}
           onReaction={onReaction}
           onRegenerate={handleRegenerate}
@@ -565,29 +576,81 @@ function Agent1TurnStatus({
   status: 'working' | 'thinking';
   palette: ReturnType<typeof getPalette>;
 }) {
+  const [reduceMotion, setReduceMotion] = useState(false);
+  const [visible, setVisible] = useState(false);
+  const [sweepPhase, setSweepPhase] = useState(false);
+  const handleAppear = useCallback(() => setVisible(true), []);
+
+  useEffect(() => {
+    let isMounted = true;
+    void AccessibilityInfo.isReduceMotionEnabled()
+      .then((enabled) => {
+        if (isMounted) setReduceMotion(enabled);
+      })
+      .catch(() => {});
+    const subscription = AccessibilityInfo.addEventListener(
+      'reduceMotionChanged',
+      setReduceMotion,
+    );
+    return () => {
+      isMounted = false;
+      subscription.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!visible || reduceMotion) return;
+    const timeout = setTimeout(
+      () => setSweepPhase((current) => !current),
+      STATUS_SWEEP_HALF_CYCLE_MS,
+    );
+    return () => clearTimeout(timeout);
+  }, [reduceMotion, sweepPhase, visible]);
+
+  const gradientStart = sweepPhase ? 1 - STATUS_SWEEP_WIDTH : 0;
+  const statusStyle = {
+    type: 'linearGradient' as const,
+    colors: [
+      colorWithOpacity(palette.textSecondary, 0.62),
+      colorWithOpacity(palette.textSecondary, 0.9),
+      colorWithOpacity(palette.textSecondary, 0.62),
+    ],
+    startPoint: { x: gradientStart, y: 0.5 },
+    endPoint: { x: gradientStart + STATUS_SWEEP_WIDTH, y: 0.5 },
+  };
+
   return (
-    <HStack alignment="center" spacing={8}>
-      <Image
-        systemName="brain"
-        size={16}
-        color={palette.textSecondary}
-        modifiers={[
-          symbolEffect(
-            { effect: 'breathe', style: 'pulse' },
-            { options: { repeat: 'continuous', speed: 0.8 } },
-          ),
-        ]}
-      />
-      <Text
-        modifiers={[
-          foregroundStyle(palette.textSecondary),
-          font({ textStyle: 'footnote' }),
-        ]}
-      >
-        {status === 'thinking' ? 'Thinking' : 'Working'}
-      </Text>
-    </HStack>
+    <Text
+      modifiers={[
+        font({ textStyle: 'body' }),
+        foregroundStyle(reduceMotion ? palette.textSecondary : statusStyle),
+        padding({ top: STATUS_USER_MESSAGE_EXTRA_GAP }),
+        opacity(visible ? (reduceMotion ? 0.62 : 1) : 0),
+        ...(reduceMotion
+          ? []
+          : [
+              animation(Animation.easeOut({ duration: 0.18 }), visible),
+              animation(
+                Animation.easeInOut({ duration: STATUS_SWEEP_TRANSITION_SECONDS }),
+                sweepPhase,
+              ),
+            ]),
+        onAppear(handleAppear),
+      ]}
+    >
+      {status === 'thinking' ? 'Thinking' : 'Working'}
+    </Text>
   );
+}
+
+function colorWithOpacity(color: string, opacityValue: number): string {
+  const match = /^#([0-9a-f]{6})$/iu.exec(color);
+  if (!match) return color;
+  const hex = match[1];
+  const red = Number.parseInt(hex.slice(0, 2), 16);
+  const green = Number.parseInt(hex.slice(2, 4), 16);
+  const blue = Number.parseInt(hex.slice(4, 6), 16);
+  return `rgba(${red}, ${green}, ${blue}, ${opacityValue})`;
 }
 
 const ChatAssistantActions = memo(function ChatAssistantActions({
@@ -614,41 +677,65 @@ const ChatAssistantActions = memo(function ChatAssistantActions({
   onRegenerate: () => void;
 }) {
   return (
-    <HStack alignment="center" spacing={8}>
+    <HStack alignment="center" spacing={ASSISTANT_ACTION_SPACING}>
       {showFeedback ? (
         <>
           <Button
             onPress={() => void onCopy(assistantId, content)}
             modifiers={[
               buttonStyle('plain'),
-              frame({ width: ACTION_BUTTON_HIT_TARGET, height: ACTION_BUTTON_HIT_TARGET, alignment: 'center' }),
+              frame({
+                width: ASSISTANT_ACTION_LAYOUT_SIZE,
+                height: ASSISTANT_ACTION_LAYOUT_SIZE,
+                alignment: 'center',
+              }),
               contentShape(shapes.rectangle()),
               accessibilityLabel(copied ? 'تم نسخ الرد' : 'نسخ الرد'),
             ]}
           >
-            <Image systemName={copied ? 'checkmark' : 'doc.on.doc'} size={18} color={palette.textSecondary} />
+            <Image
+              systemName={copied ? 'checkmark' : 'doc.on.doc'}
+              size={ASSISTANT_ACTION_ICON_SIZE}
+              color={palette.textSecondary}
+            />
           </Button>
           <Button
             onPress={() => onReaction(assistantId, 'like')}
             modifiers={[
               buttonStyle('plain'),
-              frame({ width: ACTION_BUTTON_HIT_TARGET, height: ACTION_BUTTON_HIT_TARGET, alignment: 'center' }),
+              frame({
+                width: ASSISTANT_ACTION_LAYOUT_SIZE,
+                height: ASSISTANT_ACTION_LAYOUT_SIZE,
+                alignment: 'center',
+              }),
               contentShape(shapes.rectangle()),
               accessibilityLabel(reaction === 'like' ? 'إعجاب، محدد' : 'إعجاب'),
             ]}
           >
-            <Image systemName="hand.thumbsup" size={18} color={reaction === 'like' ? palette.text : palette.textSecondary} />
+            <Image
+              systemName="hand.thumbsup"
+              size={ASSISTANT_ACTION_ICON_SIZE}
+              color={reaction === 'like' ? palette.text : palette.textSecondary}
+            />
           </Button>
           <Button
             onPress={() => onReaction(assistantId, 'dislike')}
             modifiers={[
               buttonStyle('plain'),
-              frame({ width: ACTION_BUTTON_HIT_TARGET, height: ACTION_BUTTON_HIT_TARGET, alignment: 'center' }),
+              frame({
+                width: ASSISTANT_ACTION_LAYOUT_SIZE,
+                height: ASSISTANT_ACTION_LAYOUT_SIZE,
+                alignment: 'center',
+              }),
               contentShape(shapes.rectangle()),
               accessibilityLabel(reaction === 'dislike' ? 'عدم إعجاب، محدد' : 'عدم إعجاب'),
             ]}
           >
-            <Image systemName="hand.thumbsdown" size={18} color={reaction === 'dislike' ? palette.text : palette.textSecondary} />
+            <Image
+              systemName="hand.thumbsdown"
+              size={ASSISTANT_ACTION_ICON_SIZE}
+              color={reaction === 'dislike' ? palette.text : palette.textSecondary}
+            />
           </Button>
         </>
       ) : null}
@@ -657,12 +744,20 @@ const ChatAssistantActions = memo(function ChatAssistantActions({
           onPress={onRegenerate}
           modifiers={[
             buttonStyle('plain'),
-            frame({ width: ACTION_BUTTON_HIT_TARGET, height: ACTION_BUTTON_HIT_TARGET, alignment: 'center' }),
+            frame({
+              width: ASSISTANT_ACTION_LAYOUT_SIZE,
+              height: ASSISTANT_ACTION_LAYOUT_SIZE,
+              alignment: 'center',
+            }),
             contentShape(shapes.rectangle()),
             accessibilityLabel('إعادة إنشاء الرد'),
           ]}
         >
-          <Image systemName="arrow.clockwise" size={18} color={palette.textSecondary} />
+          <Image
+            systemName="arrow.clockwise"
+            size={ASSISTANT_ACTION_ICON_SIZE}
+            color={palette.textSecondary}
+          />
         </Button>
       ) : null}
     </HStack>

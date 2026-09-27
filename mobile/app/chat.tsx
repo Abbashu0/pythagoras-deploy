@@ -31,6 +31,7 @@ import {
   buildAgent1HistoryForNewTurn,
   buildAgent1HistoryForRegenerate,
   canRegenerateAgent1Turn,
+  createAcceptedAgent1ChatTurn,
   failAgent1ChatTurn,
   resetAgent1ChatTurnAttempt,
 } from '@/ai/agent-1-chat-state';
@@ -137,20 +138,8 @@ export default function ChatScreen() {
     }
 
     const turnId = `turn-${Date.now()}-${messageSequenceRef.current++}`;
-    const userMessage: ChatMessage = {
-      id: turnId,
-      role: 'user',
-      content,
-    };
-    const requestMessages = buildAgent1HistoryForNewTurn(currentTurns, userMessage);
-    const turn: ChatTurn = {
-      id: turnId,
-      user: userMessage,
-      assistantAttempt: 0,
-      assistant: null,
-      assistantStatus: null,
-      errorMessage: null,
-    };
+    const turn = createAcceptedAgent1ChatTurn(turnId, content);
+    const requestMessages = buildAgent1HistoryForNewTurn(currentTurns, turn.user);
 
     setSubmissionError(null);
     updateTurns((current) => [...current, turn]);

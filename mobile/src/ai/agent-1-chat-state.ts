@@ -7,6 +7,17 @@ import type {
 
 export type Agent1ModelMessage = Pick<ChatMessage, "role" | "content">;
 
+export function createAcceptedAgent1ChatTurn(turnId: string, userContent: string): ChatTurn {
+  return {
+    id: turnId,
+    user: { id: turnId, role: "user", content: userContent },
+    assistantAttempt: 0,
+    assistant: null,
+    assistantStatus: "working",
+    errorMessage: null,
+  };
+}
+
 export function buildAgent1HistoryForNewTurn(
   turns: readonly ChatTurn[],
   userMessage: ChatMessage,
@@ -88,7 +99,7 @@ export function resetAgent1ChatTurnAttempt(
     ...turn,
     assistantAttempt: turn.assistantAttempt + 1,
     assistant: null,
-    assistantStatus: null,
+    assistantStatus: "working",
     errorMessage: null,
   }));
 }
@@ -100,12 +111,43 @@ export function canRegenerateAgent1Turn(
 ): boolean {
   const latest = turns[turns.length - 1];
   if (!latest || latest.id !== turnId) return false;
-  if (latest.assistantStatus === "error") return false;
+  if (activeTurnId === turnId) return false;
+  if (!latest.assistant) return false;
   return (
     latest.assistantStatus === "completed" ||
-    latest.assistantStatus === "incomplete" ||
-    activeTurnId === turnId
+    latest.assistantStatus === "incomplete"
   );
+}
+
+export interface Agent1AssistantActionPolicy {
+  showStatus: boolean;
+  showFeedback: boolean;
+  showRegenerate: boolean;
+  showIncompleteNotice: boolean;
+  showError: boolean;
+}
+
+export function getAgent1AssistantActionPolicy(
+  turn: ChatTurn,
+  isLatest: boolean,
+  isActive: boolean,
+): Agent1AssistantActionPolicy {
+  const hasAssistant = Boolean(turn.assistant);
+  const isCompleted = turn.assistantStatus === "completed" && hasAssistant;
+  const isIncomplete = turn.assistantStatus === "incomplete" && hasAssistant;
+  return {
+    showStatus:
+      isActive &&
+      !hasAssistant &&
+      (turn.assistantStatus === "working" || turn.assistantStatus === "thinking"),
+    showFeedback: !isActive && isCompleted,
+    showRegenerate:
+      !isActive &&
+      isLatest &&
+      (isCompleted || isIncomplete),
+    showIncompleteNotice: !isActive && isIncomplete,
+    showError: !isActive && turn.assistantStatus === "error",
+  };
 }
 
 export function toggleChatReaction(
