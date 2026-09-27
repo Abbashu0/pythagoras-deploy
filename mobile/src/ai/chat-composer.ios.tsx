@@ -49,6 +49,8 @@ import {
 } from '@expo/ui/swift-ui/modifiers';
 import { getAgent1AssistantActionPolicy, toggleChatReaction } from './agent-1-chat-state';
 import type { ChatComposerProps, ChatReaction, ChatTurn } from './chat-types';
+import Agent1AssistantMarkdown from './assistant-rich-renderer.ios';
+import { firstStrongTextDirection } from './rich-response/text-direction';
 import { usePreferences } from '@/preferences/preferences-provider';
 import { getPalette } from '@/theme';
 
@@ -63,6 +65,7 @@ const CHAT_BUBBLE_CORNER_RADIUS = 24;
 const TRANSCRIPT_HORIZONTAL_INSET = 22;
 const CHAT_TURN_SPACING = 28;
 const CHAT_TURN_CONTENT_SPACING = 10;
+const USER_TO_ASSISTANT_GAP = 26;
 const COPY_FEEDBACK_DURATION_MS = 1_300;
 const CHAT_TOP_CONTROLS_HEIGHT = 44;
 const CHAT_TRANSCRIPT_TOP_GAP = 20;
@@ -72,7 +75,6 @@ const ASSISTANT_ACTION_SPACING = 3;
 const STATUS_SWEEP_HALF_CYCLE_MS = 700;
 const STATUS_SWEEP_TRANSITION_SECONDS = 0.65;
 const STATUS_SWEEP_WIDTH = 0.4;
-const STATUS_USER_MESSAGE_EXTRA_GAP = 5;
 
 export function ChatComposer({
   turns,
@@ -450,12 +452,19 @@ const ChatTranscriptTurn = memo(function ChatTranscriptTurn({
   const assistant = turn.assistant;
   const actionPolicy = getAgent1AssistantActionPolicy(turn, isLatest, isActive);
   const showRegenerateOnly = actionPolicy.showRegenerate && !actionPolicy.showFeedback;
+  const showStatus =
+    actionPolicy.showStatus &&
+    (turn.assistantStatus === 'working' || turn.assistantStatus === 'thinking');
+  const showError =
+    Boolean(turn.errorMessage) &&
+    (actionPolicy.showIncompleteNotice || actionPolicy.showError);
+  const showResponse = showStatus || Boolean(assistant) || showError || showRegenerateOnly;
   const handleRegenerate = useCallback(() => onRegenerate(turn.id), [onRegenerate, turn.id]);
 
   return (
     <VStack
       alignment="leading"
-      spacing={CHAT_TURN_CONTENT_SPACING}
+      spacing={0}
       modifiers={[
         id(turn.id),
         ...(contentWidth > 0
@@ -465,59 +474,58 @@ const ChatTranscriptTurn = memo(function ChatTranscriptTurn({
     >
       <ChatUserBubble message={turn.user} contentWidth={contentWidth} palette={palette} />
 
-      {actionPolicy.showStatus &&
-      (turn.assistantStatus === 'working' || turn.assistantStatus === 'thinking') ? (
-        <Agent1TurnStatus status={turn.assistantStatus} palette={palette} />
-      ) : null}
-
-      {assistant ? (
-        <Text
-          modifiers={[
-            font({ textStyle: 'body' }),
-            foregroundStyle(palette.text),
-            multilineTextAlignment('leading'),
-            lineSpacing(3),
-            textSelection(true),
-            fixedSize({ horizontal: false, vertical: true }),
-            ...(contentWidth > 0
-              ? [frame({ maxWidth: contentWidth, alignment: 'leading' as const })]
-              : []),
-          ]}
+      {showResponse ? (
+        <VStack
+          alignment="leading"
+          spacing={CHAT_TURN_CONTENT_SPACING}
+          modifiers={[padding({ top: USER_TO_ASSISTANT_GAP })]}
         >
-          {assistant.content}
-        </Text>
-      ) : null}
+          {showStatus ? (
+            <Agent1TurnStatus status={turn.assistantStatus as 'working' | 'thinking'} palette={palette} />
+          ) : null}
 
-      {turn.errorMessage && (actionPolicy.showIncompleteNotice || actionPolicy.showError) ? (
-        <ChatInlineNotice message={turn.errorMessage} contentWidth={contentWidth} palette={palette} />
-      ) : null}
+          {assistant ? (
+            <Agent1AssistantMarkdown
+              messageId={assistant.id}
+              content={assistant.content}
+              streaming={turn.assistantStatus === 'streaming'}
+              contentWidth={contentWidth}
+              palette={palette}
+            />
+          ) : null}
 
-      {actionPolicy.showFeedback && assistant ? (
-        <ChatAssistantActions
-          assistantId={assistant.id}
-          content={assistant.content}
-          palette={palette}
-          reaction={reaction}
-          copied={copied}
-          showFeedback
-          showRegenerate={actionPolicy.showRegenerate}
-          onCopy={onCopy}
-          onReaction={onReaction}
-          onRegenerate={handleRegenerate}
-        />
-      ) : showRegenerateOnly ? (
-        <ChatAssistantActions
-          assistantId={assistant?.id ?? `${turn.id}-assistant-${turn.assistantAttempt}`}
-          content=""
-          palette={palette}
-          reaction={reaction}
-          copied={copied}
-          showFeedback={false}
-          showRegenerate
-          onCopy={onCopy}
-          onReaction={onReaction}
-          onRegenerate={handleRegenerate}
-        />
+          {showError ? (
+            <ChatInlineNotice message={turn.errorMessage!} contentWidth={contentWidth} palette={palette} />
+          ) : null}
+
+          {actionPolicy.showFeedback && assistant ? (
+            <ChatAssistantActions
+              assistantId={assistant.id}
+              content={assistant.content}
+              palette={palette}
+              reaction={reaction}
+              copied={copied}
+              showFeedback
+              showRegenerate={actionPolicy.showRegenerate}
+              onCopy={onCopy}
+              onReaction={onReaction}
+              onRegenerate={handleRegenerate}
+            />
+          ) : showRegenerateOnly ? (
+            <ChatAssistantActions
+              assistantId={assistant?.id ?? `${turn.id}-assistant-${turn.assistantAttempt}`}
+              content=""
+              palette={palette}
+              reaction={reaction}
+              copied={copied}
+              showFeedback={false}
+              showRegenerate
+              onCopy={onCopy}
+              onReaction={onReaction}
+              onRegenerate={handleRegenerate}
+            />
+          ) : null}
+        </VStack>
       ) : null}
     </VStack>
   );
@@ -533,6 +541,7 @@ const ChatUserBubble = memo(function ChatUserBubble({
   palette: ReturnType<typeof getPalette>;
 }) {
   const bubbleMaxWidth = contentWidth * 0.82;
+  const messageAlignment = firstStrongTextDirection(message.content) === 'ltr' ? 'leading' : 'trailing';
   return (
     <HStack alignment="top" spacing={0}>
       <Spacer minLength={0} />
@@ -540,7 +549,7 @@ const ChatUserBubble = memo(function ChatUserBubble({
         modifiers={[
           font({ textStyle: 'body' }),
           foregroundStyle(palette.text),
-          multilineTextAlignment('trailing'),
+          multilineTextAlignment(messageAlignment),
           lineSpacing(3),
           textSelection(true),
           fixedSize({ horizontal: false, vertical: true }),
@@ -624,7 +633,6 @@ function Agent1TurnStatus({
       modifiers={[
         font({ textStyle: 'body' }),
         foregroundStyle(reduceMotion ? palette.textSecondary : statusStyle),
-        padding({ top: STATUS_USER_MESSAGE_EXTRA_GAP }),
         opacity(visible ? (reduceMotion ? 0.62 : 1) : 0),
         ...(reduceMotion
           ? []
