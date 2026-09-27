@@ -12,6 +12,12 @@ export interface DirectionalTextStyle {
   textAlign: 'auto' | 'left' | 'right';
 }
 
+export interface DirectionalListFlow {
+  direction: LayoutTextDirection;
+  flexDirection: 'row';
+  justifyContent: 'flex-start';
+}
+
 const RTL_LETTERS = /[\u05D0-\u05EA\u0621-\u063A\u0641-\u064A\u066E-\u066F\u0671-\u06D3\u06FA-\u06FC\u0710-\u072F\u0780-\u07A5\u0750-\u077F\u08A0-\u08C9\uFB50-\uFDFF\uFE70-\uFEFC]/u;
 const LTR_LETTERS = /[A-Za-z\u00C0-\u02AF\u0370-\u052F]/u;
 
@@ -32,6 +38,15 @@ export function resolveDirectionalTextStyle(direction: TextDirection): Direction
 
 export function resolveDirectionalLayoutDirection(direction: TextDirection): LayoutTextDirection {
   return direction === 'auto' ? 'inherit' : direction;
+}
+
+/** One Yoga direction controls only marker/content placement for an individual list row. */
+export function resolveDirectionalListFlow(direction: TextDirection): DirectionalListFlow {
+  return {
+    direction: resolveDirectionalLayoutDirection(direction),
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
+  };
 }
 
 export function textFromDirectionNodes(node: DirectionTextNode): string {

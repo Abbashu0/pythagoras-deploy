@@ -11,7 +11,7 @@ import type {
   RenderRules,
 } from '@ronradtke/react-native-markdown-display';
 import { RNHostView } from '@expo/ui/swift-ui';
-import { Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View, type TextProps, type TextStyle } from 'react-native';
+import { Linking, Platform, ScrollView, StyleSheet, Text, View, type TextProps, type TextStyle } from 'react-native';
 import { SvgXml } from 'react-native-svg';
 
 import type { Palette } from '@/theme';
@@ -19,11 +19,11 @@ import { scaledFontSize, scaledLineHeight } from '@/theme';
 import { usePreferences } from '@/preferences/preferences-provider';
 import { hideUnclosedMathSuffix } from './rich-response/math-delimiters';
 import { agent1MathMarkdownPlugin, isSafeAgent1Link } from './rich-response/math-markdown-plugin';
-import { renderTexToSvg } from './rich-response/mathjax-svg';
+import { getInlineMathAttachmentMetrics, renderTexToSvg } from './rich-response/mathjax-svg';
 import { stabilizeNodeKey } from './rich-response/stable-markdown-keys';
 import {
   firstStrongTextDirection,
-  resolveDirectionalLayoutDirection,
+  resolveDirectionalListFlow,
   resolveDirectionalTextStyle,
   textFromDirectionNodes,
 } from './rich-response/text-direction';
@@ -51,13 +51,7 @@ const BLOCK_STYLE_KEYS = [
 ] as const;
 
 const SelectableText: ComponentType<TextProps> = function SelectableMarkdownText(props) {
-  return (
-    <Text
-      {...props}
-      selectable
-      style={[{ writingDirection: 'auto', textAlign: 'auto' }, props.style]}
-    />
-  );
+  return <Text {...props} selectable />;
 };
 
 const Agent1AssistantMarkdown = memo(function Agent1AssistantMarkdown({
@@ -217,10 +211,10 @@ function createAssistantRules(
     bullet_list: (node, children, _parents, map) => <View key={node.key} style={map._VIEW_SAFE_bullet_list}>{children}</View>,
     ordered_list: (node, children, _parents, map) => <View key={node.key} style={map._VIEW_SAFE_ordered_list}>{children}</View>,
     list_item: (node, children, parents) => renderListItem(node, children, parents, palette),
-    strong: (node, children, parents, map, inherited) => renderFormattedInline(node, children, map.strong, inherited, directionForNode(node, parents)),
-    em: (node, children, parents, map, inherited) => renderFormattedInline(node, children, map.em, inherited, directionForNode(node, parents)),
-    s: (node, children, parents, map, inherited) => renderFormattedInline(node, children, map.s, inherited, directionForNode(node, parents)),
-    ins: (node, children, parents, map, inherited) => renderFormattedInline(node, children, map.ins, inherited, directionForNode(node, parents)),
+    strong: (node, children, _parents, map, inherited) => renderFormattedInline(node, children, map.strong, inherited),
+    em: (node, children, _parents, map, inherited) => renderFormattedInline(node, children, map.em, inherited),
+    s: (node, children, _parents, map, inherited) => renderFormattedInline(node, children, map.s, inherited),
+    ins: (node, children, _parents, map, inherited) => renderFormattedInline(node, children, map.ins, inherited),
     code_inline: (node, _children, _parents, map, inherited) => (
       <SelectableText key={node.key} style={[inherited as TextStyle, map.code_inline]}>
         {node.content}
@@ -245,40 +239,26 @@ function createAssistantRules(
     tr: (node, children, _parents, map) => <View key={node.key} style={map._VIEW_SAFE_tr}>{children}</View>,
     th: (node, children, _parents, map) => <View key={node.key} style={map._VIEW_SAFE_th}>{children}</View>,
     td: (node, children, _parents, map) => <View key={node.key} style={map._VIEW_SAFE_td}>{children}</View>,
-    link: (node, children, parents, map) => {
-      const direction = directionForNode(node, parents);
-      return (
-        <Pressable key={node.key} accessibilityRole="link" onPress={() => safeOpenLink(node.attributes.href)}>
-          <SelectableText style={[map.link, inheritedTextStyle(parents, map), resolveDirectionalTextStyle(direction)]}>
-            {children}
-          </SelectableText>
-        </Pressable>
-      );
-    },
+    link: (node, children, parents, map) => (
+      <SelectableText
+        key={node.key}
+        accessibilityRole="link"
+        onPress={() => safeOpenLink(node.attributes.href)}
+        style={[map.link, inheritedTextStyle(parents, map)]}
+      >
+        {children}
+      </SelectableText>
+    ),
     blocklink: () => null,
     image: () => null,
-    text: (node, _children, parents, map, inherited) => {
-      const direction = directionForNode(node, parents);
-      return (
-        <SelectableText
-          key={node.key}
-          style={[inherited as TextStyle, map.text, resolveDirectionalTextStyle(direction)]}
-        >
-          {node.content}
-        </SelectableText>
-      );
-    },
-    textgroup: (node, children, parents, map) => {
-      const direction = directionForNode(node, parents);
-      return (
-        <SelectableText
-          key={node.key}
-          style={[map.textgroup, inheritedTextStyle(parents, map), resolveDirectionalTextStyle(direction)]}
-        >
-          {children}
-        </SelectableText>
-      );
-    },
+    text: (node, _children, _parents, map, inherited) => (
+      <SelectableText key={node.key} style={[inherited as TextStyle, map.text]}>{node.content}</SelectableText>
+    ),
+    textgroup: (node, children, parents, map) => (
+      <SelectableText key={node.key} style={[map.textgroup, inheritedTextStyle(parents, map)]}>
+        {children}
+      </SelectableText>
+    ),
     paragraph: (node, children, _parents, map) => (
       <View key={node.key} style={[map._VIEW_SAFE_paragraph, { width: '100%' }]}>{children}</View>
     ),
@@ -286,14 +266,7 @@ function createAssistantRules(
     softbreak: (node, _children, _parents, map) => <SelectableText key={node.key} style={map.softbreak}>{'\n'}</SelectableText>,
     pre: (node, children, _parents, map) => <View key={node.key} style={map._VIEW_SAFE_pre}>{children}</View>,
     inline: (node, children, parents, map) => renderDirectionalInline(node, children, parents, map, palette),
-    span: (node, children, parents, map) => {
-      const direction = directionForNode(node, parents);
-      return (
-        <SelectableText key={node.key} style={[map.span, resolveDirectionalTextStyle(direction)]}>
-          {children}
-        </SelectableText>
-      );
-    },
+    span: (node, children, _parents, map) => <SelectableText key={node.key} style={map.span}>{children}</SelectableText>,
     agent1_math_inline: (node) => renderMathNode(node, false, contentWidth, fontScale, palette),
     agent1_math_block: (node) => renderMathNode(node, true, contentWidth, fontScale, palette),
   };
@@ -309,27 +282,9 @@ function renderDirectionalInline(
 ): ReactNode {
   const direction = firstStrongTextDirection(textFromDirectionNodes(node));
   const inherited = inheritedTextStyle(parents, styles);
-  const containsNativeView = hasNativeViewNode(node);
   const directionalStyle = resolveDirectionalTextStyle(direction);
 
-  if (containsNativeView) {
-    return (
-      <View
-        key={node.key}
-        style={{
-          alignItems: 'center',
-          direction: resolveDirectionalLayoutDirection(direction),
-          flexDirection: 'row',
-          flexWrap: 'wrap',
-          justifyContent: 'flex-start',
-          width: '100%',
-        }}
-      >
-        {children}
-      </View>
-    );
-  }
-
+  // Keep the whole prose run in one native Text paragraph; Fabric lays inline Views as text attachments.
   return (
     <SelectableText
       key={node.key}
@@ -369,11 +324,6 @@ function inheritedTextStyle(parents: ASTNode[], styles: MarkdownStyleMap): TextS
   return result as TextStyle;
 }
 
-function directionForNode(node: ASTNode, parents: ASTNode[]): ReturnType<typeof firstStrongTextDirection> {
-  const inlineBlock = node.type === 'inline' ? node : parents.find((parent) => parent.type === 'inline');
-  return firstStrongTextDirection(textFromDirectionNodes(inlineBlock ?? node));
-}
-
 function renderBlockquote(
   node: ASTNode,
   children: ReactNode[],
@@ -388,7 +338,6 @@ function renderBlockquote(
       style={[
         styles._VIEW_SAFE_blockquote,
         {
-          direction: resolveDirectionalLayoutDirection(direction),
           borderLeftWidth: direction === 'rtl' ? 0 : 2,
           borderRightWidth: direction === 'rtl' ? 2 : 0,
           borderLeftColor: palette.border,
@@ -418,15 +367,13 @@ function renderListItem(
       key={node.key}
       style={{
         alignItems: 'flex-start',
-        direction: resolveDirectionalLayoutDirection(direction),
-        flexDirection: 'row',
-        justifyContent: 'flex-start',
+        ...resolveDirectionalListFlow(direction),
         marginVertical: 2,
         width: '100%',
       }}
     >
       <Text style={{ color: palette.textSecondary, minWidth: 24, textAlign: 'center', writingDirection: 'ltr' }}>{marker}</Text>
-      <View style={{ direction: resolveDirectionalLayoutDirection(direction), flex: 1, minWidth: 0 }}>{children}</View>
+      <View style={{ flex: 1, minWidth: 0 }}>{children}</View>
     </View>
   );
 }
@@ -472,9 +419,9 @@ function MathFormula({
 }) {
   const payload = useMemo(() => renderTexToSvg(content, display), [content, display]);
   const fontSize = scaledFontSize(17, fontScale);
-  const pointsPerEx = fontSize * 0.5;
-  const formulaWidth = payload ? Math.ceil(payload.widthEx * pointsPerEx) : 0;
-  const formulaHeight = payload ? Math.ceil(payload.heightEx * pointsPerEx) : 0;
+  const inlineMetrics = payload ? getInlineMathAttachmentMetrics(payload, fontSize) : null;
+  const formulaWidth = inlineMetrics?.width ?? 0;
+  const formulaHeight = inlineMetrics?.svgHeight ?? 0;
   const fitsSafetyBounds =
     formulaWidth <= Math.max(1_024, width * 6) && formulaHeight <= Math.max(768, fontSize * 40);
   const svg = payload && fitsSafetyBounds ? colorizeSvg(payload.svg, color) : null;
@@ -490,17 +437,33 @@ function MathFormula({
     );
   }
 
-  if (!display && formulaWidth <= width) {
-    return (
-      <View style={{ alignItems: 'center', direction: 'ltr', height: formulaHeight, justifyContent: 'center', width: formulaWidth }}>
-        <SvgXml xml={svg} width={formulaWidth} height={formulaHeight} />
+  // A single measured View child becomes an inline attachment in RN 0.86 iOS Text layout.
+  const inlineAttachment = inlineMetrics ? (
+    <View
+      style={{
+        direction: 'ltr',
+        height: inlineMetrics.attachmentHeight,
+        overflow: 'visible',
+        width: inlineMetrics.width,
+      }}
+    >
+      <View
+        style={{
+          height: inlineMetrics.svgHeight,
+          transform: [{ translateY: inlineMetrics.translateY }],
+          width: inlineMetrics.width,
+        }}
+      >
+        <SvgXml xml={svg} width={inlineMetrics.width} height={inlineMetrics.svgHeight} />
       </View>
-    );
-  }
+    </View>
+  ) : null;
+
+  if (!display && formulaWidth <= width) return inlineAttachment;
 
   const scrollWidth = display ? width : Math.min(width, Math.max(1, formulaWidth));
   const contentMinimumWidth = display ? width : undefined;
-  const displayedSvg = (
+  const displayedSvg = display ? (
     <SvgXml
       xml={svg}
       width={formulaWidth}
@@ -509,7 +472,7 @@ function MathFormula({
       fill={color}
       stroke={color}
     />
-  );
+  ) : inlineAttachment;
 
   return (
     <ScrollView
@@ -519,7 +482,7 @@ function MathFormula({
       style={{
         alignSelf: display ? 'center' : 'auto',
         direction: 'ltr',
-        height: formulaHeight + (display ? 8 : 0),
+        height: display ? formulaHeight + 8 : inlineMetrics?.attachmentHeight ?? formulaHeight,
         maxWidth: width,
         width: scrollWidth,
       }}
@@ -581,32 +544,16 @@ function colorizeSvg(svg: string, color: string): string {
   return svg.replace(/currentColor/giu, safeColor);
 }
 
-function hasNativeViewNode(node: ASTNode): boolean {
-  return (
-    node.type.startsWith('agent1_math_') ||
-    node.type === 'link' ||
-    node.children.some(hasNativeViewNode)
-  );
-}
-
 function renderFormattedInline(
   node: ASTNode,
   children: ReactNode[],
   style: unknown,
   inheritedStyles: unknown,
-  direction: ReturnType<typeof firstStrongTextDirection>,
 ): ReactNode {
-  if (hasNativeViewNode(node)) {
-    return (
-      <View key={node.key} style={{ alignItems: 'center', direction: resolveDirectionalLayoutDirection(direction), flexDirection: 'row', flexWrap: 'wrap' }}>
-        {children}
-      </View>
-    );
-  }
   return (
-    <Text key={node.key} style={[inheritedStyles as never, style as never, resolveDirectionalTextStyle(direction)]}>
+    <SelectableText key={node.key} style={[inheritedStyles as never, style as never]}>
       {children}
-    </Text>
+    </SelectableText>
   );
 }
 

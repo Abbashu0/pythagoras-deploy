@@ -23,6 +23,15 @@ export interface MathSvgResult {
   verticalAlignEx: number;
 }
 
+export interface InlineMathAttachmentMetrics {
+  width: number;
+  svgHeight: number;
+  attachmentHeight: number;
+  translateY: number;
+}
+
+const MATHJAX_EX_TO_RENDERER_POINTS = 0.5;
+
 const MAX_TEX_LENGTH = 8_000;
 const MAX_SVG_LENGTH = 512_000;
 const MAX_CACHE_ENTRIES = 72;
@@ -152,6 +161,30 @@ export function clearMathSvgCacheForTests(): void {
   svgCache.clear();
   svgCacheChars = 0;
   mathDocument = null;
+}
+
+/**
+ * MathJax expresses the SVG baseline with CSS vertical-align. RN text attachments
+ * anchor their measured box at the text baseline, so reserve the descent in the
+ * attachment box and offset the SVG within that measured box using the same ex
+ * scale as its width and height.
+ */
+export function getInlineMathAttachmentMetrics(
+  result: MathSvgResult,
+  fontSize: number,
+): InlineMathAttachmentMetrics {
+  const pointsPerEx = fontSize * MATHJAX_EX_TO_RENDERER_POINTS;
+  const width = Math.ceil(result.widthEx * pointsPerEx);
+  const svgHeight = Math.ceil(result.heightEx * pointsPerEx);
+  const verticalAlign = result.verticalAlignEx * pointsPerEx;
+  const attachmentHeight = svgHeight + Math.ceil(Math.max(0, -verticalAlign));
+
+  return {
+    width,
+    svgHeight,
+    attachmentHeight,
+    translateY: attachmentHeight - svgHeight - verticalAlign,
+  };
 }
 
 function createMathDocument() {

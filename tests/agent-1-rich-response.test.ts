@@ -6,10 +6,12 @@ import { sealIncompleteMarkdown } from '../mobile/node_modules/@ronradtke/react-
 import { AGENT_1_MATH_CORPUS } from './fixtures/agent-1-math-corpus';
 import { hideUnclosedMathSuffix, parseMathDelimiterAt } from '../mobile/src/ai/rich-response/math-delimiters';
 import { agent1MathMarkdownPlugin, isSafeAgent1Link } from '../mobile/src/ai/rich-response/math-markdown-plugin';
-import { renderTexToSvg } from '../mobile/src/ai/rich-response/mathjax-svg';
+import { getInlineMathAttachmentMetrics, renderTexToSvg } from '../mobile/src/ai/rich-response/mathjax-svg';
 import {
+  type DirectionTextNode,
   firstStrongTextDirection,
   resolveDirectionalLayoutDirection,
+  resolveDirectionalListFlow,
   resolveDirectionalTextStyle,
   textFromDirectionNodes,
 } from '../mobile/src/ai/rich-response/text-direction';
@@ -36,6 +38,31 @@ test('fixture corpus renders all 55 requested TeX categories to local SVG', () =
 test('malformed and oversized TeX fail safely for plain-text fallback', () => {
   assert.equal(renderTexToSvg(String.raw`\notARealCommand{x}`, false), null);
   assert.equal(renderTexToSvg('x'.repeat(8_001), false), null);
+});
+
+test('inline SVG attachment metrics reserve MathJax baseline depth', () => {
+  const formulas = ['F(x)', 'f(x)', 'x^3', 'x_i^2', String.raw`\frac{x^3}{f(x)}`];
+  const results = formulas.map((formula) => renderTexToSvg(formula, false));
+  assert.ok(results.every((result) => result !== null));
+  assert.ok(results.some((result) => result?.verticalAlignEx !== 0));
+
+  for (const result of results) {
+    assert.ok(result);
+    const metrics = getInlineMathAttachmentMetrics(result, 18);
+    const pointsPerEx = 9;
+    const verticalAlign = result.verticalAlignEx * pointsPerEx;
+    const expectedSvgHeight = Math.ceil(result.heightEx * pointsPerEx);
+    const expectedAttachmentHeight = expectedSvgHeight + Math.ceil(Math.max(0, -verticalAlign));
+    assert.equal(metrics.width, Math.ceil(result.widthEx * pointsPerEx));
+    assert.equal(metrics.svgHeight, expectedSvgHeight);
+    assert.equal(metrics.attachmentHeight, expectedAttachmentHeight);
+    assert.equal(metrics.translateY, expectedAttachmentHeight - expectedSvgHeight - verticalAlign);
+    assert.ok(
+      Math.abs(metrics.translateY + metrics.svgHeight - metrics.attachmentHeight + verticalAlign) < 1e-9,
+      'the SVG baseline offset must preserve MathJax vertical-align relative to the native attachment baseline',
+    );
+    if (verticalAlign < 0) assert.ok(metrics.attachmentHeight > metrics.svgHeight);
+  }
 });
 
 test('math parser supports inline and multiline display delimiters without changing source', () => {
@@ -130,6 +157,16 @@ test('direction resolves to actual native Text base direction and alignment', ()
   assert.equal(resolveDirectionalLayoutDirection('rtl'), 'rtl');
   assert.equal(resolveDirectionalLayoutDirection('ltr'), 'ltr');
   assert.equal(resolveDirectionalLayoutDirection('auto'), 'inherit');
+  assert.deepEqual(resolveDirectionalListFlow('rtl'), {
+    direction: 'rtl',
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
+  });
+  assert.deepEqual(resolveDirectionalListFlow('ltr'), {
+    direction: 'ltr',
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
+  });
 });
 
 test('inline math is excluded while Arabic prose establishes paragraph direction', () => {
@@ -145,6 +182,36 @@ test('inline math is excluded while Arabic prose establishes paragraph direction
   const proseForDirection = textFromDirectionNodes(inlineContent);
   assert.equal(proseForDirection, 'إذا كانت  دالة ومشتقتها ');
   assert.equal(firstStrongTextDirection(proseForDirection), 'rtl');
+});
+
+test('mixed inline Markdown regressions stay in prose runs with block first-strong direction', () => {
+  const fixtures = [
+    { markdown: 'إذا كانت عندك دالة $F(x)$، فإن مشتقتها $f(x)$.', direction: 'rtl', mathCount: 2 },
+    { markdown: 'لأن مشتقته $x^3$.', direction: 'rtl', mathCount: 1 },
+    { markdown: 'إذا كانت $F(x)$ دالة، فإن:\n$F\'(x)=f(x)$', direction: 'rtl', mathCount: 2 },
+    { markdown: '**المشتقة** لـ $F(x)$ هي $f(x)$.', direction: 'rtl', mathCount: 2 },
+    { markdown: 'راجع [هذا المصدر](https://example.com) للمزيد.', direction: 'rtl', mathCount: 0 },
+    { markdown: '- حساب المساحة تحت المنحنى $x^3$.', direction: 'rtl', mathCount: 1 },
+    { markdown: 'If $F(x)$ is smooth, then $f(x)$ is its derivative.', direction: 'ltr', mathCount: 2 },
+    { markdown: '$x^3$', direction: 'auto', mathCount: 1 },
+  ] as const;
+
+  const parser = makeParser();
+  for (const fixture of fixtures) {
+    const tokens = parser.parse(fixture.markdown, {});
+    const inlineTokens = tokens.filter((token) => token.type === 'inline');
+    const mathCount = inlineTokens.reduce(
+      (count, token) => count + (token.children?.filter((child) => child.type === 'agent1_math_inline').length ?? 0),
+      0,
+    );
+    const directionSource = inlineTokens
+      .map((token) => textFromDirectionNodes(tokenToDirectionNode(token)))
+      .join(' ');
+
+    assert.equal(mathCount, fixture.mathCount, fixture.markdown);
+    assert.equal(firstStrongTextDirection(directionSource), fixture.direction, fixture.markdown);
+    assert.equal(tokens.some((token) => token.type === 'agent1_math_block'), false, fixture.markdown);
+  }
 });
 
 test('streaming Markdown node keys remain stable when later blocks are appended', () => {
@@ -168,3 +235,15 @@ test('streaming Markdown node keys remain stable when later blocks are appended'
   assert.equal(first.key, reparsedFirst.key);
   assert.notEqual(first.key, second.key);
 });
+
+function tokenToDirectionNode(token: {
+  type: string;
+  content: string;
+  children?: readonly { type: string; content: string; children?: readonly unknown[] }[] | null;
+}): DirectionTextNode {
+  return {
+    type: token.type,
+    content: token.content,
+    children: token.children?.map((child) => tokenToDirectionNode(child as Parameters<typeof tokenToDirectionNode>[0])),
+  };
+}
