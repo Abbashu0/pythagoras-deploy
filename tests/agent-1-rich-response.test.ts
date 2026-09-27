@@ -7,7 +7,12 @@ import { AGENT_1_MATH_CORPUS } from './fixtures/agent-1-math-corpus';
 import { hideUnclosedMathSuffix, parseMathDelimiterAt } from '../mobile/src/ai/rich-response/math-delimiters';
 import { agent1MathMarkdownPlugin, isSafeAgent1Link } from '../mobile/src/ai/rich-response/math-markdown-plugin';
 import { renderTexToSvg } from '../mobile/src/ai/rich-response/mathjax-svg';
-import { firstStrongTextDirection } from '../mobile/src/ai/rich-response/text-direction';
+import {
+  firstStrongTextDirection,
+  resolveDirectionalLayoutDirection,
+  resolveDirectionalTextStyle,
+  textFromDirectionNodes,
+} from '../mobile/src/ai/rich-response/text-direction';
 import { stabilizeNodeKey } from '../mobile/src/ai/rich-response/stable-markdown-keys';
 
 function makeParser() {
@@ -112,7 +117,34 @@ test('links allow only safe HTTP and HTTPS targets', () => {
 test('paragraph direction follows the first strong Arabic or Latin letter without editing content', () => {
   assert.equal(firstStrongTextDirection('مرحبا 123 API'), 'rtl');
   assert.equal(firstStrongTextDirection('... 25 Hello مرحبا'), 'ltr');
+  assert.equal(firstStrongTextDirection('إذا كانت F(x) دالة ومشتقتها f(x)، فإن:'), 'rtl');
+  assert.equal(firstStrongTextDirection('API يعمل الآن'), 'ltr');
+  assert.equal(firstStrongTextDirection('API response is جاهز'), 'ltr');
   assert.equal(firstStrongTextDirection('123 + 456'), 'auto');
+});
+
+test('direction resolves to actual native Text base direction and alignment', () => {
+  assert.deepEqual(resolveDirectionalTextStyle('rtl'), { writingDirection: 'rtl', textAlign: 'right' });
+  assert.deepEqual(resolveDirectionalTextStyle('ltr'), { writingDirection: 'ltr', textAlign: 'left' });
+  assert.deepEqual(resolveDirectionalTextStyle('auto'), { writingDirection: 'auto', textAlign: 'auto' });
+  assert.equal(resolveDirectionalLayoutDirection('rtl'), 'rtl');
+  assert.equal(resolveDirectionalLayoutDirection('ltr'), 'ltr');
+  assert.equal(resolveDirectionalLayoutDirection('auto'), 'inherit');
+});
+
+test('inline math is excluded while Arabic prose establishes paragraph direction', () => {
+  const inlineContent = {
+    type: 'inline',
+    children: [
+      { type: 'textgroup', children: [{ type: 'text', content: 'إذا كانت ' }] },
+      { type: 'agent1_math_inline', content: 'F(x)' },
+      { type: 'textgroup', children: [{ type: 'text', content: ' دالة ومشتقتها ' }] },
+      { type: 'agent1_math_inline', content: 'f(x)' },
+    ],
+  } as const;
+  const proseForDirection = textFromDirectionNodes(inlineContent);
+  assert.equal(proseForDirection, 'إذا كانت  دالة ومشتقتها ');
+  assert.equal(firstStrongTextDirection(proseForDirection), 'rtl');
 });
 
 test('streaming Markdown node keys remain stable when later blocks are appended', () => {

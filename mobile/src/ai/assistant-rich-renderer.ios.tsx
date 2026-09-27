@@ -21,7 +21,12 @@ import { hideUnclosedMathSuffix } from './rich-response/math-delimiters';
 import { agent1MathMarkdownPlugin, isSafeAgent1Link } from './rich-response/math-markdown-plugin';
 import { renderTexToSvg } from './rich-response/mathjax-svg';
 import { stabilizeNodeKey } from './rich-response/stable-markdown-keys';
-import { firstStrongTextDirection, textFromDirectionNodes } from './rich-response/text-direction';
+import {
+  firstStrongTextDirection,
+  resolveDirectionalLayoutDirection,
+  resolveDirectionalTextStyle,
+  textFromDirectionNodes,
+} from './rich-response/text-direction';
 
 interface AssistantRichRendererProps {
   messageId: string;
@@ -105,6 +110,7 @@ const Agent1AssistantMarkdown = memo(function Agent1AssistantMarkdown({
 
   return (
     <RNHostView matchContents>
+      {/* Keep the bridge's physical layout LTR; prose direction is resolved per inline/text boundary below. */}
       <View style={{ width: contentWidth, alignSelf: 'stretch', direction: 'ltr' }}>
         {parsedResponse}
       </View>
@@ -211,10 +217,10 @@ function createAssistantRules(
     bullet_list: (node, children, _parents, map) => <View key={node.key} style={map._VIEW_SAFE_bullet_list}>{children}</View>,
     ordered_list: (node, children, _parents, map) => <View key={node.key} style={map._VIEW_SAFE_ordered_list}>{children}</View>,
     list_item: (node, children, parents) => renderListItem(node, children, parents, palette),
-    strong: (node, children, _parents, map, inherited) => renderFormattedInline(node, children, map.strong, inherited),
-    em: (node, children, _parents, map, inherited) => renderFormattedInline(node, children, map.em, inherited),
-    s: (node, children, _parents, map, inherited) => renderFormattedInline(node, children, map.s, inherited),
-    ins: (node, children, _parents, map, inherited) => renderFormattedInline(node, children, map.ins, inherited),
+    strong: (node, children, parents, map, inherited) => renderFormattedInline(node, children, map.strong, inherited, directionForNode(node, parents)),
+    em: (node, children, parents, map, inherited) => renderFormattedInline(node, children, map.em, inherited, directionForNode(node, parents)),
+    s: (node, children, parents, map, inherited) => renderFormattedInline(node, children, map.s, inherited, directionForNode(node, parents)),
+    ins: (node, children, parents, map, inherited) => renderFormattedInline(node, children, map.ins, inherited, directionForNode(node, parents)),
     code_inline: (node, _children, _parents, map, inherited) => (
       <SelectableText key={node.key} style={[inherited as TextStyle, map.code_inline]}>
         {node.content}
@@ -239,21 +245,40 @@ function createAssistantRules(
     tr: (node, children, _parents, map) => <View key={node.key} style={map._VIEW_SAFE_tr}>{children}</View>,
     th: (node, children, _parents, map) => <View key={node.key} style={map._VIEW_SAFE_th}>{children}</View>,
     td: (node, children, _parents, map) => <View key={node.key} style={map._VIEW_SAFE_td}>{children}</View>,
-    link: (node, children, parents, map) => (
-      <Pressable key={node.key} accessibilityRole="link" onPress={() => safeOpenLink(node.attributes.href)}>
-        <SelectableText style={[map.link, inheritedTextStyle(parents, map)]}>{children}</SelectableText>
-      </Pressable>
-    ),
+    link: (node, children, parents, map) => {
+      const direction = directionForNode(node, parents);
+      return (
+        <Pressable key={node.key} accessibilityRole="link" onPress={() => safeOpenLink(node.attributes.href)}>
+          <SelectableText style={[map.link, inheritedTextStyle(parents, map), resolveDirectionalTextStyle(direction)]}>
+            {children}
+          </SelectableText>
+        </Pressable>
+      );
+    },
     blocklink: () => null,
     image: () => null,
-    text: (node, _children, _parents, map, inherited) => (
-      <SelectableText key={node.key} style={[inherited as TextStyle, map.text]}>{node.content}</SelectableText>
-    ),
-    textgroup: (node, children, parents, map) => (
-      <SelectableText key={node.key} style={[map.textgroup, inheritedTextStyle(parents, map)]}>
-        {children}
-      </SelectableText>
-    ),
+    text: (node, _children, parents, map, inherited) => {
+      const direction = directionForNode(node, parents);
+      return (
+        <SelectableText
+          key={node.key}
+          style={[inherited as TextStyle, map.text, resolveDirectionalTextStyle(direction)]}
+        >
+          {node.content}
+        </SelectableText>
+      );
+    },
+    textgroup: (node, children, parents, map) => {
+      const direction = directionForNode(node, parents);
+      return (
+        <SelectableText
+          key={node.key}
+          style={[map.textgroup, inheritedTextStyle(parents, map), resolveDirectionalTextStyle(direction)]}
+        >
+          {children}
+        </SelectableText>
+      );
+    },
     paragraph: (node, children, _parents, map) => (
       <View key={node.key} style={[map._VIEW_SAFE_paragraph, { width: '100%' }]}>{children}</View>
     ),
@@ -261,7 +286,14 @@ function createAssistantRules(
     softbreak: (node, _children, _parents, map) => <SelectableText key={node.key} style={map.softbreak}>{'\n'}</SelectableText>,
     pre: (node, children, _parents, map) => <View key={node.key} style={map._VIEW_SAFE_pre}>{children}</View>,
     inline: (node, children, parents, map) => renderDirectionalInline(node, children, parents, map, palette),
-    span: (node, children, _parents, map) => <SelectableText key={node.key} style={map.span}>{children}</SelectableText>,
+    span: (node, children, parents, map) => {
+      const direction = directionForNode(node, parents);
+      return (
+        <SelectableText key={node.key} style={[map.span, resolveDirectionalTextStyle(direction)]}>
+          {children}
+        </SelectableText>
+      );
+    },
     agent1_math_inline: (node) => renderMathNode(node, false, contentWidth, fontScale, palette),
     agent1_math_block: (node) => renderMathNode(node, true, contentWidth, fontScale, palette),
   };
@@ -278,6 +310,7 @@ function renderDirectionalInline(
   const direction = firstStrongTextDirection(textFromDirectionNodes(node));
   const inherited = inheritedTextStyle(parents, styles);
   const containsNativeView = hasNativeViewNode(node);
+  const directionalStyle = resolveDirectionalTextStyle(direction);
 
   if (containsNativeView) {
     return (
@@ -285,9 +318,10 @@ function renderDirectionalInline(
         key={node.key}
         style={{
           alignItems: 'center',
-          flexDirection: direction === 'rtl' ? 'row-reverse' : 'row',
+          direction: resolveDirectionalLayoutDirection(direction),
+          flexDirection: 'row',
           flexWrap: 'wrap',
-          justifyContent: direction === 'rtl' ? 'flex-end' : 'flex-start',
+          justifyContent: 'flex-start',
           width: '100%',
         }}
       >
@@ -304,8 +338,7 @@ function renderDirectionalInline(
         inherited,
         {
           color: palette.text,
-          textAlign: direction === 'rtl' ? 'right' : direction === 'ltr' ? 'left' : 'auto',
-          writingDirection: 'auto',
+          ...directionalStyle,
           width: '100%',
         },
       ]}
@@ -336,6 +369,11 @@ function inheritedTextStyle(parents: ASTNode[], styles: MarkdownStyleMap): TextS
   return result as TextStyle;
 }
 
+function directionForNode(node: ASTNode, parents: ASTNode[]): ReturnType<typeof firstStrongTextDirection> {
+  const inlineBlock = node.type === 'inline' ? node : parents.find((parent) => parent.type === 'inline');
+  return firstStrongTextDirection(textFromDirectionNodes(inlineBlock ?? node));
+}
+
 function renderBlockquote(
   node: ASTNode,
   children: ReactNode[],
@@ -350,6 +388,7 @@ function renderBlockquote(
       style={[
         styles._VIEW_SAFE_blockquote,
         {
+          direction: resolveDirectionalLayoutDirection(direction),
           borderLeftWidth: direction === 'rtl' ? 0 : 2,
           borderRightWidth: direction === 'rtl' ? 2 : 0,
           borderLeftColor: palette.border,
@@ -379,13 +418,15 @@ function renderListItem(
       key={node.key}
       style={{
         alignItems: 'flex-start',
-        flexDirection: direction === 'rtl' ? 'row-reverse' : 'row',
+        direction: resolveDirectionalLayoutDirection(direction),
+        flexDirection: 'row',
+        justifyContent: 'flex-start',
         marginVertical: 2,
         width: '100%',
       }}
     >
-      <Text style={{ color: palette.textSecondary, minWidth: 24, textAlign: 'center' }}>{marker}</Text>
-      <View style={{ flex: 1, minWidth: 0 }}>{children}</View>
+      <Text style={{ color: palette.textSecondary, minWidth: 24, textAlign: 'center', writingDirection: 'ltr' }}>{marker}</Text>
+      <View style={{ direction: resolveDirectionalLayoutDirection(direction), flex: 1, minWidth: 0 }}>{children}</View>
     </View>
   );
 }
@@ -442,7 +483,7 @@ function MathFormula({
     return (
       <Text
         selectable
-        style={{ color: fallbackColor, fontFamily: Platform.select({ ios: 'Menlo', default: 'monospace' }), fontSize: Math.max(12, fontSize - 2) }}
+        style={{ color: fallbackColor, fontFamily: Platform.select({ ios: 'Menlo', default: 'monospace' }), fontSize: Math.max(12, fontSize - 2), textAlign: 'left', writingDirection: 'ltr' }}
       >
         {raw}
       </Text>
@@ -451,7 +492,7 @@ function MathFormula({
 
   if (!display && formulaWidth <= width) {
     return (
-      <View style={{ alignItems: 'center', height: formulaHeight, justifyContent: 'center', width: formulaWidth }}>
+      <View style={{ alignItems: 'center', direction: 'ltr', height: formulaHeight, justifyContent: 'center', width: formulaWidth }}>
         <SvgXml xml={svg} width={formulaWidth} height={formulaHeight} />
       </View>
     );
@@ -477,12 +518,14 @@ function MathFormula({
       showsHorizontalScrollIndicator={display}
       style={{
         alignSelf: display ? 'center' : 'auto',
+        direction: 'ltr',
         height: formulaHeight + (display ? 8 : 0),
         maxWidth: width,
         width: scrollWidth,
       }}
       contentContainerStyle={{
         alignItems: 'center',
+        direction: 'ltr',
         justifyContent: formulaWidth <= width ? 'center' : 'flex-start',
         minWidth: contentMinimumWidth,
         paddingHorizontal: display ? 6 : 0,
@@ -551,16 +594,17 @@ function renderFormattedInline(
   children: ReactNode[],
   style: unknown,
   inheritedStyles: unknown,
+  direction: ReturnType<typeof firstStrongTextDirection>,
 ): ReactNode {
   if (hasNativeViewNode(node)) {
     return (
-      <View key={node.key} style={{ alignItems: 'center', flexDirection: 'row', flexWrap: 'wrap' }}>
+      <View key={node.key} style={{ alignItems: 'center', direction: resolveDirectionalLayoutDirection(direction), flexDirection: 'row', flexWrap: 'wrap' }}>
         {children}
       </View>
     );
   }
   return (
-    <Text key={node.key} style={[inheritedStyles as never, style as never]}>
+    <Text key={node.key} style={[inheritedStyles as never, style as never, resolveDirectionalTextStyle(direction)]}>
       {children}
     </Text>
   );
