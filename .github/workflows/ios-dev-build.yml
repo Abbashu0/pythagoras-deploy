@@ -1,0 +1,14 @@
+name: iOS development build dispatcher
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-from-temporary-spike:
+    name: Build from ios-dev-build-spike
+    uses: Abbashu0/pythagoras-deploy/.github/workflows/ios-dev-build.yml@ios-dev-build-spike
+    permissions:
+      contents: read
