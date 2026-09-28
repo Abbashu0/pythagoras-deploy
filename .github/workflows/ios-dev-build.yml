@@ -42,7 +42,12 @@ jobs:
           EXPO_NO_TELEMETRY: 1
 
       - name: Install CocoaPods
-        run: pod install --project-directory=mobile/ios
+        run: |
+          pwd
+          node -p "require.resolve('expo/package.json')"
+          test -f node_modules/expo/package.json
+          pod install --project-directory=ios
+        working-directory: mobile
         env:
           CI: true
 
