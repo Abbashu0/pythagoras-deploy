@@ -149,7 +149,20 @@ run_xcodebuild -showBuildSettings \
   -configuration Debug \
   -destination 'generic/platform=iOS' \
   -sdk iphoneos >"$SETTINGS_FILE" 2>&1
-grep -E 'Build settings for|PRODUCT_BUNDLE_IDENTIFIER =|PRODUCT_NAME =|SDKROOT =|SUPPORTED_PLATFORMS =|TARGETED_DEVICE_FAMILY =' "$SETTINGS_FILE" || true
+grep -E 'Build settings for|ARCHS =|VALID_ARCHS =|ONLY_ACTIVE_ARCH =|SDKROOT =|SUPPORTED_PLATFORMS =|TARGETED_DEVICE_FAMILY =|PRODUCT_BUNDLE_IDENTIFIER =' "$SETTINGS_FILE" || true
+
+grep -Eq "PRODUCT_BUNDLE_IDENTIFIER = $EXPECTED_BUNDLE_ID" "$SETTINGS_FILE" || fail 'The selected Debug scheme does not resolve to the expected bundle identifier.'
+grep -Eq 'SDKROOT = .*iphoneos' "$SETTINGS_FILE" || fail 'The selected Debug scheme did not resolve to the iphoneos SDK.'
+grep -Eq 'SUPPORTED_PLATFORMS = .*iphoneos' "$SETTINGS_FILE" || fail 'The selected Debug scheme does not support iphoneos.'
+grep -Eq 'TARGETED_DEVICE_FAMILY = .*1' "$SETTINGS_FILE" || fail 'The selected Debug scheme is not configured for iPhone devices.'
+
+ARCHS_LINES="$(grep -E '^[[:space:]]*ARCHS = ' "$SETTINGS_FILE" || true)"
+if [ -n "$ARCHS_LINES" ] \
+  && ! printf '%s\n' "$ARCHS_LINES" | grep -Eq 'ARCHS = .*arm64|ARCHS = \$\(ARCHS_STANDARD(_64_BIT)?\)'; then
+  printf '%s\n' "$ARCHS_LINES"
+  fail 'Resolved ARCHS does not include arm64 or use an accepted Xcode standard architecture variable.'
+fi
+printf '%s\n' 'Physical-device architecture validation passed via the generic iOS destination.'
 
 printf '%s\n' '=== Destinations for the discovered scheme ==='
 DESTINATIONS_FILE="$RUNNER_TEMP/pythagoras-destinations.txt"
@@ -167,7 +180,6 @@ run_xcodebuild \
   -configuration Debug \
   -destination 'generic/platform=iOS' \
   -sdk iphoneos \
-  -arch arm64 \
   -derivedDataPath "$DERIVED_DATA" \
   CODE_SIGNING_ALLOWED=NO \
   CODE_SIGNING_REQUIRED=NO \
