@@ -1,0 +1,58 @@
+name: iOS unsigned development build
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  build-ios:
+    name: Discover and build physical iPhone app
+    runs-on: macos-26
+    timeout-minutes: 75
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout the temporary experiment branch
+        uses: actions/checkout@v4
+        with:
+          ref: ios-dev-build-spike
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install locked mobile dependencies
+        run: npm ci
+        working-directory: mobile
+        env:
+          CI: true
+          EXPO_NO_TELEMETRY: 1
+
+      - name: Generate the iOS native project
+        run: npx expo prebuild --platform ios --no-install
+        working-directory: mobile
+        env:
+          CI: true
+          EXPO_NO_TELEMETRY: 1
+
+      - name: Install CocoaPods
+        run: pod install --project-directory=mobile/ios
+        env:
+          CI: true
+
+      - name: Discover generated scheme and build unsigned iphoneos app
+        run: bash .github/scripts/ios-unsigned-build.sh
+
+      - name: Upload unsigned iPhone IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Pythagoras-dev-unsigned.ipa
+          path: mobile/Pythagoras-dev-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 7

@@ -8,6 +8,7 @@
     "scheme": "pythagoras",
     "userInterfaceStyle": "automatic",
     "ios": {
+      "bundleIdentifier": "com.abbashu.pythagoras",
       "icon": "./assets/expo.icon"
     },
     "android": {
@@ -25,6 +26,7 @@
     },
     "plugins": [
       "expo-router",
+      "expo-dev-client",
       [
         "expo-splash-screen",
         {
@@ -33,7 +35,15 @@
           "imageWidth": 76
         }
       ],
-      "expo-sqlite"
+      "expo-sqlite",
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "useFrameworks": "dynamic"
+          }
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

@@ -49,7 +49,7 @@ import {
 } from '@expo/ui/swift-ui/modifiers';
 import { getAgent1AssistantActionPolicy, toggleChatReaction } from './agent-1-chat-state';
 import type { ChatComposerProps, ChatReaction, ChatTurn } from './chat-types';
-import Agent1AssistantMarkdown from './assistant-rich-renderer.ios';
+import Agent1AssistantMarkdown from './assistant-enriched-markdown.ios';
 import { firstStrongTextDirection } from './rich-response/text-direction';
 import { usePreferences } from '@/preferences/preferences-provider';
 import { getPalette } from '@/theme';

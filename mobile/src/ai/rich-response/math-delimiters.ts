@@ -45,7 +45,7 @@ export function parseMathDelimiterAt(
   if (close < 0) return null;
 
   const content = source.slice(start + delimiter.open.length, close).trim();
-  if (!content || (delimiter.open === "$" && isCurrencyLiteral(content))) return null;
+  if (!content || (delimiter.open === "$" && isCurrencyLiteralContent(content))) return null;
 
   const end = close + delimiter.close.length;
   return {
@@ -99,7 +99,7 @@ export function hideUnclosedMathSuffix(source: string): string {
     );
     if (close >= 0) {
       const mathContent = codeMasked.slice(index + delimiter.open.length, close);
-      if (delimiter.open === "$" && isCurrencyLiteral(mathContent)) {
+      if (delimiter.open === "$" && isCurrencyLiteralContent(mathContent)) {
         index = close + delimiter.close.length;
         continue;
       }
@@ -142,7 +142,7 @@ function findUnescapedDelimiter(source: string, delimiter: string, start: number
   return -1;
 }
 
-function isCurrencyLiteral(value: string): boolean {
+export function isCurrencyLiteralContent(value: string): boolean {
   return CURRENCY_LITERAL.test(value);
 }
 
@@ -150,7 +150,7 @@ function isCurrencyPrefix(value: string): boolean {
   return CURRENCY_PREFIX.test(value);
 }
 
-function maskMarkdownCode(source: string): string {
+export function maskMarkdownCode(source: string): string {
   const masked = source.split("");
   const lines = source.split("\n");
   let offset = 0;

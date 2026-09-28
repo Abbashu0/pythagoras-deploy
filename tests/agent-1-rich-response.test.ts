@@ -5,6 +5,11 @@ import type { ASTNode } from '../mobile/node_modules/@ronradtke/react-native-mar
 import { sealIncompleteMarkdown } from '../mobile/node_modules/@ronradtke/react-native-markdown-display/dist/lib/view/util/sealIncompleteMarkdown';
 import { AGENT_1_MATH_CORPUS } from './fixtures/agent-1-math-corpus';
 import { hideUnclosedMathSuffix, parseMathDelimiterAt } from '../mobile/src/ai/rich-response/math-delimiters';
+import {
+  normalizeAlternateMathDelimiters,
+  prepareEnrichedMarkdownInput,
+  stripMarkdownImages,
+} from '../mobile/src/ai/rich-response/enriched-markdown-input';
 import { agent1MathMarkdownPlugin, isSafeAgent1Link } from '../mobile/src/ai/rich-response/math-markdown-plugin';
 import { getInlineMathAttachmentMetrics, renderTexToSvg } from '../mobile/src/ai/rich-response/mathjax-svg';
 import {
@@ -21,7 +26,7 @@ function makeParser() {
   return new MarkdownIt({ html: false, linkify: false }).use(agent1MathMarkdownPlugin);
 }
 
-test('fixture corpus renders all 55 requested TeX categories to local SVG', () => {
+test('legacy MathJax fallback renders all 55 requested TeX categories to local SVG', () => {
   assert.equal(AGENT_1_MATH_CORPUS.length, 55);
   for (const fixture of AGENT_1_MATH_CORPUS) {
     const result = renderTexToSvg(fixture.tex, false);
@@ -88,6 +93,38 @@ test('streaming hides only an unfinished TeX suffix and leaves currency/code alo
   assert.equal(hideUnclosedMathSuffix('Price is $20 USD'), 'Price is $20 USD');
   assert.equal(parseMathDelimiterAt('The literal is $20$', 15), null);
   assert.equal(parseMathDelimiterAt('Spend $20 and $30 today', 6), null);
+});
+
+test('native renderer input normalizes alternate math without touching code or source currency', () => {
+  const source =
+    'إذا كانت الدالة \\(F(x)\\)، فإن مشتقتها \\[f(x)=x^3\\]. ' +
+    'Existing $x^2$ and currency $20 and $30.';
+  assert.equal(
+    normalizeAlternateMathDelimiters(source),
+    'إذا كانت الدالة $F(x)$، فإن مشتقتها $$f(x)=x^3$$. Existing $x^2$ and currency \\$20 and \\$30.',
+  );
+
+  const tick = String.fromCharCode(96);
+  const fence = tick.repeat(3);
+  const code = 'Code: ' + tick + '\\(x\\)' + tick + '\n' +
+    fence + 'tex\n\\[y\\]\n' + fence;
+  assert.equal(normalizeAlternateMathDelimiters(code), code);
+});
+
+test('native renderer presentation copy removes remote images but preserves code', () => {
+  const tick = String.fromCharCode(96);
+  const source =
+    'صورة ![وصف عربي](https://example.com/image.png) ورابط [مصدر](https://example.com). ' +
+    'Code: ' + tick + '![keep](https://example.com/code.png)' + tick;
+  assert.equal(
+    prepareEnrichedMarkdownInput(source),
+    'صورة وصف عربي ورابط [مصدر](https://example.com). ' +
+      'Code: ' + tick + '![keep](https://example.com/code.png)' + tick,
+  );
+  assert.equal(
+    stripMarkdownImages('![alt](https://example.com/x.png) ![ref][id] ![shortcut] ![outer ![inner](https://example.com/y.png)](https://example.com/x.png)'),
+    'alt ref shortcut outer inner',
+  );
 });
 
 test('streaming Markdown reparses incomplete emphasis, fences, tables, and math safely', () => {
