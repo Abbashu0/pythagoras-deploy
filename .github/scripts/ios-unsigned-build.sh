@@ -220,16 +220,27 @@ else
   printf '%s\n' 'App bundle has no valid code signature or embedded provisioning profile.'
 fi
 
-APP_EXECUTABLE="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP_PATH/Info.plist")"
-FRAMEWORK_BINARY="$APP_PATH/Frameworks/ReactNativeEnrichedMarkdown.framework/ReactNativeEnrichedMarkdown"
-if [ ! -f "$FRAMEWORK_BINARY" ]; then
-  /usr/bin/otool -L "$APP_PATH/$APP_EXECUTABLE" >"$RUNNER_TEMP/pythagoras-linked-libraries.txt" 2>&1
-  if ! grep -q 'ReactNativeEnrichedMarkdown.framework' "$RUNNER_TEMP/pythagoras-linked-libraries.txt"; then
-    cat "$RUNNER_TEMP/pythagoras-linked-libraries.txt"
-    fail 'The built app does not link the ReactNativeEnrichedMarkdown native framework.'
-  fi
+ARCHIVE_LIST="$(find "$PRODUCTS_DIR" -type f -name 'libReactNativeEnrichedMarkdown.a' -print)"
+ARCHIVE_COUNT="$(printf '%s\n' "$ARCHIVE_LIST" | awk 'NF { count++ } END { print count + 0 }')"
+if [ "$ARCHIVE_COUNT" -ne 1 ]; then
+  printf 'ReactNativeEnrichedMarkdown archives found:\n%s\n' "$ARCHIVE_LIST"
+  fail "Expected exactly one built libReactNativeEnrichedMarkdown.a archive; found $ARCHIVE_COUNT."
 fi
-printf '%s\n' 'Verified ReactNativeEnrichedMarkdown native code in the built app.'
+
+ENRICHED_ARCHIVE="$(printf '%s\n' "$ARCHIVE_LIST" | sed -n '1p')"
+test -s "$ENRICHED_ARCHIVE" || fail "The ReactNativeEnrichedMarkdown archive is missing or empty: $ENRICHED_ARCHIVE"
+ENRICHED_ARCHS="$(/usr/bin/lipo -archs "$ENRICHED_ARCHIVE")"
+printf 'ReactNativeEnrichedMarkdown static archive: %s\n' "$ENRICHED_ARCHIVE"
+printf 'ReactNativeEnrichedMarkdown archive architectures: %s\n' "$ENRICHED_ARCHS"
+case " $ENRICHED_ARCHS " in
+  *" arm64 "*) ;;
+  *) fail "The ReactNativeEnrichedMarkdown archive does not contain arm64: $ENRICHED_ARCHS" ;;
+esac
+
+if ! grep -Fq "Implicit dependency on target 'ReactNativeEnrichedMarkdown' in project 'Pods' via options '-lReactNativeEnrichedMarkdown' in build setting 'OTHER_LDFLAGS'" "$XCODE_LOG"; then
+  fail 'Xcode build log does not prove that the app target links ReactNativeEnrichedMarkdown through OTHER_LDFLAGS.'
+fi
+printf '%s\n' 'Verified Xcode linkage of the ReactNativeEnrichedMarkdown static library through OTHER_LDFLAGS.'
 
 PACKAGE_ROOT="$RUNNER_TEMP/pythagoras-ipa"
 IPA_PATH="$MOBILE_ROOT/Pythagoras-dev-unsigned.ipa"
