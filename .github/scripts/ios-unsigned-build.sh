@@ -45,8 +45,25 @@ grep -qi 'expo-dev-launcher' "$IOS_ROOT/Podfile.lock" || fail 'expo-dev-launcher
 grep -qi 'expo-dev-menu' "$IOS_ROOT/Podfile.lock" || fail 'expo-dev-menu is absent from Podfile.lock.'
 
 printf '%s\n' '=== Generated iOS project containers ==='
-WORKSPACE_LIST="$(find "$IOS_ROOT" -type d -name Pods -prune -o -type d -name '*.xcworkspace' -print)"
-PROJECT_LIST="$(find "$IOS_ROOT" -type d -name Pods -prune -o -type d -name '*.xcodeproj' -print)"
+printf '%s\n' 'Top-level generated Xcode containers:'
+find "$IOS_ROOT" -maxdepth 1 \
+  \( -name '*.xcworkspace' -o -name '*.xcodeproj' \) \
+  -type d \
+  -print
+WORKSPACE_LIST="$(
+  find "$IOS_ROOT" \
+    -maxdepth 1 \
+    -type d \
+    -name '*.xcworkspace' \
+    -print
+)"
+PROJECT_LIST="$(
+  find "$IOS_ROOT" \
+    -maxdepth 1 \
+    -type d \
+    -name '*.xcodeproj' \
+    -print
+)"
 WORKSPACE_COUNT="$(printf '%s\n' "$WORKSPACE_LIST" | awk 'NF { count++ } END { print count + 0 }')"
 PROJECT_COUNT="$(printf '%s\n' "$PROJECT_LIST" | awk 'NF { count++ } END { print count + 0 }')"
 CONTAINER_KIND=''
