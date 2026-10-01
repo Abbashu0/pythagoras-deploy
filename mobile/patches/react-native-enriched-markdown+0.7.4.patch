@@ -1,5 +1,5 @@
 diff --git a/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdown.mm b/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdown.mm
-index 7ad95d7..d071abf 100644
+index 7ad95d7..aa938df 100644
 --- a/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdown.mm
 +++ b/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdown.mm
 @@ -69,2 +69,3 @@ static char kENRMSegmentFadeAnimatorKey;
@@ -21,7 +21,7 @@ index 7ad95d7..d071abf 100644
 +  _pendingHeightValidation = YES;
 +  _pendingForceHeightUpdate = _pendingForceHeightUpdate || forceHeightUpdate || segmentTopologyChanged;
    _segmentSignatures = result.signatures;
-@@ -572,10 +582,43 @@ static char kENRMSegmentFadeAnimatorKey;
+@@ -572,11 +582,44 @@ static char kENRMSegmentFadeAnimatorKey;
 -    if (forceHeightUpdate || segmentTopologyChanged) {
 +    if (_pendingForceHeightUpdate) {
        [self computeSegmentLayoutForWidth:self.bounds.size.width applyFrames:YES];
@@ -32,6 +32,7 @@ index 7ad95d7..d071abf 100644
 -      if (needsHeightUpdate(measured, self.bounds)) {
 -        [self requestHeightUpdate];
 -      }
+     }
 +    [self validateHeightForCurrentWidth:self.bounds.size.width];
 +  }
 +}
@@ -71,7 +72,7 @@ index 7ad95d7..d071abf 100644
 +
 +  if (shouldRequestHeightUpdate) {
 +    [self requestHeightUpdate];
-     }
+   }
 @@ -727,3 +770,5 @@ static char kENRMSegmentFadeAnimatorKey;
    [super layoutSubviews];
 -  [self computeSegmentLayoutForWidth:self.bounds.size.width applyFrames:YES];

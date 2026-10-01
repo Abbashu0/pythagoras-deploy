@@ -37,8 +37,7 @@ jobs:
       - name: Verify Enriched Markdown iOS height patch
         run: |
           test -f patches/react-native-enriched-markdown+0.7.4.patch
-          grep -Fq 'Upstream issue #824' node_modules/react-native-enriched-markdown/ios/EnrichedMarkdown.mm
-          grep -Fq 'validateHeightForCurrentWidth' node_modules/react-native-enriched-markdown/ios/EnrichedMarkdown.mm
+          node ../.github/scripts/verify-enriched-markdown-height-patch.mjs
           echo 'Verified react-native-enriched-markdown 0.7.4 native height patch.'
         working-directory: mobile
 
