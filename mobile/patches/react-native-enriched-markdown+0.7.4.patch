@@ -1,0 +1,86 @@
+diff --git a/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdown.mm b/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdown.mm
+index 7ad95d7..4643082 100644
+--- a/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdown.mm
++++ b/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdown.mm
+@@ -69,0 +70 @@ static char kENRMSegmentFadeAnimatorKey;
++- (void)validateHeightForCurrentWidth:(CGFloat)width;
+@@ -93,0 +95,6 @@ static char kENRMSegmentFadeAnimatorKey;
++  NSUInteger _renderRevision;
++  NSUInteger _validatedRenderRevision;
++  CGFloat _lastValidatedWidth;
++  BOOL _hasValidatedWidth;
++  BOOL _pendingHeightValidation;
++  BOOL _pendingForceHeightUpdate;
+@@ -568,0 +576,3 @@ static char kENRMSegmentFadeAnimatorKey;
++  _renderRevision++;
++  _pendingHeightValidation = YES;
++  _pendingForceHeightUpdate = _pendingForceHeightUpdate || forceHeightUpdate || segmentTopologyChanged;
+@@ -573 +583 @@ static char kENRMSegmentFadeAnimatorKey;
+-    if (forceHeightUpdate || segmentTopologyChanged) {
++    if (_pendingForceHeightUpdate) {
+@@ -576,6 +585,0 @@ static char kENRMSegmentFadeAnimatorKey;
+-      [self requestHeightUpdate];
+-    } else {
+-      CGSize measured = [self measureSize:self.bounds.size.width];
+-      if (needsHeightUpdate(measured, self.bounds)) {
+-        [self requestHeightUpdate];
+-      }
+@@ -582,0 +587,39 @@ static char kENRMSegmentFadeAnimatorKey;
++    [self validateHeightForCurrentWidth:self.bounds.size.width];
++  }
++}
++
++// Upstream issue #824: Fabric may measure before async GFM segments exist on iOS.
++- (void)validateHeightForCurrentWidth:(CGFloat)width
++{
++  if (width <= 0) {
++    if (_renderedMarkdown != nil) {
++      _pendingHeightValidation = YES;
++    }
++    return;
++  }
++
++  CGFloat scale = RCTScreenScale();
++  BOOL widthChanged = !_hasValidatedWidth || ceil(width * scale) != ceil(_lastValidatedWidth * scale);
++  if (_renderedMarkdown == nil && !_pendingHeightValidation && !_pendingForceHeightUpdate) {
++    _lastValidatedWidth = width;
++    _hasValidatedWidth = YES;
++    return;
++  }
++  if (!_pendingHeightValidation && _validatedRenderRevision == _renderRevision && !widthChanged &&
++      !_pendingForceHeightUpdate) {
++    return;
++  }
++
++  CGSize measured = [self measureSize:width];
++  BOOL shouldRequestHeightUpdate = _pendingForceHeightUpdate || needsHeightUpdate(measured, self.bounds);
++
++  // Record the measured revision before invalidating Yoga so its next layout pass
++  // cannot recursively request another update for the same content and width.
++  _validatedRenderRevision = _renderRevision;
++  _lastValidatedWidth = width;
++  _hasValidatedWidth = YES;
++  _pendingHeightValidation = NO;
++  _pendingForceHeightUpdate = NO;
++
++  if (shouldRequestHeightUpdate) {
++    [self requestHeightUpdate];
+@@ -728 +771,3 @@ static char kENRMSegmentFadeAnimatorKey;
+-  [self computeSegmentLayoutForWidth:self.bounds.size.width applyFrames:YES];
++  CGFloat width = self.bounds.size.width;
++  [self computeSegmentLayoutForWidth:width applyFrames:YES];
++  [self validateHeightForCurrentWidth:width];
+@@ -925,4 +970,2 @@ static char kENRMSegmentFadeAnimatorKey;
+-    CGSize measured = [self measureSize:self.bounds.size.width];
+-    if (needsHeightUpdate(measured, self.bounds)) {
+-      [self requestHeightUpdate];
+-    }
++    _pendingHeightValidation = YES;
++    [self validateHeightForCurrentWidth:self.bounds.size.width];
+@@ -951,0 +995,6 @@ static char kENRMSegmentFadeAnimatorKey;
++  _renderRevision = 0;
++  _validatedRenderRevision = 0;
++  _lastValidatedWidth = 0;
++  _hasValidatedWidth = NO;
++  _pendingHeightValidation = NO;
++  _pendingForceHeightUpdate = NO;

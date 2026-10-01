@@ -34,6 +34,14 @@ jobs:
           CI: true
           EXPO_NO_TELEMETRY: 1
 
+      - name: Verify Enriched Markdown iOS height patch
+        run: |
+          test -f patches/react-native-enriched-markdown+0.7.4.patch
+          grep -Fq 'Upstream issue #824' node_modules/react-native-enriched-markdown/ios/EnrichedMarkdown.mm
+          grep -Fq 'validateHeightForCurrentWidth' node_modules/react-native-enriched-markdown/ios/EnrichedMarkdown.mm
+          echo 'Verified react-native-enriched-markdown 0.7.4 native height patch.'
+        working-directory: mobile
+
       - name: Generate the iOS native project
         run: npx expo prebuild --platform ios --no-install
         working-directory: mobile

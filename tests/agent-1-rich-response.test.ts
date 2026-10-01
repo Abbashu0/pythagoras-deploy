@@ -10,7 +10,6 @@ import {
   fallbackArabicMathSpans,
   normalizeAlternateMathDelimiters,
   prepareEnrichedMarkdownInput,
-  resolveEnrichedMarkdownFlavor,
   stripMarkdownImages,
 } from '../mobile/src/ai/rich-response/enriched-markdown-input';
 import { agent1MathMarkdownPlugin, isSafeAgent1Link } from '../mobile/src/ai/rich-response/math-markdown-plugin';
@@ -157,20 +156,6 @@ test('Arabic outside math is untouched and valid English, chemistry, and math st
   assert.equal(prepareEnrichedMarkdownInput(englishLabels), englishLabels);
   assert.equal(prepareEnrichedMarkdownInput(chemistry), chemistry);
   assert.equal(prepareEnrichedMarkdownInput(supportedMath), supportedMath);
-});
-
-test('native markdown uses the single TextView path unless GFM block features are needed', () => {
-  assert.equal(
-    resolveEnrichedMarkdownFlavor('إذا كانت الدالة $F(x)$ قابلة للاشتقاق.'),
-    'commonmark',
-  );
-  assert.equal(resolveEnrichedMarkdownFlavor('**Bold** and a link [here](https://example.com).'), 'commonmark');
-  assert.equal(resolveEnrichedMarkdownFlavor('$$\n\\int_0^2 x\\,dx\n$$'), 'github');
-  assert.equal(resolveEnrichedMarkdownFlavor('| A | B |\n| --- | --- |\n| 1 | 2 |'), 'github');
-  assert.equal(resolveEnrichedMarkdownFlavor('| Single column |\n| --- |\n| value |'), 'github');
-  assert.equal(resolveEnrichedMarkdownFlavor('- [x] completed task'), 'github');
-  assert.equal(resolveEnrichedMarkdownFlavor('Use ~~old~~ syntax.'), 'github');
-  assert.equal(resolveEnrichedMarkdownFlavor('```md\n$$ x $$\n| A | B |\n~~x~~\n```'), 'commonmark');
 });
 
 test('Arabic math guard skips code, escaped delimiters, and currency literals', () => {

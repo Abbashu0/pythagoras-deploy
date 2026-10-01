@@ -10,10 +10,7 @@ import type { Palette } from '@/theme';
 import { scaledFontSize } from '@/theme';
 import { hideUnclosedMathSuffix } from './rich-response/math-delimiters';
 import { isSafeAgent1Link } from './rich-response/math-markdown-plugin';
-import {
-  prepareEnrichedMarkdownInput,
-  resolveEnrichedMarkdownFlavor,
-} from './rich-response/enriched-markdown-input';
+import { prepareEnrichedMarkdownInput } from './rich-response/enriched-markdown-input';
 import { usePreferences } from '@/preferences/preferences-provider';
 
 interface Agent1EnrichedMarkdownProps {
@@ -56,7 +53,6 @@ const Agent1EnrichedMarkdown = memo(function Agent1EnrichedMarkdown({
       : content;
     return prepareEnrichedMarkdownInput(stablePrefix);
   }, [content, streaming]);
-  const markdownFlavor = resolveEnrichedMarkdownFlavor(markdown);
   const lastDiagnosticRef = useRef('');
   useEffect(() => {
     if (!__DEV__ || streaming) return;
@@ -68,9 +64,9 @@ const Agent1EnrichedMarkdown = memo(function Agent1EnrichedMarkdown({
       sourceCharacters: content.length,
       presentationCharacters: markdown.length,
       contentWidth,
-      flavor: markdownFlavor,
+      flavor: 'github',
     });
-  }, [content.length, contentWidth, markdown.length, markdownFlavor, messageId, streaming]);
+  }, [content.length, contentWidth, markdown.length, messageId, streaming]);
   const handleLinkPress = useCallback(({ url }: { url: string }) => {
     if (!isSafeAgent1Link(url)) return;
     void Linking.openURL(url).catch(() => undefined);
@@ -82,9 +78,9 @@ const Agent1EnrichedMarkdown = memo(function Agent1EnrichedMarkdown({
       messageId,
       width,
       height,
-      flavor: markdownFlavor,
+      flavor: 'github',
     });
-  }, [markdownFlavor, messageId]);
+  }, [messageId]);
 
   if (contentWidth <= 0 || markdown.length === 0) return null;
 
@@ -95,7 +91,7 @@ const Agent1EnrichedMarkdown = memo(function Agent1EnrichedMarkdown({
       markdownStyle={markdownStyle}
       containerStyle={{ width: contentWidth, alignSelf: 'stretch' }}
       writingDirection="first-strong"
-      flavor={markdownFlavor}
+      flavor="github"
       md4cFlags={MARKDOWN_FLAGS}
       onLinkPress={handleLinkPress}
       enableLinkPreview={false}

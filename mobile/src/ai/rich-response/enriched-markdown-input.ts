@@ -55,47 +55,6 @@ export function prepareEnrichedMarkdownInput(source: string): string {
 }
 
 /**
- * Prefer the library's single-native-TextView path for ordinary responses.
- * Its segmented GitHub renderer is needed only for GFM tables/extensions and
- * block math; inline math is supported by both flavors.
- */
-export function resolveEnrichedMarkdownFlavor(
-  markdown: string,
-): 'commonmark' | 'github' {
-  const codeMasked = maskMarkdownCode(markdown);
-  if (containsDisplayMath(codeMasked) || containsGfmBlock(codeMasked)) {
-    return 'github';
-  }
-  return 'commonmark';
-}
-
-function containsDisplayMath(markdown: string): boolean {
-  for (let index = 0; index < markdown.length; index += 1) {
-    if (markdown[index] !== '$') continue;
-    const opening = mathOpeningAt(markdown, index);
-    if (opening?.dollar && opening.display) return true;
-  }
-  return false;
-}
-
-function containsGfmBlock(markdown: string): boolean {
-  if (/(?:^|\n)[ \t]{0,3}[-*+][ \t]+\[[ xX]\][ \t]+/u.test(markdown)) {
-    return true;
-  }
-  if (/~~[^~\n].*?~~/su.test(markdown)) return true;
-
-  const lines = markdown.split(/\r?\n/u);
-  return lines.some(
-    (line, index) => line.includes('|') && isGfmTableSeparator(lines[index + 1] ?? ''),
-  );
-}
-
-function isGfmTableSeparator(line: string): boolean {
-  const cells = line.trim().replace(/^\|/u, '').replace(/\|$/u, '').split('|');
-  return cells.length > 0 && cells.every((cell) => /^[ \t]*:?-{3,}:?[ \t]*$/u.test(cell));
-}
-
-/**
  * Arabic letters and vocalization marks are not shaped reliably inside RaTeX.
  * Detect only letters/marks (not Arabic punctuation, digits, or math symbols).
  */
