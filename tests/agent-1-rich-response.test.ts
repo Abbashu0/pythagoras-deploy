@@ -6,8 +6,11 @@ import { sealIncompleteMarkdown } from '../mobile/node_modules/@ronradtke/react-
 import { AGENT_1_MATH_CORPUS } from './fixtures/agent-1-math-corpus';
 import { hideUnclosedMathSuffix, parseMathDelimiterAt } from '../mobile/src/ai/rich-response/math-delimiters';
 import {
+  containsArabicScriptLetterOrMark,
+  fallbackArabicMathSpans,
   normalizeAlternateMathDelimiters,
   prepareEnrichedMarkdownInput,
+  resolveEnrichedMarkdownFlavor,
   stripMarkdownImages,
 } from '../mobile/src/ai/rich-response/enriched-markdown-input';
 import { agent1MathMarkdownPlugin, isSafeAgent1Link } from '../mobile/src/ai/rich-response/math-markdown-plugin';
@@ -109,6 +112,81 @@ test('native renderer input normalizes alternate math without touching code or s
   const code = 'Code: ' + tick + '\\(x\\)' + tick + '\n' +
     fence + 'tex\n\\[y\\]\n' + fence;
   assert.equal(normalizeAlternateMathDelimiters(code), code);
+});
+
+test('Arabic-script detection includes letters and harakat, not punctuation, digits, or math symbols', () => {
+  assert.equal(containsArabicScriptLetterOrMark('ذرة'), true);
+  assert.equal(containsArabicScriptLetterOrMark('ذَرَّةٌ'), true);
+  assert.equal(containsArabicScriptLetterOrMark('\u064b'), true);
+  assert.equal(containsArabicScriptLetterOrMark(String.fromCodePoint(0xfe91)), true);
+  assert.equal(containsArabicScriptLetterOrMark('Atom + Nucleus'), false);
+  assert.equal(containsArabicScriptLetterOrMark('123 + 456 = x^2'), false);
+  assert.equal(containsArabicScriptLetterOrMark('١٢٣ + ٤٥٦'), false);
+  assert.equal(containsArabicScriptLetterOrMark('،؛؟'), false);
+  assert.equal(containsArabicScriptLetterOrMark(String.fromCodePoint(0x1ee00)), false);
+});
+
+test('Arabic text inside supported math spans becomes readable code with the exact source retained', () => {
+  const inlineArabic = String.raw`$\text{ذرة}$`;
+  const displayArabic = String.raw`$$\fbox{\text{ذرة}}\rightarrow\fbox{\text{نواة}}$$`;
+  const inlineFallback = '`' + inlineArabic + '`';
+  const displayFallback = '```\n' + displayArabic + '\n```';
+
+  assert.equal(fallbackArabicMathSpans(inlineArabic), inlineFallback);
+  assert.equal(fallbackArabicMathSpans(displayArabic), displayFallback);
+  assert.equal(prepareEnrichedMarkdownInput(displayArabic), displayFallback);
+
+  const alternateInline = String.raw`\(\text{ذرة}\)`;
+  const alternateDisplay = String.raw`\[\text{ذرة}\]`;
+  assert.equal(fallbackArabicMathSpans(alternateInline), '`' + alternateInline + '`');
+  assert.equal(
+    fallbackArabicMathSpans(alternateDisplay),
+    '```\n' + alternateDisplay + '\n```',
+  );
+});
+
+test('Arabic outside math is untouched and valid English, chemistry, and math stay typesettable', () => {
+  const arabicProseAndMath = 'إذا كانت الدالة $F(x)$ قابلة للاشتقاق.';
+  const englishLabels = String.raw`$\text{Atom}\rightarrow\text{Nucleus}$`;
+  const chemistry = String.raw`$\ce{H2O + CO2 -> H2CO3}$`;
+  const supportedMath =
+    '$F(x)$ $x^3$ $3x^2$ $$\\int_0^2 x,dx$$ ' +
+    '$$\\frac{1}{1+x} \\qquad \\sqrt{x}$$';
+
+  assert.equal(prepareEnrichedMarkdownInput(arabicProseAndMath), arabicProseAndMath);
+  assert.equal(prepareEnrichedMarkdownInput(englishLabels), englishLabels);
+  assert.equal(prepareEnrichedMarkdownInput(chemistry), chemistry);
+  assert.equal(prepareEnrichedMarkdownInput(supportedMath), supportedMath);
+});
+
+test('native markdown uses the single TextView path unless GFM block features are needed', () => {
+  assert.equal(
+    resolveEnrichedMarkdownFlavor('إذا كانت الدالة $F(x)$ قابلة للاشتقاق.'),
+    'commonmark',
+  );
+  assert.equal(resolveEnrichedMarkdownFlavor('**Bold** and a link [here](https://example.com).'), 'commonmark');
+  assert.equal(resolveEnrichedMarkdownFlavor('$$\n\\int_0^2 x\\,dx\n$$'), 'github');
+  assert.equal(resolveEnrichedMarkdownFlavor('| A | B |\n| --- | --- |\n| 1 | 2 |'), 'github');
+  assert.equal(resolveEnrichedMarkdownFlavor('| Single column |\n| --- |\n| value |'), 'github');
+  assert.equal(resolveEnrichedMarkdownFlavor('- [x] completed task'), 'github');
+  assert.equal(resolveEnrichedMarkdownFlavor('Use ~~old~~ syntax.'), 'github');
+  assert.equal(resolveEnrichedMarkdownFlavor('```md\n$$ x $$\n| A | B |\n~~x~~\n```'), 'commonmark');
+});
+
+test('Arabic math guard skips code, escaped delimiters, and currency literals', () => {
+  const inlineArabic = String.raw`$\text{ذرة}$`;
+  const tick = String.fromCharCode(96);
+  const fence = tick.repeat(3);
+  const inlineCode = tick + inlineArabic + tick;
+  const fencedCode = fence + 'tex\n' + inlineArabic + '\n' + fence;
+  const escaped = String.raw`Keep \$\text{ذرة}\$ literal`;
+  const currency = 'Spend $20 and $30 today.';
+
+  assert.equal(fallbackArabicMathSpans(inlineCode), inlineCode);
+  assert.equal(fallbackArabicMathSpans(fencedCode), fencedCode);
+  assert.equal(fallbackArabicMathSpans(escaped), escaped);
+  assert.equal(fallbackArabicMathSpans(currency), currency);
+  assert.equal(prepareEnrichedMarkdownInput('Price $20 USD'), 'Price $20 USD');
 });
 
 test('native renderer presentation copy removes remote images but preserves code', () => {

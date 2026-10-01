@@ -47,6 +47,8 @@ const LAB_CASES = [
     markdown: [
       '# Heading direction',
       '',
+      '## عنوان عربي للاختبار',
+      '',
       'نص **عريض** وآخر *مائل* ضمن الفقرة نفسها.',
       '',
       '[رابط HTTPS آمن](https://example.com)',
@@ -106,6 +108,42 @@ const LAB_CASES = [
       '\\ce{H2O + CO2 -> H2CO3} \\qquad \\fbox{\\text{ذرة}}\\rightarrow\\fbox{\\text{نواة}}',
       '$$',
     ].join('\n'),
+  },
+] as const;
+
+const LATEX_ARABIC_DIAGNOSTICS = [
+  {
+    title: '1. \\text{ذرة}',
+    markdown: '$$\n\\text{ذرة}\n$$',
+  },
+  {
+    title: '2. \\mathrm{ذرة}',
+    markdown: '$$\n\\mathrm{ذرة}\n$$',
+  },
+  {
+    title: '3. \\operatorname{ذرة}',
+    markdown: '$$\n\\operatorname{ذرة}\n$$',
+  },
+  {
+    title: '4. Raw Arabic in math',
+    markdown: '$$\nذرة\n$$',
+  },
+  {
+    title: '5. \\fbox{\\text{ذرة}}',
+    markdown: '$$\n\\fbox{\\text{ذرة}}\n$$',
+  },
+  {
+    title: '6. Arabic text with arrow',
+    markdown: '$$\n\\text{نواة} \\rightarrow \\text{ذرة}\n$$',
+  },
+  {
+    title: 'Control. English text with arrow',
+    markdown: '$$\n\\text{Atom} \\rightarrow \\text{Nucleus}\n$$',
+  },
+  {
+    title: 'Fallback guard — Arabic math as readable source',
+    markdown:
+      '$$\n\\fbox{\\text{ذرة}}\\rightarrow\\fbox{\\text{نواة}}\n$$',
   },
 ] as const;
 
@@ -170,6 +208,34 @@ export default function RendererLabScreen() {
             />
           </View>
         ))}
+
+        <View
+          style={{
+            borderTopWidth: 1,
+            borderTopColor: palette.separator,
+            paddingTop: 16,
+            marginBottom: 22,
+          }}
+        >
+          <Text style={[titleStyle, { fontSize: 18, marginBottom: 8 }]}>
+            Arabic inside LaTeX diagnostics
+          </Text>
+          <Text style={{ color: palette.textSecondary, fontSize: 13, marginBottom: 16 }}>
+            Independent display-math cases using the installed native RaTeX renderer.
+          </Text>
+          {LATEX_ARABIC_DIAGNOSTICS.map((item, index) => (
+            <View key={item.title} style={{ marginBottom: 16 }}>
+              <Text style={[titleStyle, { marginBottom: 6 }]}>{item.title}</Text>
+              <Agent1EnrichedMarkdown
+                messageId={'renderer-lab-latex-arabic-' + index}
+                content={item.markdown}
+                streaming={false}
+                contentWidth={contentWidth}
+                palette={palette}
+              />
+            </View>
+          ))}
+        </View>
       </ScrollView>
     </SafeAreaView>
   );

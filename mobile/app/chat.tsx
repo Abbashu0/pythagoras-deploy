@@ -6,7 +6,7 @@ import {
   useWindowDimensions,
   type LayoutChangeEvent,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Stack } from 'expo-router/stack';
 import * as Haptics from 'expo-haptics';
@@ -42,14 +42,98 @@ import { getPalette } from '@/theme';
 
 const StableChatTopControls = memo(ChatTopControls);
 
+const SCROLL_LAYOUT_TEST_PARAGRAPH =
+  'يعرض هذا النص الطويل عدة فقرات عربية متتابعة كي نتحقق من أن React Native يقيس الارتفاع الكامل للرد، وأن موضع أزرار النسخ والتفاعل وإعادة الإنشاء يبقى بعد نهاية المحتوى لا في منتصفه. يجب أن تظل الأسطر قابلة للوصول بالتمرير الطبيعي، وأن تبقى المسافة الأخيرة واضحة فوق حقل الكتابة المثبت أسفل الشاشة.';
+
+const SCROLL_LAYOUT_TEST_CONTENT = [
+  '# اختبار ارتفاع transcript الطويل',
+  '',
+  'هذه إجابة تطويرية ثابتة لا ترسل أي طلب إلى Agent 1. الغرض منها فحص التمرير والارتفاع مع محتوى طويل ومنسق داخل شاشة المحادثة نفسها.',
+  '',
+  '## شرح الفكرة الأساسية',
+  '',
+  ...Array.from(
+    { length: 12 },
+    (_, index) => `الفقرة ${index + 1}: ${SCROLL_LAYOUT_TEST_PARAGRAPH}`,
+  ),
+  '',
+  '## صيغ رياضية ضمن الشرح',
+  '',
+  'تظهر هنا معادلات قصيرة داخل السطر مثل $F(x)$ و$x^3$ و$3x^2$ مع بقاء الشرح العربي خارج حدود LaTeX.',
+  '',
+  '$$',
+  '\\int_0^2 x\\,dx = \\left[\\frac{x^2}{2}\\right]_0^2 = 2',
+  '$$',
+  '',
+  'وتبقى المعادلة التالية في كتلة مستقلة، ثم يستمر النص بعدها ضمن تدفق المستند نفسه:',
+  '',
+  '$$',
+  '\\frac{d}{dx}x^3 = 3x^2',
+  '$$',
+  '',
+  '## قائمة خطوات التحقق',
+  '',
+  '- يبدأ المحتوى تحت أدوات الرجوع والقائمة.',
+  '- يلتف النص العربي بمحاذاة RTL الصحيحة.',
+  '- تظهر الصيغ اللاتينية في مواضعها الطبيعية.',
+  '- تظل كل فقرة قابلة للوصول عند السحب للأعلى والأسفل.',
+  '- تبقى أزرار المساعد بعد آخر سطر من الرد.',
+  '- تظل المسافة النهائية فوق Composer كافية وواضحة.',
+  '',
+  '## جدول الحالات',
+  '',
+  '| الحالة | السلوك المتوقع |',
+  '| --- | --- |',
+  '| رد قصير | يبدأ من أعلى transcript |',
+  '| رد طويل | يتمدد ويزيد ارتفاع المحتوى |',
+  '| بث حي | يتحدث قياس RN مع تغير الرد |',
+  '| اكتمال الرد | تظهر الإجراءات بعد آخر كتلة |',
+  '',
+  ...Array.from(
+    { length: 5 },
+    (_, index) => `فقرة متابعة ${index + 1}: ${SCROLL_LAYOUT_TEST_PARAGRAPH}`,
+  ),
+  '',
+  '## القسم الأخير للاختبار',
+  '',
+  'إذا وصلت إلى هذا العنوان بعد التمرير، فتابع حتى نهاية الفقرة والمعادلة. يجب أن يظهر صف الإجراءات بعدهما مباشرة، ثم تبقى مساحة مريحة قبل Composer، من دون أن يختفي أي جزء خلفه.',
+  '',
+  '$$',
+  'F(x) = \\int_0^x 3t^2\\,dt = x^3',
+  '$$',
+].join('\n');
+
+function createScrollLayoutTestTurn(): ChatTurn {
+  return {
+    id: 'development-scroll-layout-test',
+    user: {
+      id: 'development-scroll-layout-test-user',
+      role: 'user',
+      content: 'اعرض اختبار transcript الطويل',
+    },
+    assistantAttempt: 0,
+    assistant: {
+      id: 'development-scroll-layout-test-assistant',
+      role: 'assistant',
+      content: SCROLL_LAYOUT_TEST_CONTENT,
+    },
+    assistantStatus: 'completed',
+    errorMessage: null,
+  };
+}
+
 export default function ChatScreen() {
   const { resolvedColorScheme } = usePreferences();
   const palette = getPalette(resolvedColorScheme);
   const { width } = useWindowDimensions();
   const router = useRouter();
+  const { layoutTest } = useLocalSearchParams<{ layoutTest?: string }>();
+  const isScrollLayoutTest =
+    __DEV__ && process.env.EXPO_OS === 'ios' && layoutTest === 'scroll';
   const drawerRef = useRef<DrawerLayoutMethods | null>(null);
   const drawerOpenRef = useRef(false);
   const messageSequenceRef = useRef(0);
+  const scrollTestLoadedRef = useRef(false);
   const [requestCoordinator] = useState(() => new Agent1ChatRequestCoordinator());
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const turnsRef = useRef<ChatTurn[]>([]);
@@ -64,6 +148,19 @@ export default function ChatScreen() {
     turnsRef.current = next;
     setTurns(next);
   }, []);
+  useEffect(() => {
+    if (
+      !isScrollLayoutTest ||
+      scrollTestLoadedRef.current ||
+      turnsRef.current.length > 0 ||
+      requestCoordinator.isBusy
+    ) {
+      return;
+    }
+
+    scrollTestLoadedRef.current = true;
+    updateTurns(() => [createScrollLayoutTestTurn()]);
+  }, [isScrollLayoutTest, requestCoordinator, updateTurns]);
   const updateActiveTurn = useCallback((turnId: string | null) => {
     activeTurnIdRef.current = turnId;
     setActiveTurnId(turnId);
@@ -100,13 +197,33 @@ export default function ChatScreen() {
     signal: AbortSignal,
     generation: number,
   ) => {
+    let receivedTextCharacters = 0;
     try {
       await sendAgent1DevChat(requestMessages, signal, (event) => {
         if (!requestCoordinator.isCurrent(generation)) return;
+        if (event.type === 'text_delta') receivedTextCharacters += event.text.length;
         updateTurns((current) => applyAgent1ChatStreamEvent(current, turnId, event));
       });
+      if (__DEV__) {
+        console.info('[Agent1 chat diagnostics] stream completed', {
+          turnId,
+          receivedTextCharacters,
+        });
+      }
     } catch (error) {
       if (signal.aborted || !requestCoordinator.isCurrent(generation)) return;
+      if (__DEV__) {
+        console.info('[Agent1 chat diagnostics] stream failed', {
+          turnId,
+          errorCode:
+            error instanceof Agent1ChatApiError
+              ? error.code
+              : error instanceof Error
+                ? error.name
+                : 'UNKNOWN',
+          receivedTextCharacters,
+        });
+      }
       updateTurns((current) =>
         failAgent1ChatTurn(current, turnId, agent1ChatErrorMessage(error)),
       );

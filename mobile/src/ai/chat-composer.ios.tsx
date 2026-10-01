@@ -1,6 +1,24 @@
-import { memo, useCallback, useEffect, useRef, useState, type RefObject } from 'react';
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from 'react';
 import * as Clipboard from 'expo-clipboard';
-import { AccessibilityInfo } from 'react-native';
+import {
+  AccessibilityInfo,
+  Dimensions,
+  Keyboard,
+  Pressable,
+  ScrollView as RNScrollView,
+  StyleSheet,
+  View,
+  type LayoutChangeEvent,
+  type ScrollView as RNScrollViewInstance,
+} from 'react-native';
 import {
   Button,
   Circle,
@@ -8,7 +26,6 @@ import {
   Host,
   Image,
   Rectangle,
-  ScrollView,
   Spacer,
   Text,
   TextField,
@@ -26,22 +43,19 @@ import {
   buttonStyle,
   contentShape,
   disabled,
-  defaultScrollAnchorForRole,
   fixedSize,
   font,
   frame,
   foregroundStyle,
   glassEffect,
-  id,
   lineSpacing,
   lineLimit,
   multilineTextAlignment,
+  onGeometryChange,
   onTapGesture,
   onAppear,
   opacity,
   padding,
-  scrollPosition,
-  scrollTargetLayout,
   shapes,
   strokeBorder,
   textSelection,
@@ -53,6 +67,7 @@ import Agent1AssistantMarkdown from './assistant-enriched-markdown.ios';
 import { firstStrongTextDirection } from './rich-response/text-direction';
 import { usePreferences } from '@/preferences/preferences-provider';
 import { getPalette } from '@/theme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const COMPOSER_MIN_HEIGHT = 94;
 const COMPOSER_CORNER_RADIUS = 28;
@@ -69,6 +84,8 @@ const USER_TO_ASSISTANT_GAP = 26;
 const COPY_FEEDBACK_DURATION_MS = 1_300;
 const CHAT_TOP_CONTROLS_HEIGHT = 44;
 const CHAT_TRANSCRIPT_TOP_GAP = 20;
+const CHAT_TRANSCRIPT_COMPOSER_GAP = 24;
+const COMPOSER_BOTTOM_PADDING = 10;
 const ASSISTANT_ACTION_LAYOUT_SIZE = 32;
 const ASSISTANT_ACTION_ICON_SIZE = 17;
 const ASSISTANT_ACTION_SPACING = 3;
@@ -86,15 +103,21 @@ export function ChatComposer({
 }: ChatComposerProps) {
   const { resolvedColorScheme } = usePreferences();
   const palette = getPalette(resolvedColorScheme);
+  const insets = useSafeAreaInsets();
+  const transcriptTopPadding =
+    insets.top + CHAT_TOP_CONTROLS_HEIGHT + CHAT_TRANSCRIPT_TOP_GAP;
   const transcriptContentWidth = Math.max(
     0,
     transcriptWidth - TRANSCRIPT_HORIZONTAL_INSET * 2,
   );
   const message = useNativeState('');
-  const scrollPositionState = useNativeState<string | null>(null);
+  const transcriptScrollRef = useRef<RNScrollViewInstance | null>(null);
+  const turnLayoutYRef = useRef(new Map<string, number>());
+  const pendingNewTurnScrollRef = useRef<string | null>(null);
+  const composerHeightRef = useRef(COMPOSER_MIN_HEIGHT + COMPOSER_BOTTOM_PADDING);
+  const [composerHeight, setComposerHeight] = useState(composerHeightRef.current);
   const textFieldRef = useRef<TextFieldRef | null>(null);
   const draftRef = useRef('');
-  const pendingScrollTurnIdRef = useRef<string | null>(null);
   const copyFeedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previousLatestAttemptRef = useRef<{ turnId: string; attempt: number } | null>(null);
   const [hasSendableText, setHasSendableText] = useState(false);
@@ -105,11 +128,26 @@ export function ChatComposer({
   const latestAssistantAttempt = latestTurn?.assistantAttempt ?? null;
 
   const dismissKeyboard = useCallback(() => {
+    Keyboard.dismiss();
     void textFieldRef.current?.blur();
   }, []);
   const focusTextField = useCallback(() => {
     void textFieldRef.current?.focus();
   }, []);
+  const handleComposerHeightChange = useCallback((nextHeight: number) => {
+    if (nextHeight <= 0 || Math.abs(composerHeightRef.current - nextHeight) < 0.5) return;
+    composerHeightRef.current = nextHeight;
+    setComposerHeight(nextHeight);
+  }, []);
+  const handleTurnLayout = useCallback((turnId: string, layoutY: number) => {
+    turnLayoutYRef.current.set(turnId, layoutY);
+    if (pendingNewTurnScrollRef.current !== turnId) return;
+    pendingNewTurnScrollRef.current = null;
+    transcriptScrollRef.current?.scrollTo({
+      y: Math.max(0, layoutY - transcriptTopPadding),
+      animated: true,
+    });
+  }, [transcriptTopPadding]);
   const handleTextChange = useCallback((text: string) => {
     draftRef.current = text;
     setHasSendableText(text.trim().length > 0);
@@ -119,19 +157,14 @@ export function ChatComposer({
     if (!text.trim() || activeTurnId) return;
     const acceptedTurnId = onSend(text);
     if (acceptedTurnId) {
-      if (turns.length > 0) pendingScrollTurnIdRef.current = acceptedTurnId;
+      if (turns.length > 0) {
+        pendingNewTurnScrollRef.current = acceptedTurnId;
+      }
       draftRef.current = '';
       message.set('');
       setHasSendableText(false);
     }
   }, [activeTurnId, message, onSend, turns.length]);
-
-  useEffect(() => {
-    const targetId = pendingScrollTurnIdRef.current;
-    if (!targetId || targetId !== latestTurnId) return;
-    pendingScrollTurnIdRef.current = null;
-    scrollPositionState.set(targetId);
-  }, [latestTurnId, scrollPositionState]);
 
   useEffect(() => {
     const previous = previousLatestAttemptRef.current;
@@ -188,83 +221,124 @@ export function ChatComposer({
   }, []);
 
   return (
-    <Host
-      colorScheme={resolvedColorScheme}
-      layoutDirection="leftToRight"
-      modifiers={[background(palette.background)]}
-      style={{ flex: 1 }}
-    >
-      <ZStack>
-        <Rectangle
-          modifiers={[
-            foregroundStyle('clear'),
-            contentShape(shapes.rectangle()),
-            // Expo UI stores this callback for native SwiftUI tap events; it is not run during render.
-            // eslint-disable-next-line react-hooks/refs
-            onTapGesture(dismissKeyboard),
-          ]}
-        />
-        {turns.length > 0 || submissionError ? (
-          <ScrollView
-            showsIndicators={false}
-            modifiers={[
-              defaultScrollAnchorForRole('top', 'initialOffset'),
-              defaultScrollAnchorForRole(null, 'sizeChanges'),
-              defaultScrollAnchorForRole('top', 'alignment'),
-              scrollPosition(scrollPositionState, { anchor: 'top' }),
-              // Keep the approved tap-outside blur behavior while allowing normal native scrolling.
-              // eslint-disable-next-line react-hooks/refs
-              onTapGesture(dismissKeyboard),
-            ]}
-          >
-            <VStack
-              alignment="leading"
-              spacing={CHAT_TURN_SPACING}
-              modifiers={[
-                padding({
-                  top: CHAT_TOP_CONTROLS_HEIGHT + CHAT_TRANSCRIPT_TOP_GAP,
-                  horizontal: TRANSCRIPT_HORIZONTAL_INSET,
-                  bottom: COMPOSER_MIN_HEIGHT + 24,
-                }),
-                ...(transcriptWidth > 0
-                  ? [frame({ maxWidth: transcriptWidth, alignment: 'leading' as const })]
-                  : []),
-                scrollTargetLayout(),
-              ]}
+    <View style={{ flex: 1, backgroundColor: palette.background }}>
+      <Host
+        colorScheme={resolvedColorScheme}
+        layoutDirection="leftToRight"
+        pointerEvents="box-none"
+        style={StyleSheet.absoluteFill}
+      >
+        <VStack alignment="leading" spacing={0}>
+          <Spacer />
+          <ChatComposerControls
+            message={message}
+            textFieldRef={textFieldRef}
+            palette={palette}
+            onComposerHeightChange={handleComposerHeightChange}
+            hasSendableText={hasSendableText}
+            sendDisabled={activeTurnId !== null}
+            onTextChange={handleTextChange}
+            onFocus={focusTextField}
+            onSend={handleSend}
+          />
+        </VStack>
+      </Host>
+
+      <ChatKeyboardViewport
+        composerHeight={composerHeight}
+        safeAreaBottom={insets.bottom}
+      >
+        <RNScrollView
+          ref={transcriptScrollRef}
+          style={{ flex: 1 }}
+          contentContainerStyle={{
+            paddingTop: transcriptTopPadding,
+            paddingHorizontal: TRANSCRIPT_HORIZONTAL_INSET,
+            paddingBottom: CHAT_TRANSCRIPT_COMPOSER_GAP,
+            gap: CHAT_TURN_SPACING,
+          }}
+          showsVerticalScrollIndicator={false}
+          keyboardDismissMode="on-drag"
+          keyboardShouldPersistTaps="handled"
+          onTouchEnd={dismissKeyboard}
+        >
+          {turns.map((turn, index) => (
+            <ChatTranscriptTurn
+              key={turn.id}
+              turn={turn}
+              isLatest={index === turns.length - 1}
+              isActive={activeTurnId === turn.id}
+              contentWidth={transcriptContentWidth}
+              colorScheme={resolvedColorScheme}
+              palette={palette}
+              reaction={turn.assistant ? reactions[turn.assistant.id] : undefined}
+              copied={turn.assistant?.id === copiedMessageId}
+              onLayout={(event) =>
+                handleTurnLayout(turn.id, event.nativeEvent.layout.y)
+              }
+              onCopy={handleCopy}
+              onReaction={handleReaction}
+              onRegenerate={onRegenerate}
+            />
+          ))}
+          {submissionError ? (
+            <Host
+              colorScheme={resolvedColorScheme}
+              layoutDirection="leftToRight"
+              matchContents={{ vertical: true, horizontal: false }}
+              style={{ width: transcriptContentWidth }}
             >
-              {turns.map((turn, index) => (
-                <ChatTranscriptTurn
-                  key={turn.id}
-                  turn={turn}
-                  isLatest={index === turns.length - 1}
-                  isActive={activeTurnId === turn.id}
-                  contentWidth={transcriptContentWidth}
-                  palette={palette}
-                  reaction={turn.assistant ? reactions[turn.assistant.id] : undefined}
-                  copied={turn.assistant?.id === copiedMessageId}
-                  onCopy={handleCopy}
-                  onReaction={handleReaction}
-                  onRegenerate={onRegenerate}
-                />
-              ))}
-              {submissionError ? (
-                <ChatInlineNotice message={submissionError} contentWidth={transcriptContentWidth} palette={palette} />
-              ) : null}
-            </VStack>
-          </ScrollView>
-        ) : null}
-        <ChatComposerControls
-          message={message}
-          textFieldRef={textFieldRef}
-          palette={palette}
-          hasSendableText={hasSendableText}
-          sendDisabled={activeTurnId !== null}
-          onTextChange={handleTextChange}
-          onFocus={focusTextField}
-          onSend={handleSend}
-        />
-      </ZStack>
-    </Host>
+              <ChatInlineNotice
+                message={submissionError}
+                contentWidth={transcriptContentWidth}
+                palette={palette}
+              />
+            </Host>
+          ) : null}
+        </RNScrollView>
+      </ChatKeyboardViewport>
+      </View>
+  );
+}
+
+function ChatKeyboardViewport({
+  children,
+  composerHeight,
+  safeAreaBottom,
+}: {
+  children: ReactNode;
+  composerHeight: number;
+  safeAreaBottom: number;
+}) {
+  const [keyboardInset, setKeyboardInset] = useState(0);
+
+  useEffect(() => {
+    const showSubscription = Keyboard.addListener('keyboardWillShow', (event) => {
+      Keyboard.scheduleLayoutAnimation(event);
+      const screenHeight = Dimensions.get('screen').height;
+      setKeyboardInset(Math.max(0, screenHeight - event.endCoordinates.screenY));
+    });
+    const hideSubscription = Keyboard.addListener('keyboardWillHide', (event) => {
+      Keyboard.scheduleLayoutAnimation(event);
+      setKeyboardInset(0);
+    });
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
+
+  return (
+    <View
+      pointerEvents="box-none"
+      style={[
+        StyleSheet.absoluteFill,
+        { bottom: Math.max(keyboardInset, safeAreaBottom) + composerHeight },
+      ]}
+    >
+      {children}
+    </View>
   );
 }
 
@@ -272,6 +346,7 @@ const ChatComposerControls = memo(function ChatComposerControls({
   message,
   textFieldRef,
   palette,
+  onComposerHeightChange,
   hasSendableText,
   sendDisabled,
   onTextChange,
@@ -281,6 +356,7 @@ const ChatComposerControls = memo(function ChatComposerControls({
   message: ReturnType<typeof useNativeState<string>>;
   textFieldRef: RefObject<TextFieldRef | null>;
   palette: ReturnType<typeof getPalette>;
+  onComposerHeightChange: (height: number) => void;
   hasSendableText: boolean;
   sendDisabled: boolean;
   onTextChange: (text: string) => void;
@@ -292,11 +368,11 @@ const ChatComposerControls = memo(function ChatComposerControls({
       alignment="leading"
       spacing={0}
       modifiers={[
-        padding({ horizontal: 16, bottom: 10 }),
+        padding({ horizontal: 16, bottom: COMPOSER_BOTTOM_PADDING }),
         containerRelativeFrame({ axes: 'horizontal' }),
+        onGeometryChange(({ height }) => onComposerHeightChange(height)),
       ]}
     >
-      <Spacer />
       <ZStack
         alignment="topLeading"
         modifiers={[
@@ -339,7 +415,6 @@ const ChatComposerControls = memo(function ChatComposerControls({
                 modifiers={[
                   foregroundStyle(palette.textTertiary),
                   font({ textStyle: 'body' }),
-                  multilineTextAlignment('trailing'),
                 ]}
               >
                 اكتب رسالتك...
@@ -431,9 +506,11 @@ const ChatTranscriptTurn = memo(function ChatTranscriptTurn({
   isLatest,
   isActive,
   contentWidth,
+  colorScheme,
   palette,
   reaction,
   copied,
+  onLayout,
   onCopy,
   onReaction,
   onRegenerate,
@@ -442,9 +519,11 @@ const ChatTranscriptTurn = memo(function ChatTranscriptTurn({
   isLatest: boolean;
   isActive: boolean;
   contentWidth: number;
+  colorScheme: 'light' | 'dark';
   palette: ReturnType<typeof getPalette>;
   reaction?: ChatReaction;
   copied: boolean;
+  onLayout: (event: LayoutChangeEvent) => void;
   onCopy: (messageId: string, content: string) => Promise<void>;
   onReaction: (messageId: string, reaction: ChatReaction) => void;
   onRegenerate: (turnId: string) => void;
@@ -459,29 +538,57 @@ const ChatTranscriptTurn = memo(function ChatTranscriptTurn({
     Boolean(turn.errorMessage) &&
     (actionPolicy.showIncompleteNotice || actionPolicy.showError);
   const showResponse = showStatus || Boolean(assistant) || showError || showRegenerateOnly;
+  const lastResponseLayoutDiagnosticRef = useRef('');
   const handleRegenerate = useCallback(() => onRegenerate(turn.id), [onRegenerate, turn.id]);
+  const handleResponseLayout = useCallback((event: LayoutChangeEvent) => {
+    if (__DEV__ && assistant && turn.assistantStatus !== 'streaming') {
+      const height = event.nativeEvent.layout.height;
+      const diagnosticKey = `${assistant.id}:${assistant.content.length}:${contentWidth}:${height}`;
+      if (lastResponseLayoutDiagnosticRef.current !== diagnosticKey) {
+        lastResponseLayoutDiagnosticRef.current = diagnosticKey;
+        console.info('[Agent1 transcript diagnostics] response block', {
+          messageId: assistant.id,
+          sourceCharacters: assistant.content.length,
+          contentWidth,
+          blockHeight: height,
+        });
+      }
+    }
+  }, [assistant, contentWidth, turn.assistantStatus]);
 
   return (
-    <VStack
-      alignment="leading"
-      spacing={0}
-      modifiers={[
-        id(turn.id),
-        ...(contentWidth > 0
-          ? [frame({ maxWidth: contentWidth, alignment: 'leading' as const })]
-          : []),
-      ]}
-    >
-      <ChatUserBubble message={turn.user} contentWidth={contentWidth} palette={palette} />
+    <View onLayout={onLayout} style={{ width: '100%', alignSelf: 'stretch' }}>
+      <Host
+        colorScheme={colorScheme}
+        layoutDirection="leftToRight"
+        matchContents={{ vertical: true, horizontal: false }}
+        style={{ width: contentWidth }}
+      >
+        <ChatUserBubble message={turn.user} contentWidth={contentWidth} palette={palette} />
+      </Host>
 
       {showResponse ? (
-        <VStack
-          alignment="leading"
-          spacing={CHAT_TURN_CONTENT_SPACING}
-          modifiers={[padding({ top: USER_TO_ASSISTANT_GAP })]}
+        <View
+          onLayout={handleResponseLayout}
+          style={{
+            width: contentWidth,
+            alignSelf: 'stretch',
+            paddingTop: USER_TO_ASSISTANT_GAP,
+            gap: CHAT_TURN_CONTENT_SPACING,
+          }}
         >
           {showStatus ? (
-            <Agent1TurnStatus status={turn.assistantStatus as 'working' | 'thinking'} palette={palette} />
+            <Host
+              colorScheme={colorScheme}
+              layoutDirection="leftToRight"
+              matchContents
+              style={{ alignSelf: 'flex-start' }}
+            >
+              <Agent1TurnStatus
+                status={turn.assistantStatus as 'working' | 'thinking'}
+                palette={palette}
+              />
+            </Host>
           ) : null}
 
           {assistant ? (
@@ -495,39 +602,64 @@ const ChatTranscriptTurn = memo(function ChatTranscriptTurn({
           ) : null}
 
           {showError ? (
-            <ChatInlineNotice message={turn.errorMessage!} contentWidth={contentWidth} palette={palette} />
+            <Host
+              colorScheme={colorScheme}
+              layoutDirection="leftToRight"
+              matchContents={{ vertical: true, horizontal: false }}
+              style={{ width: contentWidth }}
+            >
+              <ChatInlineNotice
+                message={turn.errorMessage!}
+                contentWidth={contentWidth}
+                palette={palette}
+              />
+            </Host>
           ) : null}
 
           {actionPolicy.showFeedback && assistant ? (
-            <ChatAssistantActions
-              assistantId={assistant.id}
-              content={assistant.content}
-              palette={palette}
-              reaction={reaction}
-              copied={copied}
-              showFeedback
-              showRegenerate={actionPolicy.showRegenerate}
-              onCopy={onCopy}
-              onReaction={onReaction}
-              onRegenerate={handleRegenerate}
-            />
+            <Host
+              colorScheme={colorScheme}
+              layoutDirection="leftToRight"
+              matchContents
+              style={{ alignSelf: 'flex-start' }}
+            >
+              <ChatAssistantActions
+                assistantId={assistant.id}
+                content={assistant.content}
+                palette={palette}
+                reaction={reaction}
+                copied={copied}
+                showFeedback
+                showRegenerate={actionPolicy.showRegenerate}
+                onCopy={onCopy}
+                onReaction={onReaction}
+                onRegenerate={handleRegenerate}
+              />
+            </Host>
           ) : showRegenerateOnly ? (
-            <ChatAssistantActions
-              assistantId={assistant?.id ?? `${turn.id}-assistant-${turn.assistantAttempt}`}
-              content=""
-              palette={palette}
-              reaction={reaction}
-              copied={copied}
-              showFeedback={false}
-              showRegenerate
-              onCopy={onCopy}
-              onReaction={onReaction}
-              onRegenerate={handleRegenerate}
-            />
+            <Host
+              colorScheme={colorScheme}
+              layoutDirection="leftToRight"
+              matchContents
+              style={{ alignSelf: 'flex-start' }}
+            >
+              <ChatAssistantActions
+                assistantId={assistant?.id ?? `${turn.id}-assistant-${turn.assistantAttempt}`}
+                content=""
+                palette={palette}
+                reaction={reaction}
+                copied={copied}
+                showFeedback={false}
+                showRegenerate
+                onCopy={onCopy}
+                onReaction={onReaction}
+                onRegenerate={handleRegenerate}
+              />
+            </Host>
           ) : null}
-        </VStack>
+        </View>
       ) : null}
-    </VStack>
+    </View>
   );
 });
 

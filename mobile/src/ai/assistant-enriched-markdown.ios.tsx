@@ -1,5 +1,5 @@
-import { memo, useCallback, useMemo } from 'react';
-import { Linking, Platform } from 'react-native';
+import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
+import { Linking, Platform, type LayoutChangeEvent } from 'react-native';
 import {
   EnrichedMarkdownText,
   type MarkdownStyle,
@@ -10,7 +10,10 @@ import type { Palette } from '@/theme';
 import { scaledFontSize } from '@/theme';
 import { hideUnclosedMathSuffix } from './rich-response/math-delimiters';
 import { isSafeAgent1Link } from './rich-response/math-markdown-plugin';
-import { prepareEnrichedMarkdownInput } from './rich-response/enriched-markdown-input';
+import {
+  prepareEnrichedMarkdownInput,
+  resolveEnrichedMarkdownFlavor,
+} from './rich-response/enriched-markdown-input';
 import { usePreferences } from '@/preferences/preferences-provider';
 
 interface Agent1EnrichedMarkdownProps {
@@ -35,6 +38,7 @@ const SELECTION_MENU_CONFIG = {
 } as const;
 
 const Agent1EnrichedMarkdown = memo(function Agent1EnrichedMarkdown({
+  messageId,
   content,
   streaming,
   contentWidth,
@@ -52,20 +56,46 @@ const Agent1EnrichedMarkdown = memo(function Agent1EnrichedMarkdown({
       : content;
     return prepareEnrichedMarkdownInput(stablePrefix);
   }, [content, streaming]);
+  const markdownFlavor = resolveEnrichedMarkdownFlavor(markdown);
+  const lastDiagnosticRef = useRef('');
+  useEffect(() => {
+    if (!__DEV__ || streaming) return;
+    const diagnosticKey = `${messageId}:${content.length}:${markdown.length}:${contentWidth}`;
+    if (lastDiagnosticRef.current === diagnosticKey) return;
+    lastDiagnosticRef.current = diagnosticKey;
+    console.info('[Agent1 renderer diagnostics] completed response', {
+      messageId,
+      sourceCharacters: content.length,
+      presentationCharacters: markdown.length,
+      contentWidth,
+      flavor: markdownFlavor,
+    });
+  }, [content.length, contentWidth, markdown.length, markdownFlavor, messageId, streaming]);
   const handleLinkPress = useCallback(({ url }: { url: string }) => {
     if (!isSafeAgent1Link(url)) return;
     void Linking.openURL(url).catch(() => undefined);
   }, []);
+  const handleNativeLayout = useCallback((event: LayoutChangeEvent) => {
+    if (!__DEV__) return;
+    const { width, height } = event.nativeEvent.layout;
+    console.info('[Agent1 renderer diagnostics] native layout', {
+      messageId,
+      width,
+      height,
+      flavor: markdownFlavor,
+    });
+  }, [markdownFlavor, messageId]);
 
   if (contentWidth <= 0 || markdown.length === 0) return null;
 
   return (
     <EnrichedMarkdownText
+      onLayout={handleNativeLayout}
       markdown={markdown}
       markdownStyle={markdownStyle}
       containerStyle={{ width: contentWidth, alignSelf: 'stretch' }}
       writingDirection="first-strong"
-      flavor="github"
+      flavor={markdownFlavor}
       md4cFlags={MARKDOWN_FLAGS}
       onLinkPress={handleLinkPress}
       enableLinkPreview={false}
@@ -136,6 +166,8 @@ function createMarkdownStyle(palette: Palette, bodyFontSize: number): MarkdownSt
     strikethrough: { color: palette.textSecondary },
     link: { color: palette.accent, underline: true },
     blockquote: {
+      color: palette.text,
+      fontSize: bodyFontSize,
       backgroundColor: palette.surface,
       borderColor: palette.border,
       borderWidth: 2,
@@ -190,6 +222,7 @@ function createMarkdownStyle(palette: Palette, bodyFontSize: number): MarkdownSt
     },
     math: {
       color: palette.text,
+      backgroundColor: palette.background,
       fontSize: scaledFontSize(18, bodyFontSize / 17),
       textAlign: 'center',
       marginTop: 4,
