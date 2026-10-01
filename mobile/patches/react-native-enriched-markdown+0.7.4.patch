@@ -1,31 +1,37 @@
 diff --git a/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdown.mm b/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdown.mm
-index 7ad95d7..4643082 100644
+index 7ad95d7..d071abf 100644
 --- a/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdown.mm
 +++ b/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdown.mm
-@@ -69,0 +70 @@ static char kENRMSegmentFadeAnimatorKey;
+@@ -69,2 +69,3 @@ static char kENRMSegmentFadeAnimatorKey;
+ @interface EnrichedMarkdown () <RCTEnrichedMarkdownViewProtocol, UITextViewDelegate>
 +- (void)validateHeightForCurrentWidth:(CGFloat)width;
-@@ -93,0 +95,6 @@ static char kENRMSegmentFadeAnimatorKey;
+ - (void)emitLinkPress:(NSString *)url;
+@@ -92,2 +93,8 @@ static char kENRMSegmentFadeAnimatorKey;
+   EnrichedMarkdownShadowNode::ConcreteState::Shared _state;
 +  NSUInteger _renderRevision;
 +  NSUInteger _validatedRenderRevision;
 +  CGFloat _lastValidatedWidth;
 +  BOOL _hasValidatedWidth;
 +  BOOL _pendingHeightValidation;
 +  BOOL _pendingForceHeightUpdate;
-@@ -568,0 +576,3 @@ static char kENRMSegmentFadeAnimatorKey;
+   int _heightUpdateCounter;
+@@ -567,2 +574,5 @@ static char kENRMSegmentFadeAnimatorKey;
+   _segmentViews = result.views;
 +  _renderRevision++;
 +  _pendingHeightValidation = YES;
 +  _pendingForceHeightUpdate = _pendingForceHeightUpdate || forceHeightUpdate || segmentTopologyChanged;
-@@ -573 +583 @@ static char kENRMSegmentFadeAnimatorKey;
+   _segmentSignatures = result.signatures;
+@@ -572,10 +582,43 @@ static char kENRMSegmentFadeAnimatorKey;
 -    if (forceHeightUpdate || segmentTopologyChanged) {
 +    if (_pendingForceHeightUpdate) {
-@@ -576,6 +585,0 @@ static char kENRMSegmentFadeAnimatorKey;
+       [self computeSegmentLayoutForWidth:self.bounds.size.width applyFrames:YES];
+       [self layoutIfNeeded];
 -      [self requestHeightUpdate];
 -    } else {
 -      CGSize measured = [self measureSize:self.bounds.size.width];
 -      if (needsHeightUpdate(measured, self.bounds)) {
 -        [self requestHeightUpdate];
 -      }
-@@ -582,0 +587,39 @@ static char kENRMSegmentFadeAnimatorKey;
 +    [self validateHeightForCurrentWidth:self.bounds.size.width];
 +  }
 +}
@@ -65,22 +71,28 @@ index 7ad95d7..4643082 100644
 +
 +  if (shouldRequestHeightUpdate) {
 +    [self requestHeightUpdate];
-@@ -728 +771,3 @@ static char kENRMSegmentFadeAnimatorKey;
+     }
+@@ -727,3 +770,5 @@ static char kENRMSegmentFadeAnimatorKey;
+   [super layoutSubviews];
 -  [self computeSegmentLayoutForWidth:self.bounds.size.width applyFrames:YES];
 +  CGFloat width = self.bounds.size.width;
 +  [self computeSegmentLayoutForWidth:width applyFrames:YES];
 +  [self validateHeightForCurrentWidth:width];
-@@ -925,4 +970,2 @@ static char kENRMSegmentFadeAnimatorKey;
+ }
+@@ -924,5 +969,3 @@ static char kENRMSegmentFadeAnimatorKey;
 -    CGSize measured = [self measureSize:self.bounds.size.width];
 -    if (needsHeightUpdate(measured, self.bounds)) {
 -      [self requestHeightUpdate];
 -    }
 +    _pendingHeightValidation = YES;
 +    [self validateHeightForCurrentWidth:self.bounds.size.width];
-@@ -951,0 +995,6 @@ static char kENRMSegmentFadeAnimatorKey;
+   }
+@@ -950,2 +993,8 @@ static char kENRMSegmentFadeAnimatorKey;
+   _cachedMarkdown = nil;
 +  _renderRevision = 0;
 +  _validatedRenderRevision = 0;
 +  _lastValidatedWidth = 0;
 +  _hasValidatedWidth = NO;
 +  _pendingHeightValidation = NO;
 +  _pendingForceHeightUpdate = NO;
+   _renderedMarkdown = nil;
