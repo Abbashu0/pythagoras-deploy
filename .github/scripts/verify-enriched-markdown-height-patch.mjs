@@ -5,10 +5,11 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const packageRoot = path.join(root, 'mobile/node_modules/react-native-enriched-markdown');
 const sourcePath = path.join(packageRoot, 'ios/EnrichedMarkdown.mm');
+const tableSourcePath = path.join(packageRoot, 'ios/views/TableContainerView.m');
 const patchPath = path.join(root, 'mobile/patches/react-native-enriched-markdown+0.7.4.patch');
 
 function fail(message) {
-  console.error(`Native height patch validation failed: ${message}`);
+  console.error(`Native enriched-markdown patch validation failed: ${message}`);
   process.exit(1);
 }
 
@@ -127,11 +128,58 @@ if (depthAt(code, applyBody.open, calls[0].index) !== 2) {
   fail('validation call must be inside the usable-width block but outside _pendingForceHeightUpdate');
 }
 
+if (!fs.existsSync(tableSourcePath)) fail('installed iOS table source is missing');
+const tableSource = fs.readFileSync(tableSourcePath, 'utf8');
+const tableCode = codeOnly(tableSource);
+const renderGrid = oneMatch(
+  tableCode,
+  /^[ \t]*-\s*\(void\)\s*renderGridIOS[ \t]*$/gm,
+  'iOS table grid implementation',
+);
+const renderGridBody = methodBody(tableCode, renderGrid, 'renderGridIOS');
+const renderGridCode = tableCode.slice(renderGridBody.open, renderGridBody.close + 1);
+if (!/rowData\.cellTexts\s*=\s*isRightToLeft\s*\?\s*\[\[sourceCells reverseObjectEnumerator\]\s*allObjects\]\s*:\s*sourceCells/u.test(renderGridCode)) {
+  fail('RTL table columns must be reversed only in the visual grid data');
+}
+if (!/displayColumnWidths\s*=\s*isRightToLeft\s*\?\s*\[\[_colWidths reverseObjectEnumerator\]\s*allObjects\]\s*:\s*_colWidths/u.test(renderGridCode) ||
+    !/columnWidths\s*:\s*displayColumnWidths/u.test(renderGridCode)) {
+  fail('RTL table widths must match the visual column order');
+}
+
+const layoutSignature = oneMatch(
+  tableCode,
+  /^[ \t]*-\s*\(void\)\s*layoutSubviews[ \t]*$/gm,
+  'table layoutSubviews implementation',
+);
+const tableLayoutBody = methodBody(tableCode, layoutSignature, 'table layoutSubviews');
+const tableLayoutCode = tableCode.slice(tableLayoutBody.open, tableLayoutBody.close + 1);
+if (!/gridOriginX\s*=\s*isRightToLeft\s*&&\s*_totalTableWidth\s*<\s*self\.bounds\.size\.width/u.test(tableLayoutCode) ||
+    !/leadingOffset\s*=\s*isRightToLeft\s*\?/u.test(tableLayoutCode)) {
+  fail('fitting tables must align right in RTL and wide tables must begin at RTL leading edge');
+}
+if (!/if\s*\(\s*!_hasUserScrolledHorizontally[^)]*\)[\s\S]*?setContentOffset/u.test(tableLayoutCode)) {
+  fail('RTL leading-edge restoration must stop after the reader manually scrolls');
+}
+
+const dragHandler = oneMatch(
+  tableCode,
+  /^[ \t]*-\s*\(void\)\s*scrollViewWillBeginDragging:\s*\(UIScrollView\s*\*\)\s*scrollView[ \t]*$/gm,
+  'table scroll interaction handler',
+);
+const dragBody = methodBody(tableCode, dragHandler, 'scrollViewWillBeginDragging');
+if (!tableCode.slice(dragBody.open, dragBody.close + 1).includes('_hasUserScrolledHorizontally = YES')) {
+  fail('manual table drags must be remembered across streamed table updates');
+}
+if (!tableSource.includes('for (NSArray<TableCellData *> *row in _rows)') ||
+    !tableSource.includes('for (NSArray<TableCellData *> *cellDataRow in _rows)')) {
+  fail('copy and accessibility sources must retain original logical table order');
+}
+
 console.log([
-  'Verified react-native-enriched-markdown@0.7.4 native patch structure.',
+  'Verified react-native-enriched-markdown@0.7.4 native height and RTL table patch structure.',
   `  class declaration: line ${lineAt(source, declaration.index)} inside the class extension`,
   `  applyRenderedSegments: lines ${lineAt(source, applyBody.start)}-${lineAt(source, applyBody.close)}`,
   `  validateHeightForCurrentWidth: lines ${lineAt(source, validateBody.start)}-${lineAt(source, validateBody.close)}`,
   `  layoutSubviews: lines ${lineAt(source, layoutBody.start)}-${lineAt(source, layoutBody.close)}`,
-  '  method scopes and brace depth are valid; exactly one declaration and implementation found.',
+  '  method scopes and brace depth are valid; RTL visual columns, leading position, user-scroll preservation, and logical copy order are verified.',
 ].join('\n'));

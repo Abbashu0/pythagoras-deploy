@@ -42,98 +42,30 @@ import { getPalette } from '@/theme';
 
 const StableChatTopControls = memo(ChatTopControls);
 
-const SCROLL_LAYOUT_TEST_PARAGRAPH =
-  'يعرض هذا النص الطويل عدة فقرات عربية متتابعة كي نتحقق من أن React Native يقيس الارتفاع الكامل للرد، وأن موضع أزرار النسخ والتفاعل وإعادة الإنشاء يبقى بعد نهاية المحتوى لا في منتصفه. يجب أن تظل الأسطر قابلة للوصول بالتمرير الطبيعي، وأن تبقى المسافة الأخيرة واضحة فوق حقل الكتابة المثبت أسفل الشاشة.';
-
-const SCROLL_LAYOUT_TEST_CONTENT = [
-  '# اختبار ارتفاع transcript الطويل',
-  '',
-  'هذه إجابة تطويرية ثابتة لا ترسل أي طلب إلى Agent 1. الغرض منها فحص التمرير والارتفاع مع محتوى طويل ومنسق داخل شاشة المحادثة نفسها.',
-  '',
-  '## شرح الفكرة الأساسية',
-  '',
-  ...Array.from(
-    { length: 12 },
-    (_, index) => `الفقرة ${index + 1}: ${SCROLL_LAYOUT_TEST_PARAGRAPH}`,
-  ),
-  '',
-  '## صيغ رياضية ضمن الشرح',
-  '',
-  'تظهر هنا معادلات قصيرة داخل السطر مثل $F(x)$ و$x^3$ و$3x^2$ مع بقاء الشرح العربي خارج حدود LaTeX.',
-  '',
-  '$$',
-  '\\int_0^2 x\\,dx = \\left[\\frac{x^2}{2}\\right]_0^2 = 2',
-  '$$',
-  '',
-  'وتبقى المعادلة التالية في كتلة مستقلة، ثم يستمر النص بعدها ضمن تدفق المستند نفسه:',
-  '',
-  '$$',
-  '\\frac{d}{dx}x^3 = 3x^2',
-  '$$',
-  '',
-  '## قائمة خطوات التحقق',
-  '',
-  '- يبدأ المحتوى تحت أدوات الرجوع والقائمة.',
-  '- يلتف النص العربي بمحاذاة RTL الصحيحة.',
-  '- تظهر الصيغ اللاتينية في مواضعها الطبيعية.',
-  '- تظل كل فقرة قابلة للوصول عند السحب للأعلى والأسفل.',
-  '- تبقى أزرار المساعد بعد آخر سطر من الرد.',
-  '- تظل المسافة النهائية فوق Composer كافية وواضحة.',
-  '',
-  '## جدول الحالات',
-  '',
-  '| الحالة | السلوك المتوقع |',
-  '| --- | --- |',
-  '| رد قصير | يبدأ من أعلى transcript |',
-  '| رد طويل | يتمدد ويزيد ارتفاع المحتوى |',
-  '| بث حي | يتحدث قياس RN مع تغير الرد |',
-  '| اكتمال الرد | تظهر الإجراءات بعد آخر كتلة |',
-  '',
-  ...Array.from(
-    { length: 5 },
-    (_, index) => `فقرة متابعة ${index + 1}: ${SCROLL_LAYOUT_TEST_PARAGRAPH}`,
-  ),
-  '',
-  '## القسم الأخير للاختبار',
-  '',
-  'إذا وصلت إلى هذا العنوان بعد التمرير، فتابع حتى نهاية الفقرة والمعادلة. يجب أن يظهر صف الإجراءات بعدهما مباشرة، ثم تبقى مساحة مريحة قبل Composer، من دون أن يختفي أي جزء خلفه.',
-  '',
-  '$$',
-  'F(x) = \\int_0^x 3t^2\\,dt = x^3',
-  '$$',
-].join('\n');
-
-function createScrollLayoutTestTurn(): ChatTurn {
-  return {
-    id: 'development-scroll-layout-test',
-    user: {
-      id: 'development-scroll-layout-test-user',
-      role: 'user',
-      content: 'اعرض اختبار transcript الطويل',
-    },
-    assistantAttempt: 0,
-    assistant: {
-      id: 'development-scroll-layout-test-assistant',
-      role: 'assistant',
-      content: SCROLL_LAYOUT_TEST_CONTENT,
-    },
-    assistantStatus: 'completed',
-    errorMessage: null,
-  };
-}
+const CHAT_LAYOUT_TEST_CASES = ['short', 'biology', 'math', 'table', 'scroll', 'stream'] as const;
+type ChatLayoutTestCase = typeof CHAT_LAYOUT_TEST_CASES[number];
 
 export default function ChatScreen() {
   const { resolvedColorScheme } = usePreferences();
   const palette = getPalette(resolvedColorScheme);
   const { width } = useWindowDimensions();
   const router = useRouter();
-  const { layoutTest } = useLocalSearchParams<{ layoutTest?: string }>();
-  const isScrollLayoutTest =
-    __DEV__ && process.env.EXPO_OS === 'ios' && layoutTest === 'scroll';
+  const { layoutTest, layoutDiagnostics } = useLocalSearchParams<{
+    layoutTest?: string;
+    layoutDiagnostics?: string;
+  }>();
+  const isChatLayoutTest =
+    __DEV__ &&
+    process.env.EXPO_OS === 'ios' &&
+    CHAT_LAYOUT_TEST_CASES.some((testCase) => testCase === layoutTest);
+  const layoutTestCase = isChatLayoutTest ? layoutTest as ChatLayoutTestCase : null;
+  const layoutDiagnosticsEnabled =
+    __DEV__ &&
+    process.env.EXPO_OS === 'ios' &&
+    (isChatLayoutTest || layoutDiagnostics === '1');
   const drawerRef = useRef<DrawerLayoutMethods | null>(null);
   const drawerOpenRef = useRef(false);
   const messageSequenceRef = useRef(0);
-  const scrollTestLoadedRef = useRef(false);
   const [requestCoordinator] = useState(() => new Agent1ChatRequestCoordinator());
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const turnsRef = useRef<ChatTurn[]>([]);
@@ -148,23 +80,71 @@ export default function ChatScreen() {
     turnsRef.current = next;
     setTurns(next);
   }, []);
-  useEffect(() => {
-    if (
-      !isScrollLayoutTest ||
-      scrollTestLoadedRef.current ||
-      turnsRef.current.length > 0 ||
-      requestCoordinator.isBusy
-    ) {
-      return;
-    }
-
-    scrollTestLoadedRef.current = true;
-    updateTurns(() => [createScrollLayoutTestTurn()]);
-  }, [isScrollLayoutTest, requestCoordinator, updateTurns]);
   const updateActiveTurn = useCallback((turnId: string | null) => {
     activeTurnIdRef.current = turnId;
     setActiveTurnId(turnId);
   }, []);
+  useEffect(() => {
+    if (!layoutTestCase || requestCoordinator.isBusy) return;
+    let cancelled = false;
+    let stopFixtureStream = () => {};
+    void import('@/ai/chat-layout-fixtures.dev').then(({ createChatLayoutTestTurn, getChatLayoutStreamChunks }) => {
+      if (cancelled) return;
+      const turn = createChatLayoutTestTurn(layoutTestCase);
+      updateTurns(() => [turn]);
+      if (layoutTestCase !== 'stream') {
+        updateActiveTurn(null);
+        return;
+      }
+
+      updateActiveTurn(turn.id);
+      updateTurns((current) => applyAgent1ChatStreamEvent(current, turn.id, { type: 'started' }));
+      let streamCancelled = false;
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      let releasePendingDelay = () => {};
+      const runFixtureStream = async () => {
+        updateTurns((current) =>
+          applyAgent1ChatStreamEvent(current, turn.id, { type: 'phase', phase: 'thinking' }),
+        );
+        for (const chunk of getChatLayoutStreamChunks()) {
+          await new Promise<void>((resolve) => {
+            let settled = false;
+            const finish = () => {
+              if (settled) return;
+              settled = true;
+              timer = null;
+              resolve();
+            };
+            timer = setTimeout(finish, 180);
+            releasePendingDelay = () => {
+              if (timer !== null) clearTimeout(timer);
+              finish();
+            };
+          });
+          if (cancelled || streamCancelled) return;
+          updateTurns((current) =>
+            applyAgent1ChatStreamEvent(current, turn.id, { type: 'text_delta', text: chunk }),
+          );
+        }
+        if (cancelled || streamCancelled) return;
+        updateTurns((current) =>
+          applyAgent1ChatStreamEvent(current, turn.id, { type: 'completed' }),
+        );
+        updateActiveTurn(null);
+      };
+      void runFixtureStream();
+      stopFixtureStream = () => {
+        streamCancelled = true;
+        releasePendingDelay();
+      };
+    }).catch(() => {
+      if (!cancelled) setSubmissionError('تعذر تحميل بيانات اختبار التخطيط التطويري.');
+    });
+    return () => {
+      cancelled = true;
+      stopFixtureStream();
+    };
+  }, [layoutTestCase, requestCoordinator, updateActiveTurn, updateTurns]);
   const handleForegroundLayout = useCallback((event: LayoutChangeEvent) => {
     const nextWidth = event.nativeEvent.layout.width;
     setTranscriptWidth((current) =>
@@ -351,6 +331,7 @@ export default function ChatScreen() {
               activeTurnId={activeTurnId}
               submissionError={submissionError}
               transcriptWidth={transcriptWidth}
+              layoutDiagnosticsEnabled={layoutDiagnosticsEnabled}
             />
             {process.env.EXPO_OS === 'ios' ? (
               <StableChatTopControls

@@ -12,11 +12,13 @@ import {
   AccessibilityInfo,
   Dimensions,
   Keyboard,
-  Pressable,
   ScrollView as RNScrollView,
   StyleSheet,
   View,
+  useWindowDimensions,
   type LayoutChangeEvent,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   type ScrollView as RNScrollViewInstance,
 } from 'react-native';
 import {
@@ -93,6 +95,28 @@ const STATUS_SWEEP_HALF_CYCLE_MS = 700;
 const STATUS_SWEEP_TRANSITION_SECONDS = 0.65;
 const STATUS_SWEEP_WIDTH = 0.4;
 
+interface WindowFrame {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+type ChatLayoutDiagnosticValues = Record<
+  string,
+  string | number | boolean | null
+>;
+type ChatLayoutDiagnostic = (
+  event: string,
+  values: ChatLayoutDiagnosticValues,
+) => void;
+type ChatScrollEvent = NativeSyntheticEvent<NativeScrollEvent>;
+type KeyboardFrameEvent = Parameters<typeof Keyboard.scheduleLayoutAnimation>[0];
+type KeyboardStage = 'closed' | 'opening' | 'open' | 'closing';
+type WindowFrameRef = { current: WindowFrame | null };
+type TurnGeometryProbe = (reason: string) => void;
+type TurnGeometryProbeRef = { current: TurnGeometryProbe | null };
+
 export function ChatComposer({
   turns,
   onSend,
@@ -100,10 +124,12 @@ export function ChatComposer({
   activeTurnId,
   submissionError,
   transcriptWidth,
+  layoutDiagnosticsEnabled = false,
 }: ChatComposerProps) {
   const { resolvedColorScheme } = usePreferences();
   const palette = getPalette(resolvedColorScheme);
   const insets = useSafeAreaInsets();
+  const windowDimensions = useWindowDimensions();
   const transcriptTopPadding =
     insets.top + CHAT_TOP_CONTROLS_HEIGHT + CHAT_TRANSCRIPT_TOP_GAP;
   const transcriptContentWidth = Math.max(
@@ -112,10 +138,17 @@ export function ChatComposer({
   );
   const message = useNativeState('');
   const transcriptScrollRef = useRef<RNScrollViewInstance | null>(null);
-  const turnLayoutYRef = useRef(new Map<string, number>());
   const pendingNewTurnScrollRef = useRef<string | null>(null);
+  const scrollOffsetRef = useRef(0);
+  const chatRootRef = useRef<View | null>(null);
+  const rootWindowFrameRef = useRef<WindowFrame | null>(null);
+  const keyboardInsetRef = useRef(0);
+  const keyboardStageRef = useRef<KeyboardStage>('closed');
+  const activeTurnGeometryProbeRef = useRef<TurnGeometryProbe | null>(null);
   const composerHeightRef = useRef(COMPOSER_MIN_HEIGHT + COMPOSER_BOTTOM_PADDING);
-  const [composerHeight, setComposerHeight] = useState(composerHeightRef.current);
+  const [composerHeight, setComposerHeight] = useState(
+    COMPOSER_MIN_HEIGHT + COMPOSER_BOTTOM_PADDING,
+  );
   const textFieldRef = useRef<TextFieldRef | null>(null);
   const draftRef = useRef('');
   const copyFeedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -126,28 +159,129 @@ export function ChatComposer({
   const latestTurn = turns[turns.length - 1];
   const latestTurnId = latestTurn?.id ?? null;
   const latestAssistantAttempt = latestTurn?.assistantAttempt ?? null;
+  const reportLayoutDiagnostic = useCallback<ChatLayoutDiagnostic>(
+    (event, values) => {
+      if (!__DEV__ || !layoutDiagnosticsEnabled) return;
+      console.info('[Chat layout diagnostics]', {
+        at: Date.now(),
+        event,
+        scrollOffsetY: scrollOffsetRef.current,
+        latestTurnId,
+        activeTurnId,
+        keyboardStage: keyboardStageRef.current,
+        keyboardInsetApplied: keyboardInsetRef.current,
+        composerHeight: composerHeightRef.current,
+        safeAreaTop: insets.top,
+        safeAreaBottom: insets.bottom,
+        transcriptTopPadding,
+        transcriptWidth,
+        transcriptContentWidth,
+        rootWindowX: rootWindowFrameRef.current?.x ?? null,
+        rootWindowY: rootWindowFrameRef.current?.y ?? null,
+        rootWindowWidth: rootWindowFrameRef.current?.width ?? null,
+        rootWindowHeight: rootWindowFrameRef.current?.height ?? null,
+        pendingAnchorTurnId: pendingNewTurnScrollRef.current,
+        ...values,
+      });
+    },
+    [
+      insets.bottom,
+      insets.top,
+      activeTurnId,
+      layoutDiagnosticsEnabled,
+      latestTurnId,
+      transcriptContentWidth,
+      transcriptTopPadding,
+      transcriptWidth,
+    ],
+  );
 
   const dismissKeyboard = useCallback(() => {
     Keyboard.dismiss();
     void textFieldRef.current?.blur();
   }, []);
+  const requestGeometryProbe = useCallback((reason: string) => {
+    if (!layoutDiagnosticsEnabled) return;
+    reportLayoutDiagnostic('geometry-probe-request', { reason });
+    activeTurnGeometryProbeRef.current?.(reason);
+  }, [layoutDiagnosticsEnabled, reportLayoutDiagnostic]);
   const focusTextField = useCallback(() => {
+    reportLayoutDiagnostic('composer-focus-request', { activeTurnId });
+    requestGeometryProbe('composer-focus-request');
     void textFieldRef.current?.focus();
-  }, []);
+  }, [activeTurnId, reportLayoutDiagnostic, requestGeometryProbe]);
   const handleComposerHeightChange = useCallback((nextHeight: number) => {
     if (nextHeight <= 0 || Math.abs(composerHeightRef.current - nextHeight) < 0.5) return;
     composerHeightRef.current = nextHeight;
     setComposerHeight(nextHeight);
-  }, []);
-  const handleTurnLayout = useCallback((turnId: string, layoutY: number) => {
-    turnLayoutYRef.current.set(turnId, layoutY);
-    if (pendingNewTurnScrollRef.current !== turnId) return;
+    reportLayoutDiagnostic('composer-layout', { composerHeight: nextHeight });
+  }, [reportLayoutDiagnostic]);
+  const handleRootLayout = useCallback((event: LayoutChangeEvent) => {
+    const { x, y, width, height } = event.nativeEvent.layout;
+    reportLayoutDiagnostic('chat-root-layout', {
+      x,
+      y,
+      width,
+      height,
+      screenHeight: Dimensions.get('screen').height,
+      windowHeight: windowDimensions.height,
+    });
+    chatRootRef.current?.measureInWindow((windowX, windowY, windowWidth, windowHeight) => {
+      const frame = {
+        x: windowX,
+        y: windowY,
+        width: windowWidth,
+        height: windowHeight,
+      };
+      rootWindowFrameRef.current = frame;
+      reportLayoutDiagnostic('chat-root-window-frame', frame);
+    });
+  }, [reportLayoutDiagnostic, windowDimensions.height]);
+  const handleViewportLayout = useCallback((event: LayoutChangeEvent) => {
+    const { x, y, width, height } = event.nativeEvent.layout;
+    reportLayoutDiagnostic('transcript-viewport-layout', { x, y, width, height });
+  }, [reportLayoutDiagnostic]);
+  const handleScroll = useCallback((event: ChatScrollEvent) => {
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    scrollOffsetRef.current = contentOffset.y;
+    if (!layoutDiagnosticsEnabled) return;
+    reportLayoutDiagnostic('transcript-scroll', {
+      offsetY: contentOffset.y,
+      contentWidth: contentSize.width,
+      contentHeight: contentSize.height,
+      viewportWidth: layoutMeasurement.width,
+      viewportHeight: layoutMeasurement.height,
+    });
+  }, [layoutDiagnosticsEnabled, reportLayoutDiagnostic]);
+  const handleScrollBeginDrag = useCallback(() => {
     pendingNewTurnScrollRef.current = null;
+    reportLayoutDiagnostic('manual-scroll-begin', {});
+  }, [reportLayoutDiagnostic]);
+  const handleScrollEndDrag = useCallback(() => {
+    reportLayoutDiagnostic('manual-scroll-end-drag', {});
+  }, [reportLayoutDiagnostic]);
+  const handleMomentumScrollEnd = useCallback(() => {
+    reportLayoutDiagnostic('manual-scroll-momentum-end', {});
+  }, [reportLayoutDiagnostic]);
+  const handleContentSizeChange = useCallback((width: number, height: number) => {
+    reportLayoutDiagnostic('transcript-content-size', { width, height });
+  }, [reportLayoutDiagnostic]);
+  const handleTurnLayout = useCallback((turnId: string, layoutY: number) => {
+    reportLayoutDiagnostic('turn-layout', {
+      turnId,
+      y: layoutY,
+      visibleY: layoutY - scrollOffsetRef.current,
+    });
+    if (pendingNewTurnScrollRef.current !== turnId) return;
+    if (transcriptContentWidth <= 0) return;
+    pendingNewTurnScrollRef.current = null;
+    const targetOffset = Math.max(0, layoutY - transcriptTopPadding);
     transcriptScrollRef.current?.scrollTo({
-      y: Math.max(0, layoutY - transcriptTopPadding),
+      y: targetOffset,
       animated: true,
     });
-  }, [transcriptTopPadding]);
+    reportLayoutDiagnostic('new-turn-positioned', { turnId, targetOffsetY: targetOffset });
+  }, [reportLayoutDiagnostic, transcriptContentWidth, transcriptTopPadding]);
   const handleTextChange = useCallback((text: string) => {
     draftRef.current = text;
     setHasSendableText(text.trim().length > 0);
@@ -159,12 +293,13 @@ export function ChatComposer({
     if (acceptedTurnId) {
       if (turns.length > 0) {
         pendingNewTurnScrollRef.current = acceptedTurnId;
+        reportLayoutDiagnostic('new-turn-accepted', { turnId: acceptedTurnId });
       }
       draftRef.current = '';
       message.set('');
       setHasSendableText(false);
     }
-  }, [activeTurnId, message, onSend, turns.length]);
+  }, [activeTurnId, message, onSend, reportLayoutDiagnostic, turns.length]);
 
   useEffect(() => {
     const previous = previousLatestAttemptRef.current;
@@ -221,7 +356,11 @@ export function ChatComposer({
   }, []);
 
   return (
-    <View style={{ flex: 1, backgroundColor: palette.background }}>
+    <View
+      ref={chatRootRef}
+      onLayout={layoutDiagnosticsEnabled ? handleRootLayout : undefined}
+      style={{ flex: 1, backgroundColor: palette.background }}
+    >
       <Host
         colorScheme={resolvedColorScheme}
         layoutDirection="leftToRight"
@@ -247,6 +386,13 @@ export function ChatComposer({
       <ChatKeyboardViewport
         composerHeight={composerHeight}
         safeAreaBottom={insets.bottom}
+        keyboardInsetRef={keyboardInsetRef}
+        keyboardStageRef={keyboardStageRef}
+        rootWindowFrameRef={rootWindowFrameRef}
+        onKeyboardProbe={requestGeometryProbe}
+        layoutDiagnosticsEnabled={layoutDiagnosticsEnabled}
+        onLayoutDiagnostic={reportLayoutDiagnostic}
+        onLayout={layoutDiagnosticsEnabled ? handleViewportLayout : undefined}
       >
         <RNScrollView
           ref={transcriptScrollRef}
@@ -261,6 +407,12 @@ export function ChatComposer({
           keyboardDismissMode="on-drag"
           keyboardShouldPersistTaps="handled"
           onTouchEnd={dismissKeyboard}
+          onScroll={layoutDiagnosticsEnabled ? handleScroll : undefined}
+          scrollEventThrottle={layoutDiagnosticsEnabled ? 100 : undefined}
+          onScrollBeginDrag={layoutDiagnosticsEnabled ? handleScrollBeginDrag : undefined}
+          onScrollEndDrag={layoutDiagnosticsEnabled ? handleScrollEndDrag : undefined}
+          onMomentumScrollEnd={layoutDiagnosticsEnabled ? handleMomentumScrollEnd : undefined}
+          onContentSizeChange={layoutDiagnosticsEnabled ? handleContentSizeChange : undefined}
         >
           {turns.map((turn, index) => (
             <ChatTranscriptTurn
@@ -273,9 +425,11 @@ export function ChatComposer({
               palette={palette}
               reaction={turn.assistant ? reactions[turn.assistant.id] : undefined}
               copied={turn.assistant?.id === copiedMessageId}
-              onLayout={(event) =>
-                handleTurnLayout(turn.id, event.nativeEvent.layout.y)
-              }
+              layoutDiagnosticsEnabled={layoutDiagnosticsEnabled}
+              diagnosticsActive={index === turns.length - 1 || activeTurnId === turn.id}
+              activeTurnGeometryProbeRef={activeTurnGeometryProbeRef}
+              onLayoutDiagnostic={reportLayoutDiagnostic}
+              onTurnLayout={handleTurnLayout}
               onCopy={handleCopy}
               onReaction={handleReaction}
               onRegenerate={onRegenerate}
@@ -297,7 +451,7 @@ export function ChatComposer({
           ) : null}
         </RNScrollView>
       </ChatKeyboardViewport>
-      </View>
+    </View>
   );
 }
 
@@ -305,33 +459,124 @@ function ChatKeyboardViewport({
   children,
   composerHeight,
   safeAreaBottom,
+  keyboardInsetRef,
+  keyboardStageRef,
+  rootWindowFrameRef,
+  layoutDiagnosticsEnabled,
+  onKeyboardProbe,
+  onLayoutDiagnostic,
+  onLayout,
 }: {
   children: ReactNode;
   composerHeight: number;
   safeAreaBottom: number;
+  keyboardInsetRef: { current: number };
+  keyboardStageRef: { current: KeyboardStage };
+  rootWindowFrameRef: WindowFrameRef;
+  layoutDiagnosticsEnabled: boolean;
+  onKeyboardProbe: (reason: string) => void;
+  onLayoutDiagnostic: ChatLayoutDiagnostic;
+  onLayout?: (event: LayoutChangeEvent) => void;
 }) {
   const [keyboardInset, setKeyboardInset] = useState(0);
+  const viewportRef = useRef<View | null>(null);
+  const windowDimensions = useWindowDimensions();
+
+  const handleViewportLayout = useCallback((event: LayoutChangeEvent) => {
+    onLayout?.(event);
+    if (!__DEV__ || !layoutDiagnosticsEnabled) return;
+    const { x, y, width, height } = event.nativeEvent.layout;
+    viewportRef.current?.measureInWindow((windowX, windowY, windowWidth, windowHeight) => {
+      onLayoutDiagnostic('transcript-viewport-window', {
+        localX: x,
+        localY: y,
+        localWidth: width,
+        localHeight: height,
+        x: windowX,
+        y: windowY,
+        width: windowWidth,
+        height: windowHeight,
+      });
+    });
+  }, [layoutDiagnosticsEnabled, onLayout, onLayoutDiagnostic]);
+
+  const reportKeyboardEvent = useCallback((
+    event: KeyboardFrameEvent,
+    eventName: string,
+    stage: KeyboardStage,
+    applyBaselineInset: boolean,
+  ) => {
+    const frame = event.endCoordinates;
+    const screenHeight = Dimensions.get('screen').height;
+    const screenBasedInset = Math.max(0, screenHeight - frame.screenY);
+    const rootWindowFrame = rootWindowFrameRef.current;
+    const rootBottom = rootWindowFrame
+      ? rootWindowFrame.y + rootWindowFrame.height
+      : null;
+    const rootOverlap = rootWindowFrame
+      ? Math.max(0, rootBottom! - Math.max(rootWindowFrame.y, frame.screenY))
+      : null;
+
+    keyboardStageRef.current = stage;
+    if (applyBaselineInset) {
+      Keyboard.scheduleLayoutAnimation(event);
+      const nextInset = stage === 'closing' || stage === 'closed' ? 0 : screenBasedInset;
+      keyboardInsetRef.current = nextInset;
+      setKeyboardInset(nextInset);
+    }
+
+    if (!layoutDiagnosticsEnabled) return;
+    onLayoutDiagnostic('keyboard-transition', {
+      eventName,
+      stage,
+      frameEndY: frame.screenY,
+      frameEndHeight: frame.height,
+      frameEndBottom: frame.screenY + frame.height,
+      screenHeight,
+      windowHeight: windowDimensions.height,
+      rootWindowX: rootWindowFrame?.x ?? null,
+      rootWindowY: rootWindowFrame?.y ?? null,
+      rootWindowWidth: rootWindowFrame?.width ?? null,
+      rootWindowHeight: rootWindowFrame?.height ?? null,
+      rootOverlapCandidate: rootOverlap,
+      screenBasedInsetCandidate: screenBasedInset,
+      effectiveInsetApplied: keyboardInsetRef.current,
+      safeAreaBottom,
+    });
+    if (eventName !== 'keyboardWillChangeFrame') onKeyboardProbe(eventName);
+  }, [keyboardInsetRef, keyboardStageRef, layoutDiagnosticsEnabled, onKeyboardProbe, onLayoutDiagnostic, rootWindowFrameRef, safeAreaBottom, windowDimensions.height]);
 
   useEffect(() => {
     const showSubscription = Keyboard.addListener('keyboardWillShow', (event) => {
-      Keyboard.scheduleLayoutAnimation(event);
-      const screenHeight = Dimensions.get('screen').height;
-      setKeyboardInset(Math.max(0, screenHeight - event.endCoordinates.screenY));
+      reportKeyboardEvent(event, 'keyboardWillShow', 'opening', true);
     });
     const hideSubscription = Keyboard.addListener('keyboardWillHide', (event) => {
-      Keyboard.scheduleLayoutAnimation(event);
-      setKeyboardInset(0);
+      reportKeyboardEvent(event, 'keyboardWillHide', 'closing', true);
+    });
+    const didShowSubscription = Keyboard.addListener('keyboardDidShow', (event) => {
+      reportKeyboardEvent(event, 'keyboardDidShow', 'open', false);
+    });
+    const didHideSubscription = Keyboard.addListener('keyboardDidHide', (event) => {
+      reportKeyboardEvent(event, 'keyboardDidHide', 'closed', false);
+    });
+    const frameSubscription = Keyboard.addListener('keyboardWillChangeFrame', (event) => {
+      reportKeyboardEvent(event, 'keyboardWillChangeFrame', keyboardStageRef.current, false);
     });
 
     return () => {
       showSubscription.remove();
       hideSubscription.remove();
+      didShowSubscription.remove();
+      didHideSubscription.remove();
+      frameSubscription.remove();
     };
-  }, []);
+  }, [keyboardStageRef, reportKeyboardEvent]);
 
   return (
     <View
+      ref={viewportRef}
       pointerEvents="box-none"
+      onLayout={layoutDiagnosticsEnabled ? handleViewportLayout : undefined}
       style={[
         StyleSheet.absoluteFill,
         { bottom: Math.max(keyboardInset, safeAreaBottom) + composerHeight },
@@ -510,7 +755,11 @@ const ChatTranscriptTurn = memo(function ChatTranscriptTurn({
   palette,
   reaction,
   copied,
-  onLayout,
+  layoutDiagnosticsEnabled,
+  diagnosticsActive,
+  activeTurnGeometryProbeRef,
+  onLayoutDiagnostic,
+  onTurnLayout,
   onCopy,
   onReaction,
   onRegenerate,
@@ -523,7 +772,11 @@ const ChatTranscriptTurn = memo(function ChatTranscriptTurn({
   palette: ReturnType<typeof getPalette>;
   reaction?: ChatReaction;
   copied: boolean;
-  onLayout: (event: LayoutChangeEvent) => void;
+  layoutDiagnosticsEnabled: boolean;
+  diagnosticsActive: boolean;
+  activeTurnGeometryProbeRef: TurnGeometryProbeRef;
+  onLayoutDiagnostic: ChatLayoutDiagnostic;
+  onTurnLayout: (turnId: string, layoutY: number) => void;
   onCopy: (messageId: string, content: string) => Promise<void>;
   onReaction: (messageId: string, reaction: ChatReaction) => void;
   onRegenerate: (turnId: string) => void;
@@ -538,37 +791,151 @@ const ChatTranscriptTurn = memo(function ChatTranscriptTurn({
     Boolean(turn.errorMessage) &&
     (actionPolicy.showIncompleteNotice || actionPolicy.showError);
   const showResponse = showStatus || Boolean(assistant) || showError || showRegenerateOnly;
-  const lastResponseLayoutDiagnosticRef = useRef('');
-  const handleRegenerate = useCallback(() => onRegenerate(turn.id), [onRegenerate, turn.id]);
-  const handleResponseLayout = useCallback((event: LayoutChangeEvent) => {
-    if (__DEV__ && assistant && turn.assistantStatus !== 'streaming') {
-      const height = event.nativeEvent.layout.height;
-      const diagnosticKey = `${assistant.id}:${assistant.content.length}:${contentWidth}:${height}`;
-      if (lastResponseLayoutDiagnosticRef.current !== diagnosticKey) {
-        lastResponseLayoutDiagnosticRef.current = diagnosticKey;
-        console.info('[Agent1 transcript diagnostics] response block', {
-          messageId: assistant.id,
-          sourceCharacters: assistant.content.length,
-          contentWidth,
-          blockHeight: height,
+  const turnWrapperRef = useRef<View | null>(null);
+  const userHostRef = useRef<View | null>(null);
+  const responseWrapperRef = useRef<View | null>(null);
+  const geometryRef = useRef<{
+    turn: WindowFrame | null;
+    user: WindowFrame | null;
+    userSwiftUI: { width: number; height: number } | null;
+    response: WindowFrame | null;
+    markdown: ChatLayoutDiagnosticValues | null;
+  }>({ turn: null, user: null, userSwiftUI: null, response: null, markdown: null });
+
+  const probeActiveTurnGeometry = useCallback((reason: string) => {
+    if (!__DEV__ || !layoutDiagnosticsEnabled || !diagnosticsActive) return;
+    const geometry = geometryRef.current;
+    const user = geometry.user;
+    const response = geometry.response;
+    const markdown = geometry.markdown;
+    const shared = {
+      reason,
+      turnId: turn.id,
+      turnY: geometry.turn?.y ?? null,
+      turnHeight: geometry.turn?.height ?? null,
+      userWrapperY: user?.y ?? null,
+      userWrapperHeight: user?.height ?? null,
+      userHostContentWidth: geometry.userSwiftUI?.width ?? null,
+      userHostContentHeight: geometry.userSwiftUI?.height ?? null,
+      responseWrapperY: response?.y ?? null,
+      responseWrapperHeight: response?.height ?? null,
+      responseStartsAfterUser:
+        user && response ? response.y >= user.y + user.height : null,
+      messageId: markdown?.messageId ?? assistant?.id ?? null,
+      sourceCharacters: markdown?.sourceCharacters ?? null,
+      presentationCharacters: markdown?.presentationCharacters ?? null,
+      nativeMarkdownY: markdown?.y ?? null,
+      nativeMarkdownWidth: markdown?.width ?? null,
+      nativeMarkdownHeight: markdown?.height ?? null,
+      contentStartsAfterDesignedGap:
+        typeof markdown?.y === 'number' ? markdown.y >= USER_TO_ASSISTANT_GAP : null,
+    };
+    onLayoutDiagnostic('active-turn-geometry', shared);
+
+    const measureWindow = (component: string, ref: RefObject<View | null>) => {
+      ref.current?.measureInWindow((x, y, width, height) => {
+        onLayoutDiagnostic('active-turn-window-frame', {
+          ...shared,
+          component,
+          x,
+          y,
+          width,
+          height,
+          nativeMarkdownWindowY:
+            component === 'assistant-response' && typeof markdown?.y === 'number'
+              ? y + markdown.y
+              : null,
         });
+      });
+    };
+    measureWindow('turn', turnWrapperRef);
+    measureWindow('user-host', userHostRef);
+    measureWindow('assistant-response', responseWrapperRef);
+  }, [assistant?.id, diagnosticsActive, layoutDiagnosticsEnabled, onLayoutDiagnostic, turn.id]);
+
+  useEffect(() => {
+    if (!__DEV__ || !layoutDiagnosticsEnabled || !diagnosticsActive) return;
+    const probe = probeActiveTurnGeometry;
+    activeTurnGeometryProbeRef.current = probe;
+    probe('active-turn-attached');
+    return () => {
+      if (activeTurnGeometryProbeRef.current === probe) {
+        activeTurnGeometryProbeRef.current = null;
       }
-    }
-  }, [assistant, contentWidth, turn.assistantStatus]);
+    };
+  }, [
+    activeTurnGeometryProbeRef,
+    diagnosticsActive,
+    layoutDiagnosticsEnabled,
+    probeActiveTurnGeometry,
+  ]);
+
+  const handleTurnLayout = useCallback((event: LayoutChangeEvent) => {
+    const { x, y, width, height } = event.nativeEvent.layout;
+    geometryRef.current.turn = { x, y, width, height };
+    onTurnLayout(turn.id, y);
+    if (!__DEV__ || !layoutDiagnosticsEnabled || !diagnosticsActive) return;
+    probeActiveTurnGeometry('turn-layout');
+  }, [diagnosticsActive, layoutDiagnosticsEnabled, onTurnLayout, probeActiveTurnGeometry, turn.id]);
+  const handleRegenerate = useCallback(() => onRegenerate(turn.id), [onRegenerate, turn.id]);
+  const handleUserHostLayout = useCallback((event: LayoutChangeEvent) => {
+    const { x, y, width, height } = event.nativeEvent.layout;
+    geometryRef.current.user = { x, y, width, height };
+    if (!__DEV__ || !layoutDiagnosticsEnabled || !diagnosticsActive) return;
+    probeActiveTurnGeometry('user-host-layout');
+  }, [diagnosticsActive, layoutDiagnosticsEnabled, probeActiveTurnGeometry]);
+
+  const handleSwiftUIUserHostLayout = useCallback((event: { nativeEvent: { width: number; height: number } }) => {
+    if (!__DEV__ || !layoutDiagnosticsEnabled || !diagnosticsActive) return;
+    geometryRef.current.userSwiftUI = {
+      width: event.nativeEvent.width,
+      height: event.nativeEvent.height,
+    };
+    probeActiveTurnGeometry('user-host-swiftui-content');
+  }, [diagnosticsActive, layoutDiagnosticsEnabled, probeActiveTurnGeometry]);
+
+  const handleResponseLayout = useCallback((event: LayoutChangeEvent) => {
+    const { x, y, width, height } = event.nativeEvent.layout;
+    geometryRef.current.response = { x, y, width, height };
+    if (!__DEV__ || !layoutDiagnosticsEnabled || !diagnosticsActive) return;
+    probeActiveTurnGeometry('assistant-response-layout');
+  }, [diagnosticsActive, layoutDiagnosticsEnabled, probeActiveTurnGeometry]);
+
+  const handleMarkdownDiagnostic = useCallback((event: string, values: ChatLayoutDiagnosticValues) => {
+    if (!__DEV__ || !layoutDiagnosticsEnabled || !diagnosticsActive) return;
+    if (event === 'native-markdown-layout') geometryRef.current.markdown = values;
+    onLayoutDiagnostic(event, {
+      turnId: turn.id,
+      ...values,
+      responseWrapperYWithinTurn: geometryRef.current.response?.y ?? null,
+      intentionalUserToAssistantGap: USER_TO_ASSISTANT_GAP,
+      contentStartsAfterDesignedGap:
+        typeof values.y === 'number' ? values.y >= USER_TO_ASSISTANT_GAP : null,
+    });
+    if (event === 'native-markdown-layout') probeActiveTurnGeometry('native-markdown-layout');
+  }, [diagnosticsActive, layoutDiagnosticsEnabled, onLayoutDiagnostic, probeActiveTurnGeometry, turn.id]);
 
   return (
-    <View onLayout={onLayout} style={{ width: '100%', alignSelf: 'stretch' }}>
-      <Host
-        colorScheme={colorScheme}
-        layoutDirection="leftToRight"
-        matchContents={{ vertical: true, horizontal: false }}
+    <View ref={turnWrapperRef} onLayout={handleTurnLayout} style={{ width: '100%', alignSelf: 'stretch' }}>
+      <View
+        ref={userHostRef}
+        onLayout={layoutDiagnosticsEnabled && diagnosticsActive ? handleUserHostLayout : undefined}
         style={{ width: contentWidth }}
       >
-        <ChatUserBubble message={turn.user} contentWidth={contentWidth} palette={palette} />
-      </Host>
+        <Host
+          colorScheme={colorScheme}
+          layoutDirection="leftToRight"
+          matchContents={{ vertical: true, horizontal: false }}
+          style={{ width: contentWidth }}
+          onLayoutContent={layoutDiagnosticsEnabled && diagnosticsActive ? handleSwiftUIUserHostLayout : undefined}
+        >
+          <ChatUserBubble message={turn.user} contentWidth={contentWidth} palette={palette} />
+        </Host>
+      </View>
 
       {showResponse ? (
         <View
+          ref={responseWrapperRef}
           onLayout={handleResponseLayout}
           style={{
             width: contentWidth,
@@ -598,6 +965,8 @@ const ChatTranscriptTurn = memo(function ChatTranscriptTurn({
               streaming={turn.assistantStatus === 'streaming'}
               contentWidth={contentWidth}
               palette={palette}
+              layoutDiagnosticsEnabled={layoutDiagnosticsEnabled && diagnosticsActive}
+              onLayoutDiagnostic={handleMarkdownDiagnostic}
             />
           ) : null}
 

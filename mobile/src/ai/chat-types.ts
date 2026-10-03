@@ -38,4 +38,5 @@ export interface ChatComposerProps {
   activeTurnId: string | null;
   submissionError: string | null;
   transcriptWidth: number;
+  layoutDiagnosticsEnabled?: boolean;
 }

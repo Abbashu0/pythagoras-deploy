@@ -37,6 +37,10 @@ function bytes(value: string): AsyncIterable<Uint8Array> {
 
 class FallbackTransport implements AIProviderHttpTransport {
   readonly requestedModels: string[] = [];
+  readonly requestBodies: Array<{
+    model?: string;
+    messages?: Array<{ role?: string; content?: string }>;
+  }> = [];
 
   constructor(private readonly primaryModelId: string) {}
 
@@ -45,10 +49,14 @@ class FallbackTransport implements AIProviderHttpTransport {
     request: AIProviderHttpRequest,
   ): Promise<AIProviderHttpResponse> {
     const body = request.body
-      ? JSON.parse(new TextDecoder().decode(request.body)) as { model?: string }
+      ? JSON.parse(new TextDecoder().decode(request.body)) as {
+          model?: string;
+          messages?: Array<{ role?: string; content?: string }>;
+        }
       : {};
     const modelId = body.model ?? "";
     this.requestedModels.push(modelId);
+    this.requestBodies.push(body);
     if (modelId === this.primaryModelId) {
       return {
         status: 429,
@@ -172,6 +180,7 @@ test("direct mobile chat is development-only and accepts only the server-owned r
   assert.equal(isDevMobileChatEnabled("test"), false);
   assert.doesNotThrow(() => assertDevAgent1Fields({ messages: [] }, ["messages"]));
   assert.throws(() => assertDevAgent1Fields({ messages: [], modelId: "client-choice" }, ["messages"]));
+  assert.throws(() => assertDevAgent1Fields({ messages: [], instructions: "client prompt" }, ["messages"]));
 });
 
 test("development chat response flushes each NDJSON delta before generation completes", async () => {
@@ -300,6 +309,16 @@ test("Agent 1 temporary chat follows the saved route and creates no chat, accoun
     assert.deepEqual(textDeltasBeforeCompletion, [true, true]);
     assert.equal(JSON.stringify(receivedEvents).includes("PRIVATE REASONING MUST NOT LEAVE SERVER"), false);
     assert.deepEqual(transport.requestedModels, ["test-primary", "test-fallback"]);
+    assert.equal(transport.requestBodies.length, 2);
+    for (const requestBody of transport.requestBodies) {
+      const systemMessage = requestBody.messages?.find((message) => message.role === "system");
+      assert.ok(systemMessage?.content);
+      assert.match(systemMessage.content, /GitHub-Flavored Markdown/u);
+      assert.match(systemMessage.content, /inline mathematics in \$\.\.\.\$/u);
+      assert.match(systemMessage.content, /display mathematics in \$\$\.\.\.\$\$/u);
+      assert.match(systemMessage.content, /outside math delimiters/u);
+      assert.match(systemMessage.content, /Do not emit raw HTML/u);
+    }
     assert.deepEqual(aiTableCounts(f.database), before);
   } finally {
     f.close();

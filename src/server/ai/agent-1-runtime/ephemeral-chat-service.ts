@@ -64,6 +64,13 @@ const MAX_MESSAGE_BYTES = 32 * 1_024;
 const MAX_RESPONSE_BYTES = 64 * 1_024;
 const DEFAULT_TIMEOUT_MS = 90_000;
 const DEFAULT_MAX_OUTPUT_TOKENS = 2_048;
+const AGENT_1_DEV_PRESENTATION_INSTRUCTIONS = [
+  'Respond in clean GitHub-Flavored Markdown.',
+  'Write Arabic educational prose as short coherent paragraphs separated by blank lines; use real ##/### section headings and proper Markdown lists.',
+  'Wrap inline mathematics in $...$ and display mathematics in $$...$$. Never emit TeX commands such as \\frac, \\gamma, \\Delta, or \\int outside math delimiters.',
+  'Keep Arabic natural-language text outside math delimiters; never put Arabic sentences in \\text{...}.',
+  'Do not emit raw HTML or code fences for ordinary prose. Use tables only for genuinely comparative information and avoid wall-of-text paragraphs.',
+].join('\n');
 
 /**
  * Development-only, request-scoped Agent 1 execution. It reads the current
@@ -186,6 +193,7 @@ export class Agent1DevChatService {
       { capability: "GENERATION", attempts },
       {
         requestId: uuidv7(),
+        instructions: AGENT_1_DEV_PRESENTATION_INSTRUCTIONS,
         messages,
         maxOutputTokens,
         stream: true,

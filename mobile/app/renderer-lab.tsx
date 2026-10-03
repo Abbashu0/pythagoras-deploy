@@ -111,6 +111,41 @@ const LAB_CASES = [
   },
 ] as const;
 
+const MATH_SOURCE_DIAGNOSTICS = [
+  {
+    title: 'Arabic prose with $C$',
+    markdown: 'ثابت التكامل هو $C$، ويُكتب خارج الشرح العربي كرمز رياضي.',
+  },
+  {
+    title: 'Arabic prose with $x=b$',
+    markdown: 'حل المعادلة $x=b$ ثم تحقق من قيمة المتغير.',
+  },
+  {
+    title: 'Alternate inline delimiter \\(x=b\\)',
+    markdown: 'الصيغة البديلة هي \\(x=b\\) وتُحوّل في نسخة العرض فقط.',
+  },
+  {
+    title: 'Display math',
+    markdown: '$$\n\\int_0^2 x\\,dx = 2\n$$',
+  },
+  {
+    title: 'Escaped dollar signs',
+    markdown: String.raw`النص الحرفي \$C\$ لا يمثل صيغة رياضية.`,
+  },
+  {
+    title: 'Currency',
+    markdown: 'السعر $20، ثم أصبح $30.',
+  },
+  {
+    title: 'Math-like source inside inline code',
+    markdown: 'يبقى `$x=b$` نصًا برمجيًا حرفيًا.',
+  },
+  {
+    title: 'Raw TeX without delimiters',
+    markdown: String.raw`المصدر الخام: \int u\,dv = uv - \int v\,du`,
+  },
+] as const;
+
 const LATEX_ARABIC_DIAGNOSTICS = [
   {
     title: '1. \\text{ذرة}',
@@ -208,6 +243,34 @@ export default function RendererLabScreen() {
             />
           </View>
         ))}
+
+        <View
+          style={{
+            borderTopWidth: 1,
+            borderTopColor: palette.separator,
+            paddingTop: 16,
+            marginBottom: 22,
+          }}
+        >
+          <Text style={[titleStyle, { fontSize: 18, marginBottom: 8 }]}>
+            Math source / presentation diagnostics
+          </Text>
+          <Text style={{ color: palette.textSecondary, fontSize: 13, marginBottom: 16 }}>
+            These exact fixtures distinguish delimited math from escaped or raw model text; no TeX is inferred.
+          </Text>
+          {MATH_SOURCE_DIAGNOSTICS.map((item, index) => (
+            <View key={item.title} style={{ marginBottom: 16 }}>
+              <Text style={[titleStyle, { marginBottom: 6 }]}>{item.title}</Text>
+              <Agent1EnrichedMarkdown
+                messageId={'renderer-lab-math-source-' + index}
+                content={item.markdown}
+                streaming={false}
+                contentWidth={contentWidth}
+                palette={palette}
+              />
+            </View>
+          ))}
+        </View>
 
         <View
           style={{

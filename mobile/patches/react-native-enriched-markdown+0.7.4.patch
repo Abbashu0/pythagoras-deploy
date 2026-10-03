@@ -97,3 +97,89 @@ index 7ad95d7..aa938df 100644
 +  _pendingHeightValidation = NO;
 +  _pendingForceHeightUpdate = NO;
    _renderedMarkdown = nil;
+diff --git a/node_modules/react-native-enriched-markdown/ios/views/TableContainerView.m b/node_modules/react-native-enriched-markdown/ios/views/TableContainerView.m
+index bd73244..e0b1d62 100644
+--- a/node_modules/react-native-enriched-markdown/ios/views/TableContainerView.m
++++ b/node_modules/react-native-enriched-markdown/ios/views/TableContainerView.m
+@@ -12,2 +12,3 @@
+ #include <TargetConditionals.h>
++#include <math.h>
+ #if TARGET_OS_OSX
+@@ -31,3 +32,3 @@
+ #if !TARGET_OS_OSX
+-@interface TableContainerView () <UIContextMenuInteractionDelegate>
++@interface TableContainerView () <UIContextMenuInteractionDelegate, UIScrollViewDelegate>
+ @end
+@@ -49,1 +50,2 @@
+   CGFloat _borderWidth;
++  BOOL _hasUserScrolledHorizontally;
+@@ -76,2 +78,5 @@
+   _scrollView.showsHorizontalScrollIndicator = YES;
++#if !TARGET_OS_OSX
++  _scrollView.delegate = self;
++#endif
+ #if !TARGET_OS_OSX
+@@ -374,1 +379,2 @@
+   NSMutableArray<ENRMTableIOSRowData *> *rowDataArray = [NSMutableArray arrayWithCapacity:_rows.count];
++  BOOL isRightToLeft = _resolvedLayoutDirection == NSWritingDirectionRightToLeft;
+@@ -380,3 +386,7 @@
+     rowData.backgroundColor = [self backgroundColorForRowIsHeader:isHeaderRow bodyRowIndex:bodyRowIndex];
+-    rowData.cellTexts = [self attributedTextsForRow:rowCells];
++    NSArray<NSAttributedString *> *sourceCells = [self attributedTextsForRow:rowCells];
++    // Reverse only visual cell order; _rows remains the logical source for copy and accessibility.
++    rowData.cellTexts = isRightToLeft
++        ? [[sourceCells reverseObjectEnumerator] allObjects]
++        : sourceCells;
+     [rowDataArray addObject:rowData];
+@@ -389,4 +399,7 @@
+   ENRMTableIOSGridView *gridView = (ENRMTableIOSGridView *)_gridContainer;
++  NSArray<NSNumber *> *displayColumnWidths = isRightToLeft
++      ? [[_colWidths reverseObjectEnumerator] allObjects]
++      : _colWidths;
+   [gridView updateWithRows:[rowDataArray copy]
+-               columnWidths:_colWidths
++               columnWidths:displayColumnWidths
+                  rowHeights:_rowHeights
+@@ -549,2 +562,12 @@
+   return _totalTableHeight;
+ }
++#if !TARGET_OS_OSX
++- (void)scrollViewWillBeginDragging:(UIScrollView *)scrollView
++{
++  CGPoint velocity = [scrollView.panGestureRecognizer velocityInView:scrollView];
++  if (scrollView == _scrollView && fabs(velocity.x) > fabs(velocity.y)) {
++    _hasUserScrolledHorizontally = YES;
++  }
++}
++#endif
++
+@@ -558,3 +581,18 @@
+   _scrollView.scrollEnabled = (_totalTableWidth > self.bounds.size.width);
+-  _gridContainer.frame = CGRectMake(0, 0, _totalTableWidth, _totalTableHeight);
++  BOOL isRightToLeft = _resolvedLayoutDirection == NSWritingDirectionRightToLeft;
++  CGFloat gridOriginX = isRightToLeft && _totalTableWidth < self.bounds.size.width
++      ? self.bounds.size.width - _totalTableWidth
++      : 0;
++  _gridContainer.frame = CGRectMake(gridOriginX, 0, _totalTableWidth, _totalTableHeight);
++
++  // Keep untouched RTL tables at their logical leading edge as streaming widens them.
++  // Once the reader starts a horizontal drag, preserve UIKit's current offset.
++  if (!_hasUserScrolledHorizontally && self.bounds.size.width > 0) {
++    CGFloat leadingOffset = isRightToLeft
++        ? MAX(0, _totalTableWidth - self.bounds.size.width)
++        : 0;
++    if (fabs(_scrollView.contentOffset.x - leadingOffset) > 0.5) {
++      [_scrollView setContentOffset:CGPointMake(leadingOffset, _scrollView.contentOffset.y) animated:NO];
++    }
++  }
+ #else
+@@ -610,3 +648,8 @@
+                                            withString:[cellTexts componentsJoinedByString:@", "]];
+-      element.accessibilityFrameInContainerSpace = CGRectMake(0, yOffset, _totalTableWidth, rowHeight);
++      CGFloat gridOriginX = _resolvedLayoutDirection == NSWritingDirectionRightToLeft &&
++              _totalTableWidth < self.bounds.size.width
++          ? self.bounds.size.width - _totalTableWidth
++          : 0;
++      element.accessibilityFrameInContainerSpace =
++          CGRectMake(gridOriginX, yOffset, _totalTableWidth, rowHeight);
+       element.accessibilityTraits =

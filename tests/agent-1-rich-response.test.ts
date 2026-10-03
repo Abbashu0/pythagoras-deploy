@@ -113,6 +113,51 @@ test('native renderer input normalizes alternate math without touching code or s
   assert.equal(normalizeAlternateMathDelimiters(code), code);
 });
 
+test('presentation input distinguishes valid inline math from escaped currency, code, and raw TeX', () => {
+  const validArabicSource = 'إذا كان الثابت $C$ وكانت قيمة المتغير $x=b$، فالنص العربي يبقى خارجهما.';
+  assert.equal(prepareEnrichedMarkdownInput(validArabicSource), validArabicSource);
+
+  const alternateInline = String.raw`إذا كانت المعادلة \(x=b\).`;
+  assert.equal(
+    prepareEnrichedMarkdownInput(alternateInline),
+    'إذا كانت المعادلة $x=b$.',
+  );
+
+  const display = '$$\n\\int_0^2 x\\,dx = 2\n$$';
+  assert.equal(prepareEnrichedMarkdownInput(display), display);
+
+  const escapedDollar = String.raw`Keep \$C\$ literal.`;
+  assert.equal(prepareEnrichedMarkdownInput(escapedDollar), escapedDollar);
+  assert.equal(prepareEnrichedMarkdownInput('Price: $20 USD.'), 'Price: $20 USD.');
+
+  const tick = String.fromCharCode(96);
+  const inlineCode = `Code: ${tick}$x=b$${tick}`;
+  assert.equal(prepareEnrichedMarkdownInput(inlineCode), inlineCode);
+
+  const rawTex = String.raw`Raw source without math delimiters: \int u\,dv = uv - \int v\,du`;
+  assert.equal(prepareEnrichedMarkdownInput(rawTex), rawTex);
+
+  const validTokens = makeParser().parse(validArabicSource, {});
+  const inlineTokenCount = validTokens
+    .filter((token) => token.type === 'inline')
+    .reduce(
+      (count, token) =>
+        count + (token.children?.filter((child) => child.type === 'agent1_math_inline').length ?? 0),
+      0,
+    );
+  assert.equal(inlineTokenCount, 2);
+});
+
+test('presentation input preserves RTL table source column order', () => {
+  const table = [
+    '| وجه المقارنة | النسبية الخاصة | النسبية العامة |',
+    '| --- | --- | --- |',
+    '| الزمن | $\\Delta t$ | $\\Delta t$ |',
+  ].join('\n');
+  assert.equal(prepareEnrichedMarkdownInput(table), table);
+  assert.ok(table.indexOf('وجه المقارنة') < table.indexOf('النسبية الخاصة'));
+});
+
 test('Arabic-script detection includes letters and harakat, not punctuation, digits, or math symbols', () => {
   assert.equal(containsArabicScriptLetterOrMark('ذرة'), true);
   assert.equal(containsArabicScriptLetterOrMark('ذَرَّةٌ'), true);
