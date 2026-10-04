@@ -31,6 +31,9 @@ export interface AgentModelSelectorProps {
   placeholder?: string;
   ariaLabel: string;
   className?: string;
+  trigger?: React.ReactElement;
+  clearLabel?: string;
+  renderModelIcon?: (model: AIAgent1RuntimeModel) => React.ReactNode;
 }
 
 /** Agent routing selector adapted from APCL's provider-grouped model selector. */
@@ -44,6 +47,9 @@ export function AgentModelSelector({
   placeholder = "اختر نموذجًا",
   ariaLabel,
   className,
+  trigger,
+  clearLabel = "بدون نموذج رئيسي",
+  renderModelIcon,
 }: AgentModelSelectorProps) {
   const [open, setOpen] = React.useState(false);
   const selected = models.find((model) => model.id === value) ?? null;
@@ -60,7 +66,7 @@ export function AgentModelSelector({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button
+        {trigger ?? <Button
           type="button"
           variant="outline"
           size="lg"
@@ -84,7 +90,7 @@ export function AgentModelSelector({
             )}
           </span>
           <ChevronDown className="size-4 shrink-0 text-fg-quaternary" aria-hidden />
-        </Button>
+        </Button>}
       </PopoverTrigger>
       <PopoverContent
         align="start"
@@ -117,7 +123,7 @@ export function AgentModelSelector({
                   }}
                   className="data-[selected=true]:bg-hover data-[selected=true]:text-fg"
                 >
-                  <span className="flex-1 text-fg-secondary">بدون نموذج رئيسي</span>
+                  <span className="flex-1 text-fg-secondary">{clearLabel}</span>
                   {!value ? <Check className="size-4 text-accent" aria-hidden /> : null}
                 </CommandItem>
               </CommandGroup>
@@ -145,7 +151,7 @@ export function AgentModelSelector({
                       )}
                     >
                       <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-md bg-inset text-fg-tertiary">
-                        <Server className="size-3.5" aria-hidden />
+                        {renderModelIcon?.(model) ?? <Server className="size-3.5" aria-hidden />}
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="flex min-w-0 items-center justify-between gap-2">
@@ -156,9 +162,9 @@ export function AgentModelSelector({
                             <Check className="size-4 shrink-0 text-accent" aria-hidden />
                           ) : null}
                         </span>
-                        <span dir="ltr" className="ltr-island mt-0.5 block truncate text-start">
+                        {model.displayName !== model.providerModelId ? <span dir="ltr" className="ltr-island mt-0.5 block truncate text-start">
                           <Mono size="xs">{model.providerModelId}</Mono>
-                        </span>
+                        </span> : null}
                         <span className="mt-1.5 flex flex-wrap items-center gap-1.5">
                           <Badge size="sm" variant="inset">
                             <span className="tnum">

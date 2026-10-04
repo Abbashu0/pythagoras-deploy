@@ -2,75 +2,51 @@
 
 import * as React from "react";
 import Link from "next/link";
-import {
-  Bot,
-  Check,
-  Power,
-  RotateCcw,
-  Save,
-  Server,
-  ShieldAlert,
-  Trash2,
-  Zap,
-} from "lucide-react";
-
-import type { AIAgent1RuntimeSnapshot } from "@/server/ai/agent-1-runtime/contracts";
+import { AlertTriangle, ArrowRight, ArrowLeft, Bot, Check, Pause, Play, Plus, RotateCcw, Save, Trash2 } from "lucide-react";
+import type { AIAgent1RuntimeModel, AIAgent1RuntimeSnapshot } from "@/server/ai/agent-1-runtime/contracts";
+import type { Agent1ActivitySnapshot } from "@/server/ai/agent-1-runtime/activity-contracts";
 import { cn } from "@/lib/cn";
-import { formatContextWindow, formatNumber } from "@/lib/format";
+import { formatContextWindow, formatNumber, formatTime } from "@/lib/format";
 import { Button, IconButton } from "@/components/admin-ui/primitives/button";
-import { EmptyState, ErrorState } from "@/components/admin-ui/feedback/empty-state";
+import { Panel, PanelHeader } from "@/components/admin-ui/primitives/surface";
+import { Tooltip, DisabledReason } from "@/components/admin-ui/primitives/tooltip";
+import { Spinner } from "@/components/admin-ui/primitives/spinner";
+import { Switch } from "@/components/admin-ui/forms/toggle";
+import { ErrorState, EmptyState } from "@/components/admin-ui/feedback/empty-state";
 import { InlineNote } from "@/components/admin-ui/feedback/banner";
 import { PageHeader, PageShell } from "@/components/admin-ui/layout/page";
-import { PipelineFlow, type PipelineStage } from "@/components/admin-ui/charts/matrix";
-import {
-  LiveMetricChart,
-  LiveTelemetryChart,
-  type LiveTelemetryPoint,
-} from "@/components/admin-ui/charts/live";
-import { ReorderableList } from "@/components/admin-ui/domain/content/reorderable";
-import {
-  AgentModelSelector,
-  ModelAssignmentPanel,
-} from "@/components/admin-ui/domain/agents/model-selector";
-import { Panel, PanelHeader } from "@/components/admin-ui/primitives/surface";
-import { Spinner } from "@/components/admin-ui/primitives/spinner";
-import { Badge, StatusBadge } from "@/components/admin-ui/status/status-badge";
-
-interface RuntimeResponse extends AIAgent1RuntimeSnapshot {
-  ok: true;
-}
-
-interface ApiError extends Error {
-  code?: string;
-  details?: Record<string, unknown>;
-}
+import { AgentModelSelector } from "@/components/admin-ui/domain/agents/model-selector";
+import { LivePulseIndicator, LiveTelemetryChart, LiveMetricChart } from "@/components/admin-ui/charts/live";
+import { CompactMetric, MetricRow } from "@/components/admin-ui/charts/metrics";
+import { StatusBadge } from "@/components/admin-ui/status/status-badge";
+import { ModelBrandIcon } from "./model-brand-icon";
+import { useAgent1Activity } from "./use-agent-1-activity";
 
 const TOKEN_SERIES = [
-  { key: "inputTokens", label: "الإدخال", unit: "رمز" },
-  { key: "outputTokens", label: "الإخراج", unit: "رمز" },
-  { key: "reasoningTokens", label: "الاستدلال", unit: "رمز" },
+  { key: "totalTokens", label: "الإجمالي" },
+  { key: "inputTokens", label: "الإدخال", dashed: true },
+  { key: "outputTokens", label: "الإخراج", dashed: true },
 ];
+const CONCURRENT_SERIES = { key: "concurrentRequests", label: "الطلبات المتزامنة", unit: "طلب" };
+const liveClock = new Intl.DateTimeFormat("ar-IQ-u-nu-latn", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+const formatLiveTime = (value: number | string) => liveClock.format(new Date(value));
+const PHASE_LABELS = { connecting: "جارٍ الاتصال", thinking: "يفكّر الآن", responding: "يردّ الآن" };
+const OUTCOMES = {
+  completed: { status: "ready", label: "اكتمل" },
+  failed: { status: "failed", label: "تعذّر" },
+  cancelled: { status: "inactive", label: "أُلغي" },
+  expired: { status: "stale", label: "انتهت المراقبة" },
+} as const;
 
-async function requestJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {
-  const response = await fetch(input, {
-    ...init,
-    cache: "no-store",
-    headers: {
-      Accept: "application/json",
-      ...(init?.body ? { "Content-Type": "application/json" } : {}),
-      ...init?.headers,
-    },
-  });
-  const body = (await response.json().catch(() => ({}))) as {
-    ok?: boolean;
-    code?: string;
-    message?: string;
-    details?: Record<string, unknown>;
-  };
+interface ApiError extends Error { code?: string }
+async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(url, { ...init, cache: "no-store", headers: {
+    Accept: "application/json", ...(init?.body ? { "Content-Type": "application/json" } : {}), ...init?.headers,
+  } });
+  const body = await response.json();
   if (!response.ok || body.ok === false) {
-    const error = new Error(body.message ?? body.code ?? "AI_AGENT_1_RUNTIME_REQUEST_FAILED") as ApiError;
+    const error = new Error(body.message ?? "تعذّر إكمال العملية.") as ApiError;
     error.code = body.code;
-    error.details = body.details;
     throw error;
   }
   return body as T;
@@ -84,8 +60,9 @@ export function Agent1RuntimeWorkspace() {
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [actionError, setActionError] = React.useState<string | null>(null);
   const [conflict, setConflict] = React.useState(false);
-  const [savingRoute, setSavingRoute] = React.useState(false);
-  const [savingEnabled, setSavingEnabled] = React.useState(false);
+  const [pending, setPending] = React.useState<"route" | "power" | null>(null);
+  const [paused, setPaused] = React.useState<Agent1ActivitySnapshot | null>(null);
+  const { activity, connection, error: activityError } = useAgent1Activity();
 
   const applySnapshot = React.useCallback((next: AIAgent1RuntimeSnapshot) => {
     setSnapshot(next);
@@ -93,638 +70,246 @@ export function Agent1RuntimeWorkspace() {
     setDraftFallbacks(next.config.fallbackModelConfigIds);
     setConflict(false);
   }, []);
-
   const refresh = React.useCallback(async () => {
-    setLoadError(null);
     try {
-      const result = await requestJson<RuntimeResponse>(
-        "/api/admin/local/ai/agent-1/runtime",
-      );
-      applySnapshot(result);
-    } catch (error) {
-      setLoadError(errorMessage(error));
-    } finally {
-      setLoading(false);
-    }
+      applySnapshot(await requestJson<AIAgent1RuntimeSnapshot>("/api/admin/local/ai/agent-1/runtime"));
+      setLoadError(null);
+    } catch (error) { setLoadError(errorMessage(error)); }
+    finally { setLoading(false); }
   }, [applySnapshot]);
+  React.useEffect(() => { void refresh(); }, [refresh]);
 
-  React.useEffect(() => {
-    void refresh();
-  }, [refresh]);
-
-  const routeDirty = Boolean(
-    snapshot &&
-      (draftPrimary !== snapshot.config.primaryModelConfigId ||
-        !sameArray(draftFallbacks, snapshot.config.fallbackModelConfigIds)),
-  );
-  const draftPrimaryModel = snapshot?.models.find((model) => model.id === draftPrimary) ?? null;
-  const primaryFallbackDuplicate = Boolean(draftPrimary && draftFallbacks.includes(draftPrimary));
-  const readyForEnable = Boolean(draftPrimaryModel?.ready) && !primaryFallbackDuplicate;
+  const dirty = Boolean(snapshot && (draftPrimary !== snapshot.config.primaryModelConfigId ||
+    draftFallbacks.join("\0") !== snapshot.config.fallbackModelConfigIds.join("\0")));
+  const primary = snapshot?.models.find(model => model.id === draftPrimary) ?? null;
+  const validRoute = Boolean(primary?.ready && !draftFallbacks.includes(draftPrimary ?? ""));
+  const displayed = paused ?? activity;
+  const tokenPoints = React.useMemo(() => displayed?.stats.usageReports ? displayed.points.map(point => ({
+    ...point, totalTokens: point.inputTokens === null || point.outputTokens === null ? null : point.inputTokens + point.outputTokens,
+  })) : [], [displayed]);
+  const requestPoints = React.useMemo(() => displayed?.points.map(point => ({
+    timestamp: point.timestamp, concurrentRequests: point.concurrentRequests,
+  })) ?? [], [displayed]);
 
   const saveRoute = async () => {
-    if (!snapshot || !routeDirty || primaryFallbackDuplicate) return;
-    setActionError(null);
-    setConflict(false);
-    setSavingRoute(true);
+    if (!snapshot || !dirty || !validRoute || pending) return;
+    setPending("route"); setActionError(null);
     try {
-      const result = await requestJson<RuntimeResponse>(
-        "/api/admin/local/ai/agent-1/runtime",
-        {
-          method: "PUT",
-          body: JSON.stringify({
-            expectedRevision: snapshot.config.revision,
-            primaryModelConfigId: draftPrimary,
-            fallbackModelConfigIds: draftFallbacks,
-          }),
-        },
-      );
-      applySnapshot(result);
+      applySnapshot(await requestJson<AIAgent1RuntimeSnapshot>("/api/admin/local/ai/agent-1/runtime", {
+        method: "PUT", body: JSON.stringify({ expectedRevision: snapshot.config.revision,
+          primaryModelConfigId: draftPrimary, fallbackModelConfigIds: draftFallbacks }),
+      }));
     } catch (error) {
-      if (isConflict(error)) setConflict(true);
+      setConflict((error as ApiError).code === "AI_AGENT_1_RUNTIME_CONFLICT");
       setActionError(errorMessage(error));
-    } finally {
-      setSavingRoute(false);
-    }
+    } finally { setPending(null); }
   };
-
-  const setEnabled = async (enabled: boolean) => {
-    if (!snapshot || routeDirty || (enabled && !readyForEnable)) return;
-    setActionError(null);
-    setConflict(false);
-    setSavingEnabled(true);
+  const togglePower = async (enabled: boolean) => {
+    if (!snapshot || pending || (enabled && (dirty || !validRoute))) return;
+    setPending("power"); setActionError(null);
     try {
-      const result = await requestJson<RuntimeResponse>(
-        "/api/admin/local/ai/agent-1/runtime",
-        {
-          method: "PATCH",
-          body: JSON.stringify({
-            expectedRevision: snapshot.config.revision,
-            enabled,
-          }),
-        },
-      );
-      applySnapshot(result);
+      const result = await requestJson<AIAgent1RuntimeSnapshot>("/api/admin/local/ai/agent-1/runtime", {
+        method: "PATCH", body: JSON.stringify({ expectedRevision: snapshot.config.revision, enabled }),
+      });
+      // Stopping remains available while editing and does not discard the draft.
+      setSnapshot(result); setConflict(false);
     } catch (error) {
-      if (isConflict(error)) setConflict(true);
+      setConflict((error as ApiError).code === "AI_AGENT_1_RUNTIME_CONFLICT");
       setActionError(errorMessage(error));
-    } finally {
-      setSavingEnabled(false);
-    }
+    } finally { setPending(null); }
+  };
+  const selectFallback = (index: number, value: string | null) => {
+    setDraftFallbacks(previous => value === null ? previous.filter((_, i) => i !== index)
+      : index >= previous.length ? [...previous, value] : previous.map((id, i) => i === index ? value : id));
+  };
+  const moveFallback = (index: number, direction: -1 | 1) => {
+    setDraftFallbacks(previous => {
+      const next = [...previous]; const target = index + direction;
+      if (target < 0 || target >= next.length) return previous;
+      [next[index], next[target]] = [next[target], next[index]]; return next;
+    });
   };
 
-  const reloadAfterConflict = async () => {
-    await refresh();
-    setActionError(null);
-  };
+  const header = <PageHeader eyebrow="الذكاء الاصطناعي" title="تشغيل Agent 1"
+    description="مسار النماذج، النشاط المباشر، وأداء الوكيل في مكان واحد."
+    actions={<Button variant="ghost" size="sm" icon={<RotateCcw aria-hidden />} onClick={() => void refresh()}
+      disabled={Boolean(pending) || dirty} title={dirty ? "احفظ التغييرات أو تراجع عنها قبل التحديث." : undefined}>تحديث الإعداد</Button>} />;
+  if (loading) return <PageShell width="full" className="gap-5">{header}<Panel><div className="grid min-h-72 place-items-center"><Spinner label="جارٍ تحميل لوحة التشغيل" size="lg" /></div></Panel></PageShell>;
+  if (!snapshot || loadError) return <PageShell width="full" className="gap-5">{header}<ErrorState title="تعذّر تحميل لوحة التشغيل" description={loadError ?? undefined} onRetry={() => void refresh()} /></PageShell>;
 
-  if (loading) {
-    return (
-      <PageShell width="full" padding="default" className="gap-5">
-        <PageHeader
-          eyebrow="الذكاء الاصطناعي"
-          title="Agent 1 — التشغيل"
-          description="تحكم بتشغيل Agent 1 ومسار النماذج الذي يستخدمه للرد على الطلاب."
-        />
-        <Panel>
-          <div className="flex min-h-48 items-center justify-center text-fg-tertiary">
-            <Spinner size="lg" label="جارٍ تحميل إعداد التشغيل" />
-          </div>
-        </Panel>
-      </PageShell>
-    );
-  }
-
-  if (loadError || !snapshot) {
-    return (
-      <PageShell width="full" padding="default" className="gap-5">
-        <PageHeader
-          eyebrow="الذكاء الاصطناعي"
-          title="Agent 1 — التشغيل"
-          description="تحكم بتشغيل Agent 1 ومسار النماذج الذي يستخدمه للرد على الطلاب."
-        />
-        <ErrorState
-          title="تعذّر تحميل إعداد Agent 1"
-          description={loadError ?? "لا تتوفر بيانات إعداد التشغيل."}
-          onRetry={() => void refresh()}
-        />
-      </PageShell>
-    );
-  }
-
-  const enabled = snapshot.config.enabled;
-  const status = !enabled
-    ? "disabled"
-    : snapshot.state === "NEEDS_ATTENTION"
-      ? "notReady"
-      : "ready";
-  const statusLabel = !enabled
-    ? "متوقف"
-    : snapshot.state === "NEEDS_ATTENTION"
-      ? "يحتاج انتباهًا"
-      : "مفعّل — لا توجد طلبات جارية";
-  // Only the unaccounted development test route is connected; no production
-  // Student execution or Agent-1-attributed M11 event source exists yet.
-  // Keep telemetry empty rather than borrowing Tutor measurements.
-  const tokenPoints: LiveTelemetryPoint[] = [];
-  const attemptPoints: LiveTelemetryPoint[] = [];
+  const powerBlocked = pending !== null || (!snapshot.config.enabled && (dirty || !validRoute));
+  const powerReason = pending ? "جارٍ حفظ الإعداد." : dirty ? "احفظ مسار النماذج قبل التفعيل." : "عيّن نموذجًا رئيسيًا جاهزًا أولًا.";
+  const stats = activity?.stats;
+  const detachedModels = activity?.activeModels.filter(model => ![draftPrimary, ...draftFallbacks].includes(model.modelConfigId)) ?? [];
+  const totalTokens = stats?.inputTokens != null && stats.outputTokens != null ? stats.inputTokens + stats.outputTokens : null;
+  const chartStatus = paused ? "paused" : connection;
+  const successRate = stats && stats.completedRequests + stats.failedRequests > 0
+    ? Math.round(stats.completedRequests / (stats.completedRequests + stats.failedRequests) * 100) + "%" : "—";
 
   return (
-    <PageShell width="full" padding="default" className="gap-5">
-      <PageHeader
-        eyebrow="الذكاء الاصطناعي"
-        title="Agent 1 — التشغيل"
-        description="تحكم بتشغيل Agent 1 ومسار النماذج الذي يستخدمه للرد على الطلاب."
-        status={<StatusBadge status={status} label={statusLabel} size="sm" />}
-        icon={
-          <span className="grid size-9 place-items-center rounded-lg bg-accent-subtle text-accent-text">
-            <Bot className="size-5" aria-hidden />
-          </span>
-        }
-      />
+    <PageShell width="full" className="gap-5">
+      {header}
+      {actionError ? <InlineNote tone={conflict ? "warning" : "danger"}><span className="flex flex-wrap items-center justify-between gap-3">
+        <span>{actionError}</span>{conflict ? <Button size="sm" variant="secondary" onClick={() => { void refresh(); setActionError(null); }}>تحميل أحدث إعداد</Button> : null}
+      </span></InlineNote> : null}
 
-      <PowerPanel
-        snapshot={snapshot}
-        status={status}
-        statusLabel={statusLabel}
-        routeDirty={routeDirty}
-        readyForEnable={readyForEnable}
-        pending={savingEnabled}
-        onToggle={() => void setEnabled(!enabled)}
-      />
-
-      {actionError ? (
-        <InlineNote tone={conflict ? "warning" : "danger"}>
-          <span className="flex flex-wrap items-center justify-between gap-3">
-            <span>{actionError}</span>
-            {conflict ? (
-              <Button size="sm" variant="secondary" onClick={() => void reloadAfterConflict()}>
-                تحميل النسخة الأحدث
-              </Button>
-            ) : null}
-          </span>
-        </InlineNote>
-      ) : null}
-
-      <Panel padding="none">
-        <PanelHeader
-          title="ملخص التشغيل"
-          description="حالة الإعداد والمسار الحالي، دون نسب حركة غير مرتبطة بـAgent 1."
-          bordered
-          density="compact"
-        />
-        <dl className="grid gap-x-8 gap-y-4 p-4 sm:grid-cols-2 xl:grid-cols-5">
-          <SummaryItem label="حالة Agent 1">
-            <StatusBadge status={status} label={statusLabel} size="sm" />
-          </SummaryItem>
-          <SummaryItem label="النموذج الرئيسي">
-            {snapshot.primary ? (
-              <span className="min-w-0">
-                <span className="block truncate font-medium text-fg">
-                  {snapshot.primary.displayName}
-                </span>
-                <span className="mt-0.5 block truncate text-2xs text-fg-tertiary">
-                  {snapshot.primary.providerName}
-                </span>
-              </span>
-            ) : (
-              <span className="text-warning-text">غير معيّن</span>
-            )}
-          </SummaryItem>
-          <SummaryItem label="الطلب الجاري">
-            <span className="text-fg-secondary">لا يوجد مسار طالب إنتاجي؛ اختبار الهاتف تطويري فقط</span>
-          </SummaryItem>
-          <SummaryItem label="آخر latency معروف">
-            <span className="font-medium text-fg tnum">—</span>
-          </SummaryItem>
-          <SummaryItem label="استخدام التوكنات">
-            <span className="font-medium text-fg tnum">—</span>
-          </SummaryItem>
-        </dl>
-      </Panel>
-
-      <Panel padding="none">
-        <PanelHeader
-          title="النموذج الرئيسي"
-          description="يُستخدم أولًا. لا يمكن تفعيل Agent 1 ما لم تكن جاهزية المسار المحلي سليمة."
-          bordered
-          density="compact"
-        />
-        <div className="p-4">
-          {!snapshot.models.some((model) => model.capability === "GENERATION") ? (
-            <EmptyState
-              size="sm"
-              align="start"
-              title="لا توجد نماذج توليد متاحة."
-              description="أضف مزوّدًا ونموذج Generation أولًا؛ لن يُفعّل Agent 1 من دون نموذج رئيسي صالح."
-              icon={<Server aria-hidden />}
-              action={
-                <Button variant="outline" asChild>
-                  <Link href="/admin/ai/models">فتح النماذج والمزوّدين</Link>
-                </Button>
-              }
-            />
-          ) : (
-            <ModelAssignmentPanel
-              models={snapshot.models}
-              value={draftPrimary}
-              changed={Boolean(snapshot && draftPrimary !== snapshot.config.primaryModelConfigId)}
-              onValueChange={(nextId) => {
-                setDraftPrimary(nextId);
-                if (nextId) {
-                  setDraftFallbacks((current) => current.filter((id) => id !== nextId));
-                }
-              }}
-            />
-          )}
-        </div>
-      </Panel>
-
-      <Panel padding="none">
-        <PanelHeader
-          title="النماذج الاحتياطية"
-          description="تُجرَّب بالترتيب عند تعذر استخدام المسار السابق. يُحفظ الترتيب مع النموذج الرئيسي دفعة واحدة."
-          bordered
-          density="compact"
-          actions={
-            routeDirty ? (
-              <StatusBadge status="warning" label="مسودة غير محفوظة" size="sm" />
-            ) : null
-          }
-        />
-        <div className="space-y-4 p-4">
-          {draftFallbacks.length > 0 ? (
-            <ReorderableList
-              items={draftFallbacks.map((id) => ({ id }))}
-              onReorder={(items) => setDraftFallbacks(items.map((item) => item.id))}
-              itemLabel="نموذج احتياطي"
-              showPosition
-              emptyState={null}
-              renderItem={(item, index) => {
-                const selectedFallback = snapshot.models.find((model) => model.id === item.id) ?? null;
-                const occupied = new Set([
-                  ...(draftPrimary ? [draftPrimary] : []),
-                  ...draftFallbacks.filter((id) => id !== item.id),
-                ]);
-                return (
-                  <div className="flex min-w-0 flex-wrap items-start gap-2">
-                    <div className="min-w-56 flex-1">
-                      <AgentModelSelector
-                        ariaLabel={`اختيار النموذج الاحتياطي ${index + 1}`}
-                        models={snapshot.models}
-                        value={item.id}
-                        excludedIds={occupied}
-                        onValueChange={(nextId) => {
-                          if (!nextId) return;
-                          setDraftFallbacks((current) =>
-                            current.map((id) => id === item.id ? nextId : id),
-                          );
-                        }}
-                        placeholder={`النموذج الاحتياطي ${index + 1}`}
-                      />
-                      {selectedFallback ? (
-                        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                          <Badge size="sm" variant="inset">
-                            <span className="tnum">
-                              {selectedFallback.contextWindowTokens == null
-                                ? "نافذة غير محددة"
-                                : `${formatContextWindow(selectedFallback.contextWindowTokens)} رمز`}
-                            </span>
-                          </Badge>
-                          <StatusBadge
-                            status={selectedFallback.ready ? "ready" : "notReady"}
-                            label={selectedFallback.readinessLabel}
-                            size="sm"
-                          />
-                          {selectedFallback.readinessReason ? (
-                            <span className="text-2xs text-warning-text">
-                              {selectedFallback.readinessReason}
-                            </span>
-                          ) : null}
-                        </div>
-                      ) : null}
-                    </div>
-                    <IconButton
-                      label={`إزالة النموذج الاحتياطي ${index + 1}`}
-                      size="sm"
-                      variant="dangerGhost"
-                      onClick={() => setDraftFallbacks((current) => current.filter((id) => id !== item.id))}
-                    >
-                      <Trash2 aria-hidden />
-                    </IconButton>
-                  </div>
-                );
-              }}
-            />
-          ) : (
-            <EmptyState
-              size="sm"
-              align="start"
-              title="لا توجد نماذج احتياطية."
-              description="يمكنك إضافة حتى ثلاثة نماذج، وسيُحافظ النظام على ترتيبها عند الحفظ."
-              icon={<Server aria-hidden />}
-            />
-          )}
-
-          {draftFallbacks.length < 3 ? (
-            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
-              <AgentModelSelector
-                ariaLabel="إضافة نموذج احتياطي"
-                models={snapshot.models}
-                value={null}
-                excludedIds={new Set([
-                  ...(draftPrimary ? [draftPrimary] : []),
-                  ...draftFallbacks,
-                ])}
-                onValueChange={(nextId) => {
-                  if (!nextId || draftFallbacks.includes(nextId) || nextId === draftPrimary) return;
-                  setDraftFallbacks((current) => [...current, nextId]);
-                }}
-                disabled={!draftPrimary}
-                placeholder="إضافة نموذج احتياطي"
-              />
-              <span className="text-2xs text-fg-quaternary">
-                {formatNumber(draftFallbacks.length)} من 3
-              </span>
+      <Panel padding="none" className="min-w-0">
+        <PanelHeader title="التشغيل ومسار النماذج" as="h2" bordered description="الرئيسي يبدأ أولًا، والاحتياطية تُجرّب حسب ترتيبها."
+          actions={<div className="flex items-center gap-3">
+            <StatusBadge status={!snapshot.config.enabled ? "disabled" : snapshot.canEnable ? "ready" : "notReady"}
+              label={!snapshot.config.enabled ? "متوقف" : snapshot.canEnable ? "مفعّل" : "يحتاج انتباهًا"} size="sm" />
+            <DisabledReason reason={powerBlocked ? powerReason : null}><Switch checked={snapshot.config.enabled} pending={pending === "power"}
+              disabled={powerBlocked} onCheckedChange={(enabled) => void togglePower(enabled)} aria-label="تشغيل Agent 1" /></DisabledReason>
+          </div>} />
+        {connection === "live" && detachedModels.length ? <div className="flex flex-wrap items-center gap-3 border-b border-border-subtle px-5 py-2 text-xs text-info-text">
+          <span>طلبات من المسار السابق ما زالت جارية:</span>{detachedModels.map(model => <span key={model.modelConfigId}><bdi>{snapshot.models.find(candidate => candidate.id === model.modelConfigId)?.displayName ?? "نموذج سابق"}</bdi> · {model.count}</span>)}
+        </div> : null}
+        <div className="grid lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
+          <div className="relative min-w-0 px-5 py-4 sm:px-8">
+            <div className="mx-auto flex max-w-lg flex-col items-center">
+              <ModelSlot primary position={0} model={primary} models={snapshot.models} selectedId={draftPrimary}
+                excludedIds={new Set(draftFallbacks)} disabled={Boolean(pending)} onSelect={setDraftPrimary}
+                running={connection === "live" ? activity?.activeModels.find(model => model.modelConfigId === draftPrimary) : undefined} />
+              <div aria-hidden className="relative my-3 h-7 w-2/3 rounded-t-xl border-x border-t border-border-strong">
+                <span className="absolute -top-3 start-1/2 h-3 border-s border-border-strong" />
+                <span className="absolute start-1/2 top-0 h-7 border-s border-border-strong" />
+              </div>
+              <div className="grid w-full grid-cols-3 gap-3 sm:gap-5">
+                {[0, 1, 2].map(index => {
+                  const id = draftFallbacks[index] ?? null;
+                  const model = snapshot.models.find(candidate => candidate.id === id) ?? null;
+                  return <div key={index} className="flex min-w-0 flex-col items-center gap-2">
+                    <ModelSlot position={index + 1} model={model} models={snapshot.models} selectedId={id}
+                      excludedIds={new Set([draftPrimary ?? "", ...draftFallbacks.filter((_, i) => i !== index)])}
+                      disabled={Boolean(pending) || index > draftFallbacks.length} onSelect={value => selectFallback(index, value)}
+                      running={connection === "live" ? activity?.activeModels.find(model => model.modelConfigId === id) : undefined} />
+                    {id ? <div className="flex items-center justify-center gap-1">
+                      <IconButton label={"تقديم الاحتياطي " + (index + 1)} size="xs" variant="ghost" disabled={index === 0 || Boolean(pending)} onClick={() => moveFallback(index, -1)}><ArrowRight aria-hidden /></IconButton>
+                      <IconButton label={"تأخير الاحتياطي " + (index + 1)} size="xs" variant="ghost" disabled={index === draftFallbacks.length - 1 || Boolean(pending)} onClick={() => moveFallback(index, 1)}><ArrowLeft aria-hidden /></IconButton>
+                      <IconButton label={"إزالة الاحتياطي " + (index + 1)} size="xs" variant="ghost" disabled={Boolean(pending)} onClick={() => selectFallback(index, null)}><Trash2 aria-hidden /></IconButton>
+                    </div> : null}
+                  </div>;
+                })}
+              </div>
             </div>
-          ) : (
-            <p className="text-xs text-fg-tertiary">وصلت إلى الحد الأقصى: ثلاثة نماذج احتياطية.</p>
-          )}
-
-          {!draftPrimary ? (
-            <InlineNote tone="warning">
-              اختر النموذج الرئيسي قبل إضافة نماذج احتياطية.
-            </InlineNote>
-          ) : null}
-          {primaryFallbackDuplicate ? (
-            <InlineNote tone="danger">
-              لا يمكن تكرار النموذج الرئيسي داخل سلسلة النماذج الاحتياطية.
-            </InlineNote>
-          ) : null}
-
-          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border-subtle pt-4">
-            {routeDirty ? (
-              <Button
-                variant="ghost"
-                disabled={savingRoute}
-                icon={<RotateCcw aria-hidden />}
-                onClick={() => {
-                  setDraftPrimary(snapshot.config.primaryModelConfigId);
-                  setDraftFallbacks(snapshot.config.fallbackModelConfigIds);
-                  setActionError(null);
-                  setConflict(false);
-                }}
-              >
-                تراجع عن المسودة
-              </Button>
-            ) : null}
-            <Button
-              variant={routeDirty && !primaryFallbackDuplicate ? "primary" : "outline"}
-              disabled={!routeDirty || savingRoute || primaryFallbackDuplicate}
-              loading={savingRoute}
-              icon={<Save aria-hidden />}
-              onClick={() => void saveRoute()}
-            >
-              حفظ مسار التشغيل
-            </Button>
+          </div>
+          <div className="flex min-w-0 flex-col justify-center gap-6 border-t border-border-subtle p-6 lg:border-s lg:border-t-0 lg:p-8">
+            <div><p className="eyebrow mb-2">النموذج الرئيسي</p>
+              <h3 className="break-words text-lg font-medium text-fg"><bdi>{primary?.displayName ?? "اختر النموذج الذي سيبدأ المحادثات"}</bdi></h3>
+              <p className="mt-1 text-xs text-fg-tertiary">{primary?.providerName ?? "اضغط الدائرة الكبيرة لتعيين نموذج."}</p></div>
+            {primary ? <dl className="grid grid-cols-2 gap-4 text-xs">
+              <div><dt className="text-fg-tertiary">نافذة السياق</dt><dd className="mt-1 font-medium tnum">{primary.contextWindowTokens === null ? "—" : formatContextWindow(primary.contextWindowTokens)}</dd></div>
+              <div><dt className="text-fg-tertiary">الاحتياطية المعينة</dt><dd dir="ltr" className="ltr-island mt-1 text-end font-medium tnum">{draftFallbacks.length} / 3</dd></div>
+            </dl> : null}
+            <div className="space-y-2 text-xs leading-relaxed text-fg-secondary">
+              <p>اضغط أي دائرة متاحة لاختيار النموذج. ترتيب الاحتياطية من 1 إلى 3؛ يمكن تقديمها أو تأخيرها.</p>
+              <p>تظهر حلقة النشاط حول النموذج الذي يستقبل الطلب حاليًا، بما في ذلك الانتقال إلى احتياطي.</p>
+            </div>
+            {primary && !primary.ready ? <InlineNote tone="warning">{primary.readinessReason ?? "النموذج الرئيسي غير جاهز للتشغيل."}</InlineNote> : null}
+            <Link href="/admin/ai/models" className="text-xs text-accent-text hover:underline">إدارة النماذج والمزوّدين ←</Link>
           </div>
         </div>
-      </Panel>
-
-      <Panel padding="none">
-        <PanelHeader
-          title="مسار التوجيه"
-          description="معاينة مرتبة للمسار الحالي؛ لا يظهر أي نموذج كأنه يعمل ما لم يصل حدث تشغيل حقيقي."
-          bordered
-          density="compact"
-        />
-        <div className="p-4">
-          <PipelineFlow stages={pipelineStages(snapshot, draftPrimary, draftFallbacks)} />
-          <p className="mt-3 text-2xs leading-relaxed text-fg-quaternary">
-            {routeDirty
-              ? "المسار أعلاه يعرض المسودة الحالية؛ لن يتغير إعداد الخادم حتى تحفظها."
-              : "المسار أعلاه هو الإعداد المحفوظ؛ لم تُرسل أي طلبات إلى المزوّدين."}
-          </p>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border-subtle px-5 py-3">
+          <p className="max-w-3xl text-2xs leading-relaxed text-fg-tertiary">يُستخدم الاحتياطي عند فشل قابل لإعادة المحاولة، قبل وصول أي محتوى أو استخدام مُبلّغ. إيقاف الوكيل يمنع الطلبات الجديدة؛ لا يقطع ردًا جاريًا.</p>
+          {dirty ? <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" disabled={Boolean(pending)} onClick={() => applySnapshot(snapshot)}>تراجع</Button>
+            <DisabledReason reason={!validRoute ? "عيّن نموذجًا رئيسيًا جاهزًا لحفظ المسار." : null}><Button size="sm" icon={<Save aria-hidden />}
+              loading={pending === "route"} disabled={!validRoute || Boolean(pending)} onClick={() => void saveRoute()}>حفظ المسار</Button></DisabledReason>
+          </div> : <span className="flex items-center gap-1.5 text-2xs text-fg-tertiary"><Check className="size-3" aria-hidden />المسار محفوظ</span>}
         </div>
       </Panel>
 
-      <div className="grid min-w-0 gap-5 2xl:grid-cols-2">
-        <LiveTelemetryChart
-          title="استهلاك التوكنات المباشر"
-          description="قياسات الإدخال والإخراج والاستدلال التي يرسلها مسار Agent 1 فقط."
-          data={tokenPoints}
-          series={TOKEN_SERIES}
-          status="paused"
-          showTimeWindow
-          footnote="وتيرة التحديث تعتمد على تقارير الاستخدام التي يرسلها المزوّد. لن تُنسب قياسات Tutor إلى Agent 1."
-          emptyState={
-            <EmptyState
-              size="sm"
-              title="لا توجد قياسات استخدام من Agent 1 بعد."
-              description="ستبقى النافذة فارغة حتى يتصل مسار تنفيذ Agent 1 ويصل تقرير استخدام حقيقي."
-              icon={<Zap aria-hidden />}
-            />
-          }
-        />
-        <LiveMetricChart
-          title="محاولات التشغيل"
-          description="عدد محاولات Agent 1 الفعلية ضمن النافذة المحددة."
-          data={attemptPoints}
-          series={{ key: "attempts", label: "المحاولات", role: "neutral", unit: "محاولة" }}
-          status="paused"
-          showTimeWindow
-          footnote="لا تُعرض أصفار زمنية أو عينات افتراضية؛ يظهر الرسم بعد وصول أحداث Agent 1 الفعلية."
-          emptyState={
-            <EmptyState
-              size="sm"
-              title="لا توجد محاولات مسجلة بعد."
-              description="لا يوجد حاليًا مسار طالب متصل بهذا الإعداد، لذلك لا توجد أحداث تشغيل قابلة للنسب إلى Agent 1."
-              icon={<ShieldAlert aria-hidden />}
-            />
-          }
-        />
-      </div>
+      <section aria-labelledby="agent1-monitoring" className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div><h2 id="agent1-monitoring" className="text-lg font-medium">المراقبة المباشرة</h2><p className="mt-1 text-xs text-fg-tertiary">نشاط شات الآيفون في جلسة الخادم الحالية، بتحديث كل ثانية.</p></div>
+          <div className="flex items-center gap-3"><LivePulseIndicator status={connection} label={connection === "live" ? "التحديث متصل" : "جارٍ الاتصال"} />
+            <Button variant="ghost" size="sm" disabled={!activity} icon={paused ? <Play aria-hidden /> : <Pause aria-hidden />}
+              onClick={() => setPaused(previous => previous ? null : activity)}>{paused ? "استئناف الرسم" : "إيقاف الرسم مؤقتًا"}</Button></div>
+        </div>
+        {activityError ? <InlineNote tone="warning">{activityError}</InlineNote> : null}
+        <MetricRow columns={5}>
+          <CompactMetric variant="bare" label="الطلبات الجارية" value={connection === "live" && stats ? formatNumber(stats.activeRequests) : "—"} />
+          <CompactMetric variant="bare" label="الردود المكتملة" value={stats ? formatNumber(stats.completedRequests) : "—"} />
+          <CompactMetric variant="bare" label="نجاح الطلبات" value={successRate}
+            context={stats ? formatNumber(stats.failedRequests) + " تعذّر · " + formatNumber(stats.cancelledRequests) + " أُلغي" : undefined} />
+          <CompactMetric variant="bare" label="متوسط مدة الرد" value={stats?.averageLatencyMs == null ? "—" : (stats.averageLatencyMs / 1_000).toFixed(1)} unit="ث" />
+          <CompactMetric variant="bare" label="التوكنات المُبلّغة" value={totalTokens === null ? "—" : formatNumber(totalTokens)}
+            context={stats?.reasoningTokens != null ? formatNumber(stats.reasoningTokens) + " استدلال ضمن الإخراج" : undefined} />
+        </MetricRow>
+        <div className="grid min-w-0 gap-4 xl:grid-cols-2">
+          <LiveTelemetryChart title="تدفّق التوكنات" description="التقارير التي وصلت من المزوّد في كل 5 ثوانٍ."
+            data={tokenPoints} series={TOKEN_SERIES} status={chartStatus} valueUnit="رمز / 5 ث" startAtZero formatTimestamp={formatLiveTime} allowDecimals={false}
+            loading={!activity && !activityError} error={!activity && activityError ? { message: activityError } : null}
+            emptyState={<EmptyState size="sm" title="في انتظار أول تقرير استخدام" description="سيبدأ الرسم عند إرسال المزوّد أرقام التوكنات، أثناء الرد أو عند اكتماله." />}
+            footnote="لا تُقدّر التوكنات من النص. الاستدلال جزء من الإخراج، ولا يُضاف إلى الإجمالي مرة ثانية." />
+          <LiveMetricChart title="نشاط الطلبات" description="أعلى عدد من الطلبات المتزامنة خلال كل 5 ثوانٍ."
+            data={requestPoints} series={CONCURRENT_SERIES} status={chartStatus} formatTimestamp={formatLiveTime} allowDecimals={false}
+            loading={!activity && !activityError} error={!activity && activityError ? { message: activityError } : null}
+            footnote="صفر يعني عدم وجود طلبات جارية في الفترة المرصودة. القياس لا يحتوي معرفات الطلاب أو نصوص المحادثات." />
+        </div>
+      </section>
+
+      <Panel padding="none">
+        <PanelHeader title="آخر عمليات التشغيل" as="h2" description="أحدث 12 طلبًا في جلسة الخادم، دون محتوى المحادثات." bordered
+          actions={stats?.fallbackAttempts ? <span className="text-xs text-fg-tertiary">{formatNumber(stats.fallbackAttempts)} محاولة احتياطية</span> : undefined} />
+        {!activity?.recent.length ? <div className="px-5 py-8 text-center text-xs text-fg-tertiary">لا توجد عمليات مكتملة بعد. أرسل رسالة من شات الآيفون لمراقبة أول طلب.</div>
+          : <ul className="divide-y divide-border-subtle">{activity.recent.map((item, index) => {
+            const model = snapshot.models.find(model => model.id === item.modelConfigId);
+            const state = OUTCOMES[item.outcome];
+            return <li key={String(item.endedAt) + "-" + index} className="flex flex-wrap items-center gap-3 px-5 py-3">
+              {model ? <ModelBrandIcon providerModelId={model.providerModelId} displayName={model.displayName} /> : <Bot className="size-5 text-fg-tertiary" aria-hidden />}
+              <span className="min-w-0 flex-1 truncate text-sm text-fg"><bdi>{model?.displayName ?? "طلب دون نموذج متاح"}</bdi></span>
+              <span className="text-2xs text-fg-tertiary tnum">{formatTime(item.endedAt)}</span>
+              <span className="text-xs text-fg-secondary tnum">{(item.latencyMs / 1_000).toFixed(1)} ث</span>
+              <span className="text-xs text-fg-secondary tnum">{item.outputTokens === null ? "استخدام غير مُبلّغ" : formatNumber(item.outputTokens) + " إخراج"}</span>
+              <StatusBadge status={state.status} label={state.label} size="sm" />
+            </li>;
+          })}</ul>}
+      </Panel>
+      <p className="text-2xs leading-relaxed text-fg-tertiary">المصدر: مسار شات التطوير الحالي. تُصفّر القياسات عند إعادة تشغيل الخادم، ويُحتفظ بآخر ساعة في الذاكرة فقط.
+        {stats?.missingUsageRequests ? " " + formatNumber(stats.missingUsageRequests) + " طلب لم يرسل تقرير استخدام." : ""}</p>
     </PageShell>
   );
 }
 
-function PowerPanel({
-  snapshot,
-  status,
-  statusLabel,
-  routeDirty,
-  readyForEnable,
-  pending,
-  onToggle,
-}: {
-  snapshot: AIAgent1RuntimeSnapshot;
-  status: "disabled" | "notReady" | "ready";
-  statusLabel: string;
-  routeDirty: boolean;
-  readyForEnable: boolean;
-  pending: boolean;
-  onToggle: () => void;
+function ModelSlot({ primary = false, position, model, models, selectedId, excludedIds, disabled, onSelect, running }: {
+  primary?: boolean; position: number; model: AIAgent1RuntimeModel | null; models: AIAgent1RuntimeModel[];
+  selectedId: string | null; excludedIds: ReadonlySet<string>; disabled: boolean;
+  onSelect: (id: string | null) => void; running?: Agent1ActivitySnapshot["activeModels"][number];
 }) {
-  const enabled = snapshot.config.enabled;
-  const buttonDisabled = pending || routeDirty || (!enabled && !readyForEnable);
-  const disabledReason = routeDirty
-    ? "احفظ أو تراجع عن مسودة المسار قبل تغيير حالة التشغيل."
-    : !snapshot.primary
-      ? "اختر نموذج Generation رئيسيًا أولًا."
-      : snapshot.primary.readinessReason;
-  const statusNote = routeDirty
-    ? disabledReason
-    : !enabled && !readyForEnable
-      ? disabledReason ?? "المسار غير جاهز للتفعيل."
-      : "التشغيل والإيقاف يُحفظان في إعداد الخادم بإصدار متفائل؛ لا يرسلان طلبات إلى أي مزوّد.";
-
-  return (
-    <Panel padding="none" className="border-border">
-      <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
-        <div className="flex min-w-0 items-start gap-3">
-          <span
-            className={cn(
-              "mt-0.5 grid size-10 shrink-0 place-items-center rounded-lg",
-              enabled ? "bg-success-subtle text-success-text" : "bg-inset text-fg-tertiary",
-            )}
-          >
-            {enabled ? <Check className="size-5" aria-hidden /> : <Zap className="size-5" aria-hidden />}
-          </span>
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-md font-semibold text-fg">تشغيل Agent 1</h2>
-              <StatusBadge status={status} label={statusLabel} size="sm" />
-            </div>
-            <p className="mt-1 max-w-prose text-xs leading-relaxed text-fg-secondary">
-              {enabled
-                ? "حالة التفعيل محفوظة. واجهة الطالب لم تُربط بمسار Agent 1 في هذه المرحلة."
-                : "الإعداد متوقف. يمكنك ضبط السلسلة ثم تفعيلها عندما يكون النموذج الرئيسي جاهزًا."}
-            </p>
-          </div>
-        </div>
-        <Button
-          variant={enabled
-            ? "secondary"
-            : readyForEnable && !routeDirty
-              ? "primary"
-              : "outline"}
-          size="lg"
-          disabled={buttonDisabled}
-          loading={pending}
-          icon={enabled ? <Power aria-hidden /> : <Zap aria-hidden />}
-          onClick={onToggle}
-          className="shrink-0"
-        >
-          {enabled ? "إيقاف Agent 1" : "تشغيل Agent 1"}
-        </Button>
-      </div>
-      <div className="border-t border-border-subtle px-4 py-3 sm:px-5">
-        <p className={cn("text-xs", buttonDisabled && !enabled ? "text-warning-text" : "text-fg-tertiary")}>
-          {statusNote}
-        </p>
-      </div>
-    </Panel>
-  );
+  const label = primary ? "النموذج الرئيسي" : "الاحتياطي " + position;
+  return <div className="flex w-full min-w-0 flex-col items-center gap-2 text-center">
+    <span className="text-xs text-fg-secondary">{label}{primary ? <span className="ms-1 text-2xs text-fg-tertiary">· مطلوب</span> : null}</span>
+    <AgentModelSelector models={models} value={selectedId} onValueChange={onSelect} excludedIds={excludedIds} clearable={!primary && model !== null}
+      clearLabel="إزالة هذا الاحتياطي" disabled={disabled} ariaLabel={"اختيار " + label}
+      renderModelIcon={model => <ModelBrandIcon providerModelId={model.providerModelId} displayName={model.displayName} />}
+      trigger={<button type="button" aria-label={"اختيار " + label} disabled={disabled}
+        title={disabled ? "عيّن الاحتياطي السابق أولًا، أو انتظر اكتمال الحفظ." : model ? model.displayName + (model.ready ? "" : " · " + model.readinessReason) : "اختيار " + label}
+        className={cn("relative grid shrink-0 place-items-center rounded-full border bg-bg transition-colors duration-[var(--dur-base)] focus-ring disabled:cursor-not-allowed disabled:opacity-45",
+          primary ? "size-24 sm:size-28" : "size-16 sm:size-20",
+          model ? primary ? "border-accent-border bg-accent-subtle" : "border-border-strong hover:border-accent" : "border-dashed border-border-strong hover:border-accent hover:bg-hover",
+          running && "border-info-border ring-2 ring-info-border")}>
+        {running ? <span aria-hidden className="pointer-events-none absolute -inset-2 rounded-full border border-info-border motion-safe:animate-pulse" /> : null}
+        {model ? <ModelBrandIcon providerModelId={model.providerModelId} displayName={model.displayName} markSize={primary ? 48 : 30} className="size-full border-0 bg-transparent" />
+          : <Plus className={primary ? "size-7 text-fg-tertiary" : "size-5 text-fg-tertiary"} aria-hidden />}
+        {model && !model.ready ? <span className="absolute bottom-0 end-0 grid size-5 place-items-center rounded-full border border-warning-border bg-surface text-warning-text"><AlertTriangle className="size-3" aria-hidden /></span> : null}
+      </button>} />
+    {!primary ? <Tooltip content={model ? model.displayName + " · " + model.providerName : undefined}>
+      <span dir="auto" className="max-w-full truncate px-1 text-xs font-medium text-fg">{model?.displayName ?? "اختيار نموذج"}</span>
+    </Tooltip> : null}
+    <span className="min-h-4 text-2xs text-info-text">{running ? PHASE_LABELS[running.phase] + " · " + running.count : ""}</span>
+  </div>;
 }
 
-function SummaryItem({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="min-w-0">
-      <dt className="text-2xs text-fg-tertiary">{label}</dt>
-      <dd className="mt-1 min-w-0 text-xs">{children}</dd>
-    </div>
-  );
-}
-
-function pipelineStages(
-  snapshot: AIAgent1RuntimeSnapshot,
-  primaryId: string | null,
-  fallbackIds: string[],
-): PipelineStage[] {
-  const primary = snapshot.models.find((model) => model.id === primaryId) ?? null;
-  const stages: PipelineStage[] = [
-    {
-      key: "agent-1",
-      label: "Agent 1",
-      state: !snapshot.config.enabled || primary?.ready ? "skipped" : "warning",
-      statusLabel: !snapshot.config.enabled
-        ? "متوقف"
-        : primary?.ready
-          ? "مفعّل · بانتظار مسار الطالب"
-          : "يحتاج انتباهًا",
-      note: !snapshot.config.enabled
-        ? "متوقف"
-        : snapshot.execution.connected
-          ? undefined
-          : "الإعداد مفعّل؛ مسار الطالب غير متصل.",
-    },
-  ];
-
-  if (!primary) {
-    stages.push({
-      key: "primary-missing",
-      label: "النموذج الرئيسي",
-      state: "warning",
-      statusLabel: "غير معيّن",
-      note: "لم يُعيّن نموذج Generation بعد.",
-    });
-    return stages;
-  }
-
-  stages.push(modelStage("primary", primary, snapshot.config.enabled));
-  fallbackIds.forEach((id, index) => {
-    const model = snapshot.models.find((candidate) => candidate.id === id);
-    if (model) stages.push(modelStage(`fallback-${index + 1}`, model, false, index + 1));
-  });
-  return stages;
-}
-
-function modelStage(
-  key: string,
-  model: AIAgent1RuntimeSnapshot["models"][number],
-  primary: boolean,
-  fallbackPosition?: number,
-): PipelineStage {
-  const ready = model.ready;
-  return {
-    key,
-    label: primary
-      ? `الرئيسي · ${model.displayName}`
-      : `احتياطي ${fallbackPosition} · ${model.displayName}`,
-    state: ready ? (primary ? "ok" : "skipped") : "warning",
-    statusLabel: !ready
-      ? "غير جاهز"
-      : primary
-        ? "جاهز محليًا"
-        : "احتياطي · لم يُجرَّب",
-    detail: [
-      { label: "المزوّد", value: model.providerName },
-      {
-        label: "نافذة السياق",
-        value: model.contextWindowTokens == null
-          ? "غير محددة"
-          : `${formatContextWindow(model.contextWindowTokens)} رمز`,
-      },
-      { label: "الجاهزية", value: model.readinessLabel },
-    ],
-    note: primary
-      ? ready
-        ? "جاهز محليًا؛ لم يُفحص الاتصال الخارجي عند تحميل الإعداد."
-        : model.readinessReason ?? undefined
-      : "لم تتم محاولة أي طلب احتياطي حتى الآن.",
+function errorMessage(error: unknown) {
+  const messages: Record<string, string> = {
+    AI_AGENT_1_RUNTIME_CONFLICT: "تغيّر الإعداد من جلسة أخرى. حمّل أحدث نسخة قبل متابعة التعديل.",
+    AI_AGENT_1_RUNTIME_PRIMARY_REQUIRED: "اختر نموذجًا رئيسيًا قبل تشغيل الوكيل.",
+    AI_AGENT_1_RUNTIME_MODEL_NOT_READY: "أحد النماذج غير جاهز. راجع تفعيله وإعداد المزوّد.",
+    AI_AGENT_1_RUNTIME_MODEL_NOT_FOUND: "أحد النماذج لم يعد متاحًا. حدّث الإعداد واختر بديلًا.",
+    AI_AGENT_1_RUNTIME_INVALID: "راجع اختيار النماذج وترتيبها؛ لا يمكن تكرار النموذج داخل المسار.",
+    AI_AGENT_1_RUNTIME_CORRUPT: "تعذّر قراءة الإعداد المحفوظ. راجع إعدادات الخادم.",
   };
-}
-
-function sameArray(left: readonly string[], right: readonly string[]): boolean {
-  return left.length === right.length && left.every((value, index) => value === right[index]);
-}
-
-function isConflict(error: unknown): boolean {
-  return Boolean(error && typeof error === "object" && "code" in error &&
-    (error as ApiError).code === "AI_AGENT_1_RUNTIME_CONFLICT");
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error
-    ? error.message
-    : "تعذّر إكمال العملية. حدّث الصفحة وحاول مجددًا.";
+  const code = error && typeof error === "object" && "code" in error ? String(error.code) : "";
+  return messages[code] ?? "تعذّر الاتصال أو إكمال العملية. حدّث الصفحة وحاول مجددًا.";
 }

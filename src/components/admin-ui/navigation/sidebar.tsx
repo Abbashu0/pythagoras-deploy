@@ -33,6 +33,7 @@ import {
 import {
   flattenNav,
   isNavItemActive,
+  resolveNavTrail,
   type NavBadge,
   type NavItem,
   type NavSection,
@@ -59,6 +60,7 @@ interface SidebarContextValue {
   pinned: string[];
   togglePin: (key: string) => void;
   pathname: string;
+  currentItemKey: string | null;
 }
 
 const SidebarContext = React.createContext<SidebarContextValue>({
@@ -66,7 +68,11 @@ const SidebarContext = React.createContext<SidebarContextValue>({
   pinned: [],
   togglePin: () => {},
   pathname: "",
+  currentItemKey: null,
 });
+
+const NAV_GROUP_HEADER_CLASS =
+  "flex w-full items-center gap-1 rounded-[5px] px-2 py-1 text-start transition-colors hover:bg-hover";
 
 export interface SidebarProps {
   sections: NavSection[];
@@ -125,8 +131,14 @@ export function Sidebar({
   );
 
   const ctx = React.useMemo(
-    () => ({ collapsed, pinned, togglePin: pinnable ? togglePin : () => {}, pathname }),
-    [collapsed, pinned, togglePin, pathname, pinnable],
+    () => ({
+      collapsed,
+      pinned,
+      togglePin: pinnable ? togglePin : () => {},
+      pathname,
+      currentItemKey: resolveNavTrail(sections, pathname)?.trail.at(-1)?.key ?? null,
+    }),
+    [collapsed, pinned, togglePin, pathname, pinnable, sections],
   );
 
   return (
@@ -224,6 +236,24 @@ export function Sidebar({
    Section
    ------------------------------------------------------------------------ */
 
+function useNavDisclosure(
+  storageKey: string,
+  defaultOpen: boolean,
+  containsActive: boolean,
+  pathname: string,
+) {
+  const [open, setOpen] = usePersistentState(storageKey, defaultOpen);
+  const [collapsedAtPath, setCollapsedAtPath] = React.useState<string | null>(null);
+  // Reveal a newly visited route, while allowing its ancestors to be folded
+  // explicitly without changing the current page.
+  const expanded = open || (containsActive && collapsedAtPath !== pathname);
+  const toggle = () => {
+    setOpen(!expanded);
+    setCollapsedAtPath(expanded ? pathname : null);
+  };
+  return [expanded, toggle] as const;
+}
+
 function SectionBlock({
   section,
   isFirst,
@@ -233,11 +263,14 @@ function SectionBlock({
 }) {
   const { collapsed, pathname } = React.useContext(SidebarContext);
   const containsActive = section.items.some((i) => isNavItemActive(i, pathname));
-  const [open, setOpen] = usePersistentState(
+  const [sectionExpanded, toggleSection] = useNavDisclosure(
     `pyth-nav-section:${section.key}`,
     !(section.defaultCollapsed ?? false),
+    containsActive,
+    pathname,
   );
-  const expanded = section.collapsible ? open || containsActive : true;
+  const expanded = collapsed || !section.collapsible || sectionExpanded;
+  const childrenId = React.useId();
 
   const visible = section.items.filter((i) => !i.hidden);
   if (visible.length === 0) return null;
@@ -248,10 +281,13 @@ function SectionBlock({
         section.collapsible ? (
           <button
             type="button"
-            onClick={() => setOpen((v) => !v)}
+            id={`${childrenId}-trigger`}
+            onClick={toggleSection}
+            aria-expanded={expanded}
+            aria-controls={childrenId}
             className={cn(
-              "group/sec flex w-full items-center gap-1 rounded-[5px] px-2 py-1 text-start",
-              "transition-colors hover:bg-hover",
+              "group/sec",
+              NAV_GROUP_HEADER_CLASS,
               collapsed && "sr-only",
             )}
           >
@@ -272,14 +308,25 @@ function SectionBlock({
       <AnimatePresence initial={false}>
         {expanded ? (
           <motion.ul
+            id={childrenId}
+            aria-labelledby={section.collapsible && section.label ? `${childrenId}-trigger` : undefined}
             initial={section.collapsible ? { height: 0, opacity: 0 } : false}
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={transition.base}
-            className="space-y-px overflow-hidden"
+            className={cn(
+              "space-y-px overflow-hidden",
+              section.collapsible && section.label && !collapsed && "ms-3 border-s border-border ps-2",
+            )}
           >
             {visible.map((item) => (
-              <li key={item.key}>
+              <li key={item.key} className="relative">
+                {section.collapsible && section.label && !collapsed ? (
+                  <span aria-hidden className={cn(
+                    "absolute start-[-0.5rem] h-px w-2 bg-border",
+                    item.children?.length ? "top-3" : "top-4",
+                  )} />
+                ) : null}
                 <NavRow item={item} depth={0} />
               </li>
             ))}
@@ -315,37 +362,41 @@ function SectionLabel({
    ------------------------------------------------------------------------ */
 
 function NavRow({ item, depth }: { item: NavItem; depth: number }) {
-  const { collapsed, pinned, togglePin, pathname } =
+  const { collapsed, pinned, togglePin, pathname, currentItemKey } =
     React.useContext(SidebarContext);
   const active = isNavItemActive(item, pathname);
-  const exactActive = pathname === item.href;
   const hasChildren = (item.children?.length ?? 0) > 0;
-  const [open, setOpen] = usePersistentState(
+  const groupHeader = hasChildren && !collapsed;
+  const selected = !hasChildren && currentItemKey === item.key;
+  const [groupExpanded, toggleGroup] = useNavDisclosure(
     `pyth-nav-group:${item.key}`,
     false,
+    active,
+    pathname,
   );
-  const expanded = hasChildren && (open || active);
+  const expanded = hasChildren && groupExpanded;
+  const childrenId = React.useId();
 
   const Icon = item.icon;
   const isPinned = pinned.includes(item.key);
 
   const body = (
     <>
-      {Icon ? (
+      {!groupHeader && (Icon ? (
         <Icon
           className={cn(
             "size-4 shrink-0 transition-colors",
-            active ? "text-accent-text" : "text-fg-tertiary",
+            selected ? "text-accent-text" : "text-fg-tertiary",
           )}
           aria-hidden
         />
       ) : (
         <span className="size-4 shrink-0" aria-hidden />
-      )}
+      ))}
 
       {!collapsed ? (
         <>
-          <span className="min-w-0 flex-1 truncate">{item.label}</span>
+          <span className={cn("min-w-0 flex-1 truncate", groupHeader && "eyebrow")}>{item.label}</span>
           <BadgeSlot badge={item.badge} disabled={item.disabled} />
           {hasChildren ? (
             <ChevronDown
@@ -371,16 +422,22 @@ function NavRow({ item, depth }: { item: NavItem; depth: number }) {
   );
 
   const rowClass = cn(
-    "group/nav relative flex w-full items-center gap-2.5 rounded-md text-sm font-medium",
-    "transition-colors duration-[var(--dur-fast)]",
+    "group/nav relative",
+    groupHeader
+      ? NAV_GROUP_HEADER_CLASS
+      : "flex w-full items-center gap-2.5 rounded-md text-start text-sm font-medium transition-colors duration-[var(--dur-fast)]",
     "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--ring)]",
-    collapsed ? "h-9 justify-center px-0" : "h-8 px-2",
-    depth > 0 && !collapsed && "ms-[1.375rem] h-[30px]",
+    !groupHeader && (collapsed ? "h-9 justify-center px-0" : "h-8 px-2"),
+    depth > 0 && !collapsed && !hasChildren && "h-[30px]",
     item.disabled
       ? "cursor-not-allowed text-disabled-fg"
-      : active
+      : groupHeader
+        ? undefined
+        : selected
         ? "bg-selected text-fg"
-        : "text-fg-secondary hover:bg-hover hover:text-fg",
+        : active
+          ? "text-fg hover:bg-hover"
+          : "text-fg-secondary hover:bg-hover hover:text-fg",
   );
 
   const rowNode =
@@ -402,15 +459,17 @@ function NavRow({ item, depth }: { item: NavItem; depth: number }) {
         </MenuTrigger>
         <MenuContent side="left" align="start" aria-label={item.label}>
           <MenuLabel>{item.label}</MenuLabel>
-          <CollapsedNavItems items={item.children ?? []} pathname={pathname} />
+          <CollapsedNavItems items={item.children ?? []} />
         </MenuContent>
       </Menu>
     ) : hasChildren ? (
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        id={`${childrenId}-trigger`}
+        onClick={toggleGroup}
         className={rowClass}
         aria-expanded={expanded}
+        aria-controls={childrenId}
       >
         {body}
       </button>
@@ -418,7 +477,7 @@ function NavRow({ item, depth }: { item: NavItem; depth: number }) {
       <Link
         href={item.href}
         className={rowClass}
-        aria-current={exactActive ? "page" : undefined}
+        aria-current={selected ? "page" : undefined}
       >
         {body}
       </Link>
@@ -448,16 +507,15 @@ function NavRow({ item, depth }: { item: NavItem; depth: number }) {
   return (
     <>
       <div className="group/wrap relative">
-        {/* Active trail marker: a 2px bar rather than a filled block, so a long
-            active section does not shout. */}
-        {active && !collapsed ? (
+        {/* Only the current destination receives a marker; ancestors are groups. */}
+        {selected && !collapsed ? (
           <span
             aria-hidden
             className="absolute inset-y-1 start-0 z-10 w-[2px] rounded-full bg-accent"
           />
         ) : null}
         {wrapped}
-        {!collapsed && !item.disabled && item.href !== "#" ? (
+        {!collapsed && !hasChildren && !item.disabled && item.href !== "#" ? (
           <button
             type="button"
             aria-label={isPinned ? `إزالة ${item.label} من المثبّت` : `تثبيت ${item.label}`}
@@ -486,21 +544,22 @@ function NavRow({ item, depth }: { item: NavItem; depth: number }) {
         <AnimatePresence initial={false}>
           {expanded ? (
             <motion.ul
+              id={childrenId}
+              aria-labelledby={`${childrenId}-trigger`}
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: "auto", opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
               transition={transition.base}
-              className="relative space-y-px overflow-hidden"
+              className="relative ms-3 my-0.5 space-y-px overflow-hidden border-s border-border ps-2"
             >
-              {/* Guide rail so nesting is legible without indentation alone. */}
-              <span
-                aria-hidden
-                className="absolute inset-y-1 start-[1.0625rem] w-px bg-separator"
-              />
               {item.children!
                 .filter((c) => !c.hidden)
                 .map((child) => (
-                  <li key={child.key}>
+                  <li key={child.key} className="relative">
+                    <span aria-hidden className={cn(
+                      "absolute start-[-0.5rem] h-px w-2 bg-border",
+                      child.children?.length ? "top-3" : "top-[15px]",
+                    )} />
                     <NavRow item={child} depth={depth + 1} />
                   </li>
                 ))}
@@ -514,12 +573,11 @@ function NavRow({ item, depth }: { item: NavItem; depth: number }) {
 
 function CollapsedNavItems({
   items,
-  pathname,
 }: {
   items: NavItem[];
-  pathname: string;
 }) {
   const router = useRouter();
+  const { currentItemKey } = React.useContext(SidebarContext);
   const visibleItems = items.filter((item) => !item.hidden);
   return (
     <>
@@ -545,7 +603,7 @@ function CollapsedNavItems({
               </MenuSubTrigger>
               <MenuSubContent aria-label={item.label}>
                 <MenuLabel>{item.label}</MenuLabel>
-                <CollapsedNavItems items={item.children} pathname={pathname} />
+                <CollapsedNavItems items={item.children} />
               </MenuSubContent>
             </MenuSub>
           );
@@ -554,8 +612,8 @@ function CollapsedNavItems({
           <MenuItem
             key={item.key}
             icon={Icon ? <Icon aria-hidden /> : undefined}
-            aria-current={pathname === item.href ? "page" : undefined}
-            className={pathname === item.href ? "bg-selected text-fg" : undefined}
+            aria-current={currentItemKey === item.key ? "page" : undefined}
+            className={currentItemKey === item.key ? "bg-selected text-fg" : undefined}
             onSelect={() => router.push(item.href)}
           >
             {item.label}

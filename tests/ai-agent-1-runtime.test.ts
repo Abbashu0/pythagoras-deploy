@@ -7,6 +7,7 @@ import { v7 as uuidv7 } from "uuid";
 import { NextRequest } from "next/server";
 
 import { PATCH, PUT, GET } from "../src/app/api/admin/local/ai/agent-1/runtime/route";
+import { GET as GET_ACTIVITY } from "../src/app/api/admin/local/ai/agent-1/activity/route";
 import { AIAdminDirectService } from "../src/server/ai/admin-direct-service";
 import { AIAgent1RuntimeError } from "../src/server/ai/agent-1-runtime/errors";
 import { AIAgent1RuntimeService } from "../src/server/ai/agent-1-runtime/service";
@@ -384,6 +385,15 @@ test("Agent 1 runtime routes preserve local-admin protections and reject browser
     assert.equal(body.config.revision, 0);
     assert.deepEqual(body.models, []);
     assert.equal(body.execution.connected, false);
+    const activity = await GET_ACTIVITY(new NextRequest(
+      "http://localhost:3000/api/admin/local/ai/agent-1/activity", { headers: localHeaders },
+    ));
+    assert.equal(activity.status, 200);
+    assert.equal((await activity.json()).stats.activeRequests, 0);
+    const untrustedActivity = await GET_ACTIVITY(new NextRequest(
+      "http://localhost:3000/api/admin/local/ai/agent-1/activity", { headers: { Host: "untrusted.example" } },
+    ));
+    assert.equal(untrustedActivity.status, 403);
 
     const suppliedActor = await PUT(new NextRequest(
       "http://localhost:3000/api/admin/local/ai/agent-1/runtime",

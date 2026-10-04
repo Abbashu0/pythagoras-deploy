@@ -18,6 +18,8 @@ import { type AISecretStoreAdapter } from "../secrets";
 import { SQLiteAIProviderConfigRepository } from "../configuration";
 import { SQLiteAIModelConfigRepository } from "../model-registry";
 import { AIAgent1RuntimeService } from "./service";
+import { Agent1ActivityStore, getAgent1ActivityStore } from "./activity-store";
+import type { Agent1ActivityOutcome } from "./activity-contracts";
 
 export type Agent1DevChatErrorCode =
   | "AGENT_1_DISABLED"
@@ -45,6 +47,7 @@ export interface Agent1DevChatServiceOptions {
   runtimeService?: AIAgent1RuntimeService;
   timeoutMs?: number;
   maxOutputTokens?: number;
+  activity?: Agent1ActivityStore;
 }
 
 export interface Agent1DevChatMessage {
@@ -76,6 +79,7 @@ export class Agent1DevChatService {
   private readonly runtime: AIAgent1RuntimeService;
   private readonly outboundPolicy: OutboundTargetPolicy;
   private readonly secrets: AISecretStoreAdapter;
+  private readonly activity: Agent1ActivityStore;
 
   constructor(
     private readonly database: ContentDatabase,
@@ -86,6 +90,7 @@ export class Agent1DevChatService {
     this.runtime = options.runtimeService ?? AIAgent1RuntimeService.forDatabase(database);
     this.outboundPolicy = options.outboundPolicy ?? createProviderOutboundPolicy();
     this.secrets = options.secrets ?? createLocalAISecretStore(database);
+    this.activity = options.activity ?? getAgent1ActivityStore(database);
   }
 
   static forDatabase(
@@ -182,10 +187,11 @@ export class Agent1DevChatService {
       },
     );
 
+    const requestId = uuidv7();
     const execution = gateway.generate(
       { capability: "GENERATION", attempts },
       {
-        requestId: uuidv7(),
+        requestId,
         messages,
         maxOutputTokens,
         stream: true,
@@ -194,6 +200,7 @@ export class Agent1DevChatService {
         signal: options.signal,
         timeoutMs: this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         expectedIdentities,
+        onGenerationAttempt: (attempt) => this.activity.observeAttempt(requestId, attempt),
       },
     );
 
@@ -202,6 +209,8 @@ export class Agent1DevChatService {
     let sawStarted = false;
     let sawCompleted = false;
     let emittedThinking = false;
+    let outcome: Agent1ActivityOutcome = "failed";
+    this.activity.begin(requestId);
     try {
       for await (const event of execution.events) {
         if (options.signal?.aborted) throw new Agent1DevChatError("CANCELLED");
@@ -213,6 +222,7 @@ export class Agent1DevChatService {
           continue;
         }
         if (event.type === "REASONING_DELTA") {
+          this.activity.phase(requestId, "thinking");
           if (!emittedThinking) {
             emittedThinking = true;
             yield { type: "phase", phase: "thinking" };
@@ -220,6 +230,7 @@ export class Agent1DevChatService {
           continue;
         }
         if (event.type === "TEXT_DELTA") {
+          this.activity.phase(requestId, "responding");
           responseBytes += Buffer.byteLength(event.text, "utf8");
           if (responseBytes > MAX_RESPONSE_BYTES) {
             throw new Agent1DevChatError("RESPONSE_TOO_LARGE");
@@ -229,7 +240,12 @@ export class Agent1DevChatService {
           continue;
         }
         if (event.type === "COMPLETED") {
+          this.activity.usage(requestId, event.usage);
           sawCompleted = true;
+          continue;
+        }
+        if (event.type === "USAGE") {
+          this.activity.usage(requestId, event.usage);
           continue;
         }
         if (event.type === "MEMORY_COMMAND" || event.type === "TOOL_CALL_DELTA") {
@@ -240,14 +256,21 @@ export class Agent1DevChatService {
       if (!sawCompleted || !hasVisibleText) {
         throw new Agent1DevChatError("PROVIDER_FAILED", "EMPTY_RESPONSE");
       }
+      outcome = "completed";
       yield { type: "completed" };
     } catch (error) {
+      if (options.signal?.aborted || (error instanceof Agent1DevChatError && error.code === "CANCELLED")) {
+        outcome = "cancelled";
+      }
       if (error instanceof Agent1DevChatError) throw error;
       if (options.signal?.aborted) throw new Agent1DevChatError("CANCELLED");
       if (isAIProviderGatewayError(error)) {
         throw new Agent1DevChatError("PROVIDER_FAILED", error.code);
       }
       throw new Agent1DevChatError("PROVIDER_FAILED");
+    } finally {
+      if (outcome !== "completed" && options.signal?.aborted) outcome = "cancelled";
+      this.activity.finish(requestId, outcome);
     }
   }
 }

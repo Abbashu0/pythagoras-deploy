@@ -344,6 +344,8 @@ export interface AIProviderGatewayDependencies {
 export interface AIProviderGatewayOperationOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
+  /** Server-only observation; never emitted into the Product response stream. */
+  onGenerationAttempt?: (attempt: Readonly<AIProviderAttemptTrace>) => void;
   /** Exact server-owned Model/Provider identity pinned by the runtime plan. */
   expectedIdentity?: Readonly<AIProviderAttemptIdentity>;
   /** Exact identity for each ordered fallback attempt, keyed by Model Config ID. */

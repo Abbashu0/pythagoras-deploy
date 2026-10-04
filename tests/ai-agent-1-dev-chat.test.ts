@@ -19,6 +19,7 @@ import type {
   OutboundTargetPolicy,
 } from "../src/server/ai/gateway";
 import { AIAgent1RuntimeService } from "../src/server/ai/agent-1-runtime/service";
+import { Agent1ActivityStore } from "../src/server/ai/agent-1-runtime/activity-store";
 import { AI_SECRET_KEY_BYTES, createLocalAISecretStore } from "../src/server/ai/secrets";
 import { SQLiteAdminIdentityRepository } from "../src/server/admin-auth";
 import type { AdminActor } from "../src/server/admin-auth/contracts";
@@ -284,17 +285,24 @@ test("Agent 1 temporary chat follows the saved route and creates no chat, accoun
     const receivedEvents: Agent1DevChatStreamEvent[] = [];
     const textDeltasBeforeCompletion: boolean[] = [];
     let sawCompleted = false;
+    const activity = new Agent1ActivityStore();
     const service = Agent1DevChatService.forDatabase(f.database, {
       runtimeService: f.runtime,
       secrets: f.secrets,
       outboundPolicy,
       transport,
       timeoutMs: 2_000,
+      activity,
     });
     for await (const event of service.stream({
       messages: [{ role: "user", content: "مرحبا" }],
     })) {
-      if (event.type === "text_delta") textDeltasBeforeCompletion.push(!sawCompleted);
+      if (event.type === "text_delta") {
+        textDeltasBeforeCompletion.push(!sawCompleted);
+        assert.equal(activity.snapshot().stats.activeRequests, 1);
+        assert.equal(activity.snapshot().activeModels[0].modelConfigId, fallback.id);
+        assert.equal(activity.snapshot().activeModels[0].phase, "responding");
+      }
       if (event.type === "completed") sawCompleted = true;
       receivedEvents.push(event);
     }
@@ -314,6 +322,23 @@ test("Agent 1 temporary chat follows the saved route and creates no chat, accoun
       const systemMessage = requestBody.messages?.find((message) => message.role === "system");
       assert.equal(systemMessage, undefined);
     }
+    assert.deepEqual(aiTableCounts(f.database), before);
+    const live = activity.snapshot();
+    assert.equal(live.stats.activeRequests, 0);
+    assert.equal(live.stats.completedRequests, 1);
+    assert.equal(live.stats.fallbackAttempts, 1);
+    assert.equal(live.stats.inputTokens, 1);
+    assert.equal(live.stats.outputTokens, 2);
+    assert.equal(live.recent[0].modelConfigId, fallback.id);
+    assert.equal(JSON.stringify(live).includes("PRIVATE REASONING"), false);
+    assert.equal(JSON.stringify(live).includes("مرحبا"), false);
+
+    const controller = new AbortController();
+    for await (const event of service.stream({ messages: [{ role: "user", content: "إلغاء" }] }, { signal: controller.signal })) {
+      if (event.type === "text_delta") { controller.abort(); break; }
+    }
+    assert.equal(activity.snapshot().stats.cancelledRequests, 1);
+    assert.equal(activity.snapshot().stats.activeRequests, 0);
     assert.deepEqual(aiTableCounts(f.database), before);
   } finally {
     f.close();

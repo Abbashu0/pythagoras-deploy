@@ -13,6 +13,7 @@ import {
 import { cn } from "@/lib/cn";
 import { formatCompact, formatTime } from "@/lib/format";
 import { useReducedMotion } from "@/lib/hooks";
+import { chartAnimationMs } from "@/lib/motion";
 import { EmptyState } from "../feedback/empty-state";
 import { SegmentedControl } from "../forms/segmented";
 import { ChartContainer, ChartLegend, gridDefaults, makeChartTooltip, seriesColor, type ChartSeries } from "./chart-primitives";
@@ -93,6 +94,8 @@ export interface LiveTelemetryChartProps {
   footnote?: React.ReactNode;
   valueUnit?: string;
   formatValue?: (value: number) => string;
+  formatTimestamp?: (value: number | string) => string;
+  allowDecimals?: boolean;
   startAtZero?: boolean;
   chartLabel?: string;
   className?: string;
@@ -121,6 +124,8 @@ export function LiveTelemetryChart({
   footnote,
   valueUnit,
   formatValue = formatCompact,
+  formatTimestamp = formatTime,
+  allowDecimals = true,
   startAtZero = false,
   chartLabel,
   className,
@@ -139,7 +144,7 @@ export function LiveTelemetryChart({
   const reducedMotion = useReducedMotion();
   const plotData = visible.map((point) => ({
     ...point,
-    plottedAt: formatTime(point.timestamp),
+    plottedAt: formatTimestamp(point.timestamp),
   }));
   const tooltip = React.useMemo(
     () => makeChartTooltip({
@@ -207,6 +212,7 @@ export function LiveTelemetryChart({
         />
         <YAxis
           width={40}
+          allowDecimals={allowDecimals}
           domain={startAtZero ? [0, "auto"] : ["auto", "auto"]}
           tickLine={false}
           axisLine={false}
@@ -226,6 +232,7 @@ export function LiveTelemetryChart({
             dot={false}
             activeDot={{ r: 3 }}
             isAnimationActive={!reducedMotion}
+            animationDuration={chartAnimationMs}
             connectNulls={false}
           />
         ))}

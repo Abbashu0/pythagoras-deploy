@@ -627,9 +627,14 @@ test("Generation Gateway resolves an opaque credential only in request scope and
       secrets: fixture.secrets,
       adapters: new ProviderAdapterRegistry([adapter]),
     }, { gatewayRequestIdFactory: () => "gateway-request-1" });
+    const observedModels: string[] = [];
     const stream = gateway.generate(
       { capability: "GENERATION", attempts: [modelId] },
       generationRequest(),
+      { onGenerationAttempt: (attempt) => {
+        observedModels.push(attempt.modelConfigId);
+        throw new Error("An operational observer failed");
+      } },
     );
     const events = await collect(stream);
     const trace = await stream.trace;
@@ -642,6 +647,7 @@ test("Generation Gateway resolves an opaque credential only in request scope and
     assert.equal(trace[0].providerRequestId, "provider-request-1");
     assert.equal(JSON.stringify(trace).includes(provider.secret), false);
     assert.equal(JSON.stringify(trace).includes("إجابة"), false);
+    assert.deepEqual(observedModels, [modelId, modelId]);
   } finally {
     fixture.close();
   }

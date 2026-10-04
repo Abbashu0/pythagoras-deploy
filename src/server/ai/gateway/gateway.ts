@@ -287,6 +287,7 @@ export class AIProviderGateway {
             stream: true,
           };
           trace.providerInvoked = true;
+          notifyGenerationAttempt(options.onGenerationAttempt, trace);
           const iterator = prepared.adapter.capability === "GENERATION"
             ? prepared.adapter
                 .generate(providerRequest, {
@@ -400,6 +401,9 @@ export class AIProviderGateway {
             throw lastError;
           }
         } finally {
+          if (trace.providerInvoked && trace.completedAt !== null) {
+            notifyGenerationAttempt(options.onGenerationAttempt, trace);
+          }
           control?.cleanup();
         }
       }
@@ -902,6 +906,17 @@ function validateRerankRequest(request: RerankGatewayRequest): void {
       throw invalidRequestError();
     }
     ids.add(candidate.id);
+  }
+}
+
+function notifyGenerationAttempt(
+  observer: AIProviderGatewayOperationOptions["onGenerationAttempt"],
+  attempt: AIProviderAttemptTrace,
+) {
+  try {
+    observer?.(Object.freeze({ ...attempt }));
+  } catch {
+    // Observation must never interrupt generation, cancellation, or fallback.
   }
 }
 
