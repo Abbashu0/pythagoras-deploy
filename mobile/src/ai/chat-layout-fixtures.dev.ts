@@ -1,25 +1,6 @@
-import type { ChatLayoutTestCase, ChatTurn } from './chat-types';
+import type { ChatTurn } from './chat-types';
 
-export type { ChatLayoutTestCase } from './chat-types';
-
-export interface Agent1DevelopmentRecentFixture {
-  id: string;
-  title: string;
-  timeLabel: string;
-  testCase: ChatLayoutTestCase;
-}
-
-const DEVELOPMENT_RECENTS: readonly Agent1DevelopmentRecentFixture[] = [
-  { id: 'recent-biology', title: 'شرح انقسام الخلية', timeLabel: 'اليوم', testCase: 'biology' },
-  { id: 'recent-math', title: 'أمثلة على التكامل', timeLabel: 'أمس', testCase: 'math' },
-  { id: 'recent-table', title: 'مقارنة مراحل الانقسام', timeLabel: 'معاينة', testCase: 'table' },
-  { id: 'recent-scroll', title: 'اختبار الإجابة الطويلة', timeLabel: 'معاينة', testCase: 'scroll' },
-  { id: 'recent-stream', title: 'اختبار البث أثناء التمرير', timeLabel: 'معاينة', testCase: 'stream' },
-];
-
-export function getAgent1DevelopmentRecents(): readonly Agent1DevelopmentRecentFixture[] {
-  return DEVELOPMENT_RECENTS;
-}
+export type ChatLayoutTestCase = 'short' | 'biology' | 'math' | 'table' | 'scroll' | 'stream';
 
 const SCROLL_PARAGRAPH =
   'يعرض هذا النص الطويل عدة فقرات عربية متتابعة كي نتحقق من أن React Native يقيس الارتفاع الكامل للرد، وأن موضع أزرار النسخ والتفاعل وإعادة الإنشاء يبقى بعد نهاية المحتوى لا في منتصفه. يجب أن تظل الأسطر قابلة للوصول بالتمرير الطبيعي، وأن تبقى المسافة الأخيرة واضحة فوق حقل الكتابة المثبت أسفل الشاشة.';

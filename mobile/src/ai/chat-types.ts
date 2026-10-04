@@ -10,8 +10,6 @@ export type Agent1AssistantTurnStatus =
 
 export type ChatReaction = "like" | "dislike";
 
-export type ChatLayoutTestCase = "short" | "biology" | "math" | "table" | "scroll" | "stream";
-
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
@@ -36,12 +34,9 @@ export type Agent1ChatStreamEvent =
 export interface ChatComposerProps {
   turns: readonly ChatTurn[];
   onSend: (text: string) => string | null;
-  onCancel: () => void;
   onRegenerate: (turnId: string) => void;
-  onNewChat: () => void;
-  onSelectDevelopmentRecent: (testCase: ChatLayoutTestCase) => void;
-  newChatKey: number;
   activeTurnId: string | null;
   submissionError: string | null;
+  transcriptWidth: number;
   layoutDiagnosticsEnabled?: boolean;
 }

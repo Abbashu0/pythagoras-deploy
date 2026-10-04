@@ -110,75 +110,19 @@ index bd73244..e0b1d62 100644
 -@interface TableContainerView () <UIContextMenuInteractionDelegate>
 +@interface TableContainerView () <UIContextMenuInteractionDelegate, UIScrollViewDelegate>
  @end
-@@ -47,5 +48,7 @@
-   CGFloat _totalTableWidth;
-   CGFloat _totalTableHeight;
+@@ -49,1 +50,2 @@
    CGFloat _borderWidth;
 +  BOOL _hasUserScrolledHorizontally;
-+  NSWritingDirection _resolvedTableLayoutDirection;
- 
-   NSString *_cachedMarkdown;
-@@ -64,6 +67,7 @@
-     _enableLinkPreview = YES;
-     _writingDirectionMode = ENRMWritingDirectionModeFirstStrong;
-     _resolvedLayoutDirection = NSWritingDirectionLeftToRight;
-+    _resolvedTableLayoutDirection = NSWritingDirectionLeftToRight;
-     [self setupScrollView];
-   }
-   return self;
-@@ -76,2 +79,5 @@
+@@ -76,2 +78,5 @@
    _scrollView.showsHorizontalScrollIndicator = YES;
 +#if !TARGET_OS_OSX
 +  _scrollView.delegate = self;
 +#endif
  #if !TARGET_OS_OSX
-@@ -141,5 +148,6 @@
-                                      isHeader:(BOOL)isHeader
-                                    cellConfig:(StyleConfig *)cellConfig
-                                     alignment:(NSTextAlignment)alignment
-+                             layoutDirection:(NSWritingDirection)layoutDirection
- {
- 
-@@ -157,6 +165,6 @@
-   [context applyLinkAttributesToString:attributedText];
-
--  ENRMApplyWritingDirectionMode(attributedText, _writingDirectionMode, _resolvedLayoutDirection);
-+  ENRMApplyWritingDirectionMode(attributedText, _writingDirectionMode, layoutDirection);
-
-   if (alignment != NSTextAlignmentLeft && attributedText.length > 0) {
-     NSRange fullRange = NSMakeRange(0, attributedText.length);
-@@ -210,6 +218,13 @@
- - (void)applyTableNode:(MarkdownASTNode *)tableNode
- {
-   [[_gridContainer subviews] makeObjectsPerformSelector:@selector(removeFromSuperview)];
-+  _resolvedTableLayoutDirection = _resolvedLayoutDirection;
-+  if (_writingDirectionMode == ENRMWritingDirectionModeFirstStrong) {
-+    NSWritingDirection sourceDirection = ENRMFirstStrongDirection([self extractPlainTextFromNode:tableNode]);
-+    if (sourceDirection != NSWritingDirectionNatural) {
-+      _resolvedTableLayoutDirection = sourceDirection;
-+    }
-+  }
- 
-   StyleConfig *headerCellConfig = [self cellConfigForHeader:YES];
-   StyleConfig *bodyCellConfig = [self cellConfigForHeader:NO];
-@@ -236,5 +251,6 @@
-         cell.attributedText = [self renderCellNode:cellNode
-                                           isHeader:cell.isHeader
-                                         cellConfig:cellConfig
--                                         alignment:cell.alignment];
-+                                         alignment:cell.alignment
-+                                  layoutDirection:_resolvedTableLayoutDirection];
-         [rowCells addObject:cell];
-@@ -372,13 +388,18 @@
- 
-   NSUInteger bodyRowIndex = 0;
+@@ -374,1 +379,2 @@
    NSMutableArray<ENRMTableIOSRowData *> *rowDataArray = [NSMutableArray arrayWithCapacity:_rows.count];
-+  BOOL isRightToLeft = _resolvedTableLayoutDirection == NSWritingDirectionRightToLeft;
- 
-   for (NSArray<TableCellData *> *rowCells in _rows) {
-     BOOL isHeaderRow = (rowCells.count > 0 && rowCells.firstObject.isHeader);
- 
-     ENRMTableIOSRowData *rowData = [[ENRMTableIOSRowData alloc] init];
++  BOOL isRightToLeft = _resolvedLayoutDirection == NSWritingDirectionRightToLeft;
+@@ -380,3 +386,7 @@
      rowData.backgroundColor = [self backgroundColorForRowIsHeader:isHeaderRow bodyRowIndex:bodyRowIndex];
 -    rowData.cellTexts = [self attributedTextsForRow:rowCells];
 +    NSArray<NSAttributedString *> *sourceCells = [self attributedTextsForRow:rowCells];
@@ -187,8 +131,6 @@ index bd73244..e0b1d62 100644
 +        ? [[sourceCells reverseObjectEnumerator] allObjects]
 +        : sourceCells;
      [rowDataArray addObject:rowData];
- 
-     if (!isHeaderRow) {
 @@ -389,4 +399,7 @@
    ENRMTableIOSGridView *gridView = (ENRMTableIOSGridView *)_gridContainer;
 +  NSArray<NSNumber *> *displayColumnWidths = isRightToLeft
@@ -198,7 +140,7 @@ index bd73244..e0b1d62 100644
 -               columnWidths:_colWidths
 +               columnWidths:displayColumnWidths
                   rowHeights:_rowHeights
-@@ -549,7 +573,16 @@
+@@ -549,2 +562,12 @@
    return _totalTableHeight;
  }
 +#if !TARGET_OS_OSX
@@ -210,17 +152,11 @@ index bd73244..e0b1d62 100644
 +  }
 +}
 +#endif
- 
- - (void)layoutSubviews
- {
-   [super layoutSubviews];
-   _scrollView.frame = self.bounds;
-@@ -556,7 +590,22 @@
- #if !TARGET_OS_OSX
-   _scrollView.contentSize = CGSizeMake(MAX(_totalTableWidth, self.bounds.size.width), _totalTableHeight);
++
+@@ -558,3 +581,18 @@
    _scrollView.scrollEnabled = (_totalTableWidth > self.bounds.size.width);
 -  _gridContainer.frame = CGRectMake(0, 0, _totalTableWidth, _totalTableHeight);
-+  BOOL isRightToLeft = _resolvedTableLayoutDirection == NSWritingDirectionRightToLeft;
++  BOOL isRightToLeft = _resolvedLayoutDirection == NSWritingDirectionRightToLeft;
 +  CGFloat gridOriginX = isRightToLeft && _totalTableWidth < self.bounds.size.width
 +      ? self.bounds.size.width - _totalTableWidth
 +      : 0;
@@ -237,12 +173,10 @@ index bd73244..e0b1d62 100644
 +    }
 +  }
  #else
-   // For NSScrollView+documentView, the scrollable content area is determined by
-   // the documentView's frame. No contentSize property to set.
 @@ -610,3 +648,8 @@
                                             withString:[cellTexts componentsJoinedByString:@", "]];
 -      element.accessibilityFrameInContainerSpace = CGRectMake(0, yOffset, _totalTableWidth, rowHeight);
-+      CGFloat gridOriginX = _resolvedTableLayoutDirection == NSWritingDirectionRightToLeft &&
++      CGFloat gridOriginX = _resolvedLayoutDirection == NSWritingDirectionRightToLeft &&
 +              _totalTableWidth < self.bounds.size.width
 +          ? self.bounds.size.width - _totalTableWidth
 +          : 0;

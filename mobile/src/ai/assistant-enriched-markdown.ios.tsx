@@ -119,7 +119,6 @@ const Agent1EnrichedMarkdown = memo(function Agent1EnrichedMarkdown({
       enableLinkPreview={false}
       selectionMenuConfig={SELECTION_MENU_CONFIG}
       allowTrailingMargin={false}
-      streamingAnimation={streaming}
     />
   );
 });

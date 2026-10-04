@@ -131,21 +131,6 @@ if (depthAt(code, applyBody.open, calls[0].index) !== 2) {
 if (!fs.existsSync(tableSourcePath)) fail('installed iOS table source is missing');
 const tableSource = fs.readFileSync(tableSourcePath, 'utf8');
 const tableCode = codeOnly(tableSource);
-const applyTable = oneMatch(
-  tableCode,
-  /^[ \t]*-\s*\(void\)\s*applyTableNode:\s*\(MarkdownASTNode\s*\*\)\s*tableNode[ \t]*$/gm,
-  'table source-direction implementation',
-);
-const applyTableBody = methodBody(tableCode, applyTable, 'applyTableNode');
-const applyTableCode = tableCode.slice(applyTableBody.open, applyTableBody.close + 1);
-if (!/_resolvedTableLayoutDirection\s*=\s*_resolvedLayoutDirection/u.test(applyTableCode) ||
-    !/_writingDirectionMode\s*==\s*ENRMWritingDirectionModeFirstStrong[\s\S]*?ENRMFirstStrongDirection\(\[self\s+extractPlainTextFromNode:tableNode\]\)/u.test(applyTableCode) ||
-    !/sourceDirection\s*!=\s*NSWritingDirectionNatural[\s\S]*?_resolvedTableLayoutDirection\s*=\s*sourceDirection/u.test(applyTableCode)) {
-  fail('first-strong table direction must come from logical table source text, with the existing direction as neutral fallback');
-}
-if (!/layoutDirection:_resolvedTableLayoutDirection/u.test(applyTableCode)) {
-  fail('table cells must receive the direction resolved from their source table');
-}
 const renderGrid = oneMatch(
   tableCode,
   /^[ \t]*-\s*\(void\)\s*renderGridIOS[ \t]*$/gm,
@@ -155,9 +140,6 @@ const renderGridBody = methodBody(tableCode, renderGrid, 'renderGridIOS');
 const renderGridCode = tableCode.slice(renderGridBody.open, renderGridBody.close + 1);
 if (!/rowData\.cellTexts\s*=\s*isRightToLeft\s*\?\s*\[\[sourceCells reverseObjectEnumerator\]\s*allObjects\]\s*:\s*sourceCells/u.test(renderGridCode)) {
   fail('RTL table columns must be reversed only in the visual grid data');
-}
-if (!/BOOL\s+isRightToLeft\s*=\s*_resolvedTableLayoutDirection\s*==\s*NSWritingDirectionRightToLeft/u.test(renderGridCode)) {
-  fail('visual RTL table order must use source-resolved table direction, not outer Yoga direction');
 }
 if (!/displayColumnWidths\s*=\s*isRightToLeft\s*\?\s*\[\[_colWidths reverseObjectEnumerator\]\s*allObjects\]\s*:\s*_colWidths/u.test(renderGridCode) ||
     !/columnWidths\s*:\s*displayColumnWidths/u.test(renderGridCode)) {
@@ -171,8 +153,7 @@ const layoutSignature = oneMatch(
 );
 const tableLayoutBody = methodBody(tableCode, layoutSignature, 'table layoutSubviews');
 const tableLayoutCode = tableCode.slice(tableLayoutBody.open, tableLayoutBody.close + 1);
-if (!/BOOL\s+isRightToLeft\s*=\s*_resolvedTableLayoutDirection\s*==\s*NSWritingDirectionRightToLeft/u.test(tableLayoutCode) ||
-    !/gridOriginX\s*=\s*isRightToLeft\s*&&\s*_totalTableWidth\s*<\s*self\.bounds\.size\.width/u.test(tableLayoutCode) ||
+if (!/gridOriginX\s*=\s*isRightToLeft\s*&&\s*_totalTableWidth\s*<\s*self\.bounds\.size\.width/u.test(tableLayoutCode) ||
     !/leadingOffset\s*=\s*isRightToLeft\s*\?/u.test(tableLayoutCode)) {
   fail('fitting tables must align right in RTL and wide tables must begin at RTL leading edge');
 }
@@ -200,5 +181,5 @@ console.log([
   `  applyRenderedSegments: lines ${lineAt(source, applyBody.start)}-${lineAt(source, applyBody.close)}`,
   `  validateHeightForCurrentWidth: lines ${lineAt(source, validateBody.start)}-${lineAt(source, validateBody.close)}`,
   `  layoutSubviews: lines ${lineAt(source, layoutBody.start)}-${lineAt(source, layoutBody.close)}`,
-  '  method scopes and brace depth are valid; table first-strong direction comes from logical source, RTL visual columns and leading position agree, user-scroll preservation and logical copy order are verified.',
+  '  method scopes and brace depth are valid; RTL visual columns, leading position, user-scroll preservation, and logical copy order are verified.',
 ].join('\n'));
