@@ -73,16 +73,61 @@ export function applyAgent1ChatStreamEvent(
   });
 }
 
+/** Marks the active turn as streaming without copying its token buffer into ChatTurn. */
+export function markAgent1ChatTurnStreaming(
+  turns: ChatTurn[],
+  turnId: string,
+): ChatTurn[] {
+  const current = turns.find((turn) => turn.id === turnId);
+  if (!current || current.assistant || current.assistantStatus === "streaming") {
+    return turns;
+  }
+  return updateTurn(turns, turnId, (turn) => {
+    return { ...turn, assistantStatus: "streaming", errorMessage: null };
+  });
+}
+
+/** Commits the accumulated presentation buffer once the provider completes. */
+export function completeAgent1ChatTurn(
+  turns: readonly ChatTurn[],
+  turnId: string,
+  assistantContent: string,
+): ChatTurn[] {
+  return updateTurn(turns, turnId, (turn) => ({
+    ...turn,
+    assistant: assistantContent.length > 0
+      ? {
+          id: `${turn.id}-assistant-${turn.assistantAttempt}`,
+          role: "assistant",
+          content: assistantContent,
+        }
+      : null,
+    assistantStatus: "completed",
+    errorMessage: null,
+  }));
+}
+
 export function failAgent1ChatTurn(
   turns: readonly ChatTurn[],
   turnId: string,
   safeErrorMessage: string,
+  partialResponse?: string,
 ): ChatTurn[] {
   return updateTurn(turns, turnId, (turn) => {
-    const hasPartialResponse = Boolean(turn.assistant?.content.trim());
+    const accumulatedResponse = partialResponse ?? turn.assistant?.content ?? "";
+    const hasPartialResponse = Boolean(accumulatedResponse.trim());
+    const partialAssistant = partialResponse === undefined
+      ? turn.assistant
+      : hasPartialResponse
+        ? {
+            id: `${turn.id}-assistant-${turn.assistantAttempt}`,
+            role: "assistant" as const,
+            content: accumulatedResponse,
+          }
+        : null;
     return {
       ...turn,
-      assistant: hasPartialResponse ? turn.assistant : null,
+      assistant: hasPartialResponse ? partialAssistant : null,
       assistantStatus: hasPartialResponse ? "incomplete" : "error",
       errorMessage: hasPartialResponse
         ? "انقطع الرد قبل اكتماله."

@@ -31,14 +31,18 @@ import {
   buildAgent1HistoryForNewTurn,
   buildAgent1HistoryForRegenerate,
   canRegenerateAgent1Turn,
+  completeAgent1ChatTurn,
   createAcceptedAgent1ChatTurn,
   failAgent1ChatTurn,
+  markAgent1ChatTurnStreaming,
   resetAgent1ChatTurnAttempt,
 } from '@/ai/agent-1-chat-state';
+import { Agent1ChatStreamStore, agent1ChatStreamKey } from '@/ai/agent-1-chat-stream-store';
 import { MAX_TEMP_CHAT_MESSAGES, type ChatMessage, type ChatTurn } from '@/ai/chat-types';
 import { ChatTopControls } from '@/ai/chat-top-controls';
 import { usePreferences } from '@/preferences/preferences-provider';
 import { getPalette } from '@/theme';
+import { KeyboardProvider } from 'react-native-keyboard-controller';
 
 const StableChatTopControls = memo(ChatTopControls);
 
@@ -46,6 +50,14 @@ const CHAT_LAYOUT_TEST_CASES = ['short', 'biology', 'math', 'table', 'scroll', '
 type ChatLayoutTestCase = typeof CHAT_LAYOUT_TEST_CASES[number];
 
 export default function ChatScreen() {
+  return (
+    <KeyboardProvider>
+      <ChatScreenContent />
+    </KeyboardProvider>
+  );
+}
+
+function ChatScreenContent() {
   const { resolvedColorScheme } = usePreferences();
   const palette = getPalette(resolvedColorScheme);
   const { width } = useWindowDimensions();
@@ -67,6 +79,7 @@ export default function ChatScreen() {
   const drawerOpenRef = useRef(false);
   const messageSequenceRef = useRef(0);
   const [requestCoordinator] = useState(() => new Agent1ChatRequestCoordinator());
+  const [streamStore] = useState(() => new Agent1ChatStreamStore(32));
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const turnsRef = useRef<ChatTurn[]>([]);
   const mountedRef = useRef(false);
@@ -75,8 +88,9 @@ export default function ChatScreen() {
   const [activeTurnId, setActiveTurnId] = useState<string | null>(null);
   const [submissionError, setSubmissionError] = useState<string | null>(null);
   const [transcriptWidth, setTranscriptWidth] = useState(0);
-  const updateTurns = useCallback((update: (current: readonly ChatTurn[]) => ChatTurn[]) => {
+  const updateTurns = useCallback((update: (current: ChatTurn[]) => ChatTurn[]) => {
     const next = update(turnsRef.current);
+    if (next === turnsRef.current) return;
     turnsRef.current = next;
     setTurns(next);
   }, []);
@@ -98,8 +112,11 @@ export default function ChatScreen() {
       }
 
       updateActiveTurn(turn.id);
+      const streamKey = agent1ChatStreamKey(turn.id, turn.assistantAttempt);
+      streamStore.begin(streamKey);
       updateTurns((current) => applyAgent1ChatStreamEvent(current, turn.id, { type: 'started' }));
       let streamCancelled = false;
+      let hasPresentedStream = false;
       let timer: ReturnType<typeof setTimeout> | null = null;
       let releasePendingDelay = () => {};
       const runFixtureStream = async () => {
@@ -122,20 +139,22 @@ export default function ChatScreen() {
             };
           });
           if (cancelled || streamCancelled) return;
-          updateTurns((current) =>
-            applyAgent1ChatStreamEvent(current, turn.id, { type: 'text_delta', text: chunk }),
-          );
+          streamStore.append(streamKey, chunk);
+          if (!hasPresentedStream) {
+            hasPresentedStream = true;
+            updateTurns((current) => markAgent1ChatTurnStreaming(current, turn.id));
+          }
         }
         if (cancelled || streamCancelled) return;
-        updateTurns((current) =>
-          applyAgent1ChatStreamEvent(current, turn.id, { type: 'completed' }),
-        );
+        const finalText = streamStore.finish(streamKey);
+        updateTurns((current) => completeAgent1ChatTurn(current, turn.id, finalText));
         updateActiveTurn(null);
       };
       void runFixtureStream();
       stopFixtureStream = () => {
         streamCancelled = true;
         releasePendingDelay();
+        streamStore.discard(streamKey);
       };
     }).catch(() => {
       if (!cancelled) setSubmissionError('تعذر تحميل بيانات اختبار التخطيط التطويري.');
@@ -144,7 +163,7 @@ export default function ChatScreen() {
       cancelled = true;
       stopFixtureStream();
     };
-  }, [layoutTestCase, requestCoordinator, updateActiveTurn, updateTurns]);
+  }, [layoutTestCase, requestCoordinator, streamStore, updateActiveTurn, updateTurns]);
   const handleForegroundLayout = useCallback((event: LayoutChangeEvent) => {
     const nextWidth = event.nativeEvent.layout.width;
     setTranscriptWidth((current) =>
@@ -173,15 +192,29 @@ export default function ChatScreen() {
   const handleBackPress = useCallback(() => router.back(), [router]);
   const executeAssistantTurn = useCallback(async (
     turnId: string,
+    assistantAttempt: number,
     requestMessages: readonly Pick<ChatMessage, 'role' | 'content'>[],
     signal: AbortSignal,
     generation: number,
   ) => {
+    const streamKey = agent1ChatStreamKey(turnId, assistantAttempt);
     let receivedTextCharacters = 0;
     try {
       await sendAgent1DevChat(requestMessages, signal, (event) => {
         if (!requestCoordinator.isCurrent(generation)) return;
-        if (event.type === 'text_delta') receivedTextCharacters += event.text.length;
+        if (event.type === 'text_delta') {
+          receivedTextCharacters += event.text.length;
+          streamStore.append(streamKey, event.text);
+          if (event.text) {
+            updateTurns((current) => markAgent1ChatTurnStreaming(current, turnId));
+          }
+          return;
+        }
+        if (event.type === 'completed') {
+          const finalText = streamStore.finish(streamKey);
+          updateTurns((current) => completeAgent1ChatTurn(current, turnId, finalText));
+          return;
+        }
         updateTurns((current) => applyAgent1ChatStreamEvent(current, turnId, event));
       });
       if (__DEV__) {
@@ -192,6 +225,7 @@ export default function ChatScreen() {
       }
     } catch (error) {
       if (signal.aborted || !requestCoordinator.isCurrent(generation)) return;
+      const partialResponse = streamStore.finish(streamKey);
       if (__DEV__) {
         console.info('[Agent1 chat diagnostics] stream failed', {
           turnId,
@@ -205,7 +239,7 @@ export default function ChatScreen() {
         });
       }
       updateTurns((current) =>
-        failAgent1ChatTurn(current, turnId, agent1ChatErrorMessage(error)),
+        failAgent1ChatTurn(current, turnId, agent1ChatErrorMessage(error), partialResponse),
       );
     } finally {
       if (
@@ -215,7 +249,7 @@ export default function ChatScreen() {
         updateActiveTurn(null);
       }
     }
-  }, [requestCoordinator, updateActiveTurn, updateTurns]);
+  }, [requestCoordinator, streamStore, updateActiveTurn, updateTurns]);
 
   const handleSend = useCallback((draft: string): string | null => {
     const content = draft.trim();
@@ -239,19 +273,22 @@ export default function ChatScreen() {
     const requestMessages = buildAgent1HistoryForNewTurn(currentTurns, turn.user);
 
     setSubmissionError(null);
+    const streamKey = agent1ChatStreamKey(turnId, turn.assistantAttempt);
+    streamStore.begin(streamKey);
     updateTurns((current) => [...current, turn]);
     updateActiveTurn(turnId);
     const started = requestCoordinator.start((signal, generation) =>
-      executeAssistantTurn(turnId, requestMessages, signal, generation),
+      executeAssistantTurn(turnId, turn.assistantAttempt, requestMessages, signal, generation),
     );
     if (!started) {
+      streamStore.discard(streamKey);
       updateTurns((current) => current.filter((candidate) => candidate.id !== turnId));
       updateActiveTurn(null);
       setSubmissionError('تعذر بدء طلب جديد أثناء معالجة الطلب السابق. حاول مجددًا.');
       return null;
     }
     return turnId;
-  }, [executeAssistantTurn, requestCoordinator, updateActiveTurn, updateTurns]);
+  }, [executeAssistantTurn, requestCoordinator, streamStore, updateActiveTurn, updateTurns]);
 
   const handleRegenerate = useCallback((turnId: string) => {
     if (regenerationInProgressRef.current) return;
@@ -259,12 +296,16 @@ export default function ChatScreen() {
     if (!canRegenerateAgent1Turn(currentTurns, turnId, activeTurnIdRef.current)) return;
     const requestMessages = buildAgent1HistoryForRegenerate(currentTurns, turnId);
     if (!requestMessages) return;
+    const latestTurn = currentTurns[currentTurns.length - 1];
+    if (!latestTurn || latestTurn.id !== turnId) return;
+    const nextAttempt = latestTurn.assistantAttempt + 1;
+    streamStore.begin(agent1ChatStreamKey(turnId, nextAttempt));
 
     regenerationInProgressRef.current = true;
     setSubmissionError(null);
     updateActiveTurn(turnId);
     const replacement = requestCoordinator.replace((signal, generation) =>
-      executeAssistantTurn(turnId, requestMessages, signal, generation),
+      executeAssistantTurn(turnId, nextAttempt, requestMessages, signal, generation),
     );
     updateTurns((current) => resetAgent1ChatTurnAttempt(current, turnId));
     void replacement.finally(() => {
@@ -277,15 +318,16 @@ export default function ChatScreen() {
         updateActiveTurn(null);
       }
     });
-  }, [executeAssistantTurn, requestCoordinator, updateActiveTurn, updateTurns]);
+  }, [executeAssistantTurn, requestCoordinator, streamStore, updateActiveTurn, updateTurns]);
 
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
       requestCoordinator.cancelAll();
+      streamStore.clear();
     };
-  }, [requestCoordinator]);
+  }, [requestCoordinator, streamStore]);
 
   return (
     <>
@@ -326,6 +368,7 @@ export default function ChatScreen() {
           >
             <ChatComposer
               turns={turns}
+              streamStore={streamStore}
               onSend={handleSend}
               onRegenerate={handleRegenerate}
               activeTurnId={activeTurnId}

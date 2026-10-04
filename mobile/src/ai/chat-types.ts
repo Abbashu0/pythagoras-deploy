@@ -33,6 +33,7 @@ export type Agent1ChatStreamEvent =
 
 export interface ChatComposerProps {
   turns: readonly ChatTurn[];
+  streamStore: import("./agent-1-chat-stream-store").Agent1ChatStreamStore;
   onSend: (text: string) => string | null;
   onRegenerate: (turnId: string) => void;
   activeTurnId: string | null;

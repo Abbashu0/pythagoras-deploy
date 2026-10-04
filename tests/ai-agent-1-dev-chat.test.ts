@@ -312,12 +312,7 @@ test("Agent 1 temporary chat follows the saved route and creates no chat, accoun
     assert.equal(transport.requestBodies.length, 2);
     for (const requestBody of transport.requestBodies) {
       const systemMessage = requestBody.messages?.find((message) => message.role === "system");
-      assert.ok(systemMessage?.content);
-      assert.match(systemMessage.content, /GitHub-Flavored Markdown/u);
-      assert.match(systemMessage.content, /inline mathematics in \$\.\.\.\$/u);
-      assert.match(systemMessage.content, /display mathematics in \$\$\.\.\.\$\$/u);
-      assert.match(systemMessage.content, /outside math delimiters/u);
-      assert.match(systemMessage.content, /Do not emit raw HTML/u);
+      assert.equal(systemMessage, undefined);
     }
     assert.deepEqual(aiTableCounts(f.database), before);
   } finally {

@@ -25,14 +25,19 @@ printf 'Expo CLI: '
 (cd "$MOBILE_ROOT" && npx expo --version)
 ENRICHED_VERSION="$(cd "$MOBILE_ROOT" && node -p "require('./node_modules/react-native-enriched-markdown/package.json').version")"
 DEV_CLIENT_VERSION="$(cd "$MOBILE_ROOT" && node -p "require('./node_modules/expo-dev-client/package.json').version")"
+KEYBOARD_CONTROLLER_VERSION="$(cd "$MOBILE_ROOT" && node -p "require('./node_modules/react-native-keyboard-controller/package.json').version")"
 printf 'react-native-enriched-markdown: %s\n' "$ENRICHED_VERSION"
 printf 'expo-dev-client: %s\n' "$DEV_CLIENT_VERSION"
+printf 'react-native-keyboard-controller: %s\n' "$KEYBOARD_CONTROLLER_VERSION"
 
 if [ "$ENRICHED_VERSION" != '0.7.4' ]; then
   fail "Expected react-native-enriched-markdown 0.7.4; found $ENRICHED_VERSION"
 fi
 if [ "$DEV_CLIENT_VERSION" != '57.0.19' ]; then
   fail "Expected Expo SDK 57 expo-dev-client 57.0.19; found $DEV_CLIENT_VERSION"
+fi
+if [ "$KEYBOARD_CONTROLLER_VERSION" != '1.21.9' ]; then
+  fail "Expected react-native-keyboard-controller 1.21.9; found $KEYBOARD_CONTROLLER_VERSION"
 fi
 
 test -f "$MOBILE_ROOT/app/renderer-lab.tsx" || fail 'Development renderer lab is missing from the checked-out experiment branch.'
@@ -43,6 +48,7 @@ test -f "$IOS_ROOT/Podfile.lock" || fail 'CocoaPods did not create mobile/ios/Po
 grep -qi 'ReactNativeEnrichedMarkdown' "$IOS_ROOT/Podfile.lock" || fail 'ReactNativeEnrichedMarkdown is absent from Podfile.lock.'
 grep -qi 'expo-dev-launcher' "$IOS_ROOT/Podfile.lock" || fail 'expo-dev-launcher is absent from Podfile.lock.'
 grep -qi 'expo-dev-menu' "$IOS_ROOT/Podfile.lock" || fail 'expo-dev-menu is absent from Podfile.lock.'
+grep -qi 'react-native-keyboard-controller' "$IOS_ROOT/Podfile.lock" || fail 'react-native-keyboard-controller is absent from Podfile.lock.'
 
 printf '%s\n' '=== Generated iOS project containers ==='
 printf '%s\n' 'Top-level generated Xcode containers:'
@@ -265,5 +271,6 @@ printf 'Artifact size: %s bytes\n' "$(stat -f '%z' "$IPA_PATH")"
   printf '%s\n' "- Bundle ID: $EXPECTED_BUNDLE_ID"
   printf '%s\n' "- Native renderer: react-native-enriched-markdown $ENRICHED_VERSION"
   printf '%s\n' "- Development client: expo-dev-client $DEV_CLIENT_VERSION"
+  printf '%s\n' "- Keyboard controller: react-native-keyboard-controller $KEYBOARD_CONTROLLER_VERSION"
   printf '%s\n' "- IPA: Pythagoras-dev-unsigned.ipa"
 } >>"$GITHUB_STEP_SUMMARY"
