@@ -55,6 +55,12 @@ test('code copy uses raw AST bytes and intrinsic no-wrap horizontal container si
 
 test('native code card keeps a readable LTR header, continuous corners and fixed native copy geometry', () => {
   const view = read('ios/views/ENRMCodeBlockContainerView.m');
+  const header = read('ios/views/ENRMCodeBlockContainerView.h');
+  const owner = read('ios/EnrichedMarkdown.mm');
+  assert.ok(header.includes('NSString *menuCopyLabel;'));
+  assert.equal(header.includes('NSString *copyLabel;'), false);
+  assert.ok(view.includes('self.menuCopyLabel'));
+  assert.ok(owner.includes('view.menuCopyLabel = owner->_selectionMenuLabels.copyLabel'));
   for (const value of ['MAX(14, font.pointSize)', 'MAX(44, ceil(_language.font.lineHeight + 16))', 'configurationWithPointSize:18', 'kCACornerCurveContinuous', '_header.backgroundColor = [UIColor clearColor]', '44, MAX(44, headerHeight)', 'dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.3 * NSEC_PER_SEC))']) assert.ok(view.includes(value), value);
   const copy = view.slice(view.indexOf('- (void)copyCode'));
   assert.equal(/setNeedsLayout|\.frame\s*=/u.test(copy), false);

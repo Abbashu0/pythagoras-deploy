@@ -1,5 +1,5 @@
 diff --git a/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdown.mm b/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdown.mm
-index 7ad95d7..1dcff54 100644
+index 7ad95d7..2c6e80a 100644
 --- a/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdown.mm
 +++ b/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdown.mm
 @@ -40,6 +40,7 @@
@@ -44,7 +44,7 @@ index 7ad95d7..1dcff54 100644
 +      EnrichedMarkdown *owner = weakSelf;
 +      if (!owner) return [RCTUIView new];
 +      ENRMCodeBlockContainerView *view = [[ENRMCodeBlockContainerView alloc] initWithConfig:owner->_config];
-+      view.copyLabel = owner->_selectionMenuLabels.copyLabel;
++      view.menuCopyLabel = owner->_selectionMenuLabels.copyLabel;
 +      [view applyCodeNode:segment.codeNode];
 +      return view;
 +    }
@@ -90,7 +90,7 @@ index 7ad95d7..1dcff54 100644
    for (RCTUIView *segment in _segmentViews) {
 +#if !TARGET_OS_OSX
 +    if ([segment isKindOfClass:[ENRMCodeBlockContainerView class]]) {
-+      ((ENRMCodeBlockContainerView *)segment).copyLabel = _selectionMenuLabels.copyLabel;
++      ((ENRMCodeBlockContainerView *)segment).menuCopyLabel = _selectionMenuLabels.copyLabel;
 +    }
 +#endif
      if ([segment isKindOfClass:[TableContainerView class]]) {
@@ -380,7 +380,7 @@ index d84d2e4..1208df6 100644
        ENRMRenderResult *rendered = ENRMRenderASTNodes(textSegment.nodes, config, allowTrailingMargin, allowFontScaling,
 diff --git a/node_modules/react-native-enriched-markdown/ios/views/ENRMCodeBlockContainerView.h b/node_modules/react-native-enriched-markdown/ios/views/ENRMCodeBlockContainerView.h
 new file mode 100644
-index 0000000..8784462
+index 0000000..a5a2740
 --- /dev/null
 +++ b/node_modules/react-native-enriched-markdown/ios/views/ENRMCodeBlockContainerView.h
 @@ -0,0 +1,13 @@
@@ -391,7 +391,7 @@ index 0000000..8784462
 +#if !TARGET_OS_OSX
 +@interface ENRMCodeBlockContainerView : RCTUIView <UIScrollViewDelegate>
 +@property (nonatomic, strong) StyleConfig *config;
-+@property (nonatomic, copy) NSString *copyLabel;
++@property (nonatomic, copy) NSString *menuCopyLabel;
 +- (instancetype)initWithConfig:(StyleConfig *)config;
 +- (void)applyCodeNode:(MarkdownASTNode *)node;
 +- (CGFloat)measureHeight:(CGFloat)width;
@@ -399,7 +399,7 @@ index 0000000..8784462
 +#endif
 diff --git a/node_modules/react-native-enriched-markdown/ios/views/ENRMCodeBlockContainerView.m b/node_modules/react-native-enriched-markdown/ios/views/ENRMCodeBlockContainerView.m
 new file mode 100644
-index 0000000..9d029a6
+index 0000000..902a4e7
 --- /dev/null
 +++ b/node_modules/react-native-enriched-markdown/ios/views/ENRMCodeBlockContainerView.m
 @@ -0,0 +1,139 @@
@@ -426,7 +426,7 @@ index 0000000..9d029a6
 +{
 +  self = [super initWithFrame:CGRectZero];
 +  if (self) {
-+    _config = config; _rawCode = @""; _copyLabel = @"نسخ";
++    _config = config; _rawCode = @""; _menuCopyLabel = @"نسخ";
 +    self.clipsToBounds = YES;
 +    self.semanticContentAttribute = UISemanticContentAttributeForceLeftToRight;
 +    _header = [UIView new]; [self addSubview:_header];
@@ -470,7 +470,7 @@ index 0000000..9d029a6
 +  _language.textColor = [self.config.codeBlockColor colorWithAlphaComponent:0.8];
 +  _language.accessibilityLabel = [@"لغة الكود: " stringByAppendingString:_language.text];
 +  _copyButton.tintColor = [self.config.codeBlockColor colorWithAlphaComponent:0.8];
-+  _copyButton.accessibilityLabel = [NSString stringWithFormat:@"%@ الكود — %@", self.copyLabel, _language.text];
++  _copyButton.accessibilityLabel = [NSString stringWithFormat:@"%@ الكود — %@", self.menuCopyLabel, _language.text];
 +  self.backgroundColor = self.config.codeBlockBackgroundColor;
 +  _header.backgroundColor = [UIColor clearColor];
 +  self.layer.cornerRadius = self.config.codeBlockBorderRadius;

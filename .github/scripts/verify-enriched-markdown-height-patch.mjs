@@ -176,6 +176,7 @@ if (!tableSource.includes('for (NSArray<TableCellData *> *row in _rows)') ||
 }
 
 const nativeFiles = {
+  codeHeader: 'ios/views/ENRMCodeBlockContainerView.h',
   codeView: 'ios/views/ENRMCodeBlockContainerView.m',
   codeLanguage: 'ios/utils/ENRMCodeLanguage.m',
   segments: 'ios/utils/SegmentRenderer.m',
@@ -195,6 +196,7 @@ for (const [key, text] of Object.entries(native)) {
 }
 const viewCode = codeOnly(native.codeView);
 const codeImplementation = oneMatch(viewCode, /@implementation\s+ENRMCodeBlockContainerView\b/g, 'code-block implementation');
+if (!native.codeHeader.includes('@property (nonatomic, copy) NSString *menuCopyLabel;') || /@property\s+\([^\n]*\)\s+NSString\s+\*copyLabel\b/u.test(native.codeHeader)) fail('code-block menu label must avoid the Objective-C copy method family');
 for (const name of ['applyCodeNode', 'measureHeight', 'layoutSubviews', 'copyCode']) {
   const signature = oneMatch(viewCode, new RegExp(`^[ \\t]*-\\s*\\([^\\n]+\\)${name}(?::[^\\n]*)?[ \\t]*$`, 'gm'), `code ${name}`);
   const body = methodBody(viewCode, signature, `code ${name}`);
