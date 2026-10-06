@@ -294,7 +294,7 @@ index 7ad95d7..316b7e9 100644
        if ([segment pointInside:segmentPoint withEvent:nil]) {
 diff --git a/node_modules/react-native-enriched-markdown/ios/code/ENRMCodeFullscreenController.swift b/node_modules/react-native-enriched-markdown/ios/code/ENRMCodeFullscreenController.swift
 new file mode 100644
-index 0000000..dfa3826
+index 0000000..5a3e8eb
 --- /dev/null
 +++ b/node_modules/react-native-enriched-markdown/ios/code/ENRMCodeFullscreenController.swift
 @@ -0,0 +1,185 @@
@@ -315,7 +315,7 @@ index 0000000..dfa3826
 +    super.init(frame: .zero)
 +    clipsToBounds = true
 +    scroll.clipsToBounds = true
-+    scroll.directionalLockEnabled = true
++    scroll.isDirectionalLockEnabled = true
 +    scroll.bounces = false
 +    scroll.contentInsetAdjustmentBehavior = .never
 +    scroll.semanticContentAttribute = .forceLeftToRight

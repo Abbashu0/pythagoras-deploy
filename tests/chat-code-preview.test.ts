@@ -186,6 +186,8 @@ test('Mermaid actual-render status is isolated, event-driven and fits only a fre
 });
 
 test('fullScreen uses an immutable exact source snapshot, native text segments and the shared secure preview', () => {
+  assert.ok(fullscreen.includes('scroll.isDirectionalLockEnabled = true'));
+  assert.equal(fullscreen.includes('scroll.directionalLockEnabled = true'), false);
   for (const code of ['modalPresentationStyle = .fullScreen', 'items: ["Code", "Preview"]', 'modes.selectedSegmentIndex = 1', 'systemName: "xmark"', 'width: 44, height: 44', 'content.fullscreen = true', 'ENRMCodePreviewController(kind: kind)', 'content.update(source: source.string', 'source.copy()', 'text.isSelectable = true', 'text.isScrollEnabled = false', 'text.textContainer.widthTracksTextView = false', 'text.textContainer.lineBreakMode = .byClipping', 'scroll.contentSize', 'ENRMSyntaxHighlighterBridge.requestColors(forSource: raw', 'textStorage.addAttribute(.foregroundColor']) assert.ok(fullscreen.includes(code), code);
   assert.equal(/WKWebViewConfiguration|loadHTMLString|loadFileURL|\.cdn\(|scrollTo|contentOffset\s*=|setTimeout|asyncAfter/u.test(fullscreen), false);
   assert.ok(fullscreen.includes('dismiss(animated: !UIAccessibility.isReduceMotionEnabled)'));
