@@ -180,6 +180,7 @@ const nativeFiles = {
   codeView: 'ios/views/ENRMCodeBlockContainerView.m',
   codeLanguage: 'ios/utils/ENRMCodeLanguage.m',
   syntaxBridge: 'ios/code/ENRMSyntaxHighlighterBridge.swift',
+  previewBridge: 'ios/code/ENRMCodePreviewController.swift',
   segments: 'ios/utils/SegmentRenderer.m',
   mathView: 'ios/views/ENRMMathContainerView.m',
   bidi: 'ios/utils/ParagraphStyleUtils.m',
@@ -226,6 +227,18 @@ for (const required of ["https://github.com/smittytone/HighlighterSwift.git", "k
 if (!native.codeLanguage.includes('NSString *ENRMCodeHighlightLanguage') || !native.codeLanguage.includes('containsObject:normalized]) return nil')) fail('plain/unknown language must have an explicit safe syntax path');
 if (!parser.includes('codeDetail->lang') || !parser.includes('node->setAttribute(ATTR_LANGUAGE, lang)')) fail('code language must originate from MD4C, not content guesses');
 
+const preview = native.previewBridge;
+for (const required of ['UIGlassEffect(style: .regular)', 'UISegmentedControl', '#available(iOS 26.0, *)', 'UIBlurEffect(style: .systemThinMaterial)', 'websiteDataStore = .nonPersistent()', 'allowsContentJavaScript = false', 'web.loadHTMLString(document, baseURL: nil)', 'navigationAction.targetFrame?.isMainFrame == true', 'decisionHandler(allowed ? .allow : .cancel, preferences)', "default-src 'none'", "script-src 'none'", "form-action 'none'", 'securityLevel: .strict, source: .bundledDefault', 'onLinkActivated: { _ in }', 'addChild(host)', 'host.didMove(toParent: self)', 'removeAllScriptMessageHandlers()', 'host.rootView = AnyView(EmptyView())', 'host.removeFromParent()']) if (!preview.includes(required)) fail(`preview policy/lifecycle lacks ${required}`);
+if (/\.cdn\(|print\(|NSLog|Timer|asyncAfter|scrollTo/u.test(preview)) fail('previews must remain offline, quiet, bounded and without scroll/timer ownership');
+for (const required of ['_language.textColor = self.config.paragraphColor', 'ENRMCodePreviewLanguage(node.attributes[@"language"])', 'if (!_previewing || !_previewLanguage || !self.window) return', '[self reactViewController]', '[parent addChildViewController:_previewController]', 'didMoveToParentViewController:parent', 'if (!newWindow) [self disposePreviewController]', 'self.onIntrinsicPresentationChanged()', 'MAX(260, MIN(330, round(width * 0.85)))', 'ENRMCodeCopySymbolName = @"doc.on.doc"']) if (!native.codeView.includes(required)) fail(`native preview presentation lacks ${required}`);
+const presentationSignature = oneMatch(code, /^[ \t]*-\s*\(void\)codeBlockPresentationDidChange[ \t]*$/gm, 'presentation height invalidation');
+const presentationBody = methodBody(code, presentationSignature, 'presentation height invalidation');
+const presentationCode = code.slice(presentationBody.open, presentationBody.close + 1);
+for (const required of ['_renderRevision++', '_pendingHeightValidation = YES', '[self validateHeightForCurrentWidth:self.bounds.size.width]']) if (!presentationCode.includes(required)) fail(`presentation height must use existing validation: ${required}`);
+if (/requestHeightUpdate|scrollTo/u.test(presentationCode)) fail('preview cannot bypass reviewed height validation or own transcript scrolling');
+if (!source.includes('[currentOwner codeBlockPresentationDidChange]')) fail('code preview lacks a weak-owner height callback');
+for (const required of ["https://github.com/braddschick/MermaidKit.git", "kind: 'revision', revision: 'a6a5c15f3c91ff4061780c235a44716a988dc475'", "products: ['MermaidKit']", 'PythagorasCodePreviewNotices', 'ENRICHED_MARKDOWN_PREVIEW=1']) if (!podspec.includes(required)) fail(`reproducible preview integration lacks ${required}`);
+
 console.log([
   'Verified react-native-enriched-markdown@0.7.4 native height and RTL table patch structure.',
   `  class declaration: line ${lineAt(source, declaration.index)} inside the class extension`,
@@ -235,4 +248,5 @@ console.log([
   '  method scopes and brace depth are valid; RTL visual columns, leading position, user-scroll preservation, and logical copy order are verified.',
   '  AST-backed code headers/copy/horizontal layout, wide-math native touch ownership, and attributed inline bidi protections are verified.',
   '  Pinned grammar service, bounded background coalescing/cache, exact source guards and color-only native application are verified.',
+  '  Lazy HTML/Mermaid previews, strict offline policies, controller teardown and reviewed intrinsic-height invalidation are verified.',
 ].join('\n'));

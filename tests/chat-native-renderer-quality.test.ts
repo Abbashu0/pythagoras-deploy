@@ -49,7 +49,7 @@ test('code copy uses raw AST bytes and intrinsic no-wrap horizontal container si
   const code = read('ios/utils/ENRMCodeLanguage.m');
   assert.ok(view.includes('copyStringToPasteboard(_rawCode)'));
   assert.equal(code.includes('stringByTrimmingCharactersInSet', code.indexOf('NSString *ENRMRawCodeContent')), false);
-  for (const value of ['usedRectForTextContainer', '_documentWidth + padding * 2', '[self headerHeight] + _bodyHeight', 'NSLineBreakByClipping', '_codeView.scrollEnabled = NO', 'UISemanticContentAttributeForceLeftToRight']) assert.ok(view.includes(value));
+  for (const value of ['usedRectForTextContainer', '_documentWidth + padding * 2', '[self headerHeight] + (_previewing ?', ': _bodyHeight)', 'NSLineBreakByClipping', '_codeView.scrollEnabled = NO', 'UISemanticContentAttributeForceLeftToRight']) assert.ok(view.includes(value));
   const long = parser.parse(CHAT_QUALITY_CASES.find(item => item.title.includes('360'))!.markdown, {})[0].content;
   assert.ok(long.split('\n')[0].length > 300);
 });

@@ -1,8 +1,8 @@
 diff --git a/node_modules/react-native-enriched-markdown/ReactNativeEnrichedMarkdown.podspec b/node_modules/react-native-enriched-markdown/ReactNativeEnrichedMarkdown.podspec
-index 4d31a7a..07bfb69 100644
+index 4d31a7a..b94aaf1 100644
 --- a/node_modules/react-native-enriched-markdown/ReactNativeEnrichedMarkdown.podspec
 +++ b/node_modules/react-native-enriched-markdown/ReactNativeEnrichedMarkdown.podspec
-@@ -40,11 +40,24 @@ Pod::Spec.new do |s|
+@@ -40,11 +40,34 @@ Pod::Spec.new do |s|
      enable_math = false
    end
 
@@ -12,6 +12,7 @@ index 4d31a7a..07bfb69 100644
 +  excluded_sources = []
 +  excluded_sources << "ios/math/**/*.swift" unless enable_math
 +  excluded_sources << "ios/code/ENRMSyntaxHighlighterBridge.swift" unless enable_syntax
++  excluded_sources << "ios/code/ENRMCodePreviewController.swift" unless enable_syntax
 +  s.exclude_files = excluded_sources unless excluded_sources.empty?
 +
 +  # HighlighterSwift 3.1.0: pin the audited tag's commit, including its Highlight.js 11.11.1 resources.
@@ -21,15 +22,24 @@ index 4d31a7a..07bfb69 100644
 +      requirement: {kind: 'revision', revision: 'fe7aae9c9b31d3b296fd3d2dd575e1a207bb29e0'},
 +      products: ['Highlighter']
 +    )
++    spm_dependency(s,
++      url: 'https://github.com/braddschick/MermaidKit.git',
++      requirement: {kind: 'revision', revision: 'a6a5c15f3c91ff4061780c235a44716a988dc475'},
++      products: ['MermaidKit']
++    )
    end
-+  s.resource_bundles = { 'PythagorasCodeSyntaxNotices' => ['ios/code/PythagorasSyntax-LICENSE.txt'] }
++  s.resource_bundles = {
++    'PythagorasCodeSyntaxNotices' => ['ios/code/PythagorasSyntax-LICENSE.txt'],
++    'PythagorasCodePreviewNotices' => ['ios/code/PythagorasPreview-LICENSE.txt']
++  }
 
    preprocessor_defs = '$(inherited) MD4C_USE_UTF8=1'
 +  preprocessor_defs += enable_syntax ? ' ENRICHED_MARKDOWN_SYNTAX=1' : ' ENRICHED_MARKDOWN_SYNTAX=0'
++  preprocessor_defs += enable_syntax ? ' ENRICHED_MARKDOWN_PREVIEW=1' : ' ENRICHED_MARKDOWN_PREVIEW=0'
    if enable_math
      preprocessor_defs += ' ENRICHED_MARKDOWN_MATH=1'
      spm_dependency(s,
-@@ -52,6 +65,9 @@ Pod::Spec.new do |s|
+@@ -52,6 +75,9 @@ Pod::Spec.new do |s|
        requirement: {kind: 'upToNextMajorVersion', minimumVersion: '0.1.12'},
        products: ['RaTeX']
      )
@@ -40,7 +50,7 @@ index 4d31a7a..07bfb69 100644
 
    pod_xcconfig = {
 diff --git a/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdown.mm b/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdown.mm
-index 7ad95d7..2c6e80a 100644
+index 7ad95d7..9730241 100644
 --- a/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdown.mm
 +++ b/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdown.mm
 @@ -40,6 +40,7 @@
@@ -51,15 +61,16 @@ index 7ad95d7..2c6e80a 100644
  #import "TaskListTapUtils.h"
  #import "TextViewLayoutManager.h"
  #import <React/RCTUtils.h>
-@@ -67,6 +68,7 @@ typedef NS_OPTIONS(NSUInteger, ENRMDirtyFlags) {
+@@ -67,6 +68,8 @@ typedef NS_OPTIONS(NSUInteger, ENRMDirtyFlags) {
  static char kENRMSegmentFadeAnimatorKey;
  
  @interface EnrichedMarkdown () <RCTEnrichedMarkdownViewProtocol, UITextViewDelegate>
 +- (void)validateHeightForCurrentWidth:(CGFloat)width;
++- (void)codeBlockPresentationDidChange;
  - (void)emitLinkPress:(NSString *)url;
  - (void)emitLinkLongPress:(NSString *)url;
  - (void)emitTaskListItemPress:(NSInteger)index checked:(BOOL)checked text:(NSString *)text;
-@@ -90,6 +92,12 @@ static char kENRMSegmentFadeAnimatorKey;
+@@ -90,6 +93,12 @@ static char kENRMSegmentFadeAnimatorKey;
    ENRMAsyncRenderCoordinator *_renderCoordinator;
  
    EnrichedMarkdownShadowNode::ConcreteState::Shared _state;
@@ -72,7 +83,7 @@ index 7ad95d7..2c6e80a 100644
    int _heightUpdateCounter;
  
    FontScaleObserver *_fontScaleObserver;
-@@ -219,6 +227,23 @@ static char kENRMSegmentFadeAnimatorKey;
+@@ -219,6 +228,27 @@ static char kENRMSegmentFadeAnimatorKey;
                              }
                            }]];
  
@@ -86,6 +97,10 @@ index 7ad95d7..2c6e80a 100644
 +      if (!owner) return [RCTUIView new];
 +      ENRMCodeBlockContainerView *view = [[ENRMCodeBlockContainerView alloc] initWithConfig:owner->_config];
 +      view.menuCopyLabel = owner->_selectionMenuLabels.copyLabel;
++      view.onIntrinsicPresentationChanged = ^{
++        EnrichedMarkdown *currentOwner = weakSelf;
++        if (currentOwner) [currentOwner codeBlockPresentationDidChange];
++      };
 +      [view applyCodeNode:segment.codeNode];
 +      return view;
 +    }
@@ -96,7 +111,7 @@ index 7ad95d7..2c6e80a 100644
  #if ENRICHED_MARKDOWN_MATH
    [handlers addObject:[ENRMSegmentViewHandler handlerWithKind:ENRMSegmentKindMath
                            matchesView:^BOOL(RCTUIView *view, ENRMRenderedSegment *segment) {
-@@ -265,7 +290,15 @@ static char kENRMSegmentFadeAnimatorKey;
+@@ -265,7 +295,15 @@ static char kENRMSegmentFadeAnimatorKey;
        segmentHeight = textSize.height;
        maxContentWidth = MAX(maxContentWidth, textSize.width);
  
@@ -113,7 +128,7 @@ index 7ad95d7..2c6e80a 100644
        yOffset += _config.tableMarginTop;
        segmentHeight = [(TableContainerView *)segment measureHeight:width];
        maxContentWidth = width;
-@@ -293,6 +326,11 @@ static char kENRMSegmentFadeAnimatorKey;
+@@ -293,6 +331,11 @@ static char kENRMSegmentFadeAnimatorKey;
      }
  
      yOffset += segmentHeight;
@@ -125,7 +140,7 @@ index 7ad95d7..2c6e80a 100644
  
      if ([segment isKindOfClass:[TableContainerView class]] && shouldAddBottomMargin) {
        yOffset += _config.tableMarginBottom;
-@@ -413,6 +451,11 @@ static char kENRMSegmentFadeAnimatorKey;
+@@ -413,6 +456,11 @@ static char kENRMSegmentFadeAnimatorKey;
  - (void)pushSelectionMenuLabelsToSegments
  {
    for (RCTUIView *segment in _segmentViews) {
@@ -137,7 +152,7 @@ index 7ad95d7..2c6e80a 100644
      if ([segment isKindOfClass:[TableContainerView class]]) {
        TableContainerView *tableView = (TableContainerView *)segment;
        tableView.copyLabel = _selectionMenuLabels.copyLabel;
-@@ -565,21 +608,57 @@ static char kENRMSegmentFadeAnimatorKey;
+@@ -565,21 +613,65 @@ static char kENRMSegmentFadeAnimatorKey;
    _dirtyFlags = ENRMDirtyNone;
  
    _segmentViews = result.views;
@@ -162,6 +177,14 @@ index 7ad95d7..2c6e80a 100644
      }
 +    [self validateHeightForCurrentWidth:self.bounds.size.width];
 +  }
++}
++
++- (void)codeBlockPresentationDidChange
++{
++  _renderRevision++;
++  _pendingHeightValidation = YES;
++  [self setNeedsLayout];
++  [self validateHeightForCurrentWidth:self.bounds.size.width];
 +}
 +
 +// Upstream issue #824: Fabric may measure before async GFM segments exist on iOS.
@@ -202,7 +225,7 @@ index 7ad95d7..2c6e80a 100644
    }
  }
  
-@@ -725,7 +804,9 @@ static char kENRMSegmentFadeAnimatorKey;
+@@ -725,7 +817,9 @@ static char kENRMSegmentFadeAnimatorKey;
  - (void)layoutSubviews
  {
    [super layoutSubviews];
@@ -213,7 +236,7 @@ index 7ad95d7..2c6e80a 100644
  }
  
  - (void)updateProps:(Props::Shared const &)props oldProps:(Props::Shared const &)oldProps
-@@ -922,10 +1003,8 @@ static char kENRMSegmentFadeAnimatorKey;
+@@ -922,10 +1016,8 @@ static char kENRMSegmentFadeAnimatorKey;
        }
      }
  
@@ -226,7 +249,7 @@ index 7ad95d7..2c6e80a 100644
    }
  }
  
-@@ -948,6 +1027,12 @@ static char kENRMSegmentFadeAnimatorKey;
+@@ -948,6 +1040,12 @@ static char kENRMSegmentFadeAnimatorKey;
    [_segmentSignatures removeAllObjects];
  
    _cachedMarkdown = nil;
@@ -239,7 +262,7 @@ index 7ad95d7..2c6e80a 100644
    _renderedMarkdown = nil;
    _streamingAnimation = NO;
    _tableStreamingMode = ENRMTableStreamingModeProgressive;
-@@ -981,7 +1066,14 @@ Class<RCTComponentViewProtocol> EnrichedMarkdownCls(void)
+@@ -981,7 +1079,14 @@ Class<RCTComponentViewProtocol> EnrichedMarkdownCls(void)
  - (facebook::react::SharedTouchEventEmitter)touchEventEmitterAtPoint:(CGPoint)point
  {
    for (RCTUIView *segment in _segmentViews) {
@@ -255,6 +278,280 @@ index 7ad95d7..2c6e80a 100644
        CGPoint segmentPoint = [self convertPoint:point toView:segment];
  #if !TARGET_OS_OSX
        if ([segment pointInside:segmentPoint withEvent:nil]) {
+diff --git a/node_modules/react-native-enriched-markdown/ios/code/ENRMCodePreviewController.swift b/node_modules/react-native-enriched-markdown/ios/code/ENRMCodePreviewController.swift
+new file mode 100644
+index 0000000..a5e9816
+--- /dev/null
++++ b/node_modules/react-native-enriched-markdown/ios/code/ENRMCodePreviewController.swift
+@@ -0,0 +1,268 @@
++#if canImport(UIKit)
++import UIKit
++import WebKit
++import SwiftUI
++import MermaidKit
++
++private final class ENRMPreviewSegments: UISegmentedControl {
++  override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
++    bounds.insetBy(dx: 0, dy: -4).contains(point)
++  }
++}
++
++/// One standard segmented control on one genuine glass surface. The material is
++/// 36pt high; native segment hit testing fills the fixed 44pt header target.
++@objc(ENRMCodeModeControl)
++public final class ENRMCodeModeControl: UIControl {
++  private let material = UIVisualEffectView()
++  private let segments: ENRMPreviewSegments
++
++  @objc public var previewSelected: Bool {
++    get { segments.selectedSegmentIndex == 1 }
++    set {
++      segments.selectedSegmentIndex = newValue ? 1 : 0
++      segments.accessibilityValue = newValue ? "المعاينة" : "المصدر"
++    }
++  }
++
++  public override init(frame: CGRect) {
++    let source = UIImage(systemName: "chevron.left.forwardslash.chevron.right")!
++    let preview = UIImage(systemName: "play.fill")!
++    source.accessibilityLabel = "المصدر"
++    preview.accessibilityLabel = "المعاينة"
++    segments = ENRMPreviewSegments(items: [source, preview])
++    super.init(frame: frame)
++    semanticContentAttribute = .forceLeftToRight
++    material.layer.cornerRadius = 18
++    material.layer.cornerCurve = .continuous
++    material.clipsToBounds = true
++    addSubview(material)
++    material.contentView.addSubview(segments)
++    let clear = UIGraphicsImageRenderer(size: CGSize(width: 1, height: 1)).image { _ in }
++    segments.setBackgroundImage(clear, for: .normal, barMetrics: .default)
++    segments.setDividerImage(clear, forLeftSegmentState: .normal, rightSegmentState: .normal, barMetrics: .default)
++    segments.accessibilityLabel = "طريقة عرض الكود"
++    segments.addTarget(self, action: #selector(changed), for: .valueChanged)
++    previewSelected = false
++    updateMaterial()
++  }
++
++  required init?(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
++
++  @objc public func applyPrimaryColor(_ color: UIColor, dark: Bool) {
++    overrideUserInterfaceStyle = dark ? .dark : .light
++    segments.tintColor = color
++    updateMaterial()
++  }
++
++  private func updateMaterial() {
++    if UIAccessibility.isReduceTransparencyEnabled {
++      material.effect = nil
++      material.backgroundColor = .secondarySystemBackground
++    } else if #available(iOS 26.0, *) {
++      let glass = UIGlassEffect(style: .regular)
++      glass.isInteractive = true
++      material.backgroundColor = .clear
++      material.effect = glass
++    } else {
++      material.backgroundColor = .clear
++      material.effect = UIBlurEffect(style: .systemThinMaterial)
++    }
++  }
++
++  @objc private func changed() {
++    segments.accessibilityValue = previewSelected ? "المعاينة" : "المصدر"
++    sendActions(for: .valueChanged)
++  }
++
++  public override func layoutSubviews() {
++    super.layoutSubviews()
++    material.frame = CGRect(x: 0, y: (bounds.height - 36) / 2, width: bounds.width, height: 36)
++    segments.frame = material.bounds
++  }
++
++  public override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
++    guard !isHidden, isUserInteractionEnabled, alpha > 0.01, bounds.contains(point) else { return nil }
++    return segments.hitTest(convert(point, to: segments), with: event) ?? self
++  }
++}
++
++/// Owned as a real child of the React view controller. MermaidKit's hosting
++/// controller is in turn a child of this controller; no unowned hosting views.
++@objc(ENRMCodePreviewController)
++public final class ENRMCodePreviewController: UIViewController, WKNavigationDelegate {
++  private let kind: String
++  private var htmlWebView: WKWebView?
++  private var mermaidHost: UIHostingController<AnyView>?
++  private let errorLabel = UILabel()
++  private var source = ""
++  private var appearanceKey = ""
++  private var loadingKey = ""
++  private var activeNavigation: WKNavigation?
++  private var allowInitialHTMLDocument = false
++  private var disposed = false
++  private var generation = 0
++
++  // Inline CSS only. No data/file/remote images, fonts, frames, scripts, forms,
++  // connections or origin inheritance. Additional source CSP cannot loosen it.
++  private static let htmlCSP = "default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src 'none'; font-src 'none'; connect-src 'none'; frame-src 'none'; object-src 'none'; media-src 'none'; base-uri 'none'; form-action 'none'"
++
++  @objc public init(kind: String) {
++    self.kind = kind
++    super.init(nibName: nil, bundle: nil)
++  }
++  required init?(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
++
++  public override func viewDidLoad() {
++    super.viewDidLoad()
++    view.clipsToBounds = true
++    errorLabel.text = "تعذّر عرض المعاينة. يمكنك العودة إلى المصدر."
++    errorLabel.numberOfLines = 0
++    errorLabel.textAlignment = .center
++    errorLabel.font = .systemFont(ofSize: 14)
++    errorLabel.isHidden = true
++    errorLabel.accessibilityLabel = errorLabel.text
++    view.addSubview(errorLabel)
++    if kind == "html" {
++      let configuration = WKWebViewConfiguration()
++      configuration.websiteDataStore = .nonPersistent()
++      configuration.defaultWebpagePreferences.allowsContentJavaScript = false
++      configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
++      // No scripts or message handlers are installed for model-owned HTML.
++      let web = WKWebView(frame: .zero, configuration: configuration)
++      web.navigationDelegate = self
++      web.isOpaque = false
++      web.scrollView.bounces = false
++      web.allowsBackForwardNavigationGestures = false
++      view.insertSubview(web, at: 0)
++      htmlWebView = web
++    }
++  }
++
++  @objc(updateWithSource:dark:backgroundColor:textColor:)
++  public func update(source: String, dark: Bool, backgroundColor: UIColor, textColor: UIColor) {
++    guard !disposed else { return }
++    loadViewIfNeeded()
++    let key = "\(dark)|\(Self.cssColor(backgroundColor))|\(Self.cssColor(textColor))"
++    guard self.source != source || appearanceKey != key else { return }
++    self.source = source
++    appearanceKey = key
++    generation += 1
++    overrideUserInterfaceStyle = dark ? .dark : .light
++    view.backgroundColor = backgroundColor
++    errorLabel.backgroundColor = backgroundColor
++    errorLabel.textColor = textColor
++    errorLabel.isHidden = true
++    htmlWebView?.isHidden = false
++    htmlWebView?.backgroundColor = backgroundColor
++    if kind == "html" {
++      // Native navigation completion coalesces pending HTML updates; no timer.
++      if activeNavigation == nil { loadLatestHTML() }
++    } else if kind == "mermaid" {
++      let revision = generation
++      let configuration = MermaidConfiguration(theme: dark ? .dark : .default,
++        securityLevel: .strict, source: .bundledDefault, backgroundColor: "transparent")
++      let diagram = MermaidView(source, configuration: configuration,
++        interaction: .panZoom, onLinkActivated: { _ in }, onError: { [weak self] _ in
++          guard let self, !self.disposed, self.generation == revision else { return }
++          self.showFailure()
++        })
++      let root = AnyView(diagram)
++      if let host = mermaidHost {
++        host.view.isHidden = false
++        host.rootView = root
++      } else {
++        let host = UIHostingController(rootView: root)
++        host.view.backgroundColor = .clear
++        addChild(host)
++        view.insertSubview(host.view, at: 0)
++        host.didMove(toParent: self)
++        mermaidHost = host
++      }
++      view.setNeedsLayout()
++    }
++  }
++
++  private func loadLatestHTML() {
++    guard !disposed, let web = htmlWebView else { return }
++    loadingKey = source + appearanceKey
++    allowInitialHTMLDocument = true
++    let background = Self.cssColor(view.backgroundColor ?? .clear)
++    let foreground = Self.cssColor(errorLabel.textColor ?? .label)
++    let document = "<!doctype html><html><head><meta charset=\"utf-8\"><meta http-equiv=\"Content-Security-Policy\" content=\"\(Self.htmlCSP)\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><style>html,body{margin:0;background:\(background);color:\(foreground);font-family:-apple-system,system-ui}body{padding:12px;box-sizing:border-box}</style></head><body>" + source + "</body></html>"
++    activeNavigation = web.loadHTMLString(document, baseURL: nil)
++    if activeNavigation == nil { showFailure() }
++  }
++
++  public func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
++    preferences: WKWebpagePreferences, decisionHandler: @escaping (WKNavigationActionPolicy, WKWebpagePreferences) -> Void) {
++    preferences.allowsContentJavaScript = false
++    let url = navigationAction.request.url
++    let initialDocument = url == nil || url?.absoluteString == "about:blank"
++    let allowed = !disposed && allowInitialHTMLDocument && initialDocument &&
++      navigationAction.navigationType == .other && navigationAction.targetFrame?.isMainFrame == true
++    if allowed { allowInitialHTMLDocument = false }
++    decisionHandler(allowed ? .allow : .cancel, preferences)
++  }
++
++  public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
++    guard !disposed, navigation === activeNavigation else { return }
++    activeNavigation = nil
++    if loadingKey != source + appearanceKey { loadLatestHTML() }
++  }
++  public func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
++    navigationFailed(navigation)
++  }
++  public func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
++    navigationFailed(navigation)
++  }
++  private func navigationFailed(_ navigation: WKNavigation?) {
++    guard !disposed, navigation === activeNavigation else { return }
++    activeNavigation = nil
++    if loadingKey != source + appearanceKey { loadLatestHTML() } else { showFailure() }
++  }
++  private func showFailure() {
++    // Never display/log engine errors or raw student/model content.
++    htmlWebView?.isHidden = true
++    mermaidHost?.view.isHidden = true
++    errorLabel.isHidden = false
++  }
++
++  public override func viewDidLayoutSubviews() {
++    super.viewDidLayoutSubviews()
++    htmlWebView?.frame = view.bounds
++    mermaidHost?.view.frame = view.bounds
++    errorLabel.frame = view.bounds.insetBy(dx: 20, dy: 20)
++  }
++
++  @objc public func dispose() {
++    guard !disposed else { return }
++    disposed = true
++    generation += 1
++    htmlWebView?.stopLoading()
++    htmlWebView?.navigationDelegate = nil
++    htmlWebView?.uiDelegate = nil
++    htmlWebView?.configuration.userContentController.removeAllScriptMessageHandlers()
++    htmlWebView?.configuration.userContentController.removeAllUserScripts()
++    htmlWebView?.removeFromSuperview()
++    htmlWebView = nil
++    activeNavigation = nil
++    if let host = mermaidHost {
++      // Root replacement invokes MermaidKit.dismantleUIView, which stops its
++      // WKWebView and removes every engine script handler before release.
++      host.rootView = AnyView(EmptyView())
++      host.willMove(toParent: nil)
++      host.view.removeFromSuperview()
++      host.removeFromParent()
++      mermaidHost = nil
++    }
++    source = ""
++  }
++
++  private static func cssColor(_ color: UIColor) -> String {
++    var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
++    color.getRed(&r, green: &g, blue: &b, alpha: &a)
++    return "rgba(\(Int(r * 255)),\(Int(g * 255)),\(Int(b * 255)),\(a))"
++  }
++}
++#endif
 diff --git a/node_modules/react-native-enriched-markdown/ios/code/ENRMSyntaxHighlighterBridge.swift b/node_modules/react-native-enriched-markdown/ios/code/ENRMSyntaxHighlighterBridge.swift
 new file mode 100644
 index 0000000..d7627bd
@@ -468,6 +765,65 @@ index 0000000..d7627bd
 +  }
 +}
 +#endif
+diff --git a/node_modules/react-native-enriched-markdown/ios/code/PythagorasPreview-LICENSE.txt b/node_modules/react-native-enriched-markdown/ios/code/PythagorasPreview-LICENSE.txt
+new file mode 100644
+index 0000000..8e249c0
+--- /dev/null
++++ b/node_modules/react-native-enriched-markdown/ios/code/PythagorasPreview-LICENSE.txt
+@@ -0,0 +1,53 @@
++MermaidKit pinned at a6a5c15f3c91ff4061780c235a44716a988dc475.
++Official bundled Mermaid 11.15.0. The following upstream notices ship with the app.
++
++MIT License
++
++Copyright (c) 2026 Bradd Schick
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in all
++copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++SOFTWARE.
++
++MermaidKit bundles third-party software. Their licenses are reproduced below.
++
++================================================================================
++mermaid — https://github.com/mermaid-js/mermaid
++Vendored at: Sources/MermaidKit/Resources/mermaid.min.js (version 11.15.0)
++================================================================================
++
++The MIT License (MIT)
++
++Copyright (c) 2014 - 2022 Knut Sveidqvist
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in all
++copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++SOFTWARE.
 diff --git a/node_modules/react-native-enriched-markdown/ios/code/PythagorasSyntax-LICENSE.txt b/node_modules/react-native-enriched-markdown/ios/code/PythagorasSyntax-LICENSE.txt
 new file mode 100644
 index 0000000..5d25844
@@ -526,23 +882,24 @@ index 0000000..5d25844
 +POSSIBILITY OF SUCH DAMAGE.
 diff --git a/node_modules/react-native-enriched-markdown/ios/utils/ENRMCodeLanguage.h b/node_modules/react-native-enriched-markdown/ios/utils/ENRMCodeLanguage.h
 new file mode 100644
-index 0000000..d442d1a
+index 0000000..8a4d1f3
 --- /dev/null
 +++ b/node_modules/react-native-enriched-markdown/ios/utils/ENRMCodeLanguage.h
-@@ -0,0 +1,7 @@
+@@ -0,0 +1,8 @@
 +#import <Foundation/Foundation.h>
 +@class MarkdownASTNode;
 +NS_ASSUME_NONNULL_BEGIN
 +NSString *ENRMCodeLanguageLabel(NSString *_Nullable language);
 +NSString *_Nullable ENRMCodeHighlightLanguage(NSString *_Nullable language);
++NSString *_Nullable ENRMCodePreviewLanguage(NSString *_Nullable language);
 +NSString *ENRMRawCodeContent(MarkdownASTNode *node);
 +NS_ASSUME_NONNULL_END
 diff --git a/node_modules/react-native-enriched-markdown/ios/utils/ENRMCodeLanguage.m b/node_modules/react-native-enriched-markdown/ios/utils/ENRMCodeLanguage.m
 new file mode 100644
-index 0000000..75fd578
+index 0000000..6583b7d
 --- /dev/null
 +++ b/node_modules/react-native-enriched-markdown/ios/utils/ENRMCodeLanguage.m
-@@ -0,0 +1,58 @@
+@@ -0,0 +1,65 @@
 +#import "ENRMCodeLanguage.h"
 +#import "MarkdownASTNode.h"
 +static NSString *ENRMSanitizedCodeLanguage(NSString *language)
@@ -593,6 +950,13 @@ index 0000000..75fd578
 +      @"asm": @"x86asm", @"assembly": @"x86asm", @"rs": @"rust", @"golang": @"go", @"gql": @"graphql", @"docker": @"dockerfile", @"patch": @"diff", @"tex": @"latex", @"md": @"markdown", @"make": @"makefile", @"https": @"http" };
 +  });
 +  return grammars[normalized] ?: normalized;
++}
++NSString *ENRMCodePreviewLanguage(NSString *language)
++{
++  // Exact original metadata families only; highlighting aliases and sanitized
++  // display labels never grant an executable preview capability.
++  NSString *normalized = [(language ?: @"") stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]].lowercaseString;
++  return [@[@"html", @"mermaid"] containsObject:normalized] ? normalized : nil;
 +}
 +NSString *ENRMRawCodeContent(MarkdownASTNode *node)
 +{
@@ -721,10 +1085,10 @@ index d84d2e4..1208df6 100644
        ENRMRenderResult *rendered = ENRMRenderASTNodes(textSegment.nodes, config, allowTrailingMargin, allowFontScaling,
 diff --git a/node_modules/react-native-enriched-markdown/ios/views/ENRMCodeBlockContainerView.h b/node_modules/react-native-enriched-markdown/ios/views/ENRMCodeBlockContainerView.h
 new file mode 100644
-index 0000000..a5a2740
+index 0000000..f025ddb
 --- /dev/null
 +++ b/node_modules/react-native-enriched-markdown/ios/views/ENRMCodeBlockContainerView.h
-@@ -0,0 +1,13 @@
+@@ -0,0 +1,14 @@
 +#import "ENRMUIKit.h"
 +#include <TargetConditionals.h>
 +@class StyleConfig;
@@ -733,6 +1097,7 @@ index 0000000..a5a2740
 +@interface ENRMCodeBlockContainerView : RCTUIView <UIScrollViewDelegate>
 +@property (nonatomic, strong) StyleConfig *config;
 +@property (nonatomic, copy) NSString *menuCopyLabel;
++@property (nonatomic, copy) void (^onIntrinsicPresentationChanged)(void);
 +- (instancetype)initWithConfig:(StyleConfig *)config;
 +- (void)applyCodeNode:(MarkdownASTNode *)node;
 +- (CGFloat)measureHeight:(CGFloat)width;
@@ -740,10 +1105,10 @@ index 0000000..a5a2740
 +#endif
 diff --git a/node_modules/react-native-enriched-markdown/ios/views/ENRMCodeBlockContainerView.m b/node_modules/react-native-enriched-markdown/ios/views/ENRMCodeBlockContainerView.m
 new file mode 100644
-index 0000000..eca0b68
+index 0000000..7afebcf
 --- /dev/null
 +++ b/node_modules/react-native-enriched-markdown/ios/views/ENRMCodeBlockContainerView.m
-@@ -0,0 +1,195 @@
+@@ -0,0 +1,308 @@
 +#import "ENRMCodeBlockContainerView.h"
 +#import "ENRMCodeLanguage.h"
 +#import "MarkdownASTNode.h"
@@ -753,7 +1118,11 @@ index 0000000..eca0b68
 +#ifndef ENRICHED_MARKDOWN_SYNTAX
 +#define ENRICHED_MARKDOWN_SYNTAX 0
 +#endif
++#ifndef ENRICHED_MARKDOWN_PREVIEW
++#define ENRICHED_MARKDOWN_PREVIEW 0
++#endif
 +#if !TARGET_OS_OSX
++#import <React/UIView+React.h>
 +#if ENRICHED_MARKDOWN_SYNTAX
 +#if __has_include("ReactNativeEnrichedMarkdown-Swift.h")
 +#import "ReactNativeEnrichedMarkdown-Swift.h"
@@ -764,7 +1133,16 @@ index 0000000..eca0b68
 +
 +@interface ENRMCodeBlockContainerView ()
 +- (void)requestSyntaxColorsForLanguage:(NSString *)language;
++#if ENRICHED_MARKDOWN_PREVIEW
++- (void)updatePreviewPresentation;
++- (void)detachPreviewController;
++- (void)disposePreviewController;
++- (void)previewModeChanged:(ENRMCodeModeControl *)control;
++#endif
 +@end
++
++// Shared by the initial icon and copy feedback reset; glyph polish is deferred.
++static NSString *const ENRMCodeCopySymbolName = @"doc.on.doc";
 +
 +// Pythagoras: native AST-backed code block, sharing the segmented Fabric height contract.
 +@implementation ENRMCodeBlockContainerView {
@@ -779,6 +1157,12 @@ index 0000000..eca0b68
 +  NSUInteger _copyFeedbackRevision;
 +  NSUInteger _highlightRevision;
 +  NSString *_highlightClientID;
++  BOOL _previewing;
++#if ENRICHED_MARKDOWN_PREVIEW
++  NSString *_previewLanguage;
++  ENRMCodeModeControl *_modeControl;
++  ENRMCodePreviewController *_previewController;
++#endif
 +#if ENRICHED_MARKDOWN_SYNTAX
 +  ENRMSyntaxHighlightRequest *_highlightRequest;
 +#endif
@@ -812,7 +1196,7 @@ index 0000000..eca0b68
 +    _codeView.textContainer.lineBreakMode = NSLineBreakByClipping;
 +    [_horizontalScroll addSubview:_codeView];
 +    _copyButton = [UIButton buttonWithType:UIButtonTypeSystem];
-+    [_copyButton setImage:[UIImage systemImageNamed:@"doc.on.doc"] forState:UIControlStateNormal];
++    [_copyButton setImage:[UIImage systemImageNamed:ENRMCodeCopySymbolName] forState:UIControlStateNormal];
 +    [_copyButton addTarget:self action:@selector(copyCode) forControlEvents:UIControlEventTouchUpInside];
 +    [_copyButton setPreferredSymbolConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:18 weight:UIImageSymbolWeightRegular] forImageInState:UIControlStateNormal];
 +    [_header addSubview:_copyButton];
@@ -831,10 +1215,25 @@ index 0000000..eca0b68
 +#endif
 +  _highlightRevision++;
 +  _rawCode = [ENRMRawCodeContent(node) copy];
++#if ENRICHED_MARKDOWN_PREVIEW
++  NSString *previewLanguage = ENRMCodePreviewLanguage(node.attributes[@"language"]);
++  if (![_previewLanguage isEqualToString:previewLanguage]) {
++    _previewing = NO;
++    [self disposePreviewController];
++    _previewLanguage = [previewLanguage copy];
++  }
++  if (_previewLanguage && !_modeControl) {
++    _modeControl = [[ENRMCodeModeControl alloc] initWithFrame:CGRectZero];
++    [_modeControl addTarget:self action:@selector(previewModeChanged:) forControlEvents:UIControlEventValueChanged];
++    [_header addSubview:_modeControl];
++  }
++  _modeControl.hidden = !_previewLanguage;
++  _modeControl.previewSelected = _previewing;
++#endif
 +  _language.text = ENRMCodeLanguageLabel(node.attributes[@"language"]);
 +  UIFont *font = self.config.codeBlockFont ?: [UIFont monospacedSystemFontOfSize:14 weight:UIFontWeightRegular];
 +  _language.font = [UIFont systemFontOfSize:MAX(14, font.pointSize) weight:UIFontWeightMedium];
-+  _language.textColor = self.config.codeBlockColor;
++  _language.textColor = self.config.paragraphColor;
 +  _language.accessibilityLabel = [@"لغة الكود: " stringByAppendingString:_language.text];
 +  _copyButton.tintColor = self.config.codeBlockColor;
 +  _copyButton.accessibilityLabel = [NSString stringWithFormat:@"%@ الكود — %@", self.menuCopyLabel, _language.text];
@@ -868,6 +1267,14 @@ index 0000000..eca0b68
 +  used = [_codeView.layoutManager usedRectForTextContainer:_codeView.textContainer];
 +  CGRect extra = _codeView.layoutManager.extraLineFragmentRect;
 +  _bodyHeight = ceil(MAX(font.lineHeight, MAX(CGRectGetMaxY(used), CGRectGetMaxY(extra)))) + padding * 2;
++#if ENRICHED_MARKDOWN_PREVIEW
++  CGFloat r = 1, g = 1, b = 1, a = 1;
++  [self.config.codeBlockBackgroundColor getRed:&r green:&g blue:&b alpha:&a];
++  [_modeControl applyPrimaryColor:self.config.paragraphColor dark:(0.2126 * r + 0.7152 * g + 0.0722 * b) < 0.5];
++  _copyButton.hidden = _previewing;
++  _horizontalScroll.hidden = _previewing;
++  if (_previewing) [self updatePreviewPresentation];
++#endif
 +  [self setNeedsLayout];
 +  [self requestSyntaxColorsForLanguage:node.attributes[@"language"]];
 +}
@@ -896,13 +1303,16 @@ index 0000000..eca0b68
 +}
 +- (void)dealloc
 +{
++#if ENRICHED_MARKDOWN_PREVIEW
++  [self disposePreviewController];
++#endif
 +#if ENRICHED_MARKDOWN_SYNTAX
 +  [_highlightRequest cancel];
 +#endif
 +}
 +- (CGFloat)measureHeight:(CGFloat)width
 +{
-+  return [self headerHeight] + _bodyHeight;
++  return [self headerHeight] + (_previewing ? MAX(260, MIN(330, round(width * 0.85))) : _bodyHeight);
 +}
 +- (void)layoutSubviews
 +{
@@ -911,8 +1321,18 @@ index 0000000..eca0b68
 +  CGFloat headerHeight = [self headerHeight];
 +  CGFloat padding = self.config.codeBlockPadding;
 +  _header.frame = CGRectMake(0, 0, width, headerHeight);
-+  _language.frame = CGRectMake(padding, 0, MAX(0, width - padding * 2 - 52), headerHeight);
-+  _copyButton.frame = CGRectMake(MAX(0, width - padding - 44), 0, 44, MAX(44, headerHeight));
++  CGFloat previewControlWidth = 0;
++#if ENRICHED_MARKDOWN_PREVIEW
++  if (_previewLanguage) {
++    previewControlWidth = 88;
++    _modeControl.frame = CGRectMake(MAX(0, width - padding - previewControlWidth), 0, previewControlWidth, MAX(44, headerHeight));
++  }
++#endif
++  CGFloat copySlot = _previewing ? 0 : 52;
++  _language.frame = CGRectMake(padding, 0, MAX(0, width - padding * 2 - previewControlWidth - copySlot), headerHeight);
++  // Preserve the 44pt copy slot and its optical padding. Eligible blocks add
++  // the native mode control to its right; no glyph/x-position polish here.
++  _copyButton.frame = CGRectMake(MAX(0, width - padding - 44 - (previewControlWidth ? previewControlWidth + 8 : 0)), 0, 44, MAX(44, headerHeight));
 +  _horizontalScroll.frame = CGRectMake(0, headerHeight, width, _bodyHeight);
 +  CGFloat contentWidth = MAX(width, _documentWidth + padding * 2);
 +  _horizontalScroll.contentSize = CGSizeMake(contentWidth, _bodyHeight);
@@ -920,7 +1340,65 @@ index 0000000..eca0b68
 +  _codeView.frame = CGRectMake(padding, 0, _documentWidth, _bodyHeight);
 +  CGFloat maximum = MAX(0, contentWidth - width);
 +  if (_horizontalScroll.contentOffset.x > maximum) _horizontalScroll.contentOffset = CGPointMake(maximum, 0);
++#if ENRICHED_MARKDOWN_PREVIEW
++  if (_previewing) _previewController.view.frame = CGRectMake(0, headerHeight, width, MAX(260, MIN(330, round(width * 0.85))));
++#endif
 +}
++#if ENRICHED_MARKDOWN_PREVIEW
++- (void)previewModeChanged:(ENRMCodeModeControl *)control
++{
++  if (!_previewLanguage || _previewing == control.previewSelected) return;
++  _previewing = control.previewSelected;
++  _copyButton.hidden = _previewing;
++  _horizontalScroll.hidden = _previewing;
++  if (_previewing) [self updatePreviewPresentation];
++  else [self detachPreviewController];
++  [self setNeedsLayout];
++  // Explicit presentation action only. The owner validates native height;
++  // code/preview surfaces never write transcript offsets or React geometry.
++  if (self.onIntrinsicPresentationChanged) self.onIntrinsicPresentationChanged();
++}
++- (void)updatePreviewPresentation
++{
++  if (!_previewing || !_previewLanguage || !self.window) return;
++  UIViewController *parent = [self reactViewController];
++  if (!parent) return;
++  if (!_previewController) _previewController = [[ENRMCodePreviewController alloc] initWithKind:_previewLanguage];
++  if (_previewController.parentViewController != parent) {
++    [self detachPreviewController];
++    [parent addChildViewController:_previewController];
++    [self addSubview:_previewController.view];
++    [_previewController didMoveToParentViewController:parent];
++  }
++  CGFloat r = 1, g = 1, b = 1, a = 1;
++  [self.config.codeBlockBackgroundColor getRed:&r green:&g blue:&b alpha:&a];
++  [_previewController updateWithSource:_rawCode dark:(0.2126 * r + 0.7152 * g + 0.0722 * b) < 0.5 backgroundColor:self.config.codeBlockBackgroundColor textColor:self.config.paragraphColor];
++  [self setNeedsLayout];
++}
++- (void)detachPreviewController
++{
++  if (!_previewController.parentViewController) return;
++  [_previewController willMoveToParentViewController:nil];
++  [_previewController.view removeFromSuperview];
++  [_previewController removeFromParentViewController];
++}
++- (void)disposePreviewController
++{
++  [self detachPreviewController];
++  [_previewController dispose];
++  _previewController = nil;
++}
++- (void)willMoveToWindow:(UIWindow *)newWindow
++{
++  if (!newWindow) [self disposePreviewController];
++  [super willMoveToWindow:newWindow];
++}
++- (void)didMoveToWindow
++{
++  [super didMoveToWindow];
++  if (self.window && _previewing) [self updatePreviewPresentation];
++}
++#endif
 +- (void)copyCode
 +{
 +  copyStringToPasteboard(_rawCode);
@@ -933,7 +1411,7 @@ index 0000000..eca0b68
 +  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
 +    ENRMCodeBlockContainerView *view = weakSelf;
 +    if (!view || view->_copyFeedbackRevision != revision) return;
-+    [view->_copyButton setImage:[UIImage systemImageNamed:@"doc.on.doc"] forState:UIControlStateNormal];
++    [view->_copyButton setImage:[UIImage systemImageNamed:ENRMCodeCopySymbolName] forState:UIControlStateNormal];
 +    view->_copyButton.accessibilityValue = nil;
 +  });
 +}

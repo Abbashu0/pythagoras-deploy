@@ -10,10 +10,44 @@ import {
   createChatTranscriptScrollState,
   positionChatTranscriptTurn,
   getChatTranscriptFollowTarget,
+  getChatTranscriptEndTarget,
+  shouldShowChatTranscriptScrollToBottom,
   shouldFollowChatTranscript,
   shouldRecalculateChatAnchorSpace,
   updateChatTranscriptEndVisibility,
 } from "../mobile/src/ai/chat-transcript-scroll-state";
+
+test("end affordance appears only for an off-end intentional reader", () => {
+  const bottom = createChatTranscriptScrollState();
+  const following = beginChatTranscriptTurn(bottom, "first", false);
+  const anchoring = beginChatTranscriptTurn(following, "second", true);
+  for (const state of [bottom, following, anchoring]) {
+    assert.equal(shouldShowChatTranscriptScrollToBottom(state, false), false);
+    assert.equal(shouldShowChatTranscriptScrollToBottom(state, true), false);
+  }
+  const reader = beginChatTranscriptUserDrag(following);
+  assert.equal(shouldShowChatTranscriptScrollToBottom(reader, false), true);
+  assert.equal(shouldShowChatTranscriptScrollToBottom(reader, true), false);
+});
+
+test("explicit end request waits for visible-end confirmation to re-arm follow", () => {
+  const reader = beginChatTranscriptUserDrag(createChatTranscriptScrollState());
+  assert.equal(updateChatTranscriptEndVisibility(reader, false, true), reader);
+  assert.equal(updateChatTranscriptEndVisibility(reader, true, false), reader);
+  const reached = updateChatTranscriptEndVisibility(reader, true, true);
+  assert.equal(reached.mode, "at-bottom");
+  assert.equal(shouldFollowChatTranscript(reached), true);
+  assert.equal(shouldShowChatTranscriptScrollToBottom(reached, true), false);
+});
+
+test("end target excludes unused anchor capacity and respects actual native bounds", () => {
+  const geometry = { contentHeight: 2000, viewportHeight: 800, bottomOcclusion: 160, contentInsetBottom: 5000 };
+  assert.equal(getChatTranscriptEndTarget(geometry), 1360);
+  assert.equal(getChatTranscriptEndTarget({ ...geometry, contentInsetBottom: 100 }), 1300);
+  assert.equal(getChatTranscriptEndTarget({ ...geometry, contentHeight: 300, contentInsetBottom: 100 }), 0);
+  assert.equal(getChatTranscriptEndTarget({ ...geometry, viewportHeight: 0 }), null);
+  assert.equal(getChatTranscriptEndTarget({ ...geometry, contentHeight: NaN }), null);
+});
 
 test("first send follows without a manual anchor; later turns anchor once", () => {
   let state = createChatTranscriptScrollState();

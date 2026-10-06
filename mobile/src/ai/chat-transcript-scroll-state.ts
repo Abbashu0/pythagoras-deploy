@@ -62,6 +62,25 @@ export function shouldFollowChatTranscript(
   return state.mode === "following" || state.mode === "at-bottom";
 }
 
+/** Reader intent and the controller's end signal own this affordance. Passive
+ * streaming growth cannot make it appear while the transcript is following. */
+export function shouldShowChatTranscriptScrollToBottom(
+  state: ChatTranscriptScrollState,
+  endVisible: boolean,
+): boolean {
+  return state.mode === "user-scrolled-away" && !endVisible;
+}
+
+/** Explicit button action only. Reach the document above the composer without
+ * jumping into unused anchor blankSpace; clamp to the actual native range. */
+export function getChatTranscriptEndTarget(geometry: {
+  contentHeight: number; viewportHeight: number; bottomOcclusion: number; contentInsetBottom: number;
+}): number | null {
+  if (!Object.values(geometry).every(Number.isFinite) || geometry.viewportHeight <= 0) return null;
+  const nativeMaximum = Math.max(0, geometry.contentHeight - geometry.viewportHeight + Math.max(0, geometry.contentInsetBottom));
+  return Math.min(nativeMaximum, Math.max(0, geometry.contentHeight - geometry.viewportHeight + Math.max(0, geometry.bottomOcclusion)));
+}
+
 export function shouldRecalculateChatAnchorSpace(
   state: ChatTranscriptScrollState,
   streamIsActive: boolean,

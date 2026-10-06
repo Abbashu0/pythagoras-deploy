@@ -87,6 +87,8 @@ import {
   createChatTranscriptScrollState,
   positionChatTranscriptTurn,
   getChatTranscriptFollowTarget,
+  getChatTranscriptEndTarget,
+  shouldShowChatTranscriptScrollToBottom,
   updateChatTranscriptEndVisibility,
   type ChatTranscriptScrollState,
 } from './chat-transcript-scroll-state';
@@ -95,6 +97,7 @@ import { beginChatSendTiming, reportChatSendTiming, beginChatPresentationTiming,
 import { presentUserMessage, USER_MESSAGE_PRESENTATION } from './user-message-presentation';
 import { captureUserMessageCollapseAnchor, resolveUserMessageCollapseOffset, recordUserMessageHeight, userMessageHeightFloor, type UserMessageCollapseAnchor, type UserMessageHeightCache, type UserMessageMode, type UserMessageRowGeometry } from './user-message-layout';
 import { ChatEdgeFades } from './chat-edge-fades.ios';
+import { ChatScrollToBottomAffordance } from './chat-scroll-to-bottom.ios';
 import type { ChatComposerProps, ChatReaction, ChatTurn } from './chat-types';
 import Agent1AssistantMarkdown from './assistant-enriched-markdown.ios';
 import { firstStrongTextDirection } from './rich-response/text-direction';
@@ -186,6 +189,8 @@ export function ChatComposer({
   const scrollStateRef = useRef<ChatTranscriptScrollState>(createChatTranscriptScrollState());
   const manualScrollGestureRef = useRef(false);
   const endVisibleRef = useRef(true);
+  const scrollToBottomVisibleRef = useRef(false);
+  const explicitScrollToEndRef = useRef(false);
   const readerLeftEndRef = useRef(false);
   const activeTurnIdRef = useRef(activeTurnId);
   const activeTurnStatusRef = useRef<ChatTurn['assistantStatus']>(null);
@@ -203,6 +208,7 @@ export function ChatComposer({
   const previousLatestAttemptRef = useRef<{ turnId: string; attempt: number } | null>(null);
   const [hasSendableText, setHasSendableText] = useState(false);
   const [keyboardLiftEnabled, setKeyboardLiftEnabled] = useState(true);
+  const [scrollToBottomVisible, setScrollToBottomVisible] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [reactions, setReactions] = useState<Record<string, ChatReaction>>({});
   const latestTurn = turns[turns.length - 1];
@@ -286,11 +292,18 @@ export function ChatComposer({
     else console.info('[Chat geometry]', { event, at: Date.now(), ...values });
   }, [getKeyboardObstruction, layoutDiagnosticsEnabled]);
 
+  const updateScrollToBottomVisibility = useCallback((state: ChatTranscriptScrollState) => {
+    const visible = shouldShowChatTranscriptScrollToBottom(state, endVisibleRef.current);
+    if (scrollToBottomVisibleRef.current === visible) return;
+    scrollToBottomVisibleRef.current = visible;
+    setScrollToBottomVisible(visible);
+  }, []);
   const setScrollState = useCallback((
     next: ChatTranscriptScrollState,
     reason: string,
   ) => {
     const previous = scrollStateRef.current;
+    updateScrollToBottomVisibility(next);
     if (previous === next) return;
     scrollStateRef.current = next;
     const canLift = (state: ChatTranscriptScrollState) =>
@@ -305,7 +318,7 @@ export function ChatComposer({
       });
       reportGeometryDiagnostic('scroll-policy-transition');
     }
-  }, [reportGeometryDiagnostic, reportLayoutDiagnostic]);
+  }, [reportGeometryDiagnostic, reportLayoutDiagnostic, updateScrollToBottomVisibility]);
 
   const liveStreamActive = useCallback(() => {
     const status = activeTurnStatusRef.current;
@@ -466,6 +479,7 @@ export function ChatComposer({
     }
   }, [followMeasuredAssistantGrowth, getKeyboardObstruction, keyboardInMotion, setScrollState]);
   const handleScrollBeginDrag = useCallback(() => {
+    explicitScrollToEndRef.current = false;
     pendingUserCollapseRef.current = null;
     manualScrollGestureRef.current = true;
     readerLeftEndRef.current = !endVisibleRef.current;
@@ -502,14 +516,31 @@ export function ChatComposer({
       updateChatTranscriptEndVisibility(
         scrollStateRef.current,
         visible,
-        false,
+        visible && explicitScrollToEndRef.current,
       ),
       visible ? 'passive-end-visible' : 'end-left-viewport',
     );
+    if (visible && explicitScrollToEndRef.current) {
+      explicitScrollToEndRef.current = false;
+      userPresentationReadingRef.current = false;
+    }
     if (visible) updateAnchorBlankSpace();
     if (releaseInsetOwner) followMeasuredAssistantGrowth();
     reportLayoutDiagnostic('transcript-end-visibility', { visible });
   }, [followMeasuredAssistantGrowth, reportLayoutDiagnostic, setScrollState, updateAnchorBlankSpace]);
+  const handleScrollToBottom = useCallback(() => {
+    const scrollView = transcriptScrollRef.current;
+    const target = getChatTranscriptEndTarget({
+      contentHeight: contentHeightRef.current, viewportHeight: viewportHeightRef.current,
+      bottomOcclusion: composerHeightRef.current + getKeyboardObstruction(),
+      contentInsetBottom: keyboardInsetBottomRef.current,
+    });
+    if (!scrollView || target === null) return;
+    explicitScrollToEndRef.current = true;
+    lastRequestedOffsetRef.current = target;
+    // One reader-requested write. onEndVisible(true) re-arms the existing state.
+    scrollView.scrollTo({ y: target, animated: false });
+  }, [getKeyboardObstruction]);
   const handleContentSizeChange = useCallback((width: number, height: number) => {
     contentHeightRef.current = height;
     contentRevisionRef.current++;
@@ -831,6 +862,10 @@ export function ChatComposer({
         style={styles.composerSticky}
         offset={{ closed: -insets.bottom, opened: 0 }}
       >
+        <ChatScrollToBottomAffordance visible={scrollToBottomVisible}
+          composerHeight={composerScrollInset} safeAreaBottom={insets.bottom}
+          colorScheme={resolvedColorScheme} tint={palette.text}
+          onPress={handleScrollToBottom} />
         <Host
           colorScheme={resolvedColorScheme}
           layoutDirection="leftToRight"
