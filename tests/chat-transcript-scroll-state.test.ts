@@ -194,7 +194,7 @@ test("completion preserves exactly the capacity needed to avoid native clamping 
   const following = beginChatTranscriptTurn(createChatTranscriptScrollState(), "second", false);
   assert.equal(consumeChatTranscriptAnchorSpace(following, 600, 0, 500, 650, 700, 130), 550);
   assert.equal(consumeChatTranscriptAnchorSpace(following, 600, 0, 0, 900, 700, 130), 0);
-  assert.equal(consumeChatTranscriptAnchorSpace(beginChatTranscriptUserDrag(following), 600, 0, 100, 1400, 700, 130), 600);
+  assert.equal(consumeChatTranscriptAnchorSpace(beginChatTranscriptUserDrag(following), 600, 0, 100, 1400, 700, 130), 0);
   assert.equal(calculateChatTranscriptAnchorBlankSpace(500, 1100, 700, 130), 0);
 });
 
@@ -203,6 +203,44 @@ test("dragging during new-turn layout cancels the pending anchor", () => {
   const userAway = beginChatTranscriptUserDrag(anchoring);
 
   assert.equal(positionChatTranscriptTurn(userAway, "t"), userAway);
+});
+
+test("CASE 1: manual reader releases abandoned anchor reserve monotonically as real content grows", () => {
+  const reader = beginChatTranscriptUserDrag(beginChatTranscriptTurn(createChatTranscriptScrollState(), "long", false));
+  let space = 600;
+  for (const contentHeight of [650, 800, 1100, 1400, 2000]) {
+    const staleAnchor = calculateChatTranscriptAnchorBlankSpace(900, contentHeight, 700, 130);
+    const next = consumeChatTranscriptAnchorSpace(reader, space, staleAnchor, 500, contentHeight, 700, 130);
+    assert.ok(next <= space);
+    assert.ok(contentHeight - 700 + Math.max(130, next) >= 500);
+    assert.equal(shouldFollowChatTranscript(reader), false);
+    space = next;
+  }
+  assert.equal(space, 0);
+});
+
+test("CASE 2: terminal completion releases unused manual-reader reserve without re-arming follow", () => {
+  const reader = beginChatTranscriptUserDrag(createChatTranscriptScrollState());
+  assert.equal(consumeChatTranscriptAnchorSpace(reader, 2400, 2100, 100, 1400, 700, 130), 0);
+  assert.equal(updateChatTranscriptEndVisibility(reader, true, false), reader);
+  assert.equal(shouldFollowChatTranscript(reader), false);
+});
+
+test("CASE 3: manual reader retains precisely the reserve needed at its current offset and never increases it", () => {
+  const reader = beginChatTranscriptUserDrag(createChatTranscriptScrollState());
+  const retained = consumeChatTranscriptAnchorSpace(reader, 600, 1200, 500, 650, 700, 130);
+  assert.equal(retained, 550);
+  assert.equal(650 - 700 + Math.max(130, retained), 500);
+  assert.equal(consumeChatTranscriptAnchorSpace(reader, retained, 1200, 500, 600, 700, 130), retained);
+});
+
+test("CASE 4: return to real end leaves ordinary Composer capacity rather than a giant blank range", () => {
+  const reader = beginChatTranscriptUserDrag(createChatTranscriptScrollState());
+  const space = consumeChatTranscriptAnchorSpace(reader, 2400, 0, 500, 2200, 700, 130);
+  assert.equal(space, 0);
+  const end = updateChatTranscriptEndVisibility(reader, true, true);
+  assert.equal(consumeChatTranscriptAnchorSpace(end, space, 0, 1630, 2200, 700, 130), 0);
+  assert.equal(getChatTranscriptEndTarget({ contentHeight: 2200, viewportHeight: 700, bottomOcclusion: 130, contentInsetBottom: 130 }), 1630);
 });
 
 test("anchor blank space tracks only content below the target and cannot feed back into itself", () => {

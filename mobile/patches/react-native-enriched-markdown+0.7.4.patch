@@ -1,8 +1,8 @@
 diff --git a/node_modules/react-native-enriched-markdown/ReactNativeEnrichedMarkdown.podspec b/node_modules/react-native-enriched-markdown/ReactNativeEnrichedMarkdown.podspec
-index 4d31a7a..b94aaf1 100644
+index 4d31a7a..c2f68d5 100644
 --- a/node_modules/react-native-enriched-markdown/ReactNativeEnrichedMarkdown.podspec
 +++ b/node_modules/react-native-enriched-markdown/ReactNativeEnrichedMarkdown.podspec
-@@ -40,11 +40,34 @@ Pod::Spec.new do |s|
+@@ -40,11 +40,35 @@ Pod::Spec.new do |s|
      enable_math = false
    end
 
@@ -13,6 +13,7 @@ index 4d31a7a..b94aaf1 100644
 +  excluded_sources << "ios/math/**/*.swift" unless enable_math
 +  excluded_sources << "ios/code/ENRMSyntaxHighlighterBridge.swift" unless enable_syntax
 +  excluded_sources << "ios/code/ENRMCodePreviewController.swift" unless enable_syntax
++  excluded_sources << "ios/code/ENRMCodeFullscreenController.swift" unless enable_syntax
 +  s.exclude_files = excluded_sources unless excluded_sources.empty?
 +
 +  # HighlighterSwift 3.1.0: pin the audited tag's commit, including its Highlight.js 11.11.1 resources.
@@ -39,7 +40,7 @@ index 4d31a7a..b94aaf1 100644
    if enable_math
      preprocessor_defs += ' ENRICHED_MARKDOWN_MATH=1'
      spm_dependency(s,
-@@ -52,6 +75,9 @@ Pod::Spec.new do |s|
+@@ -52,6 +76,9 @@ Pod::Spec.new do |s|
        requirement: {kind: 'upToNextMajorVersion', minimumVersion: '0.1.12'},
        products: ['RaTeX']
      )
@@ -50,7 +51,7 @@ index 4d31a7a..b94aaf1 100644
 
    pod_xcconfig = {
 diff --git a/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdown.mm b/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdown.mm
-index 7ad95d7..9730241 100644
+index 7ad95d7..316b7e9 100644
 --- a/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdown.mm
 +++ b/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdown.mm
 @@ -40,6 +40,7 @@
@@ -83,7 +84,19 @@ index 7ad95d7..9730241 100644
    int _heightUpdateCounter;
  
    FontScaleObserver *_fontScaleObserver;
-@@ -219,6 +228,27 @@ static char kENRMSegmentFadeAnimatorKey;
+@@ -130,6 +139,11 @@ static char kENRMSegmentFadeAnimatorKey;
+     _props = defaultProps;
+
+     self.backgroundColor = [RCTUIColor clearColor];
++#if !TARGET_OS_OSX
++    // Segment presentation can change before Fabric acknowledges its height.
++    // Never let native children paint beyond the current RN Markdown bounds.
++    self.clipsToBounds = YES;
++#endif
+     _parser = [[ENRMMarkdownParser alloc] init];
+     _md4cFlags = [ENRMMd4cFlags defaultFlags];
+     _segmentViews = [NSMutableArray array];
+@@ -219,6 +233,27 @@ static char kENRMSegmentFadeAnimatorKey;
                              }
                            }]];
  
@@ -111,7 +124,7 @@ index 7ad95d7..9730241 100644
  #if ENRICHED_MARKDOWN_MATH
    [handlers addObject:[ENRMSegmentViewHandler handlerWithKind:ENRMSegmentKindMath
                            matchesView:^BOOL(RCTUIView *view, ENRMRenderedSegment *segment) {
-@@ -265,7 +295,15 @@ static char kENRMSegmentFadeAnimatorKey;
+@@ -265,7 +300,15 @@ static char kENRMSegmentFadeAnimatorKey;
        segmentHeight = textSize.height;
        maxContentWidth = MAX(maxContentWidth, textSize.width);
  
@@ -128,7 +141,7 @@ index 7ad95d7..9730241 100644
        yOffset += _config.tableMarginTop;
        segmentHeight = [(TableContainerView *)segment measureHeight:width];
        maxContentWidth = width;
-@@ -293,6 +331,11 @@ static char kENRMSegmentFadeAnimatorKey;
+@@ -293,6 +336,11 @@ static char kENRMSegmentFadeAnimatorKey;
      }
  
      yOffset += segmentHeight;
@@ -140,7 +153,7 @@ index 7ad95d7..9730241 100644
  
      if ([segment isKindOfClass:[TableContainerView class]] && shouldAddBottomMargin) {
        yOffset += _config.tableMarginBottom;
-@@ -413,6 +456,11 @@ static char kENRMSegmentFadeAnimatorKey;
+@@ -413,6 +461,11 @@ static char kENRMSegmentFadeAnimatorKey;
  - (void)pushSelectionMenuLabelsToSegments
  {
    for (RCTUIView *segment in _segmentViews) {
@@ -152,7 +165,7 @@ index 7ad95d7..9730241 100644
      if ([segment isKindOfClass:[TableContainerView class]]) {
        TableContainerView *tableView = (TableContainerView *)segment;
        tableView.copyLabel = _selectionMenuLabels.copyLabel;
-@@ -565,21 +613,65 @@ static char kENRMSegmentFadeAnimatorKey;
+@@ -565,21 +618,66 @@ static char kENRMSegmentFadeAnimatorKey;
    _dirtyFlags = ENRMDirtyNone;
  
    _segmentViews = result.views;
@@ -183,6 +196,7 @@ index 7ad95d7..9730241 100644
 +{
 +  _renderRevision++;
 +  _pendingHeightValidation = YES;
++  if (self.bounds.size.width > 0) [self computeSegmentLayoutForWidth:self.bounds.size.width applyFrames:YES];
 +  [self setNeedsLayout];
 +  [self validateHeightForCurrentWidth:self.bounds.size.width];
 +}
@@ -225,7 +239,7 @@ index 7ad95d7..9730241 100644
    }
  }
  
-@@ -725,7 +817,9 @@ static char kENRMSegmentFadeAnimatorKey;
+@@ -725,7 +823,9 @@ static char kENRMSegmentFadeAnimatorKey;
  - (void)layoutSubviews
  {
    [super layoutSubviews];
@@ -236,7 +250,7 @@ index 7ad95d7..9730241 100644
  }
  
  - (void)updateProps:(Props::Shared const &)props oldProps:(Props::Shared const &)oldProps
-@@ -922,10 +1016,8 @@ static char kENRMSegmentFadeAnimatorKey;
+@@ -922,10 +1022,8 @@ static char kENRMSegmentFadeAnimatorKey;
        }
      }
  
@@ -249,7 +263,7 @@ index 7ad95d7..9730241 100644
    }
  }
  
-@@ -948,6 +1040,12 @@ static char kENRMSegmentFadeAnimatorKey;
+@@ -948,6 +1046,12 @@ static char kENRMSegmentFadeAnimatorKey;
    [_segmentSignatures removeAllObjects];
  
    _cachedMarkdown = nil;
@@ -262,7 +276,7 @@ index 7ad95d7..9730241 100644
    _renderedMarkdown = nil;
    _streamingAnimation = NO;
    _tableStreamingMode = ENRMTableStreamingModeProgressive;
-@@ -981,7 +1079,14 @@ Class<RCTComponentViewProtocol> EnrichedMarkdownCls(void)
+@@ -981,7 +1085,14 @@ Class<RCTComponentViewProtocol> EnrichedMarkdownCls(void)
  - (facebook::react::SharedTouchEventEmitter)touchEventEmitterAtPoint:(CGPoint)point
  {
    for (RCTUIView *segment in _segmentViews) {
@@ -278,19 +292,289 @@ index 7ad95d7..9730241 100644
        CGPoint segmentPoint = [self convertPoint:point toView:segment];
  #if !TARGET_OS_OSX
        if ([segment pointInside:segmentPoint withEvent:nil]) {
+diff --git a/node_modules/react-native-enriched-markdown/ios/code/ENRMCodeFullscreenController.swift b/node_modules/react-native-enriched-markdown/ios/code/ENRMCodeFullscreenController.swift
+new file mode 100644
+index 0000000..dfa3826
+--- /dev/null
++++ b/node_modules/react-native-enriched-markdown/ios/code/ENRMCodeFullscreenController.swift
+@@ -0,0 +1,185 @@
++#if canImport(UIKit)
++import UIKit
++
++/// A source snapshot viewer, not a Markdown parser. It uses the same bounded
++/// foreground-only syntax service and the same non-wrapping TextKit contract.
++private final class ENRMFullscreenSource: UIView {
++  private let scroll = UIScrollView()
++  private let text = UITextView()
++  private var request: ENRMSyntaxHighlightRequest?
++  private let clientID = UUID().uuidString
++  private var documentWidth: CGFloat = 1
++  private var documentHeight: CGFloat = 1
++
++  init(source: NSAttributedString, language: String?, dark: Bool) {
++    super.init(frame: .zero)
++    clipsToBounds = true
++    scroll.clipsToBounds = true
++    scroll.directionalLockEnabled = true
++    scroll.bounces = false
++    scroll.contentInsetAdjustmentBehavior = .never
++    scroll.semanticContentAttribute = .forceLeftToRight
++    addSubview(scroll)
++    text.isEditable = false
++    text.isSelectable = true
++    text.isScrollEnabled = false
++    text.backgroundColor = .clear
++    text.semanticContentAttribute = .forceLeftToRight
++    text.textAlignment = .left
++    text.textContainer.widthTracksTextView = false
++    text.textContainer.lineFragmentPadding = 0
++    text.textContainer.lineBreakMode = .byClipping
++    text.textContainerInset = UIEdgeInsets(top: 12, left: 0, bottom: 12, right: 0)
++    text.attributedText = source.copy() as? NSAttributedString
++    text.textContainer.size = CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
++    text.layoutManager.ensureLayout(for: text.textContainer)
++    let used = text.layoutManager.usedRect(for: text.textContainer)
++    documentWidth = max(1, ceil(used.maxX) + 1)
++    text.textContainer.size.width = documentWidth
++    text.layoutManager.ensureLayout(for: text.textContainer)
++    let final = text.layoutManager.usedRect(for: text.textContainer)
++    let codeFont = source.length > 0 ? source.attribute(.font, at: 0, effectiveRange: nil) as? UIFont : nil
++    let lineHeight = (codeFont ?? UIFont.monospacedSystemFont(ofSize: 14, weight: .regular)).lineHeight
++    documentHeight = ceil(max(lineHeight, max(final.maxY, text.layoutManager.extraLineFragmentRect.maxY))) + 24
++    scroll.addSubview(text)
++    let raw = source.string
++    if let language {
++      request = ENRMSyntaxHighlighterBridge.requestColors(forSource: raw, language: language,
++        dark: dark, clientID: clientID, completion: { [weak self] colors in
++          guard let self, let colors, colors.string.utf8.elementsEqual(raw.utf8),
++                self.text.attributedText.string.utf8.elementsEqual(raw.utf8) else { return }
++          self.text.textStorage.beginEditing()
++          colors.enumerateAttribute(.foregroundColor, in: NSRange(location: 0, length: colors.length)) { color, range, _ in
++            if let color { self.text.textStorage.addAttribute(.foregroundColor, value: color, range: range) }
++          }
++          self.text.textStorage.endEditing()
++        })
++    }
++  }
++  required init?(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
++  func cancelHighlight() { request?.cancel(); request = nil }
++  deinit { request?.cancel() }
++  override func layoutSubviews() {
++    super.layoutSubviews()
++    scroll.frame = bounds
++    text.frame = CGRect(x: 12, y: 0, width: documentWidth, height: documentHeight)
++    scroll.contentSize = CGSize(width: max(bounds.width, documentWidth + 24), height: documentHeight)
++  }
++}
++
++/// Dedicated native fullScreen presentation. Source/Preview here changes only
++/// this snapshot. Closing never measures, anchors or scrolls the conversation.
++@objc(ENRMCodeFullscreenController)
++public final class ENRMCodeFullscreenController: UIViewController {
++  private let source: NSAttributedString
++  private let kind: String
++  private let language: String?
++  private let dark: Bool
++  private let surfaceColor: UIColor
++  private let primaryColor: UIColor
++  private let secondaryColor: UIColor
++  private let closeButton = UIButton(type: .system)
++  private let modes = ENRMPreviewSegments(items: ["Code", "Preview"])
++  private var sourceView: ENRMFullscreenSource?
++  private var preview: ENRMCodePreviewController?
++  private var disposed = false
++
++  @objc(initWithSource:kind:language:dark:backgroundColor:textColor:secondaryColor:)
++  public init(source: NSAttributedString, kind: String, language: String?, dark: Bool,
++    backgroundColor: UIColor, textColor: UIColor, secondaryColor: UIColor) {
++    self.source = source.copy() as! NSAttributedString
++    self.kind = kind
++    self.language = language
++    self.dark = dark
++    surfaceColor = backgroundColor
++    primaryColor = textColor
++    self.secondaryColor = secondaryColor
++    super.init(nibName: nil, bundle: nil)
++    modalPresentationStyle = .fullScreen
++    modalPresentationCapturesStatusBarAppearance = true
++  }
++  required init?(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
++  public override var preferredStatusBarStyle: UIStatusBarStyle { dark ? .lightContent : .darkContent }
++
++  public override func viewDidLoad() {
++    super.viewDidLoad()
++    overrideUserInterfaceStyle = dark ? .dark : .light
++    view.backgroundColor = surfaceColor
++    view.clipsToBounds = true
++    let configuration: UIButton.Configuration
++    if #available(iOS 26.0, *), !UIAccessibility.isReduceTransparencyEnabled {
++      configuration = .glass()
++    } else { configuration = .tinted() }
++    var close = configuration
++    close.image = UIImage(systemName: "xmark", withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .medium))
++    close.baseForegroundColor = primaryColor
++    close.cornerStyle = .capsule
++    closeButton.configuration = close
++    closeButton.accessibilityLabel = "إغلاق العرض الكامل"
++    closeButton.addTarget(self, action: #selector(closeViewer), for: .touchUpInside)
++    view.addSubview(closeButton)
++    modes.semanticContentAttribute = .forceLeftToRight
++    modes.selectedSegmentIndex = 1
++    modes.tintColor = primaryColor
++    modes.accessibilityLabel = "Code / Preview"
++    modes.addTarget(self, action: #selector(modeChanged), for: .valueChanged)
++    view.addSubview(modes)
++    showPreview()
++  }
++  @objc private func modeChanged() {
++    if modes.selectedSegmentIndex == 0 {
++      if sourceView == nil {
++        let code = ENRMFullscreenSource(source: source, language: language, dark: dark)
++        view.insertSubview(code, at: 0)
++        sourceView = code
++      }
++      sourceView?.isHidden = false
++      preview?.view.isHidden = true
++    } else { showPreview() }
++    view.setNeedsLayout()
++  }
++  private func showPreview() {
++    if preview == nil {
++      let content = ENRMCodePreviewController(kind: kind)
++      content.fullscreen = true
++      content.statusColor = secondaryColor
++      addChild(content)
++      view.insertSubview(content.view, at: 0)
++      content.didMove(toParent: self)
++      content.update(source: source.string, dark: dark, backgroundColor: surfaceColor, textColor: primaryColor)
++      preview = content
++    }
++    sourceView?.isHidden = true
++    preview?.view.isHidden = false
++  }
++  @objc private func closeViewer() {
++    dismiss(animated: !UIAccessibility.isReduceMotionEnabled) { [weak self] in self?.disposeViewer() }
++  }
++  private func disposeViewer() {
++    guard !disposed else { return }
++    disposed = true
++    sourceView?.cancelHighlight()
++    preview?.dispose()
++    preview?.willMove(toParent: nil)
++    preview?.view.removeFromSuperview()
++    preview?.removeFromParent()
++    preview = nil
++  }
++  public override func viewDidDisappear(_ animated: Bool) {
++    super.viewDidDisappear(animated)
++    if isBeingDismissed || presentingViewController == nil { disposeViewer() }
++  }
++  public override func viewDidLayoutSubviews() {
++    super.viewDidLayoutSubviews()
++    let top = view.safeAreaInsets.top + 8
++    closeButton.frame = CGRect(x: 16, y: top, width: 44, height: 44)
++    let modeWidth = min(200, max(88, view.bounds.width - 144))
++    modes.frame = CGRect(x: (view.bounds.width - modeWidth) / 2, y: top + 4, width: modeWidth, height: 36)
++    let bodyTop = top + 56
++    let body = CGRect(x: 0, y: bodyTop, width: view.bounds.width,
++      height: max(0, view.bounds.height - bodyTop - view.safeAreaInsets.bottom))
++    sourceView?.frame = body
++    preview?.view.frame = body
++  }
++}
++#endif
+diff --git a/node_modules/react-native-enriched-markdown/ios/code/ENRMCodeGestureGate.swift b/node_modules/react-native-enriched-markdown/ios/code/ENRMCodeGestureGate.swift
+new file mode 100644
+index 0000000..4a484ad
+--- /dev/null
++++ b/node_modules/react-native-enriched-markdown/ios/code/ENRMCodeGestureGate.swift
+@@ -0,0 +1,73 @@
++#if canImport(UIKit)
++import UIKit
++import UIKit.UIGestureRecognizerSubclass
++
++/// Hit-scoped priority for an interactive viewport. Descendant WebKit/source
++/// recognizers keep their touches; ancestor scroll pans must wait for this
++/// recognizer to fail. No ancestor delegate, scroll flag or timer is changed.
++@objc(ENRMCodeGestureGate)
++public final class ENRMCodeGestureGate: UIGestureRecognizer, UIGestureRecognizerDelegate {
++  private var starts: [ObjectIdentifier: CGPoint] = [:]
++  private var touched = Set<UITouch>()
++  private let movementThreshold: CGFloat = 8
++
++  @objc public init(viewport: UIView) {
++    super.init(target: nil, action: nil)
++    cancelsTouchesInView = false
++    delaysTouchesBegan = false
++    delaysTouchesEnded = false
++    delegate = self
++    viewport.addGestureRecognizer(self)
++  }
++  required init?(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
++
++  public override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
++    for touch in touches {
++      touched.insert(touch)
++      starts[ObjectIdentifier(touch)] = touch.location(in: view)
++    }
++    if state == .possible && touched.count > 1 { state = .began }
++  }
++  public override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
++    if state == .possible {
++      for touch in touches {
++        guard let start = starts[ObjectIdentifier(touch)] else { continue }
++        let point = touch.location(in: view)
++        let dx = point.x - start.x, dy = point.y - start.y
++        if (dx * dx + dy * dy).squareRoot() >= movementThreshold {
++          state = .began
++          break
++        }
++      }
++    } else if state == .began || state == .changed { state = .changed }
++  }
++  public override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
++    touched.subtract(touches)
++    if touched.isEmpty { state = state == .possible ? .failed : .ended }
++  }
++  public override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
++    state = state == .possible ? .failed : .cancelled
++  }
++  public override func reset() {
++    starts.removeAll(keepingCapacity: true)
++    touched.removeAll(keepingCapacity: true)
++    super.reset()
++  }
++
++  private func isAncestorScrollPan(_ other: UIGestureRecognizer) -> Bool {
++    guard let viewport = view, let scroll = other.view as? UIScrollView,
++          scroll !== viewport, other === scroll.panGestureRecognizer else { return false }
++    return viewport.isDescendant(of: scroll)
++  }
++  public func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
++    shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer) -> Bool {
++    isEnabled && view?.window != nil && isAncestorScrollPan(otherGestureRecognizer)
++  }
++  public func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
++    shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
++    if isAncestorScrollPan(otherGestureRecognizer) { return false }
++    guard let viewport = view, let otherView = otherGestureRecognizer.view else { return false }
++    return otherView === viewport || otherView.isDescendant(of: viewport)
++  }
++}
++#endif
 diff --git a/node_modules/react-native-enriched-markdown/ios/code/ENRMCodePreviewController.swift b/node_modules/react-native-enriched-markdown/ios/code/ENRMCodePreviewController.swift
 new file mode 100644
-index 0000000..a5e9816
+index 0000000..af06e5f
 --- /dev/null
 +++ b/node_modules/react-native-enriched-markdown/ios/code/ENRMCodePreviewController.swift
-@@ -0,0 +1,268 @@
+@@ -0,0 +1,433 @@
 +#if canImport(UIKit)
 +import UIKit
 +import WebKit
 +import SwiftUI
 +import MermaidKit
 +
-+private final class ENRMPreviewSegments: UISegmentedControl {
++final class ENRMPreviewSegments: UISegmentedControl {
 +  override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
 +    bounds.insetBy(dx: 0, dy: -4).contains(point)
 +  }
@@ -324,9 +608,8 @@ index 0000000..a5e9816
 +    material.clipsToBounds = true
 +    addSubview(material)
 +    material.contentView.addSubview(segments)
-+    let clear = UIGraphicsImageRenderer(size: CGSize(width: 1, height: 1)).image { _ in }
-+    segments.setBackgroundImage(clear, for: .normal, barMetrics: .default)
-+    segments.setDividerImage(clear, forLeftSegmentState: .normal, rightSegmentState: .normal, barMetrics: .default)
++    // Keep the system track, divider and selected capsule intact. UIKit owns
++    // the pressed/animated selected feedback in both appearance modes.
 +    segments.accessibilityLabel = "طريقة عرض الكود"
 +    segments.addTarget(self, action: #selector(changed), for: .valueChanged)
 +    previewSelected = false
@@ -376,11 +659,21 @@ index 0000000..a5e9816
 +/// Owned as a real child of the React view controller. MermaidKit's hosting
 +/// controller is in turn a child of this controller; no unowned hosting views.
 +@objc(ENRMCodePreviewController)
-+public final class ENRMCodePreviewController: UIViewController, WKNavigationDelegate {
++public final class ENRMCodePreviewController: UIViewController, WKNavigationDelegate, UIGestureRecognizerDelegate {
 +  private let kind: String
 +  private var htmlWebView: WKWebView?
 +  private var mermaidHost: UIHostingController<AnyView>?
 +  private let errorLabel = UILabel()
++  private let loading = UIActivityIndicatorView(style: .medium)
++  private let mermaidController = MermaidController()
++  private var mermaidObservation: ENRMMermaidObservation?
++  private weak var observedMermaidWebView: WKWebView?
++  private var mermaidGate: ENRMCodeGestureGate?
++  private var fitOnNextRender = true
++  private var enteringPreview = false
++  @objc public var fullscreen = false
++  @objc public var statusColor: UIColor = .secondaryLabel
++  @objc public var onRequestFullscreen: (() -> Void)?
 +  private var source = ""
 +  private var appearanceKey = ""
 +  private var loadingKey = ""
@@ -388,6 +681,7 @@ index 0000000..a5e9816
 +  private var allowInitialHTMLDocument = false
 +  private var disposed = false
 +  private var generation = 0
++  private var primaryColor: UIColor = .label
 +
 +  // Inline CSS only. No data/file/remote images, fonts, frames, scripts, forms,
 +  // connections or origin inheritance. Additional source CSP cannot loosen it.
@@ -405,10 +699,13 @@ index 0000000..a5e9816
 +    errorLabel.text = "تعذّر عرض المعاينة. يمكنك العودة إلى المصدر."
 +    errorLabel.numberOfLines = 0
 +    errorLabel.textAlignment = .center
-+    errorLabel.font = .systemFont(ofSize: 14)
++    errorLabel.font = .systemFont(ofSize: 15, weight: .medium)
 +    errorLabel.isHidden = true
 +    errorLabel.accessibilityLabel = errorLabel.text
 +    view.addSubview(errorLabel)
++    loading.hidesWhenStopped = true
++    loading.color = statusColor
++    view.addSubview(loading)
 +    if kind == "html" {
 +      let configuration = WKWebViewConfiguration()
 +      configuration.websiteDataStore = .nonPersistent()
@@ -423,6 +720,28 @@ index 0000000..a5e9816
 +      view.insertSubview(web, at: 0)
 +      htmlWebView = web
 +    }
++    if !fullscreen {
++      let tap = UITapGestureRecognizer(target: self, action: #selector(openFullscreen))
++      tap.numberOfTouchesRequired = 1
++      tap.allowableMovement = 8
++      tap.cancelsTouchesInView = false
++      tap.delegate = self
++      view.addGestureRecognizer(tap)
++      if kind == "mermaid" {
++        let gate = ENRMCodeGestureGate(viewport: view)
++        gate.isEnabled = false
++        mermaidGate = gate
++        tap.require(toFail: gate)
++      }
++    }
++  }
++
++  @objc public func prepareForPresentation() { enteringPreview = true }
++  @objc private func openFullscreen() { if !disposed { onRequestFullscreen?() } }
++  public func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
++    shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
++    guard let other = otherGestureRecognizer.view else { return false }
++    return other.isDescendant(of: view)
 +  }
 +
 +  @objc(updateWithSource:dark:backgroundColor:textColor:)
@@ -430,15 +749,21 @@ index 0000000..a5e9816
 +    guard !disposed else { return }
 +    loadViewIfNeeded()
 +    let key = "\(dark)|\(Self.cssColor(backgroundColor))|\(Self.cssColor(textColor))"
++    let freshPresentation = enteringPreview
++    enteringPreview = false
 +    guard self.source != source || appearanceKey != key else { return }
++    if freshPresentation { fitOnNextRender = true }
 +    self.source = source
 +    appearanceKey = key
 +    generation += 1
 +    overrideUserInterfaceStyle = dark ? .dark : .light
 +    view.backgroundColor = backgroundColor
++    primaryColor = textColor
 +    errorLabel.backgroundColor = backgroundColor
-+    errorLabel.textColor = textColor
++    errorLabel.textColor = statusColor
++    loading.color = statusColor
 +    errorLabel.isHidden = true
++    loading.startAnimating()
 +    htmlWebView?.isHidden = false
 +    htmlWebView?.backgroundColor = backgroundColor
 +    if kind == "html" {
@@ -448,8 +773,11 @@ index 0000000..a5e9816
 +      let revision = generation
 +      let configuration = MermaidConfiguration(theme: dark ? .dark : .default,
 +        securityLevel: .strict, source: .bundledDefault, backgroundColor: "transparent")
++      let interaction = fullscreen
++        ? MermaidInteraction(panZoom: true, nodeTaps: false, minScale: 0.5, maxScale: 5)
++        : MermaidInteraction(panZoom: true, nodeTaps: false, minScale: 0.7, maxScale: 3.5)
 +      let diagram = MermaidView(source, configuration: configuration,
-+        interaction: .panZoom, onLinkActivated: { _ in }, onError: { [weak self] _ in
++        interaction: interaction, controller: mermaidController, onLinkActivated: { _ in }, onError: { [weak self] _ in
 +          guard let self, !self.disposed, self.generation == revision else { return }
 +          self.showFailure()
 +        })
@@ -458,6 +786,7 @@ index 0000000..a5e9816
 +        host.view.isHidden = false
 +        host.rootView = root
 +      } else {
++        fitOnNextRender = true
 +        let host = UIHostingController(rootView: root)
 +        host.view.backgroundColor = .clear
 +        addChild(host)
@@ -474,7 +803,7 @@ index 0000000..a5e9816
 +    loadingKey = source + appearanceKey
 +    allowInitialHTMLDocument = true
 +    let background = Self.cssColor(view.backgroundColor ?? .clear)
-+    let foreground = Self.cssColor(errorLabel.textColor ?? .label)
++    let foreground = Self.cssColor(primaryColor)
 +    let document = "<!doctype html><html><head><meta charset=\"utf-8\"><meta http-equiv=\"Content-Security-Policy\" content=\"\(Self.htmlCSP)\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><style>html,body{margin:0;background:\(background);color:\(foreground);font-family:-apple-system,system-ui}body{padding:12px;box-sizing:border-box}</style></head><body>" + source + "</body></html>"
 +    activeNavigation = web.loadHTMLString(document, baseURL: nil)
 +    if activeNavigation == nil { showFailure() }
@@ -495,6 +824,7 @@ index 0000000..a5e9816
 +    guard !disposed, navigation === activeNavigation else { return }
 +    activeNavigation = nil
 +    if loadingKey != source + appearanceKey { loadLatestHTML() }
++    else { loading.stopAnimating() }
 +  }
 +  public func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
 +    navigationFailed(navigation)
@@ -511,13 +841,46 @@ index 0000000..a5e9816
 +    // Never display/log engine errors or raw student/model content.
 +    htmlWebView?.isHidden = true
 +    mermaidHost?.view.isHidden = true
++    loading.stopAnimating()
++    mermaidGate?.isEnabled = false
 +    errorLabel.isHidden = false
++  }
++
++  private func mermaidRendered() {
++    guard !disposed else { return }
++    loading.stopAnimating()
++    errorLabel.isHidden = true
++    mermaidHost?.view.isHidden = false
++    mermaidGate?.isEnabled = !fullscreen
++    if fitOnNextRender {
++      fitOnNextRender = false
++      mermaidController.zoomToFit()
++    }
++  }
++
++  private func attachMermaidObservationIfNeeded() {
++    guard kind == "mermaid", !disposed, observedMermaidWebView == nil,
++          let host = mermaidHost, let web = Self.ownedWebView(in: host.view),
++          let delegate = web.navigationDelegate else { return }
++    observedMermaidWebView = web
++    // Only inspect the owned hosting subtree during native layout. No global
++    // web-view search, polling, private MermaidKit state or transcript measure.
++    mermaidObservation = ENRMMermaidObservation(web: web, upstream: delegate, onRendered: { [weak self] in
++      self?.mermaidRendered()
++    })
++  }
++  private static func ownedWebView(in root: UIView) -> WKWebView? {
++    if let web = root as? WKWebView { return web }
++    for child in root.subviews { if let web = ownedWebView(in: child) { return web } }
++    return nil
 +  }
 +
 +  public override func viewDidLayoutSubviews() {
 +    super.viewDidLayoutSubviews()
 +    htmlWebView?.frame = view.bounds
 +    mermaidHost?.view.frame = view.bounds
++    attachMermaidObservationIfNeeded()
++    loading.center = CGPoint(x: view.bounds.midX, y: view.bounds.midY)
 +    errorLabel.frame = view.bounds.insetBy(dx: 20, dy: 20)
 +  }
 +
@@ -525,6 +888,12 @@ index 0000000..a5e9816
 +    guard !disposed else { return }
 +    disposed = true
 +    generation += 1
++    onRequestFullscreen = nil
++    loading.stopAnimating()
++    mermaidGate?.isEnabled = false
++    mermaidObservation?.detach()
++    mermaidObservation = nil
++    observedMermaidWebView = nil
 +    htmlWebView?.stopLoading()
 +    htmlWebView?.navigationDelegate = nil
 +    htmlWebView?.uiDelegate = nil
@@ -549,6 +918,86 @@ index 0000000..a5e9816
 +    var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
 +    color.getRed(&r, green: &g, blue: &b, alpha: &a)
 +    return "rgba(\(Int(r * 255)),\(Int(g * 255)),\(Int(b * 255)),\(a))"
++  }
++}
++
++/// Observe only actual SVG insertion in MermaidKit's owned WKWebView. The
++/// isolated handler receives one fixed status string, never diagram/error data.
++/// Pinned MermaidKit's navigation-action and failure policies are forwarded
++/// unchanged; this adds only didFinish/bootstrap observation.
++@MainActor
++private final class ENRMMermaidObservation: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
++  private weak var web: WKWebView?
++  private let upstream: WKNavigationDelegate
++  private var onRendered: (() -> Void)?
++  private var attached = true
++  private static let handler = "pythagorasMermaidRendered"
++  private static let script = #"""
++  (() => {
++    if (window.__pythagorasMermaidObserver) return;
++    let lastSVG = null;
++    const rendered = () => {
++      const svg = document.querySelector('#container svg');
++      if (svg && svg !== lastSVG) {
++        lastSVG = svg;
++        try { window.webkit.messageHandlers.pythagorasMermaidRendered.postMessage('rendered'); } catch (_) {}
++      }
++    };
++    const observer = new MutationObserver(rendered);
++    if (document.documentElement) observer.observe(document.documentElement, { childList: true, subtree: true });
++    window.__pythagorasMermaidObserver = observer;
++    rendered();
++  })();
++  """#
++
++  init(web: WKWebView, upstream: WKNavigationDelegate, onRendered: @escaping () -> Void) {
++    self.web = web
++    self.upstream = upstream
++    self.onRendered = onRendered
++    super.init()
++    let userContent = web.configuration.userContentController
++    userContent.add(self, contentWorld: .defaultClient, name: Self.handler)
++    userContent.addUserScript(WKUserScript(source: Self.script, injectionTime: .atDocumentEnd,
++      forMainFrameOnly: true, in: .defaultClient))
++    web.navigationDelegate = self
++    bootstrap()
++  }
++  private func bootstrap() {
++    guard attached else { return }
++    web?.evaluateJavaScript(Self.script, in: nil, in: .defaultClient, completionHandler: { _ in })
++  }
++  func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
++    guard attached, message.name == Self.handler, message.frameInfo.isMainFrame,
++          message.webView === web, message.body as? String == "rendered" else { return }
++    onRendered?()
++  }
++  func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
++    decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
++    let selector = NSSelectorFromString("webView:decidePolicyForNavigationAction:decisionHandler:")
++    if upstream.responds(to: selector) {
++      upstream.webView?(webView, decidePolicyFor: navigationAction, decisionHandler: decisionHandler)
++    } else { decisionHandler(.cancel) }
++  }
++  func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
++    upstream.webView?(webView, didFinish: navigation)
++    bootstrap()
++  }
++  func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
++    upstream.webView?(webView, didFail: navigation, withError: error)
++  }
++  func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
++    upstream.webView?(webView, didFailProvisionalNavigation: navigation, withError: error)
++  }
++  func detach() {
++    guard attached else { return }
++    attached = false
++    onRendered = nil
++    if let web {
++      if web.navigationDelegate === self { web.navigationDelegate = upstream }
++      web.configuration.userContentController.removeScriptMessageHandler(forName: Self.handler, contentWorld: .defaultClient)
++      web.configuration.userContentController.removeAllUserScripts()
++      web.evaluateJavaScript("window.__pythagorasMermaidObserver && window.__pythagorasMermaidObserver.disconnect();", in: nil, in: .defaultClient, completionHandler: { _ in })
++    }
 +  }
 +}
 +#endif
@@ -1105,10 +1554,10 @@ index 0000000..f025ddb
 +#endif
 diff --git a/node_modules/react-native-enriched-markdown/ios/views/ENRMCodeBlockContainerView.m b/node_modules/react-native-enriched-markdown/ios/views/ENRMCodeBlockContainerView.m
 new file mode 100644
-index 0000000..7afebcf
+index 0000000..a9c4ff4
 --- /dev/null
 +++ b/node_modules/react-native-enriched-markdown/ios/views/ENRMCodeBlockContainerView.m
-@@ -0,0 +1,308 @@
+@@ -0,0 +1,375 @@
 +#import "ENRMCodeBlockContainerView.h"
 +#import "ENRMCodeLanguage.h"
 +#import "MarkdownASTNode.h"
@@ -1132,21 +1581,26 @@ index 0000000..7afebcf
 +#endif
 +
 +@interface ENRMCodeBlockContainerView ()
++- (CGFloat)inlineViewportCapForWidth:(CGFloat)width;
++- (CGFloat)visibleBodyHeightForWidth:(CGFloat)width;
 +- (void)requestSyntaxColorsForLanguage:(NSString *)language;
 +#if ENRICHED_MARKDOWN_PREVIEW
 +- (void)updatePreviewPresentation;
 +- (void)detachPreviewController;
 +- (void)disposePreviewController;
 +- (void)previewModeChanged:(ENRMCodeModeControl *)control;
++- (void)presentFullscreenViewer;
 +#endif
 +@end
 +
-+// Shared by the initial icon and copy feedback reset; glyph polish is deferred.
-+static NSString *const ENRMCodeCopySymbolName = @"doc.on.doc";
++// Shared by the initial icon and copy feedback reset.
++static NSString *const ENRMCodeCopySymbolName = @"square.on.square";
 +
 +// Pythagoras: native AST-backed code block, sharing the segmented Fabric height contract.
 +@implementation ENRMCodeBlockContainerView {
 +  UIView *_header;
++  UIView *_sourceSurface;
++  UIView *_bodyContainer;
 +  UILabel *_language;
 +  UIButton *_copyButton;
 +  UIScrollView *_horizontalScroll;
@@ -1157,11 +1611,13 @@ index 0000000..7afebcf
 +  NSUInteger _copyFeedbackRevision;
 +  NSUInteger _highlightRevision;
 +  NSString *_highlightClientID;
++  NSString *_fenceLanguage;
 +  BOOL _previewing;
 +#if ENRICHED_MARKDOWN_PREVIEW
 +  NSString *_previewLanguage;
 +  ENRMCodeModeControl *_modeControl;
 +  ENRMCodePreviewController *_previewController;
++  ENRMCodeGestureGate *_sourceGestureGate;
 +#endif
 +#if ENRICHED_MARKDOWN_SYNTAX
 +  ENRMSyntaxHighlightRequest *_highlightRequest;
@@ -1175,7 +1631,10 @@ index 0000000..7afebcf
 +    _highlightClientID = [NSUUID UUID].UUIDString;
 +    self.clipsToBounds = YES;
 +    self.semanticContentAttribute = UISemanticContentAttributeForceLeftToRight;
++    _sourceSurface = [UIView new]; [self addSubview:_sourceSurface];
 +    _header = [UIView new]; [self addSubview:_header];
++    _bodyContainer = [UIView new]; _bodyContainer.clipsToBounds = YES;
++    [self addSubview:_bodyContainer];
 +    _language = [UILabel new]; _language.numberOfLines = 1;
 +    _language.isAccessibilityElement = YES; [_header addSubview:_language];
 +    _horizontalScroll = [UIScrollView new];
@@ -1183,10 +1642,16 @@ index 0000000..7afebcf
 +    _horizontalScroll.semanticContentAttribute = UISemanticContentAttributeForceLeftToRight;
 +    _horizontalScroll.directionalLockEnabled = YES;
 +    _horizontalScroll.alwaysBounceVertical = NO;
-+    _horizontalScroll.showsVerticalScrollIndicator = NO;
++    _horizontalScroll.showsVerticalScrollIndicator = YES;
 +    _horizontalScroll.showsHorizontalScrollIndicator = YES;
 +    _horizontalScroll.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
-+    [self addSubview:_horizontalScroll];
++    _horizontalScroll.clipsToBounds = YES;
++    _horizontalScroll.bounces = NO;
++    [_bodyContainer addSubview:_horizontalScroll];
++#if ENRICHED_MARKDOWN_PREVIEW
++    _sourceGestureGate = [[ENRMCodeGestureGate alloc] initWithViewport:_horizontalScroll];
++    _sourceGestureGate.enabled = NO;
++#endif
 +    _codeView = [UITextView new]; _codeView.editable = NO; _codeView.selectable = YES;
 +    _codeView.scrollEnabled = NO; _codeView.backgroundColor = [UIColor clearColor];
 +    _codeView.semanticContentAttribute = UISemanticContentAttributeForceLeftToRight;
@@ -1215,6 +1680,7 @@ index 0000000..7afebcf
 +#endif
 +  _highlightRevision++;
 +  _rawCode = [ENRMRawCodeContent(node) copy];
++  _fenceLanguage = [node.attributes[@"language"] copy];
 +#if ENRICHED_MARKDOWN_PREVIEW
 +  NSString *previewLanguage = ENRMCodePreviewLanguage(node.attributes[@"language"]);
 +  if (![_previewLanguage isEqualToString:previewLanguage]) {
@@ -1237,9 +1703,11 @@ index 0000000..7afebcf
 +  _language.accessibilityLabel = [@"لغة الكود: " stringByAppendingString:_language.text];
 +  _copyButton.tintColor = self.config.codeBlockColor;
 +  _copyButton.accessibilityLabel = [NSString stringWithFormat:@"%@ الكود — %@", self.menuCopyLabel, _language.text];
-+  self.backgroundColor = self.config.codeBlockBackgroundColor;
++  self.backgroundColor = [UIColor clearColor];
++  _sourceSurface.backgroundColor = self.config.codeBlockBackgroundColor;
++  _bodyContainer.backgroundColor = self.config.codeBlockBackgroundColor;
 +  _header.backgroundColor = [UIColor clearColor];
-+  self.layer.cornerRadius = self.config.codeBlockBorderRadius;
++  self.layer.cornerRadius = _previewing ? 0 : self.config.codeBlockBorderRadius;
 +  self.layer.cornerCurve = kCACornerCurveContinuous;
 +  self.layer.borderColor = self.config.codeBlockBorderColor.CGColor;
 +  self.layer.borderWidth = self.config.codeBlockBorderWidth;
@@ -1312,7 +1780,16 @@ index 0000000..7afebcf
 +}
 +- (CGFloat)measureHeight:(CGFloat)width
 +{
-+  return [self headerHeight] + (_previewing ? MAX(260, MIN(330, round(width * 0.85))) : _bodyHeight);
++  return [self headerHeight] + [self visibleBodyHeightForWidth:width];
++}
++- (CGFloat)inlineViewportCapForWidth:(CGFloat)width
++{
++  return MAX(260, MIN(330, round(width * 0.85)));
++}
++- (CGFloat)visibleBodyHeightForWidth:(CGFloat)width
++{
++  CGFloat cap = [self inlineViewportCapForWidth:width];
++  return _previewing ? cap : MIN(_bodyHeight, cap);
 +}
 +- (void)layoutSubviews
 +{
@@ -1320,6 +1797,13 @@ index 0000000..7afebcf
 +  CGFloat width = self.bounds.size.width;
 +  CGFloat headerHeight = [self headerHeight];
 +  CGFloat padding = self.config.codeBlockPadding;
++  CGFloat visibleBodyHeight = [self visibleBodyHeightForWidth:width];
++  _sourceSurface.frame = self.bounds;
++  _sourceSurface.hidden = _previewing;
++  self.layer.cornerRadius = _previewing ? 0 : self.config.codeBlockBorderRadius;
++  _bodyContainer.frame = CGRectMake(0, headerHeight, width, visibleBodyHeight);
++  _bodyContainer.layer.cornerRadius = _previewing ? self.config.codeBlockBorderRadius : 0;
++  _bodyContainer.layer.cornerCurve = kCACornerCurveContinuous;
 +  _header.frame = CGRectMake(0, 0, width, headerHeight);
 +  CGFloat previewControlWidth = 0;
 +#if ENRICHED_MARKDOWN_PREVIEW
@@ -1328,20 +1812,26 @@ index 0000000..7afebcf
 +    _modeControl.frame = CGRectMake(MAX(0, width - padding - previewControlWidth), 0, previewControlWidth, MAX(44, headerHeight));
 +  }
 +#endif
-+  CGFloat copySlot = _previewing ? 0 : 52;
++  CGFloat copySlot = 52; // Stable language/control coordinates in both modes.
 +  _language.frame = CGRectMake(padding, 0, MAX(0, width - padding * 2 - previewControlWidth - copySlot), headerHeight);
-+  // Preserve the 44pt copy slot and its optical padding. Eligible blocks add
-+  // the native mode control to its right; no glyph/x-position polish here.
++  // The hit box stays fixed. Only the overlapping-squares glyph is nudged 1pt.
 +  _copyButton.frame = CGRectMake(MAX(0, width - padding - 44 - (previewControlWidth ? previewControlWidth + 8 : 0)), 0, 44, MAX(44, headerHeight));
-+  _horizontalScroll.frame = CGRectMake(0, headerHeight, width, _bodyHeight);
++  _copyButton.imageView.transform = CGAffineTransformMakeTranslation(1, 0);
++  _horizontalScroll.frame = CGRectMake(0, 0, width, visibleBodyHeight);
 +  CGFloat contentWidth = MAX(width, _documentWidth + padding * 2);
 +  _horizontalScroll.contentSize = CGSizeMake(contentWidth, _bodyHeight);
-+  _horizontalScroll.scrollEnabled = contentWidth > width + 0.5;
++  BOOL verticalOverflow = _bodyHeight > visibleBodyHeight + 0.5;
++  _horizontalScroll.scrollEnabled = contentWidth > width + 0.5 || verticalOverflow;
++  _horizontalScroll.showsVerticalScrollIndicator = verticalOverflow;
 +  _codeView.frame = CGRectMake(padding, 0, _documentWidth, _bodyHeight);
-+  CGFloat maximum = MAX(0, contentWidth - width);
-+  if (_horizontalScroll.contentOffset.x > maximum) _horizontalScroll.contentOffset = CGPointMake(maximum, 0);
++  CGFloat maximumX = MAX(0, contentWidth - width);
++  CGFloat maximumY = MAX(0, _bodyHeight - visibleBodyHeight);
++  CGPoint offset = _horizontalScroll.contentOffset;
++  CGPoint clamped = CGPointMake(MIN(MAX(0, offset.x), maximumX), MIN(MAX(0, offset.y), maximumY));
++  if (!CGPointEqualToPoint(offset, clamped)) _horizontalScroll.contentOffset = clamped;
 +#if ENRICHED_MARKDOWN_PREVIEW
-+  if (_previewing) _previewController.view.frame = CGRectMake(0, headerHeight, width, MAX(260, MIN(330, round(width * 0.85))));
++  _sourceGestureGate.enabled = !_previewing && verticalOverflow;
++  if (_previewing) _previewController.view.frame = _bodyContainer.bounds;
 +#endif
 +}
 +#if ENRICHED_MARKDOWN_PREVIEW
@@ -1351,9 +1841,14 @@ index 0000000..7afebcf
 +  _previewing = control.previewSelected;
 +  _copyButton.hidden = _previewing;
 +  _horizontalScroll.hidden = _previewing;
++  if (_previewing) {
++    [_codeView resignFirstResponder];
++    [_previewController prepareForPresentation];
++  }
 +  if (_previewing) [self updatePreviewPresentation];
 +  else [self detachPreviewController];
 +  [self setNeedsLayout];
++  [self layoutIfNeeded];
 +  // Explicit presentation action only. The owner validates native height;
 +  // code/preview surfaces never write transcript offsets or React geometry.
 +  if (self.onIntrinsicPresentationChanged) self.onIntrinsicPresentationChanged();
@@ -1363,17 +1858,38 @@ index 0000000..7afebcf
 +  if (!_previewing || !_previewLanguage || !self.window) return;
 +  UIViewController *parent = [self reactViewController];
 +  if (!parent) return;
-+  if (!_previewController) _previewController = [[ENRMCodePreviewController alloc] initWithKind:_previewLanguage];
++  if (!_previewController) {
++    _previewController = [[ENRMCodePreviewController alloc] initWithKind:_previewLanguage];
++    __weak ENRMCodeBlockContainerView *weakSelf = self;
++    _previewController.onRequestFullscreen = ^{
++      ENRMCodeBlockContainerView *view = weakSelf;
++      if (view) [view presentFullscreenViewer];
++    };
++  }
 +  if (_previewController.parentViewController != parent) {
 +    [self detachPreviewController];
 +    [parent addChildViewController:_previewController];
-+    [self addSubview:_previewController.view];
++    [_bodyContainer addSubview:_previewController.view];
 +    [_previewController didMoveToParentViewController:parent];
 +  }
 +  CGFloat r = 1, g = 1, b = 1, a = 1;
++  _previewController.statusColor = self.config.codeBlockColor;
 +  [self.config.codeBlockBackgroundColor getRed:&r green:&g blue:&b alpha:&a];
 +  [_previewController updateWithSource:_rawCode dark:(0.2126 * r + 0.7152 * g + 0.0722 * b) < 0.5 backgroundColor:self.config.codeBlockBackgroundColor textColor:self.config.paragraphColor];
 +  [self setNeedsLayout];
++}
++- (void)presentFullscreenViewer
++{
++  if (!_previewing || !_previewLanguage || !self.window) return;
++  UIViewController *parent = [self reactViewController];
++  if (!parent || parent.presentedViewController) return;
++  CGFloat r = 1, g = 1, b = 1, a = 1;
++  [self.config.codeBlockBackgroundColor getRed:&r green:&g blue:&b alpha:&a];
++  ENRMCodeFullscreenController *viewer = [[ENRMCodeFullscreenController alloc]
++    initWithSource:[_codeView.attributedText copy] kind:_previewLanguage
++    language:ENRMCodeHighlightLanguage(_fenceLanguage) dark:(0.2126 * r + 0.7152 * g + 0.0722 * b) < 0.5
++    backgroundColor:self.config.codeBlockBackgroundColor textColor:self.config.paragraphColor secondaryColor:self.config.codeBlockColor];
++  [parent presentViewController:viewer animated:!UIAccessibilityIsReduceMotionEnabled() completion:nil];
 +}
 +- (void)detachPreviewController
 +{

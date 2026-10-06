@@ -75,7 +75,7 @@ test('Pythagoras syntax and default text colors meet 4.5:1 against both code sur
   }
   const renderer = fs.readFileSync(path.join(process.cwd(), 'mobile/src/ai/assistant-enriched-markdown.ios.tsx'), 'utf8');
   const card = renderer.slice(renderer.indexOf('codeBlock: {'), renderer.indexOf('thematicBreak: {'));
-  for (const required of ['color: palette.textSecondary', 'backgroundColor: palette.surfaceElevated', 'borderWidth: 0', 'borderRadius: 18']) assert.ok(card.includes(required));
+  for (const required of ['color: palette.textSecondary', 'backgroundColor: palette.surfaceElevated', 'borderWidth: 0', 'borderRadius: 21']) assert.ok(card.includes(required));
   assert.ok(view.includes('kCACornerCurveContinuous'));
 });
 

@@ -15,6 +15,8 @@ const view = read('ios/views/ENRMCodeBlockContainerView.m');
 const preview = read('ios/code/ENRMCodePreviewController.swift');
 const owner = read('ios/EnrichedMarkdown.mm');
 const composer = fs.readFileSync('mobile/src/ai/chat-composer.ios.tsx', 'utf8');
+const fullscreen = read('ios/code/ENRMCodeFullscreenController.swift');
+const gate = read('ios/code/ENRMCodeGestureGate.swift');
 
 test('preview eligibility uses exact original HTML/Mermaid metadata, never highlight/display aliases', () => {
   const languages = read('ios/utils/ENRMCodeLanguage.m');
@@ -34,9 +36,12 @@ test('Source is default and source/copy identity survives mode changes', () => {
   const toggle = view.slice(view.indexOf('- (void)previewModeChanged:', view.indexOf('@implementation')), view.indexOf('- (void)updatePreviewPresentation', view.indexOf('@implementation')));
   assert.equal(/_rawCode\s*=|applyCodeNode|parse|signature|key\s*=/u.test(toggle), false);
   assert.ok(toggle.includes('_copyButton.hidden = _previewing'));
-  assert.ok(view.includes('static NSString *const ENRMCodeCopySymbolName = @"doc.on.doc"'));
+  assert.ok(view.includes('static NSString *const ENRMCodeCopySymbolName = @"square.on.square"'));
   assert.equal((view.match(/systemImageNamed:ENRMCodeCopySymbolName/gu) ?? []).length, 2);
-  assert.ok(composer.includes("copied ? 'checkmark' : 'doc.on.doc'"));
+  assert.ok(composer.includes("copied ? 'checkmark' : 'square.on.square'"));
+  assert.ok(read('ios/utils/EditMenuUtils.m').includes('systemImageNamed:@"doc.on.doc"'));
+  assert.ok(read('ios/views/TableContainerView.m').includes('systemImageNamed:@"doc.on.doc"'));
+  assert.ok(read('ios/views/ENRMMathContainerView.m').includes('systemImageNamed:@"doc.on.doc"'));
 });
 
 test('header hierarchy and real native glass control preserve copy target and Source return geometry', () => {
@@ -46,6 +51,9 @@ test('header hierarchy and real native glass control preserve copy target and So
   assert.ok(view.includes('previewControlWidth = 88'));
   assert.ok(view.includes('44, MAX(44, headerHeight)'));
   assert.ok(view.includes('kCACornerCurveContinuous'));
+  assert.equal(/setBackgroundImage|setDividerImage|selectedSegmentTintColor/u.test(preview), false);
+  assert.ok(view.includes('CGFloat copySlot = 52'));
+  assert.ok(view.includes('_copyButton.imageView.transform = CGAffineTransformMakeTranslation(1, 0)'));
 });
 
 test('HTML has no content JS, persistent data, native bridge, external navigation or permissive CSP', () => {
@@ -106,6 +114,88 @@ test('scroll affordance uses existing reader/end state and never becomes measure
   assert.equal(/Keyboard\.addListener|onGeometryChange|onLayout=|onScroll=/u.test(affordance), false);
 });
 
+test('short Source is intrinsic; long Source and Preview share a bounded visible-height contract', () => {
+  const match = view.match(/return MAX\((\d+), MIN\((\d+), round\(width \* ([\d.]+)\)\)\)/u)!;
+  const [low, high, ratio] = match.slice(1).map(Number);
+  const cap = (width: number) => Math.max(low, Math.min(high, Math.round(width * ratio)));
+  assert.deepEqual([cap(200), cap(350), cap(800)], [260, 298, 330]);
+  const visible = (mode: string, measuredIntrinsic: number) => mode === 'Preview' ? cap(350) : Math.min(measuredIntrinsic, cap(350));
+  assert.equal(visible('Source', 60), 60);
+  for (const mode of ['Source', 'Preview', 'Source', 'Preview', 'Source']) assert.equal(44 + visible(mode, 5000), 342);
+  const stress = CHAT_QUALITY_CASES.find(item => item.title.startsWith('Long Mermaid'))!;
+  assert.ok(stress.markdown.split('\n').length > 120);
+  assert.ok(stress.markdown.startsWith('```mermaid'));
+  assert.ok(view.includes('return _previewing ? cap : MIN(_bodyHeight, cap)'));
+  assert.ok(view.includes('CGFloat visibleBodyHeight = [self visibleBodyHeightForWidth:width]'));
+  assert.ok(view.includes('_horizontalScroll.frame = CGRectMake(0, 0, width, visibleBodyHeight)'));
+  assert.ok(view.includes('_horizontalScroll.contentSize = CGSizeMake(contentWidth, _bodyHeight)'));
+  assert.ok(view.includes('contentWidth > width + 0.5 || verticalOverflow'));
+  assert.ok(view.includes('_horizontalScroll.clipsToBounds = YES'));
+  assert.ok(view.includes('MIN(MAX(0, offset.y), maximumY)'));
+  assert.equal((view.match(/\[UIScrollView new\]/gu) ?? []).length, 1);
+});
+
+test('Preview surface starts below an unchanged header; native content cannot paint beyond Fabric bounds', () => {
+  assert.ok(view.includes('_sourceSurface.frame = self.bounds'));
+  assert.ok(view.includes('_sourceSurface.hidden = _previewing'));
+  assert.ok(view.includes('_bodyContainer.frame = CGRectMake(0, headerHeight, width, visibleBodyHeight)'));
+  assert.ok(view.includes('_previewController.view.frame = _bodyContainer.bounds'));
+  assert.ok(view.includes('_bodyContainer.layer.cornerRadius = _previewing ? self.config.codeBlockBorderRadius : 0'));
+  assert.ok(owner.includes('self.clipsToBounds = YES'));
+  assert.ok(owner.includes('[self computeSegmentLayoutForWidth:self.bounds.size.width applyFrames:YES]'));
+  assert.ok(owner.includes('return [view isKindOfClass:[ENRMCodeBlockContainerView class]]'));
+  assert.match(fs.readFileSync('mobile/src/ai/assistant-enriched-markdown.ios.tsx', 'utf8'), /codeBlock:[\s\S]*?borderRadius: 21/u);
+});
+
+test('local viewport gate gives descendants priority over ancestor pans without cancelling WebKit/source touches', () => {
+  for (const code of ['cancelsTouchesInView = false', 'shouldBeRequiredToFailBy', 'isAncestorScrollPan(otherGestureRecognizer)', 'if isAncestorScrollPan(otherGestureRecognizer) { return false }', 'otherView.isDescendant(of: viewport)', 'movementThreshold: CGFloat = 8', 'touched.count > 1', 'state == .possible ? .failed : .ended']) assert.ok(gate.includes(code), code);
+  assert.equal(/scrollEnabled|isScrollEnabled|Timer|asyncAfter|runOnJS/u.test(gate), false);
+  assert.ok(view.includes('_sourceGestureGate.enabled = !_previewing && verticalOverflow'));
+  const scope = preview.slice(preview.indexOf('if !fullscreen {'), preview.indexOf('@objc public func prepareForPresentation'));
+  assert.ok(scope.includes('if kind == "mermaid"'));
+  assert.ok(scope.includes('tap.require(toFail: gate)'));
+  assert.ok(scope.includes('tap.allowableMovement = 8'));
+  assert.ok(scope.includes('tap.numberOfTouchesRequired = 1'));
+  assert.ok(view.includes('if (!_previewing || !_previewLanguage || !self.window) return'));
+});
+
+test('Mermaid actual-render status is isolated, event-driven and fits only a fresh successful render', () => {
+  assert.ok(preview.includes('minScale: 0.7, maxScale: 3.5'));
+  assert.ok(preview.includes('minScale: 0.5, maxScale: 5'));
+  assert.ok(preview.includes('controller: mermaidController'));
+  const rendered = preview.slice(preview.indexOf('private func mermaidRendered()'), preview.indexOf('private func attachMermaidObservationIfNeeded()'));
+  assert.ok(rendered.includes('loading.stopAnimating()')); assert.ok(rendered.includes('errorLabel.isHidden = true'));
+  assert.ok(rendered.includes('if fitOnNextRender')); assert.ok(rendered.includes('fitOnNextRender = false'));
+  assert.equal((preview.match(/mermaidController\.zoomToFit\(\)/gu) ?? []).length, 1);
+  assert.ok(preview.includes('contentWorld: .defaultClient'));
+  assert.ok(preview.includes('message.body as? String == "rendered"'));
+  assert.ok(preview.includes('new MutationObserver(rendered)'));
+  assert.ok(preview.includes('childList: true, subtree: true'));
+  assert.equal(/attributes: true|setInterval|setTimeout/u.test(preview), false);
+  assert.ok(preview.includes('upstream.webView?(webView, decidePolicyFor: navigationAction, decisionHandler: decisionHandler)'));
+  assert.ok(preview.includes('else { decisionHandler(.cancel) }'));
+  assert.ok(preview.includes('removeScriptMessageHandler(forName: Self.handler, contentWorld: .defaultClient)'));
+});
+
+test('fullScreen uses an immutable exact source snapshot, native text segments and the shared secure preview', () => {
+  for (const code of ['modalPresentationStyle = .fullScreen', 'items: ["Code", "Preview"]', 'modes.selectedSegmentIndex = 1', 'systemName: "xmark"', 'width: 44, height: 44', 'content.fullscreen = true', 'ENRMCodePreviewController(kind: kind)', 'content.update(source: source.string', 'source.copy()', 'text.isSelectable = true', 'text.isScrollEnabled = false', 'text.textContainer.widthTracksTextView = false', 'text.textContainer.lineBreakMode = .byClipping', 'scroll.contentSize', 'ENRMSyntaxHighlighterBridge.requestColors(forSource: raw', 'textStorage.addAttribute(.foregroundColor']) assert.ok(fullscreen.includes(code), code);
+  assert.equal(/WKWebViewConfiguration|loadHTMLString|loadFileURL|\.cdn\(|scrollTo|contentOffset\s*=|setTimeout|asyncAfter/u.test(fullscreen), false);
+  assert.ok(fullscreen.includes('dismiss(animated: !UIAccessibility.isReduceMotionEnabled)'));
+  assert.ok(fullscreen.includes('preview?.dispose()')); assert.ok(fullscreen.includes('preview?.removeFromParent()'));
+  assert.ok(view.includes('initWithSource:[_codeView.attributedText copy]'));
+});
+
+test('manual reserve release reaches growth, terminal and gesture-end callers without new scroll writes', () => {
+  const update = composer.slice(composer.indexOf('const updateAnchorBlankSpace'), composer.indexOf('const tryPositionPendingAnchor'));
+  assert.equal(update.includes("if (!state.anchorTurnId || state.mode === 'user-scrolled-away') return"), false);
+  assert.equal(/scrollTo|setTimeout|requestAnimationFrame/u.test(update), false);
+  const end = composer.slice(composer.indexOf('const handleScrollEndDrag'), composer.indexOf('const handleEndVisible'));
+  assert.equal((end.match(/updateAnchorBlankSpace\(\)/gu) ?? []).length, 2);
+  const terminal = composer.slice(composer.indexOf('// Completion only validates capacity'), composer.indexOf('  return (', composer.indexOf('// Completion only validates capacity')));
+  assert.ok(terminal.includes('updateAnchorBlankSpace()'));
+  assert.equal(/scrollTo|setTimeout/u.test(terminal), false);
+});
+
 const auditRoot = process.env.PYTHAGORAS_MERMAID_AUDIT_ROOT;
 const chrome = process.env.PYTHAGORAS_PREVIEW_CHROME;
 const run = promisify(execFile);
@@ -139,10 +229,12 @@ test('exact pinned official Mermaid engine renders flowchart/sequence/class and 
   const kit = fs.readFileSync(path.join(auditRoot!, 'Sources/MermaidKit/MermaidHTMLBuilder.swift'), 'utf8');
   for (const clause of ["default-src 'none'", "script-src 'nonce-", "img-src data: blob:", "form-action 'none'"]) assert.ok(kit.includes(clause));
   assert.ok(fs.readFileSync(path.join(auditRoot!, 'Sources/MermaidKit/MermaidWebView.swift'), 'utf8').includes('removeAllScriptMessageHandlers()'));
-  const cases = CHAT_QUALITY_CASES.filter(item => item.title.includes('Mermaid')).map(item => ({ malformed: item.title.startsWith('Malformed'), source: item.markdown.split('\n').slice(1, -1).join('\n') }));
+  const cases = CHAT_QUALITY_CASES.filter(item => item.title.startsWith('Mermaid ') || item.title.startsWith('Malformed Mermaid')).map(item => ({ malformed: item.title.startsWith('Malformed'), source: item.markdown.split('\n').slice(1, -1).join('\n') }));
   assert.equal(cases.length, 4);
   const nonce = randomUUID().replaceAll('-', '');
   const data = Buffer.from(JSON.stringify(cases)).toString('base64');
-  const document = await browserDocument(`<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"><body><div id="result">pending</div><script nonce="${nonce}">${engine}</script><script nonce="${nonce}">(async()=>{mermaid.initialize({startOnLoad:false,securityLevel:'strict',theme:'dark'});let ok=0;const cases=JSON.parse(new TextDecoder().decode(Uint8Array.from(atob('${data}'),c=>c.charCodeAt(0))));for(let i=0;i<cases.length;i++){try{const r=await mermaid.render('diagram-'+i,cases[i].source);if(!cases[i].malformed&&r.svg.includes('<svg'))ok++;}catch(_){if(cases[i].malformed)ok++;}}document.getElementById('result').textContent='completed:'+ok;document.querySelectorAll('script').forEach(s=>s.remove());})();</script>`);
-  assert.match(document, /id="result">completed:4/u);
+  const observer = preview.match(/private static let script = #"""([\s\S]*?)"""#/u)![1];
+  const document = await browserDocument(`<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"><body><div id="result">pending</div><div id="container"></div><script nonce="${nonce}">${engine}</script><script nonce="${nonce}">window.renderStatuses=[];window.webkit={messageHandlers:{pythagorasMermaidRendered:{postMessage:m=>window.renderStatuses.push(m)}}};${observer}
+(async()=>{mermaid.initialize({startOnLoad:false,securityLevel:'strict',theme:'dark'});let ok=0;const cases=JSON.parse(new TextDecoder().decode(Uint8Array.from(atob('${data}'),c=>c.charCodeAt(0))));for(let i=0;i<cases.length;i++){try{const r=await mermaid.render('diagram-'+i,cases[i].source);if(!cases[i].malformed&&r.svg.includes('<svg')){ok++;document.getElementById('container').innerHTML=r.svg;await Promise.resolve();}}catch(_){if(cases[i].malformed)ok++;}}const svg=document.querySelector('#container svg');svg.style.transform='scale(1.1)';await Promise.resolve();const safe=window.renderStatuses.every(m=>m==='rendered');document.getElementById('result').textContent='completed:'+ok+':rendered:'+window.renderStatuses.length+':safe:'+safe;document.querySelectorAll('script').forEach(s=>s.remove());})();</script>`);
+  assert.match(document, /id="result">completed:4:rendered:3:safe:true/u);
 });

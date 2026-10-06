@@ -244,7 +244,7 @@ function createMarkdownStyle(palette: Palette, bodyFontSize: number, fontScale: 
       backgroundColor: palette.surfaceElevated,
       borderColor: palette.border,
       borderWidth: 0,
-      borderRadius: 18,
+      borderRadius: 21,
       padding: 12,
       marginBottom: rhythm(READING_RHYTHM.codeAfter),
     },

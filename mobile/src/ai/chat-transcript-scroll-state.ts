@@ -117,7 +117,8 @@ export function calculateChatTranscriptAnchorBlankSpace(
 
 /** Capacity only: consume the reserve monotonically, without introducing a
  * range clamp by releasing capacity needed at the reader's offset. Terminal events use the same
- * calculation and do not issue scroll commands. A manual reader keeps capacity. */
+ * calculation and do not issue scroll commands. A manual reader keeps only
+ * the capacity needed at the CURRENT offset, never the abandoned turn anchor. */
 export function consumeChatTranscriptAnchorSpace(
   state: ChatTranscriptScrollState,
   previousSpace: number,
@@ -127,11 +128,11 @@ export function consumeChatTranscriptAnchorSpace(
   viewportHeight: number,
   minimumContentInset: number,
 ): number {
-  if (state.mode === "user-scrolled-away") return previousSpace;
   if (state.mode === "anchoring-new-turn") return requiredAnchorSpace;
   const preserveOffsetSpace = calculateChatTranscriptAnchorBlankSpace(
     scrollOffset, contentHeight, viewportHeight, minimumContentInset,
   );
+  if (state.mode === "user-scrolled-away") return Math.min(previousSpace, preserveOffsetSpace);
   return Math.min(previousSpace, Math.max(requiredAnchorSpace, preserveOffsetSpace));
 }
 

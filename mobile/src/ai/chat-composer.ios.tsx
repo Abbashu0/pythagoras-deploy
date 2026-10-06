@@ -327,12 +327,12 @@ export function ChatComposer({
   }, []);
   const updateAnchorBlankSpace = useCallback(() => {
     const state = scrollStateRef.current;
-    if (!state.anchorTurnId || state.mode === 'user-scrolled-away') return;
     const targetOffset = anchorTargetOffsetRef.current;
-    if (targetOffset === null || viewportHeightRef.current <= 0) return;
+    if (viewportHeightRef.current <= 0) return;
+    if (state.mode !== 'user-scrolled-away' && (!state.anchorTurnId || targetOffset === null)) return;
     const user = geometryRef.current.user;
     if (state.mode === 'anchoring-new-turn' && (!user || user.height <= 0 || contentHeightRef.current < user.y + user.height)) return;
-    const requiredSpace = calculateChatTranscriptAnchorBlankSpace(
+    const requiredSpace = targetOffset === null ? 0 : calculateChatTranscriptAnchorBlankSpace(
       targetOffset,
       contentHeightRef.current,
       viewportHeightRef.current,
@@ -343,10 +343,16 @@ export function ChatComposer({
       contentHeightRef.current, viewportHeightRef.current, composerHeightRef.current,
     );
     if (Math.abs(blankSpaceRef.current - nextBlankSpace) < 1) return;
+    reportLayoutDiagnostic('blank-space-capacity', {
+      previousBlankSpace: blankSpaceRef.current, nextBlankSpace,
+      preserveOffsetSpace: calculateChatTranscriptAnchorBlankSpace(
+        scrollOffsetRef.current, contentHeightRef.current, viewportHeightRef.current, composerHeightRef.current,
+      ),
+    });
     blankSpaceRef.current = nextBlankSpace;
     blankSpace.set(nextBlankSpace);
     reportGeometryDiagnostic('blank-space-change');
-  }, [blankSpace, reportGeometryDiagnostic]);
+  }, [blankSpace, reportGeometryDiagnostic, reportLayoutDiagnostic]);
 
   const tryPositionPendingAnchor = useCallback(() => {
     const { turnId, user } = geometryRef.current;
@@ -494,17 +500,19 @@ export function ChatComposer({
   }, [reportLayoutDiagnostic, setScrollState]);
   const handleScrollEndDrag = useCallback(() => {
     manualScrollGestureRef.current = false;
+    updateAnchorBlankSpace();
     reportLayoutDiagnostic('manual-scroll-end-drag', {});
     reportGeometryDiagnostic('manual-scroll-end-drag');
-  }, [reportGeometryDiagnostic, reportLayoutDiagnostic]);
+  }, [reportGeometryDiagnostic, reportLayoutDiagnostic, updateAnchorBlankSpace]);
   const handleMomentumScrollBegin = useCallback(() => {
     manualScrollGestureRef.current = true;
   }, []);
   const handleMomentumScrollEnd = useCallback(() => {
     manualScrollGestureRef.current = false;
+    updateAnchorBlankSpace();
     reportLayoutDiagnostic('manual-scroll-momentum-end', {});
     reportGeometryDiagnostic('manual-scroll-momentum-end');
-  }, [reportGeometryDiagnostic, reportLayoutDiagnostic]);
+  }, [reportGeometryDiagnostic, reportLayoutDiagnostic, updateAnchorBlankSpace]);
   const handleEndVisible = useCallback((visible: boolean) => {
     endVisibleRef.current = visible;
     // The controller's whenAtEnd policy does not shift an off-end reader.
@@ -1492,7 +1500,7 @@ const ChatAssistantActions = memo(function ChatAssistantActions({
             ]}
           >
             <Image
-              systemName={copied ? 'checkmark' : 'doc.on.doc'}
+              systemName={copied ? 'checkmark' : 'square.on.square'}
               size={ASSISTANT_ACTION_ICON_SIZE}
               color={palette.textSecondary}
             />
