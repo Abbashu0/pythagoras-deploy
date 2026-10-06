@@ -39,7 +39,8 @@ test('fenced-code fixtures retain actual source language and exact code whitespa
 });
 test('native centralized language map covers aliases and uses Plain text fallback', () => {
   const source = read('ios/utils/ENRMCodeLanguage.m');
-  const aliases = Object.fromEntries([...source.matchAll(/@"([^"\n]+)": @"([^"\n]+)"/gu)].map(match => [match[1], match[2]]));
+  const labels = source.slice(source.indexOf('labels = @{'), source.indexOf('NSString *ENRMCodeHighlightLanguage'));
+  const aliases = Object.fromEntries([...labels.matchAll(/@"([^"\n]+)": @"([^"\n]+)"/gu)].map(match => [match[1], match[2]]));
   for (const [language, label] of [['py', 'Python'], ['ts', 'TypeScript'], ['tsx', 'TypeScript'], ['js', 'JavaScript'], ['jsx', 'JavaScript'], ['json', 'JSON'], ['html', 'HTML'], ['text', 'Plain text'], ['txt', 'Plain text'], ['plaintext', 'Plain text'], ['cpp', 'C++'], ['cs', 'C#'], ['sh', 'Shell'], ['bash', 'Bash'], ['yml', 'YAML'], ['md', 'Markdown']]) assert.equal(aliases[language], label);
   assert.ok(source.includes('trimmed.length ? trimmed : @"Plain text"')); assert.ok(source.includes('controlCharacterSet')); assert.ok(source.includes('NSStringEnumerationByComposedCharacterSequences'));
 });

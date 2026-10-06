@@ -179,6 +179,7 @@ const nativeFiles = {
   codeHeader: 'ios/views/ENRMCodeBlockContainerView.h',
   codeView: 'ios/views/ENRMCodeBlockContainerView.m',
   codeLanguage: 'ios/utils/ENRMCodeLanguage.m',
+  syntaxBridge: 'ios/code/ENRMSyntaxHighlighterBridge.swift',
   segments: 'ios/utils/SegmentRenderer.m',
   mathView: 'ios/views/ENRMMathContainerView.m',
   bidi: 'ios/utils/ParagraphStyleUtils.m',
@@ -197,8 +198,8 @@ for (const [key, text] of Object.entries(native)) {
 const viewCode = codeOnly(native.codeView);
 const codeImplementation = oneMatch(viewCode, /@implementation\s+ENRMCodeBlockContainerView\b/g, 'code-block implementation');
 if (!native.codeHeader.includes('@property (nonatomic, copy) NSString *menuCopyLabel;') || /@property\s+\([^\n]*\)\s+NSString\s+\*copyLabel\b/u.test(native.codeHeader)) fail('code-block menu label must avoid the Objective-C copy method family');
-for (const name of ['applyCodeNode', 'measureHeight', 'layoutSubviews', 'copyCode']) {
-  const signature = oneMatch(viewCode, new RegExp(`^[ \\t]*-\\s*\\([^\\n]+\\)${name}(?::[^\\n]*)?[ \\t]*$`, 'gm'), `code ${name}`);
+for (const name of ['applyCodeNode', 'measureHeight', 'layoutSubviews', 'copyCode', 'requestSyntaxColorsForLanguage', 'dealloc']) {
+  const signature = oneMatch(viewCode, new RegExp(`^[ \\t]*-\\s*\\([^\\n]+\\)${name}(?::[^\\n;]*)?[ \\t]*$`, 'gm'), `code ${name}`);
   const body = methodBody(viewCode, signature, `code ${name}`);
   if (depthAt(viewCode, viewCode.indexOf('{', codeImplementation.index), body.start) !== 0) fail(`code ${name} is nested in another method`);
 }
@@ -214,6 +215,15 @@ for (const required of ['_scrollView.scrollEnabled = overflows', 'UISemanticCont
 if (!native.bidi.includes('NSWritingDirectionAttributeName') || !native.bidi.includes('NSAttachmentAttributeName') || !native.bidi.includes('NSLinkAttributeName') || !native.bidi.includes('CodeAttributeName')) fail('inline bidi must preserve parsed code/link/math regions');
 const parser = fs.readFileSync(path.join(packageRoot, 'cpp/parser/MD4CParser.cpp'), 'utf8');
 for (const required of ['MAX(14, font.pointSize)', 'MAX(44, ceil(_language.font.lineHeight + 16))', 'configurationWithPointSize:18', 'kCACornerCurveContinuous']) if (!native.codeView.includes(required)) fail(`code header visual/accessible geometry missing ${required}`);
+const syntax = native.syntaxBridge;
+for (const required of ['import Highlighter', 'qos: .utility', 'pending[clientID] = job', 'old.request.cancel()', 'maximumPendingClients = 128', 'maximumSourceUTF16 = 32768', 'maximumCacheEntries = 64', 'maximumCacheCost = 2 * 1024 * 1024', 'SHA256.hash', 'supported.contains(job.language)', 'highlighted.string.utf8.elementsEqual(job.source.utf8)', 'doFastRender: true', 'DispatchQueue.main.async']) if (!syntax.includes(required)) fail(`syntax service lacks ${required}`);
+if (/highlightAuto|doFastRender: false|asyncAfter|Timer/u.test(syntax)) fail('syntax must use explicit metadata and background work without timer/render loops');
+const colorCallback = native.codeView.slice(native.codeView.indexOf('completion:^(NSAttributedString *colors)'), native.codeView.indexOf('- (void)dealloc'));
+if (!colorCallback.includes('view->_highlightRevision != revision') || !colorCallback.includes('![colors.string isEqualToString:source]') || !colorCallback.includes('addAttribute:NSForegroundColorAttributeName')) fail('async syntax color application must reject stale/changed source');
+if (/setNeedsLayout|requestHeightUpdate|NSFontAttributeName|NSParagraphStyleAttributeName|attributedText\s*=|_rawCode\s*=/u.test(colorCallback)) fail('syntax colors must not own glyph/source/layout geometry');
+const podspec = fs.readFileSync(path.join(packageRoot, 'ReactNativeEnrichedMarkdown.podspec'), 'utf8');
+for (const required of ["https://github.com/smittytone/HighlighterSwift.git", "kind: 'revision', revision: 'fe7aae9c9b31d3b296fd3d2dd575e1a207bb29e0'", "products: ['Highlighter']", 'PythagorasCodeSyntaxNotices', 'ENRICHED_MARKDOWN_SYNTAX=1', 'ENRICHED_MARKDOWN_MATH=0']) if (!podspec.includes(required)) fail(`reproducible syntax integration lacks ${required}`);
+if (!native.codeLanguage.includes('NSString *ENRMCodeHighlightLanguage') || !native.codeLanguage.includes('containsObject:normalized]) return nil')) fail('plain/unknown language must have an explicit safe syntax path');
 if (!parser.includes('codeDetail->lang') || !parser.includes('node->setAttribute(ATTR_LANGUAGE, lang)')) fail('code language must originate from MD4C, not content guesses');
 
 console.log([
@@ -224,4 +234,5 @@ console.log([
   `  layoutSubviews: lines ${lineAt(source, layoutBody.start)}-${lineAt(source, layoutBody.close)}`,
   '  method scopes and brace depth are valid; RTL visual columns, leading position, user-scroll preservation, and logical copy order are verified.',
   '  AST-backed code headers/copy/horizontal layout, wide-math native touch ownership, and attributed inline bidi protections are verified.',
+  '  Pinned grammar service, bounded background coalescing/cache, exact source guards and color-only native application are verified.',
 ].join('\n'));

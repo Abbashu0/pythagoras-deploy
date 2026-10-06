@@ -1,3 +1,44 @@
+diff --git a/node_modules/react-native-enriched-markdown/ReactNativeEnrichedMarkdown.podspec b/node_modules/react-native-enriched-markdown/ReactNativeEnrichedMarkdown.podspec
+index 4d31a7a..07bfb69 100644
+--- a/node_modules/react-native-enriched-markdown/ReactNativeEnrichedMarkdown.podspec
++++ b/node_modules/react-native-enriched-markdown/ReactNativeEnrichedMarkdown.podspec
+@@ -40,11 +40,24 @@ Pod::Spec.new do |s|
+     enable_math = false
+   end
+
+-  unless enable_math
+-    s.exclude_files = "ios/math/**/*.swift"
++  enable_syntax = defined?(spm_dependency) != nil
++  excluded_sources = []
++  excluded_sources << "ios/math/**/*.swift" unless enable_math
++  excluded_sources << "ios/code/ENRMSyntaxHighlighterBridge.swift" unless enable_syntax
++  s.exclude_files = excluded_sources unless excluded_sources.empty?
++
++  # HighlighterSwift 3.1.0: pin the audited tag's commit, including its Highlight.js 11.11.1 resources.
++  if enable_syntax
++    spm_dependency(s,
++      url: 'https://github.com/smittytone/HighlighterSwift.git',
++      requirement: {kind: 'revision', revision: 'fe7aae9c9b31d3b296fd3d2dd575e1a207bb29e0'},
++      products: ['Highlighter']
++    )
+   end
++  s.resource_bundles = { 'PythagorasCodeSyntaxNotices' => ['ios/code/PythagorasSyntax-LICENSE.txt'] }
+
+   preprocessor_defs = '$(inherited) MD4C_USE_UTF8=1'
++  preprocessor_defs += enable_syntax ? ' ENRICHED_MARKDOWN_SYNTAX=1' : ' ENRICHED_MARKDOWN_SYNTAX=0'
+   if enable_math
+     preprocessor_defs += ' ENRICHED_MARKDOWN_MATH=1'
+     spm_dependency(s,
+@@ -52,6 +65,9 @@ Pod::Spec.new do |s|
+       requirement: {kind: 'upToNextMajorVersion', minimumVersion: '0.1.12'},
+       products: ['RaTeX']
+     )
++  else
++    # The code Swift bridge also generates a Swift header; it must not imply RaTeX availability.
++    preprocessor_defs += ' ENRICHED_MARKDOWN_MATH=0'
+   end
+
+   pod_xcconfig = {
 diff --git a/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdown.mm b/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdown.mm
 index 7ad95d7..2c6e80a 100644
 --- a/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdown.mm
@@ -214,44 +255,344 @@ index 7ad95d7..2c6e80a 100644
        CGPoint segmentPoint = [self convertPoint:point toView:segment];
  #if !TARGET_OS_OSX
        if ([segment pointInside:segmentPoint withEvent:nil]) {
+diff --git a/node_modules/react-native-enriched-markdown/ios/code/ENRMSyntaxHighlighterBridge.swift b/node_modules/react-native-enriched-markdown/ios/code/ENRMSyntaxHighlighterBridge.swift
+new file mode 100644
+index 0000000..d7627bd
+--- /dev/null
++++ b/node_modules/react-native-enriched-markdown/ios/code/ENRMSyntaxHighlighterBridge.swift
+@@ -0,0 +1,207 @@
++import Foundation
++
++#if os(iOS)
++import UIKit
++import CryptoKit
++import Highlighter
++
++// A request owns no view. Cancellation is checked both before grammar work and delivery.
++@objc(ENRMSyntaxHighlightRequest)
++public final class ENRMSyntaxHighlightRequest: NSObject, @unchecked Sendable {
++  private let lock = NSLock()
++  private var cancelled = false
++
++  @objc public func cancel() {
++    lock.lock()
++    cancelled = true
++    lock.unlock()
++  }
++
++  fileprivate var isCancelled: Bool {
++    lock.lock()
++    defer { lock.unlock() }
++    return cancelled
++  }
++}
++
++@objc(ENRMSyntaxHighlighterBridge)
++public final class ENRMSyntaxHighlighterBridge: NSObject {
++  private static let service = SyntaxHighlightService()
++
++  @objc(requestColorsForSource:language:dark:clientID:completion:)
++  public static func requestColors(
++    forSource source: String, language: String, dark: Bool, clientID: String,
++    completion: @escaping (NSAttributedString?) -> Void
++  ) -> ENRMSyntaxHighlightRequest {
++    let request = ENRMSyntaxHighlightRequest()
++    service.submit(source: source, language: language, dark: dark, clientID: clientID,
++                   request: request, completion: completion)
++    return request
++  }
++}
++
++private final class SyntaxHighlightService: @unchecked Sendable {
++  // Immutable inputs; cancellation is locked and the ObjC completion runs only on main.
++  private struct Job: @unchecked Sendable {
++    let source: String
++    let language: String
++    let dark: Bool
++    let request: ENRMSyntaxHighlightRequest
++    let completion: (NSAttributedString?) -> Void
++  }
++  private struct CachedResult {
++    let colors: NSAttributedString
++    let cost: Int
++  }
++  private struct Delivery: @unchecked Sendable {
++    let colors: NSAttributedString? // Immutable foreground-only snapshot.
++  }
++
++  private let queue = DispatchQueue(label: "com.pythagoras.markdown.syntax", qos: .utility)
++  private let pendingLock = NSLock()
++  private var pending: [String: Job] = [:]
++  private var pendingOrder: [String] = []
++  private var draining = false
++  private let maximumSourceUTF16 = 32768
++  private let maximumPendingClients = 128
++  private let maximumCacheEntries = 64
++  private let maximumCacheCost = 2 * 1024 * 1024
++
++  // Only the serial queue accesses the engine, themes and cache.
++  private var initialized = false
++  private var engine: Highlighter?
++  private var supported: Set<String> = []
++  private var activeDark: Bool?
++  private var cache: [String: CachedResult] = [:]
++  private var recency: [String] = []
++  private var cacheCost = 0
++
++  func submit(source: String, language: String, dark: Bool, clientID: String,
++              request: ENRMSyntaxHighlightRequest, completion: @escaping (NSAttributedString?) -> Void) {
++    let job = Job(source: source, language: language, dark: dark, request: request, completion: completion)
++    guard (source as NSString).length <= maximumSourceUTF16 else {
++      DispatchQueue.main.async { if !job.request.isCancelled { job.completion(nil) } }
++      return
++    }
++    pendingLock.lock()
++    // A streaming view replaces its pending job rather than enqueueing every delta.
++    if let old = pending[clientID] {
++      old.request.cancel()
++    } else {
++      if pending.count >= maximumPendingClients, let oldest = pendingOrder.first {
++        pending.removeValue(forKey: oldest)?.request.cancel()
++        pendingOrder.removeFirst()
++      }
++      pendingOrder.append(clientID)
++    }
++    pending[clientID] = job
++    let shouldStart = !draining
++    draining = true
++    pendingLock.unlock()
++    if shouldStart { queue.async { self.drain() } }
++  }
++
++  private func drain() {
++    while true {
++      pendingLock.lock()
++      guard let clientID = pendingOrder.first, let job = pending.removeValue(forKey: clientID) else {
++        draining = false
++        pendingLock.unlock()
++        return
++      }
++      pendingOrder.removeFirst()
++      pendingLock.unlock()
++      autoreleasepool {
++        guard !job.request.isCancelled else { return }
++        let delivery = Delivery(colors: colorize(job))
++        guard !job.request.isCancelled else { return }
++        DispatchQueue.main.async {
++          if !job.request.isCancelled { job.completion(delivery.colors) }
++        }
++      }
++    }
++  }
++
++  private func colorize(_ job: Job) -> NSAttributedString? {
++    if !initialized {
++      initialized = true
++      engine = Highlighter()
++      if let engine = engine {
++        engine.ignoreIllegals = true
++        supported = Set(engine.supportedLanguages())
++      }
++    }
++    // No autodetection. Unknown grammars and missing SPM resources retain plain source.
++    guard let engine = engine, supported.contains(job.language) else { return nil }
++    let digest = SHA256.hash(data: Data(job.source.utf8)).map { String(format: "%02x", $0) }.joined()
++    let key = "pythagoras-v1:\(job.dark):\(job.language):\(digest)"
++    if let hit = cache[key] {
++      recency.removeAll { $0 == key }
++      recency.append(key)
++      return hit.colors
++    }
++    if activeDark != job.dark {
++      guard engine.setTheme(job.dark ? "atom-one-dark" : "atom-one-light", withFont: "Menlo", ofSize: 14) else { return nil }
++      activeDark = job.dark
++    }
++    guard !job.request.isCancelled,
++          let highlighted = engine.highlight(job.source, as: job.language, doFastRender: true),
++          highlighted.string.utf8.elementsEqual(job.source.utf8),
++          !job.request.isCancelled else { return nil }
++
++    // Geometry belongs to the existing UITextView. Export foreground colors only.
++    let colors = NSMutableAttributedString(string: job.source)
++    var runs = 0
++    highlighted.enumerateAttribute(.foregroundColor, in: NSRange(location: 0, length: highlighted.length)) { value, range, _ in
++      guard let color = value as? UIColor, let mapped = PythagorasSyntaxColors.remap(color, dark: job.dark) else { return }
++      colors.addAttribute(.foregroundColor, value: mapped, range: range)
++      runs += 1
++    }
++    let immutable = NSAttributedString(attributedString: colors)
++    let cost = immutable.length * 2 + runs * 96 + key.utf8.count
++    if cost <= maximumCacheCost {
++      while cache.count >= maximumCacheEntries || cacheCost + cost > maximumCacheCost {
++        guard let oldest = recency.first else { break }
++        recency.removeFirst()
++        cacheCost -= cache.removeValue(forKey: oldest)?.cost ?? 0
++      }
++      cache[key] = CachedResult(colors: immutable, cost: cost)
++      cacheCost += cost
++      recency.append(key)
++    }
++    return immutable
++  }
++}
++
++private enum PythagorasSyntaxColors {
++  // Atom One token colors map to our own graphite-safe palette. Base text keeps the configured color.
++  private static let dark: [UInt32: UInt32] = [
++    0x5C6370: 0xA4A39A, // comment
++    0xC678DD: 0xC8A0C9, // keyword
++    0xE06C75: 0xD9A3A4, // tag / name
++    0x56B6C2: 0xA4BDDA, // literal
++    0x98C379: 0xA6C39E, // string
++    0xD19A66: 0xBEADD6, // number / property
++    0x61AEEE: 0xA4BDDA, // title / meta
++    0xE6C07B: 0xD6C29E  // built-in
++  ]
++  private static let light: [UInt32: UInt32] = [
++    0xA0A1A7: 0x65655F,
++    0xA626A4: 0x6F3973,
++    0xE45649: 0x944A4E,
++    0x0184BB: 0x365D83,
++    0x50A14F: 0x3B653A,
++    0x986801: 0x715480,
++    0x4078F2: 0x365D83,
++    0xC18401: 0x795F2D
++  ]
++  static func remap(_ color: UIColor, dark isDark: Bool) -> UIColor? {
++    var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
++    guard color.getRed(&r, green: &g, blue: &b, alpha: &a) else { return nil }
++    let rgb = (UInt32((r * 255).rounded()) << 16) | (UInt32((g * 255).rounded()) << 8) | UInt32((b * 255).rounded())
++    guard let mapped = (isDark ? dark : light)[rgb] else { return nil }
++    return UIColor(red: CGFloat((mapped >> 16) & 255) / 255, green: CGFloat((mapped >> 8) & 255) / 255,
++                   blue: CGFloat(mapped & 255) / 255, alpha: 1)
++  }
++}
++#endif
+diff --git a/node_modules/react-native-enriched-markdown/ios/code/PythagorasSyntax-LICENSE.txt b/node_modules/react-native-enriched-markdown/ios/code/PythagorasSyntax-LICENSE.txt
+new file mode 100644
+index 0000000..5d25844
+--- /dev/null
++++ b/node_modules/react-native-enriched-markdown/ios/code/PythagorasSyntax-LICENSE.txt
+@@ -0,0 +1,50 @@
++HighlighterSwift 3.1.0, commit fe7aae9c9b31d3b296fd3d2dd575e1a207bb29e0
++Copyright (c) 2026 Tony Smith (@smittytone)
++Portions copyright (c) 2016 Juan Pablo Illanes
++Highlight.js 11.11.1: Copyright (c) 2006-2026 Josh Goebel and other contributors
++
++MIT License (HighlighterSwift / Highlightr)
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in
++all copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
++THE SOFTWARE.
++
++BSD 3-Clause License (Highlight.js)
++
++Redistribution and use in source and binary forms, with or without
++modification, are permitted provided that the following conditions are met:
++
++1. Redistributions of source code must retain the above copyright notice,
++   this list of conditions and the following disclaimer.
++2. Redistributions in binary form must reproduce the above copyright
++   notice, this list of conditions and the following disclaimer in the
++   documentation and/or other materials provided with the distribution.
++3. Neither the name of the copyright holder nor the names of its
++   contributors may be used to endorse or promote products derived from this
++   software without specific prior written permission.
++
++THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
++LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++POSSIBILITY OF SUCH DAMAGE.
 diff --git a/node_modules/react-native-enriched-markdown/ios/utils/ENRMCodeLanguage.h b/node_modules/react-native-enriched-markdown/ios/utils/ENRMCodeLanguage.h
 new file mode 100644
-index 0000000..17ec7a9
+index 0000000..d442d1a
 --- /dev/null
 +++ b/node_modules/react-native-enriched-markdown/ios/utils/ENRMCodeLanguage.h
-@@ -0,0 +1,4 @@
+@@ -0,0 +1,7 @@
 +#import <Foundation/Foundation.h>
-+NSString *ENRMCodeLanguageLabel(NSString *language);
 +@class MarkdownASTNode;
++NS_ASSUME_NONNULL_BEGIN
++NSString *ENRMCodeLanguageLabel(NSString *_Nullable language);
++NSString *_Nullable ENRMCodeHighlightLanguage(NSString *_Nullable language);
 +NSString *ENRMRawCodeContent(MarkdownASTNode *node);
++NS_ASSUME_NONNULL_END
 diff --git a/node_modules/react-native-enriched-markdown/ios/utils/ENRMCodeLanguage.m b/node_modules/react-native-enriched-markdown/ios/utils/ENRMCodeLanguage.m
 new file mode 100644
-index 0000000..abc578e
+index 0000000..75fd578
 --- /dev/null
 +++ b/node_modules/react-native-enriched-markdown/ios/utils/ENRMCodeLanguage.m
-@@ -0,0 +1,30 @@
+@@ -0,0 +1,58 @@
 +#import "ENRMCodeLanguage.h"
 +#import "MarkdownASTNode.h"
++static NSString *ENRMSanitizedCodeLanguage(NSString *language)
++{
++  NSMutableString *safe = [NSMutableString string];
++  NSString *input = language ?: @"";
++  [input enumerateSubstringsInRange:NSMakeRange(0, input.length) options:NSStringEnumerationByComposedCharacterSequences usingBlock:^(NSString *part, NSRange range, NSRange enclosing, BOOL *stop) {
++    if (safe.length + part.length > 32) { *stop = YES; return; }
++    if ([part rangeOfCharacterFromSet:[NSCharacterSet controlCharacterSet]].location == NSNotFound && [part rangeOfCharacterFromSet:[NSCharacterSet characterSetWithCharactersInString:@"\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069"]].location == NSNotFound) [safe appendString:part];
++  }];
++  return [safe stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
++}
 +NSString *ENRMCodeLanguageLabel(NSString *language)
 +{
 +  static NSDictionary<NSString *, NSString *> *labels;
 +  static dispatch_once_t once;
 +  dispatch_once(&once, ^{
-+    labels = @{ @"text": @"Plain text", @"txt": @"Plain text", @"plaintext": @"Plain text",
++    labels = @{ @"text": @"Plain text", @"txt": @"Plain text", @"plaintext": @"Plain text", @"plain": @"Plain text", @"plain-text": @"Plain text", @"none": @"Plain text", @"no-language": @"Plain text",
 +      @"python": @"Python", @"py": @"Python", @"typescript": @"TypeScript", @"ts": @"TypeScript", @"tsx": @"TypeScript",
 +      @"javascript": @"JavaScript", @"js": @"JavaScript", @"jsx": @"JavaScript", @"json": @"JSON", @"html": @"HTML", @"css": @"CSS",
 +      @"bash": @"Bash", @"sh": @"Shell", @"shell": @"Shell", @"sql": @"SQL", @"swift": @"Swift", @"kotlin": @"Kotlin",
 +      @"java": @"Java", @"c": @"C", @"cpp": @"C++", @"c++": @"C++", @"csharp": @"C#", @"cs": @"C#",
-+      @"rust": @"Rust", @"go": @"Go", @"yaml": @"YAML", @"yml": @"YAML", @"xml": @"XML", @"markdown": @"Markdown", @"md": @"Markdown" };
++      @"rust": @"Rust", @"rs": @"Rust", @"go": @"Go", @"golang": @"Go", @"yaml": @"YAML", @"yml": @"YAML", @"xml": @"XML", @"markdown": @"Markdown", @"md": @"Markdown",
++      @"jsonc": @"JSONC", @"toml": @"TOML", @"ini": @"INI", @"powershell": @"PowerShell", @"ps1": @"PowerShell", @"pwsh": @"PowerShell", @"cmd": @"CMD", @"bat": @"CMD", @"batch": @"CMD", @"dos": @"CMD",
++      @"objc": @"Objective-C", @"objective-c": @"Objective-C", @"objectivec": @"Objective-C", @"php": @"PHP", @"ruby": @"Ruby", @"rb": @"Ruby", @"lua": @"Lua", @"r": @"R", @"matlab": @"MATLAB", @"dart": @"Dart", @"scala": @"Scala",
++      @"perl": @"Perl", @"pl": @"Perl", @"haskell": @"Haskell", @"hs": @"Haskell", @"elixir": @"Elixir", @"ex": @"Elixir", @"clojure": @"Clojure", @"clj": @"Clojure", @"fsharp": @"F#", @"f#": @"F#", @"fs": @"F#",
++      @"assembly": @"Assembly", @"asm": @"Assembly", @"x86asm": @"Assembly", @"solidity": @"Solidity", @"graphql": @"GraphQL", @"gql": @"GraphQL", @"dockerfile": @"Dockerfile", @"docker": @"Dockerfile", @"nginx": @"Nginx", @"diff": @"diff", @"patch": @"diff",
++      @"regex": @"regex", @"regexp": @"regex", @"latex": @"LaTeX", @"tex": @"LaTeX", @"mermaid": @"Mermaid", @"react": @"React", @"vue": @"Vue", @"svelte": @"Svelte", @"prisma": @"Prisma", @"sqlite": @"SQLite",
++      @"scss": @"SCSS", @"less": @"Less", @"makefile": @"Makefile", @"make": @"Makefile", @"cmake": @"CMake", @"gitconfig": @"git config", @"git-config": @"git config", @".env": @".env", @"env": @".env",
++      @"http": @"HTTP", @"https": @"HTTP", @"csv": @"CSV", @"plist": @"plist", @"swiftui": @"SwiftUI", @"react-native": @"React Native", @"reactnative": @"React Native", @"expo-config": @"Expo config", @"expoconfig": @"Expo config", @"expo": @"Expo config", @"pseudocode": @"Pseudocode" };
 +  });
-+  NSMutableString *safe = [NSMutableString string];
-+  NSString *input = language ?: @"";
-+  [input enumerateSubstringsInRange:NSMakeRange(0, input.length) options:NSStringEnumerationByComposedCharacterSequences usingBlock:^(NSString *part, NSRange range, NSRange enclosing, BOOL *stop) {
-+    if (safe.length >= 32) { *stop = YES; return; }
-+    if ([part rangeOfCharacterFromSet:[NSCharacterSet controlCharacterSet]].location == NSNotFound && [part rangeOfCharacterFromSet:[NSCharacterSet characterSetWithCharactersInString:@"\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069"]].location == NSNotFound) [safe appendString:part];
-+  }];
-+  NSString *trimmed = [safe stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
++  NSString *trimmed = ENRMSanitizedCodeLanguage(language);
 +  return labels[trimmed.lowercaseString] ?: (trimmed.length ? trimmed : @"Plain text");
++}
++NSString *ENRMCodeHighlightLanguage(NSString *language)
++{
++  NSString *normalized = ENRMSanitizedCodeLanguage(language).lowercaseString;
++  if (normalized.length == 0 || [@[@"text", @"txt", @"plaintext", @"plain", @"plain-text", @"none", @"no-language", @"csv", @"pseudocode"] containsObject:normalized]) return nil;
++  static NSDictionary<NSString *, NSString *> *grammars;
++  static dispatch_once_t once;
++  dispatch_once(&once, ^{
++    // Metadata aliases/families only. Content never selects a grammar.
++    grammars = @{ @"js": @"javascript", @"jsx": @"javascript", @"react": @"javascript", @"react-native": @"javascript", @"reactnative": @"javascript",
++      @"ts": @"typescript", @"tsx": @"typescript", @"py": @"python", @"sh": @"bash", @"shell": @"bash", @"ps1": @"powershell", @"pwsh": @"powershell", @"cmd": @"dos", @"bat": @"dos", @"batch": @"dos",
++      @"jsonc": @"json", @"expo-config": @"json", @"expoconfig": @"json", @"expo": @"json", @"yml": @"yaml", @"toml": @"ini", @"gitconfig": @"ini", @"git-config": @"ini", @".env": @"ini", @"env": @"ini",
++      @"html": @"xml", @"plist": @"xml", @"vue": @"xml", @"svelte": @"xml", @"sqlite": @"sql", @"swiftui": @"swift", @"objc": @"objectivec", @"objective-c": @"objectivec",
++      @"c++": @"cpp", @"cs": @"csharp", @"c#": @"csharp", @"rb": @"ruby", @"pl": @"perl", @"hs": @"haskell", @"ex": @"elixir", @"clj": @"clojure", @"fs": @"fsharp", @"f#": @"fsharp",
++      @"asm": @"x86asm", @"assembly": @"x86asm", @"rs": @"rust", @"golang": @"go", @"gql": @"graphql", @"docker": @"dockerfile", @"patch": @"diff", @"tex": @"latex", @"md": @"markdown", @"make": @"makefile", @"https": @"http" };
++  });
++  return grammars[normalized] ?: normalized;
 +}
 +NSString *ENRMRawCodeContent(MarkdownASTNode *node)
 +{
@@ -399,17 +740,32 @@ index 0000000..a5a2740
 +#endif
 diff --git a/node_modules/react-native-enriched-markdown/ios/views/ENRMCodeBlockContainerView.m b/node_modules/react-native-enriched-markdown/ios/views/ENRMCodeBlockContainerView.m
 new file mode 100644
-index 0000000..902a4e7
+index 0000000..eca0b68
 --- /dev/null
 +++ b/node_modules/react-native-enriched-markdown/ios/views/ENRMCodeBlockContainerView.m
-@@ -0,0 +1,139 @@
+@@ -0,0 +1,195 @@
 +#import "ENRMCodeBlockContainerView.h"
 +#import "ENRMCodeLanguage.h"
 +#import "MarkdownASTNode.h"
 +#import "PasteboardUtils.h"
 +#import "StyleConfig.h"
 +#include <math.h>
++#ifndef ENRICHED_MARKDOWN_SYNTAX
++#define ENRICHED_MARKDOWN_SYNTAX 0
++#endif
 +#if !TARGET_OS_OSX
++#if ENRICHED_MARKDOWN_SYNTAX
++#if __has_include("ReactNativeEnrichedMarkdown-Swift.h")
++#import "ReactNativeEnrichedMarkdown-Swift.h"
++#elif __has_include(<ReactNativeEnrichedMarkdown/ReactNativeEnrichedMarkdown-Swift.h>)
++#import <ReactNativeEnrichedMarkdown/ReactNativeEnrichedMarkdown-Swift.h>
++#endif
++#endif
++
++@interface ENRMCodeBlockContainerView ()
++- (void)requestSyntaxColorsForLanguage:(NSString *)language;
++@end
++
 +// Pythagoras: native AST-backed code block, sharing the segmented Fabric height contract.
 +@implementation ENRMCodeBlockContainerView {
 +  UIView *_header;
@@ -421,12 +777,18 @@ index 0000000..902a4e7
 +  CGFloat _documentWidth;
 +  CGFloat _bodyHeight;
 +  NSUInteger _copyFeedbackRevision;
++  NSUInteger _highlightRevision;
++  NSString *_highlightClientID;
++#if ENRICHED_MARKDOWN_SYNTAX
++  ENRMSyntaxHighlightRequest *_highlightRequest;
++#endif
 +}
 +- (instancetype)initWithConfig:(StyleConfig *)config
 +{
 +  self = [super initWithFrame:CGRectZero];
 +  if (self) {
 +    _config = config; _rawCode = @""; _menuCopyLabel = @"نسخ";
++    _highlightClientID = [NSUUID UUID].UUIDString;
 +    self.clipsToBounds = YES;
 +    self.semanticContentAttribute = UISemanticContentAttributeForceLeftToRight;
 +    _header = [UIView new]; [self addSubview:_header];
@@ -453,7 +815,7 @@ index 0000000..902a4e7
 +    [_copyButton setImage:[UIImage systemImageNamed:@"doc.on.doc"] forState:UIControlStateNormal];
 +    [_copyButton addTarget:self action:@selector(copyCode) forControlEvents:UIControlEventTouchUpInside];
 +    [_copyButton setPreferredSymbolConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:18 weight:UIImageSymbolWeightRegular] forImageInState:UIControlStateNormal];
-+    [self addSubview:_copyButton];
++    [_header addSubview:_copyButton];
 +  }
 +  return self;
 +}
@@ -463,13 +825,18 @@ index 0000000..902a4e7
 +}
 +- (void)applyCodeNode:(MarkdownASTNode *)node
 +{
++#if ENRICHED_MARKDOWN_SYNTAX
++  [_highlightRequest cancel];
++  _highlightRequest = nil;
++#endif
++  _highlightRevision++;
 +  _rawCode = [ENRMRawCodeContent(node) copy];
 +  _language.text = ENRMCodeLanguageLabel(node.attributes[@"language"]);
 +  UIFont *font = self.config.codeBlockFont ?: [UIFont monospacedSystemFontOfSize:14 weight:UIFontWeightRegular];
 +  _language.font = [UIFont systemFontOfSize:MAX(14, font.pointSize) weight:UIFontWeightMedium];
-+  _language.textColor = [self.config.codeBlockColor colorWithAlphaComponent:0.8];
++  _language.textColor = self.config.codeBlockColor;
 +  _language.accessibilityLabel = [@"لغة الكود: " stringByAppendingString:_language.text];
-+  _copyButton.tintColor = [self.config.codeBlockColor colorWithAlphaComponent:0.8];
++  _copyButton.tintColor = self.config.codeBlockColor;
 +  _copyButton.accessibilityLabel = [NSString stringWithFormat:@"%@ الكود — %@", self.menuCopyLabel, _language.text];
 +  self.backgroundColor = self.config.codeBlockBackgroundColor;
 +  _header.backgroundColor = [UIColor clearColor];
@@ -502,6 +869,36 @@ index 0000000..902a4e7
 +  CGRect extra = _codeView.layoutManager.extraLineFragmentRect;
 +  _bodyHeight = ceil(MAX(font.lineHeight, MAX(CGRectGetMaxY(used), CGRectGetMaxY(extra)))) + padding * 2;
 +  [self setNeedsLayout];
++  [self requestSyntaxColorsForLanguage:node.attributes[@"language"]];
++}
++- (void)requestSyntaxColorsForLanguage:(NSString *)language
++{
++#if ENRICHED_MARKDOWN_SYNTAX
++  NSString *grammar = ENRMCodeHighlightLanguage(language);
++  if (!grammar || _rawCode.length > 32768) return;
++  CGFloat r = 1, g = 1, b = 1, a = 1;
++  [self.config.codeBlockBackgroundColor getRed:&r green:&g blue:&b alpha:&a];
++  BOOL dark = (0.2126 * r + 0.7152 * g + 0.0722 * b) < 0.5;
++  NSUInteger revision = _highlightRevision;
++  NSString *source = _rawCode;
++  __weak ENRMCodeBlockContainerView *weakSelf = self;
++  _highlightRequest = [ENRMSyntaxHighlighterBridge requestColorsForSource:source language:grammar dark:dark clientID:_highlightClientID completion:^(NSAttributedString *colors) {
++    ENRMCodeBlockContainerView *view = weakSelf;
++    if (!view || !colors || view->_highlightRevision != revision || ![view->_rawCode isEqualToString:source] || ![colors.string isEqualToString:source]) return;
++    // Apply colors only. Font/paragraph/source/selection/scroll offset and intrinsic size stay owned by the existing view.
++    [view->_codeView.textStorage beginEditing];
++    [colors enumerateAttribute:NSForegroundColorAttributeName inRange:NSMakeRange(0, colors.length) options:0 usingBlock:^(id color, NSRange range, BOOL *stop) {
++      if (color) [view->_codeView.textStorage addAttribute:NSForegroundColorAttributeName value:color range:range];
++    }];
++    [view->_codeView.textStorage endEditing];
++  }];
++#endif
++}
++- (void)dealloc
++{
++#if ENRICHED_MARKDOWN_SYNTAX
++  [_highlightRequest cancel];
++#endif
 +}
 +- (CGFloat)measureHeight:(CGFloat)width
 +{
