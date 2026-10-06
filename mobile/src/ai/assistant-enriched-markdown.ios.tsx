@@ -12,6 +12,7 @@ import { hideUnclosedMathSuffix } from './rich-response/math-delimiters';
 import { isSafeAgent1Link } from './rich-response/math-markdown-plugin';
 import { prepareEnrichedMarkdownInput } from './rich-response/enriched-markdown-input';
 import { usePreferences } from '@/preferences/preferences-provider';
+import { agent1ReadingLineHeights } from './assistant-reading-rhythm';
 
 interface Agent1EnrichedMarkdownProps {
   messageId: string;
@@ -61,6 +62,7 @@ const Agent1EnrichedMarkdown = memo(function Agent1EnrichedMarkdown({
     return prepareEnrichedMarkdownInput(stablePrefix);
   }, [content, streaming]);
   const lastDiagnosticRef = useRef('');
+  const lastNativeLayoutRef = useRef('');
   useEffect(() => {
     if (!__DEV__ || !layoutDiagnosticsEnabled || streaming) return;
     const diagnosticKey = `${messageId}:${content.length}:${markdown.length}:${contentWidth}`;
@@ -90,6 +92,9 @@ const Agent1EnrichedMarkdown = memo(function Agent1EnrichedMarkdown({
   const handleNativeLayout = useCallback((event: LayoutChangeEvent) => {
     if (!__DEV__ || !layoutDiagnosticsEnabled) return;
     const { x, y, width, height } = event.nativeEvent.layout;
+    const key = JSON.stringify([messageId, x, y, width, height, streaming]);
+    if (lastNativeLayoutRef.current === key) return;
+    lastNativeLayoutRef.current = key;
     const metrics = {
       messageId,
       sourceCharacters: content.length,
@@ -144,6 +149,7 @@ const READING_RHYTHM = {
 } as const;
 
 function createMarkdownStyle(palette: Palette, bodyFontSize: number, fontScale: number): MarkdownStyle {
+  const readingLineHeights = agent1ReadingLineHeights(bodyFontSize);
   const rhythm = (points: number) => scaledFontSize(points, bodyFontSize / 17);
   const monoFont = Platform.select({
     ios: 'Menlo',
@@ -155,6 +161,7 @@ function createMarkdownStyle(palette: Palette, bodyFontSize: number, fontScale: 
     paragraph: {
       color: palette.text,
       fontSize: bodyFontSize,
+      lineHeight: readingLineHeights.paragraph,
       marginTop: 0,
       marginBottom: rhythm(READING_RHYTHM.paragraphAfter),
     },
@@ -216,6 +223,7 @@ function createMarkdownStyle(palette: Palette, bodyFontSize: number, fontScale: 
     list: {
       color: palette.text,
       fontSize: bodyFontSize,
+      lineHeight: readingLineHeights.list,
       bulletColor: palette.textSecondary,
       markerColor: palette.textSecondary,
       gapWidth: 7,
@@ -232,12 +240,12 @@ function createMarkdownStyle(palette: Palette, bodyFontSize: number, fontScale: 
     codeBlock: {
       color: palette.text,
       fontFamily: monoFont,
-      fontSize: Math.max(12, bodyFontSize - 2),
-      backgroundColor: palette.surfaceInset,
+      fontSize: Math.max(12, bodyFontSize - 3),
+      backgroundColor: palette.surface,
       borderColor: palette.border,
-      borderWidth: 1,
+      borderWidth: 0.5,
       borderRadius: 11,
-      padding: 10,
+      padding: 12,
       marginBottom: rhythm(READING_RHYTHM.codeAfter),
     },
     thematicBreak: {

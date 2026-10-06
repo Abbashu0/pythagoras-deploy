@@ -42,6 +42,9 @@ export function updateChatTranscriptEndVisibility(
   // Only positioning the target row or an explicit user drag may leave this state.
   if (state.mode === "anchoring-new-turn") return state;
 
+  // Native height/inset changes can make the end visible without a reader move.
+  // Only an actual user gesture may re-arm a suspended reader.
+  if (state.mode === "user-scrolled-away" && !userGestureActive) return state;
   if (endVisible) {
     return { mode: "at-bottom", anchorTurnId: state.anchorTurnId };
   }
@@ -79,6 +82,7 @@ export function calculateChatTranscriptAnchorBlankSpace(
   targetOffset: number,
   measuredContentHeight: number,
   viewportHeight: number,
+  minimumContentInset = 0,
 ): number {
   if (
     !Number.isFinite(targetOffset) ||
@@ -88,5 +92,60 @@ export function calculateChatTranscriptAnchorBlankSpace(
   ) {
     return 0;
   }
-  return Math.max(0, targetOffset - (measuredContentHeight - viewportHeight));
+  const requiredInset = Math.max(0, targetOffset - (measuredContentHeight - viewportHeight));
+  return requiredInset > minimumContentInset ? requiredInset : 0;
+}
+
+/** Capacity only: consume the reserve monotonically, without introducing a
+ * range clamp by releasing capacity needed at the reader's offset. Terminal events use the same
+ * calculation and do not issue scroll commands. A manual reader keeps capacity. */
+export function consumeChatTranscriptAnchorSpace(
+  state: ChatTranscriptScrollState,
+  previousSpace: number,
+  requiredAnchorSpace: number,
+  scrollOffset: number,
+  contentHeight: number,
+  viewportHeight: number,
+  minimumContentInset: number,
+): number {
+  if (state.mode === "user-scrolled-away") return previousSpace;
+  if (state.mode === "anchoring-new-turn") return requiredAnchorSpace;
+  const preserveOffsetSpace = calculateChatTranscriptAnchorBlankSpace(
+    scrollOffset, contentHeight, viewportHeight, minimumContentInset,
+  );
+  return Math.min(previousSpace, Math.max(requiredAnchorSpace, preserveOffsetSpace));
+}
+
+/** One-shot anchor must wait for BOTH the user row and the real content range.
+ * contentInset is the effective range reported by KeyboardChatScrollView. */
+export function canPositionChatTranscriptAnchor({
+  state, turnId, userHeight, userBottom, contentHeight, viewportHeight, targetOffset, contentInsetBottom,
+}: {
+  state: ChatTranscriptScrollState; turnId: string; userHeight: number; userBottom: number;
+  contentHeight: number; viewportHeight: number; targetOffset: number; contentInsetBottom: number;
+}): boolean {
+  return state.mode === "anchoring-new-turn" && state.anchorTurnId === turnId &&
+    userHeight > 0 && viewportHeight > 0 && contentHeight >= userBottom &&
+    contentHeight - viewportHeight + contentInsetBottom >= targetOffset - 0.5;
+}
+
+/** Single content-growth offset writer. Target the document, NOT the native
+ * inset end (scrollToEnd includes unused blankSpace). No write for shrink,
+ * already-visible content, keyboard motion, pending anchors, or manual readers. */
+export function getChatTranscriptFollowTarget(state: ChatTranscriptScrollState, geometry: {
+  streamIsActive: boolean; keyboardInMotion: boolean; assistantBottom: number;
+  userGestureActive?: boolean;
+  controllerInsetShiftPending?: boolean;
+  previousAssistantBottom: number; contentHeight: number; viewportHeight: number;
+  scrollOffset: number; bottomOcclusion: number; documentBottomGap: number;
+}): number | null {
+  const { streamIsActive, keyboardInMotion, assistantBottom, previousAssistantBottom,
+    contentHeight, viewportHeight, scrollOffset, bottomOcclusion, documentBottomGap } = geometry;
+  if (!streamIsActive || keyboardInMotion || geometry.userGestureActive || geometry.controllerInsetShiftPending ||
+    !shouldFollowChatTranscript(state) || viewportHeight <= 0 ||
+    !Object.values(geometry).every(value => typeof value !== 'number' || Number.isFinite(value)) ||
+    assistantBottom <= previousAssistantBottom + 0.5 ||
+    contentHeight + 0.5 < assistantBottom + documentBottomGap) return null;
+  const target = Math.max(0, assistantBottom + documentBottomGap + bottomOcclusion - viewportHeight);
+  return target > scrollOffset + 0.5 ? target : null;
 }

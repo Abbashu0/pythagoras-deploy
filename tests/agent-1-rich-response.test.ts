@@ -148,6 +148,14 @@ test('presentation input distinguishes valid inline math from escaped currency, 
   assert.equal(inlineTokenCount, 2);
 });
 
+test('undelimited or malformed TeX stays literal while valid math keeps its delimiters', () => {
+  for (const source of [String.raw`frac{1}{2}`, String.raw`sqrt{x}`, String.raw`\rightarrow`, String.raw`شرح حرفي: \frac{1}{2}`]) {
+    assert.equal(prepareEnrichedMarkdownInput(source), source);
+  }
+  const valid = String.raw`العلاقة $\frac{1}{2}$ ثم $$\sqrt{x}\rightarrow y$$`;
+  assert.equal(prepareEnrichedMarkdownInput(valid), valid);
+});
+
 test('presentation input preserves RTL table source column order', () => {
   const table = [
     '| وجه المقارنة | النسبية الخاصة | النسبية العامة |',

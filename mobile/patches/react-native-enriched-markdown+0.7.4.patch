@@ -1,12 +1,26 @@
 diff --git a/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdown.mm b/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdown.mm
-index 7ad95d7..aa938df 100644
+index 7ad95d7..1dcff54 100644
 --- a/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdown.mm
 +++ b/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdown.mm
-@@ -69,2 +69,3 @@ static char kENRMSegmentFadeAnimatorKey;
+@@ -40,6 +40,7 @@
+ #import "StyleConfig.h"
+ #import "StylePropsUtils.h"
+ #import "TableContainerView.h"
++#import "ENRMCodeBlockContainerView.h"
+ #import "TaskListTapUtils.h"
+ #import "TextViewLayoutManager.h"
+ #import <React/RCTUtils.h>
+@@ -67,6 +68,7 @@ typedef NS_OPTIONS(NSUInteger, ENRMDirtyFlags) {
+ static char kENRMSegmentFadeAnimatorKey;
+ 
  @interface EnrichedMarkdown () <RCTEnrichedMarkdownViewProtocol, UITextViewDelegate>
 +- (void)validateHeightForCurrentWidth:(CGFloat)width;
  - (void)emitLinkPress:(NSString *)url;
-@@ -92,2 +93,8 @@ static char kENRMSegmentFadeAnimatorKey;
+ - (void)emitLinkLongPress:(NSString *)url;
+ - (void)emitTaskListItemPress:(NSInteger)index checked:(BOOL)checked text:(NSString *)text;
+@@ -90,6 +92,12 @@ static char kENRMSegmentFadeAnimatorKey;
+   ENRMAsyncRenderCoordinator *_renderCoordinator;
+ 
    EnrichedMarkdownShadowNode::ConcreteState::Shared _state;
 +  NSUInteger _renderRevision;
 +  NSUInteger _validatedRenderRevision;
@@ -15,13 +29,85 @@ index 7ad95d7..aa938df 100644
 +  BOOL _pendingHeightValidation;
 +  BOOL _pendingForceHeightUpdate;
    int _heightUpdateCounter;
-@@ -567,2 +574,5 @@ static char kENRMSegmentFadeAnimatorKey;
+ 
+   FontScaleObserver *_fontScaleObserver;
+@@ -219,6 +227,23 @@ static char kENRMSegmentFadeAnimatorKey;
+                             }
+                           }]];
+ 
++#if !TARGET_OS_OSX
++  [handlers addObject:[ENRMSegmentViewHandler handlerWithKind:ENRMSegmentKindCode
++    matchesView:^BOOL(RCTUIView *view, ENRMRenderedSegment *segment) {
++      return [view isKindOfClass:[ENRMCodeBlockContainerView class]];
++    }
++    createView:^RCTUIView *(ENRMRenderedSegment *segment) {
++      EnrichedMarkdown *owner = weakSelf;
++      if (!owner) return [RCTUIView new];
++      ENRMCodeBlockContainerView *view = [[ENRMCodeBlockContainerView alloc] initWithConfig:owner->_config];
++      view.copyLabel = owner->_selectionMenuLabels.copyLabel;
++      [view applyCodeNode:segment.codeNode];
++      return view;
++    }
++    updateView:^(RCTUIView *view, ENRMRenderedSegment *segment) {
++      [(ENRMCodeBlockContainerView *)view applyCodeNode:segment.codeNode];
++    }]];
++#endif
+ #if ENRICHED_MARKDOWN_MATH
+   [handlers addObject:[ENRMSegmentViewHandler handlerWithKind:ENRMSegmentKindMath
+                           matchesView:^BOOL(RCTUIView *view, ENRMRenderedSegment *segment) {
+@@ -265,7 +290,15 @@ static char kENRMSegmentFadeAnimatorKey;
+       segmentHeight = textSize.height;
+       maxContentWidth = MAX(maxContentWidth, textSize.width);
+ 
+-    } else if ([segment isKindOfClass:[TableContainerView class]]) {
++    }
++#if !TARGET_OS_OSX
++    else if ([segment isKindOfClass:[ENRMCodeBlockContainerView class]]) {
++      yOffset += _config.codeBlockMarginTop;
++      segmentHeight = [(ENRMCodeBlockContainerView *)segment measureHeight:width];
++      maxContentWidth = width;
++    }
++#endif
++    else if ([segment isKindOfClass:[TableContainerView class]]) {
+       yOffset += _config.tableMarginTop;
+       segmentHeight = [(TableContainerView *)segment measureHeight:width];
+       maxContentWidth = width;
+@@ -293,6 +326,11 @@ static char kENRMSegmentFadeAnimatorKey;
+     }
+ 
+     yOffset += segmentHeight;
++#if !TARGET_OS_OSX
++    if ([segment isKindOfClass:[ENRMCodeBlockContainerView class]] && shouldAddBottomMargin) {
++      yOffset += _config.codeBlockMarginBottom;
++    }
++#endif
+ 
+     if ([segment isKindOfClass:[TableContainerView class]] && shouldAddBottomMargin) {
+       yOffset += _config.tableMarginBottom;
+@@ -413,6 +451,11 @@ static char kENRMSegmentFadeAnimatorKey;
+ - (void)pushSelectionMenuLabelsToSegments
+ {
+   for (RCTUIView *segment in _segmentViews) {
++#if !TARGET_OS_OSX
++    if ([segment isKindOfClass:[ENRMCodeBlockContainerView class]]) {
++      ((ENRMCodeBlockContainerView *)segment).copyLabel = _selectionMenuLabels.copyLabel;
++    }
++#endif
+     if ([segment isKindOfClass:[TableContainerView class]]) {
+       TableContainerView *tableView = (TableContainerView *)segment;
+       tableView.copyLabel = _selectionMenuLabels.copyLabel;
+@@ -565,21 +608,57 @@ static char kENRMSegmentFadeAnimatorKey;
+   _dirtyFlags = ENRMDirtyNone;
+ 
    _segmentViews = result.views;
 +  _renderRevision++;
 +  _pendingHeightValidation = YES;
 +  _pendingForceHeightUpdate = _pendingForceHeightUpdate || forceHeightUpdate || segmentTopologyChanged;
    _segmentSignatures = result.signatures;
-@@ -572,11 +582,44 @@ static char kENRMSegmentFadeAnimatorKey;
+ 
+   if (self.bounds.size.width > 0) {
+     [self setNeedsLayout];
+ 
 -    if (forceHeightUpdate || segmentTopologyChanged) {
 +    if (_pendingForceHeightUpdate) {
        [self computeSegmentLayoutForWidth:self.bounds.size.width applyFrames:YES];
@@ -73,14 +159,23 @@ index 7ad95d7..aa938df 100644
 +  if (shouldRequestHeightUpdate) {
 +    [self requestHeightUpdate];
    }
-@@ -727,3 +770,5 @@ static char kENRMSegmentFadeAnimatorKey;
+ }
+ 
+@@ -725,7 +804,9 @@ static char kENRMSegmentFadeAnimatorKey;
+ - (void)layoutSubviews
+ {
    [super layoutSubviews];
 -  [self computeSegmentLayoutForWidth:self.bounds.size.width applyFrames:YES];
 +  CGFloat width = self.bounds.size.width;
 +  [self computeSegmentLayoutForWidth:width applyFrames:YES];
 +  [self validateHeightForCurrentWidth:width];
  }
-@@ -924,5 +969,3 @@ static char kENRMSegmentFadeAnimatorKey;
+ 
+ - (void)updateProps:(Props::Shared const &)props oldProps:(Props::Shared const &)oldProps
+@@ -922,10 +1003,8 @@ static char kENRMSegmentFadeAnimatorKey;
+       }
+     }
+ 
 -    CGSize measured = [self measureSize:self.bounds.size.width];
 -    if (needsHeightUpdate(measured, self.bounds)) {
 -      [self requestHeightUpdate];
@@ -88,7 +183,11 @@ index 7ad95d7..aa938df 100644
 +    _pendingHeightValidation = YES;
 +    [self validateHeightForCurrentWidth:self.bounds.size.width];
    }
-@@ -950,2 +993,8 @@ static char kENRMSegmentFadeAnimatorKey;
+ }
+ 
+@@ -948,6 +1027,12 @@ static char kENRMSegmentFadeAnimatorKey;
+   [_segmentSignatures removeAllObjects];
+ 
    _cachedMarkdown = nil;
 +  _renderRevision = 0;
 +  _validatedRenderRevision = 0;
@@ -97,32 +196,444 @@ index 7ad95d7..aa938df 100644
 +  _pendingHeightValidation = NO;
 +  _pendingForceHeightUpdate = NO;
    _renderedMarkdown = nil;
+   _streamingAnimation = NO;
+   _tableStreamingMode = ENRMTableStreamingModeProgressive;
+@@ -981,7 +1066,14 @@ Class<RCTComponentViewProtocol> EnrichedMarkdownCls(void)
+ - (facebook::react::SharedTouchEventEmitter)touchEventEmitterAtPoint:(CGPoint)point
+ {
+   for (RCTUIView *segment in _segmentViews) {
+-    if ([segment isKindOfClass:[TableContainerView class]]) {
++    BOOL ownsNativeInteraction = [segment isKindOfClass:[TableContainerView class]];
++#if !TARGET_OS_OSX
++    ownsNativeInteraction = ownsNativeInteraction || [segment isKindOfClass:[ENRMCodeBlockContainerView class]];
++#if ENRICHED_MARKDOWN_MATH
++    ownsNativeInteraction = ownsNativeInteraction || [segment isKindOfClass:[ENRMMathContainerView class]];
++#endif
++#endif
++    if (ownsNativeInteraction) {
+       CGPoint segmentPoint = [self convertPoint:point toView:segment];
+ #if !TARGET_OS_OSX
+       if ([segment pointInside:segmentPoint withEvent:nil]) {
+diff --git a/node_modules/react-native-enriched-markdown/ios/utils/ENRMCodeLanguage.h b/node_modules/react-native-enriched-markdown/ios/utils/ENRMCodeLanguage.h
+new file mode 100644
+index 0000000..17ec7a9
+--- /dev/null
++++ b/node_modules/react-native-enriched-markdown/ios/utils/ENRMCodeLanguage.h
+@@ -0,0 +1,4 @@
++#import <Foundation/Foundation.h>
++NSString *ENRMCodeLanguageLabel(NSString *language);
++@class MarkdownASTNode;
++NSString *ENRMRawCodeContent(MarkdownASTNode *node);
+diff --git a/node_modules/react-native-enriched-markdown/ios/utils/ENRMCodeLanguage.m b/node_modules/react-native-enriched-markdown/ios/utils/ENRMCodeLanguage.m
+new file mode 100644
+index 0000000..abc578e
+--- /dev/null
++++ b/node_modules/react-native-enriched-markdown/ios/utils/ENRMCodeLanguage.m
+@@ -0,0 +1,30 @@
++#import "ENRMCodeLanguage.h"
++#import "MarkdownASTNode.h"
++NSString *ENRMCodeLanguageLabel(NSString *language)
++{
++  static NSDictionary<NSString *, NSString *> *labels;
++  static dispatch_once_t once;
++  dispatch_once(&once, ^{
++    labels = @{ @"text": @"Plain text", @"txt": @"Plain text", @"plaintext": @"Plain text",
++      @"python": @"Python", @"py": @"Python", @"typescript": @"TypeScript", @"ts": @"TypeScript", @"tsx": @"TypeScript",
++      @"javascript": @"JavaScript", @"js": @"JavaScript", @"jsx": @"JavaScript", @"json": @"JSON", @"html": @"HTML", @"css": @"CSS",
++      @"bash": @"Bash", @"sh": @"Shell", @"shell": @"Shell", @"sql": @"SQL", @"swift": @"Swift", @"kotlin": @"Kotlin",
++      @"java": @"Java", @"c": @"C", @"cpp": @"C++", @"c++": @"C++", @"csharp": @"C#", @"cs": @"C#",
++      @"rust": @"Rust", @"go": @"Go", @"yaml": @"YAML", @"yml": @"YAML", @"xml": @"XML", @"markdown": @"Markdown", @"md": @"Markdown" };
++  });
++  NSMutableString *safe = [NSMutableString string];
++  NSString *input = language ?: @"";
++  [input enumerateSubstringsInRange:NSMakeRange(0, input.length) options:NSStringEnumerationByComposedCharacterSequences usingBlock:^(NSString *part, NSRange range, NSRange enclosing, BOOL *stop) {
++    if (safe.length >= 32) { *stop = YES; return; }
++    if ([part rangeOfCharacterFromSet:[NSCharacterSet controlCharacterSet]].location == NSNotFound && [part rangeOfCharacterFromSet:[NSCharacterSet characterSetWithCharactersInString:@"\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069"]].location == NSNotFound) [safe appendString:part];
++  }];
++  NSString *trimmed = [safe stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
++  return labels[trimmed.lowercaseString] ?: (trimmed.length ? trimmed : @"Plain text");
++}
++NSString *ENRMRawCodeContent(MarkdownASTNode *node)
++{
++  // AST content only: never stringify Markdown, trim indentation, or include a fence/language.
++  NSMutableString *raw = [NSMutableString stringWithString:node.content ?: @""];
++  for (MarkdownASTNode *child in node.children) [raw appendString:ENRMRawCodeContent(child)];
++  return raw;
++}
+diff --git a/node_modules/react-native-enriched-markdown/ios/utils/ParagraphStyleUtils.m b/node_modules/react-native-enriched-markdown/ios/utils/ParagraphStyleUtils.m
+index 550bd70..988cb2e 100644
+--- a/node_modules/react-native-enriched-markdown/ios/utils/ParagraphStyleUtils.m
++++ b/node_modules/react-native-enriched-markdown/ios/utils/ParagraphStyleUtils.m
+@@ -1,6 +1,7 @@
+ #import "ParagraphStyleUtils.h"
+ #import "ENRMFeatureFlags.h"
+ #import "LastElementUtils.h"
++#import "CodeBackground.h"
+ #import <React/RCTI18nUtil.h>
+ 
+ #if ENRICHED_MARKDOWN_MATH
+@@ -92,6 +93,26 @@ void ENRMApplyWritingDirectionMode(NSMutableAttributedString *output, ENRMWritin
+   }
+ }
+ 
++// Pythagoras: isolate embedded Latin phrases at the parsed attributed-text boundary.
++// Never insert characters into Markdown or copied text; syntax has already been parsed.
++static void ENRMApplyRTLInlineDirections(NSMutableAttributedString *output, NSRange paragraphRange)
++{
++  static NSRegularExpression *latinRuns;
++  static dispatch_once_t once;
++  dispatch_once(&once, ^{
++    latinRuns = [NSRegularExpression regularExpressionWithPattern:@"[A-Za-z][A-Za-z0-9_]*(?:(?:['’.-][A-Za-z0-9_]+)|(?:[ \\t]+[A-Za-z][A-Za-z0-9_]*))*" options:0 error:nil];
++  });
++  for (NSTextCheckingResult *match in [latinRuns matchesInString:output.string options:0 range:paragraphRange]) {
++    __block BOOL protected = NO;
++    [output enumerateAttributesInRange:match.range options:0 usingBlock:^(NSDictionary *attributes, NSRange range, BOOL *stop) {
++      if (attributes[CodeAttributeName] || attributes[CodeBlockAttributeName] || attributes[NSLinkAttributeName] || attributes[NSAttachmentAttributeName]) { protected = YES; *stop = YES; }
++    }];
++    NSString *text = [output.string substringWithRange:match.range];
++    if (protected || [text hasPrefix:@"http"] || [text hasPrefix:@"www"]) continue;
++    [output addAttribute:NSWritingDirectionAttributeName value:@[ @(NSWritingDirectionLeftToRight | NSWritingDirectionEmbedding) ] range:match.range];
++  }
++}
++
+ void ENRMApplyFirstStrongParagraphDirections(NSMutableAttributedString *output, NSWritingDirection fallback)
+ {
+   if (output.length == 0) {
+@@ -121,6 +142,7 @@ void ENRMApplyFirstStrongParagraphDirections(NSMutableAttributedString *output,
+     if (direction == NSWritingDirectionNatural) {
+       continue;
+     }
++    if (direction == NSWritingDirectionRightToLeft) ENRMApplyRTLInlineDirections(output, paragraphRange);
+ 
+     [output enumerateAttribute:NSParagraphStyleAttributeName
+                        inRange:paragraphRange
+diff --git a/node_modules/react-native-enriched-markdown/ios/utils/RenderedMarkdownSegment.h b/node_modules/react-native-enriched-markdown/ios/utils/RenderedMarkdownSegment.h
+index f36eedc..cc6d9b6 100644
+--- a/node_modules/react-native-enriched-markdown/ios/utils/RenderedMarkdownSegment.h
++++ b/node_modules/react-native-enriched-markdown/ios/utils/RenderedMarkdownSegment.h
+@@ -7,7 +7,7 @@
+ 
+ NS_ASSUME_NONNULL_BEGIN
+ 
+-typedef NS_ENUM(NSInteger, ENRMSegmentKind) { ENRMSegmentKindText, ENRMSegmentKindTable, ENRMSegmentKindMath };
++typedef NS_ENUM(NSInteger, ENRMSegmentKind) { ENRMSegmentKindText, ENRMSegmentKindTable, ENRMSegmentKindMath, ENRMSegmentKindCode };
+ 
+ @interface ENRMTextSegment : NSObject
+ @property (nonatomic, strong) NSArray<MarkdownASTNode *> *nodes;
+@@ -30,6 +30,8 @@ typedef NS_ENUM(NSInteger, ENRMSegmentKind) { ENRMSegmentKindText, ENRMSegmentKi
+ @property (nonatomic, strong, nullable) ENRMRenderResult *textResult;
+ @property (nonatomic, strong, nullable) ENRMTableSegment *tableSegment;
+ @property (nonatomic, strong, nullable) ENRMMathSegment *mathSegment;
++@property (nonatomic, strong, nullable) MarkdownASTNode *codeNode;
+++ (instancetype)codeSegmentWithNode:(MarkdownASTNode *)node signature:(uint64_t)signature;
+ + (instancetype)textSegmentWithResult:(ENRMRenderResult *)result signature:(uint64_t)signature;
+ + (instancetype)tableSegmentWithSegment:(ENRMTableSegment *)segment signature:(uint64_t)signature;
+ + (instancetype)mathSegmentWithSegment:(ENRMMathSegment *)segment signature:(uint64_t)signature;
+diff --git a/node_modules/react-native-enriched-markdown/ios/utils/RenderedMarkdownSegment.m b/node_modules/react-native-enriched-markdown/ios/utils/RenderedMarkdownSegment.m
+index e98d79f..219a3ca 100644
+--- a/node_modules/react-native-enriched-markdown/ios/utils/RenderedMarkdownSegment.m
++++ b/node_modules/react-native-enriched-markdown/ios/utils/RenderedMarkdownSegment.m
+@@ -32,6 +32,12 @@
+ @end
+ 
+ @implementation ENRMRenderedSegment
+++ (instancetype)codeSegmentWithNode:(MarkdownASTNode *)node signature:(uint64_t)signature
++{
++  ENRMRenderedSegment *segment = [[ENRMRenderedSegment alloc] init];
++  segment.kind = ENRMSegmentKindCode; segment.codeNode = node; segment.signature = signature;
++  return segment;
++}
+ + (instancetype)textSegmentWithResult:(ENRMRenderResult *)result signature:(uint64_t)signature
+ {
+   NSParameterAssert(result != nil);
+diff --git a/node_modules/react-native-enriched-markdown/ios/utils/SegmentRenderer.m b/node_modules/react-native-enriched-markdown/ios/utils/SegmentRenderer.m
+index d84d2e4..1208df6 100644
+--- a/node_modules/react-native-enriched-markdown/ios/utils/SegmentRenderer.m
++++ b/node_modules/react-native-enriched-markdown/ios/utils/SegmentRenderer.m
+@@ -11,6 +11,16 @@ static NSArray *ENRMSplitASTIntoSegments(MarkdownASTNode *root)
+   NSMutableArray *currentTextNodes = [NSMutableArray array];
+ 
+   for (MarkdownASTNode *child in root.children) {
++#if !TARGET_OS_OSX
++    if (child.type == MarkdownNodeTypeCodeBlock) {
++      if (currentTextNodes.count > 0) {
++        [segments addObject:[ENRMTextSegment segmentWithNodes:[currentTextNodes copy]]];
++        [currentTextNodes removeAllObjects];
++      }
++      [segments addObject:child];
++      continue;
++    }
++#endif
+     if (child.type == MarkdownNodeTypeTable) {
+       if (currentTextNodes.count > 0) {
+         [segments addObject:[ENRMTextSegment segmentWithNodes:[currentTextNodes copy]]];
+@@ -58,6 +68,10 @@ NSArray<ENRMRenderedSegment *> *ENRMRenderSegmentsFromAST(MarkdownASTNode *ast,
+   static const uint64_t kMathKindSalt = 0x6D61746800000000ULL;  // "math"
+ 
+   for (id segment in segments) {
++    if ([segment isKindOfClass:[MarkdownASTNode class]]) {
++      [renderedSegments addObject:[ENRMRenderedSegment codeSegmentWithNode:segment signature:(ENRMSignatureForNode(segment) ^ 0x636F646500000000ULL)]];
++      continue;
++    }
+     if ([segment isKindOfClass:[ENRMTextSegment class]]) {
+       ENRMTextSegment *textSegment = (ENRMTextSegment *)segment;
+       ENRMRenderResult *rendered = ENRMRenderASTNodes(textSegment.nodes, config, allowTrailingMargin, allowFontScaling,
+diff --git a/node_modules/react-native-enriched-markdown/ios/views/ENRMCodeBlockContainerView.h b/node_modules/react-native-enriched-markdown/ios/views/ENRMCodeBlockContainerView.h
+new file mode 100644
+index 0000000..8784462
+--- /dev/null
++++ b/node_modules/react-native-enriched-markdown/ios/views/ENRMCodeBlockContainerView.h
+@@ -0,0 +1,13 @@
++#import "ENRMUIKit.h"
++#include <TargetConditionals.h>
++@class StyleConfig;
++@class MarkdownASTNode;
++#if !TARGET_OS_OSX
++@interface ENRMCodeBlockContainerView : RCTUIView <UIScrollViewDelegate>
++@property (nonatomic, strong) StyleConfig *config;
++@property (nonatomic, copy) NSString *copyLabel;
++- (instancetype)initWithConfig:(StyleConfig *)config;
++- (void)applyCodeNode:(MarkdownASTNode *)node;
++- (CGFloat)measureHeight:(CGFloat)width;
++@end
++#endif
+diff --git a/node_modules/react-native-enriched-markdown/ios/views/ENRMCodeBlockContainerView.m b/node_modules/react-native-enriched-markdown/ios/views/ENRMCodeBlockContainerView.m
+new file mode 100644
+index 0000000..9d029a6
+--- /dev/null
++++ b/node_modules/react-native-enriched-markdown/ios/views/ENRMCodeBlockContainerView.m
+@@ -0,0 +1,139 @@
++#import "ENRMCodeBlockContainerView.h"
++#import "ENRMCodeLanguage.h"
++#import "MarkdownASTNode.h"
++#import "PasteboardUtils.h"
++#import "StyleConfig.h"
++#include <math.h>
++#if !TARGET_OS_OSX
++// Pythagoras: native AST-backed code block, sharing the segmented Fabric height contract.
++@implementation ENRMCodeBlockContainerView {
++  UIView *_header;
++  UILabel *_language;
++  UIButton *_copyButton;
++  UIScrollView *_horizontalScroll;
++  UITextView *_codeView;
++  NSString *_rawCode;
++  CGFloat _documentWidth;
++  CGFloat _bodyHeight;
++  NSUInteger _copyFeedbackRevision;
++}
++- (instancetype)initWithConfig:(StyleConfig *)config
++{
++  self = [super initWithFrame:CGRectZero];
++  if (self) {
++    _config = config; _rawCode = @""; _copyLabel = @"نسخ";
++    self.clipsToBounds = YES;
++    self.semanticContentAttribute = UISemanticContentAttributeForceLeftToRight;
++    _header = [UIView new]; [self addSubview:_header];
++    _language = [UILabel new]; _language.numberOfLines = 1;
++    _language.isAccessibilityElement = YES; [_header addSubview:_language];
++    _horizontalScroll = [UIScrollView new];
++    _horizontalScroll.delegate = self;
++    _horizontalScroll.semanticContentAttribute = UISemanticContentAttributeForceLeftToRight;
++    _horizontalScroll.directionalLockEnabled = YES;
++    _horizontalScroll.alwaysBounceVertical = NO;
++    _horizontalScroll.showsVerticalScrollIndicator = NO;
++    _horizontalScroll.showsHorizontalScrollIndicator = YES;
++    _horizontalScroll.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
++    [self addSubview:_horizontalScroll];
++    _codeView = [UITextView new]; _codeView.editable = NO; _codeView.selectable = YES;
++    _codeView.scrollEnabled = NO; _codeView.backgroundColor = [UIColor clearColor];
++    _codeView.semanticContentAttribute = UISemanticContentAttributeForceLeftToRight;
++    _codeView.textAlignment = NSTextAlignmentLeft;
++    _codeView.textContainer.widthTracksTextView = NO;
++    _codeView.textContainer.lineFragmentPadding = 0;
++    _codeView.textContainer.lineBreakMode = NSLineBreakByClipping;
++    [_horizontalScroll addSubview:_codeView];
++    _copyButton = [UIButton buttonWithType:UIButtonTypeSystem];
++    [_copyButton setImage:[UIImage systemImageNamed:@"doc.on.doc"] forState:UIControlStateNormal];
++    [_copyButton addTarget:self action:@selector(copyCode) forControlEvents:UIControlEventTouchUpInside];
++    [_copyButton setPreferredSymbolConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:18 weight:UIImageSymbolWeightRegular] forImageInState:UIControlStateNormal];
++    [self addSubview:_copyButton];
++  }
++  return self;
++}
++- (CGFloat)headerHeight
++{
++  return MAX(44, ceil(_language.font.lineHeight + 16));
++}
++- (void)applyCodeNode:(MarkdownASTNode *)node
++{
++  _rawCode = [ENRMRawCodeContent(node) copy];
++  _language.text = ENRMCodeLanguageLabel(node.attributes[@"language"]);
++  UIFont *font = self.config.codeBlockFont ?: [UIFont monospacedSystemFontOfSize:14 weight:UIFontWeightRegular];
++  _language.font = [UIFont systemFontOfSize:MAX(14, font.pointSize) weight:UIFontWeightMedium];
++  _language.textColor = [self.config.codeBlockColor colorWithAlphaComponent:0.8];
++  _language.accessibilityLabel = [@"لغة الكود: " stringByAppendingString:_language.text];
++  _copyButton.tintColor = [self.config.codeBlockColor colorWithAlphaComponent:0.8];
++  _copyButton.accessibilityLabel = [NSString stringWithFormat:@"%@ الكود — %@", self.copyLabel, _language.text];
++  self.backgroundColor = self.config.codeBlockBackgroundColor;
++  _header.backgroundColor = [UIColor clearColor];
++  self.layer.cornerRadius = self.config.codeBlockBorderRadius;
++  self.layer.cornerCurve = kCACornerCurveContinuous;
++  self.layer.borderColor = self.config.codeBlockBorderColor.CGColor;
++  self.layer.borderWidth = self.config.codeBlockBorderWidth;
++  NSMutableParagraphStyle *paragraph = [NSMutableParagraphStyle new];
++  paragraph.baseWritingDirection = NSWritingDirectionLeftToRight;
++  paragraph.alignment = NSTextAlignmentLeft;
++  paragraph.lineBreakMode = NSLineBreakByClipping;
++  if (self.config.codeBlockLineHeight > 0) {
++    paragraph.minimumLineHeight = self.config.codeBlockLineHeight;
++    paragraph.maximumLineHeight = self.config.codeBlockLineHeight;
++  }
++  NSDictionary *attributes = @{ NSFontAttributeName: font, NSForegroundColorAttributeName: self.config.codeBlockColor ?: [UIColor labelColor], NSParagraphStyleAttributeName: paragraph };
++  _codeView.attributedText = [[NSAttributedString alloc] initWithString:_rawCode attributes:attributes];
++  CGFloat width = 0;
++  for (NSString *line in [_rawCode componentsSeparatedByString:@"\n"]) width = MAX(width, [line sizeWithAttributes:attributes].width);
++  _codeView.textContainer.size = CGSizeMake(CGFLOAT_MAX, CGFLOAT_MAX);
++  CGFloat padding = self.config.codeBlockPadding;
++  _codeView.textContainerInset = UIEdgeInsetsMake(padding, 0, padding, 0);
++  [_codeView.layoutManager ensureLayoutForTextContainer:_codeView.textContainer];
++  CGRect used = [_codeView.layoutManager usedRectForTextContainer:_codeView.textContainer];
++  // TextKit intrinsic extent also accounts for tabs and composed glyphs.
++  _documentWidth = MAX(1, ceil(MAX(width, CGRectGetMaxX(used))) + 1);
++  _codeView.textContainer.size = CGSizeMake(_documentWidth, CGFLOAT_MAX);
++  [_codeView.layoutManager ensureLayoutForTextContainer:_codeView.textContainer];
++  used = [_codeView.layoutManager usedRectForTextContainer:_codeView.textContainer];
++  CGRect extra = _codeView.layoutManager.extraLineFragmentRect;
++  _bodyHeight = ceil(MAX(font.lineHeight, MAX(CGRectGetMaxY(used), CGRectGetMaxY(extra)))) + padding * 2;
++  [self setNeedsLayout];
++}
++- (CGFloat)measureHeight:(CGFloat)width
++{
++  return [self headerHeight] + _bodyHeight;
++}
++- (void)layoutSubviews
++{
++  [super layoutSubviews];
++  CGFloat width = self.bounds.size.width;
++  CGFloat headerHeight = [self headerHeight];
++  CGFloat padding = self.config.codeBlockPadding;
++  _header.frame = CGRectMake(0, 0, width, headerHeight);
++  _language.frame = CGRectMake(padding, 0, MAX(0, width - padding * 2 - 52), headerHeight);
++  _copyButton.frame = CGRectMake(MAX(0, width - padding - 44), 0, 44, MAX(44, headerHeight));
++  _horizontalScroll.frame = CGRectMake(0, headerHeight, width, _bodyHeight);
++  CGFloat contentWidth = MAX(width, _documentWidth + padding * 2);
++  _horizontalScroll.contentSize = CGSizeMake(contentWidth, _bodyHeight);
++  _horizontalScroll.scrollEnabled = contentWidth > width + 0.5;
++  _codeView.frame = CGRectMake(padding, 0, _documentWidth, _bodyHeight);
++  CGFloat maximum = MAX(0, contentWidth - width);
++  if (_horizontalScroll.contentOffset.x > maximum) _horizontalScroll.contentOffset = CGPointMake(maximum, 0);
++}
++- (void)copyCode
++{
++  copyStringToPasteboard(_rawCode);
++  [_copyButton setImage:[UIImage systemImageNamed:@"checkmark"] forState:UIControlStateNormal];
++  _copyButton.accessibilityValue = @"تم النسخ";
++  UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification, @"تم النسخ");
++  NSUInteger revision = ++_copyFeedbackRevision;
++  __weak ENRMCodeBlockContainerView *weakSelf = self;
++  // Feedback only; no geometry change, polling, or streaming/layout timer.
++  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
++    ENRMCodeBlockContainerView *view = weakSelf;
++    if (!view || view->_copyFeedbackRevision != revision) return;
++    [view->_copyButton setImage:[UIImage systemImageNamed:@"doc.on.doc"] forState:UIControlStateNormal];
++    view->_copyButton.accessibilityValue = nil;
++  });
++}
++@end
++#endif
+diff --git a/node_modules/react-native-enriched-markdown/ios/views/ENRMMathContainerView.m b/node_modules/react-native-enriched-markdown/ios/views/ENRMMathContainerView.m
+index c08b3df..3fe16c7 100644
+--- a/node_modules/react-native-enriched-markdown/ios/views/ENRMMathContainerView.m
++++ b/node_modules/react-native-enriched-markdown/ios/views/ENRMMathContainerView.m
+@@ -70,6 +70,10 @@
+     _scrollView.showsHorizontalScrollIndicator = YES;
+     _scrollView.bounces = YES;
+     _scrollView.alwaysBounceHorizontal = NO;
++    _scrollView.alwaysBounceVertical = NO;
++    _scrollView.directionalLockEnabled = YES;
++    _scrollView.semanticContentAttribute = UISemanticContentAttributeForceLeftToRight;
++    _scrollView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
+     _scrollView.scrollEnabled = NO;
+     [self addSubview:_scrollView];
+     [_scrollView addSubview:_mathView];
+@@ -196,6 +200,8 @@
+   _scrollView.frame = self.bounds;
+   _scrollView.contentSize = CGSizeMake(overflows ? contentWidth : self.bounds.size.width, contentHeight);
+   _scrollView.scrollEnabled = overflows;
++  CGFloat maximumOffset = MAX(0, contentWidth - self.bounds.size.width);
++  if (_scrollView.contentOffset.x > maximumOffset) _scrollView.contentOffset = CGPointMake(maximumOffset, 0);
+   _mathView.frame = CGRectMake(originX, padding, intrinsicSize.width, intrinsicSize.height);
+ #else
+   _mathView.frame = CGRectMake(originX, padding, intrinsicSize.width, intrinsicSize.height);
+@@ -218,6 +224,18 @@
+ }
+ 
+ #if !TARGET_OS_OSX
++- (BOOL)accessibilityScroll:(UIAccessibilityScrollDirection)direction
++{
++  if (!_scrollView.scrollEnabled || (direction != UIAccessibilityScrollDirectionLeft && direction != UIAccessibilityScrollDirectionRight)) return [super accessibilityScroll:direction];
++  CGFloat maximum = MAX(0, _scrollView.contentSize.width - _scrollView.bounds.size.width);
++  CGFloat step = _scrollView.bounds.size.width * 0.8;
++  CGFloat next = MIN(maximum, MAX(0, _scrollView.contentOffset.x + (direction == UIAccessibilityScrollDirectionLeft ? step : -step)));
++  if (fabs(next - _scrollView.contentOffset.x) < 0.5) return NO;
++  [_scrollView setContentOffset:CGPointMake(next, 0) animated:!UIAccessibilityIsReduceMotionEnabled()];
++  UIAccessibilityPostNotification(UIAccessibilityPageScrolledNotification, self.accessibilityLabel);
++  return YES;
++}
++
+ - (UIAccessibilityTraits)accessibilityTraits
+ {
+   return UIAccessibilityTraitStaticText;
 diff --git a/node_modules/react-native-enriched-markdown/ios/views/TableContainerView.m b/node_modules/react-native-enriched-markdown/ios/views/TableContainerView.m
-index bd73244..e0b1d62 100644
+index bd73244..8ce0d8c 100644
 --- a/node_modules/react-native-enriched-markdown/ios/views/TableContainerView.m
 +++ b/node_modules/react-native-enriched-markdown/ios/views/TableContainerView.m
-@@ -12,2 +12,3 @@
+@@ -10,6 +10,7 @@
+ #import "RenderContext.h"
+ #import "StyleConfig.h"
  #include <TargetConditionals.h>
 +#include <math.h>
  #if TARGET_OS_OSX
-@@ -31,3 +32,3 @@
+ #import "ENRMMenuAction.h"
+ #import "ENRMTableGridView.h"
+@@ -29,7 +30,7 @@
+ @end
+ 
  #if !TARGET_OS_OSX
 -@interface TableContainerView () <UIContextMenuInteractionDelegate>
 +@interface TableContainerView () <UIContextMenuInteractionDelegate, UIScrollViewDelegate>
  @end
-@@ -49,1 +50,2 @@
+ #else
+ @interface TableContainerView ()
+@@ -47,6 +48,7 @@
+   CGFloat _totalTableWidth;
+   CGFloat _totalTableHeight;
    CGFloat _borderWidth;
 +  BOOL _hasUserScrolledHorizontally;
-@@ -76,2 +78,5 @@
+ 
+   NSString *_cachedMarkdown;
+ 
+@@ -74,6 +76,9 @@
+   _scrollView = [[RCTUIScrollView alloc] init];
+   _scrollView.showsVerticalScrollIndicator = NO;
    _scrollView.showsHorizontalScrollIndicator = YES;
 +#if !TARGET_OS_OSX
 +  _scrollView.delegate = self;
 +#endif
  #if !TARGET_OS_OSX
-@@ -374,1 +379,2 @@
+   _scrollView.bounces = YES;
+   _scrollView.alwaysBounceHorizontal = NO;
+@@ -372,13 +377,18 @@
+ 
+   NSUInteger bodyRowIndex = 0;
    NSMutableArray<ENRMTableIOSRowData *> *rowDataArray = [NSMutableArray arrayWithCapacity:_rows.count];
 +  BOOL isRightToLeft = _resolvedLayoutDirection == NSWritingDirectionRightToLeft;
-@@ -380,3 +386,7 @@
+ 
+   for (NSArray<TableCellData *> *rowCells in _rows) {
+     BOOL isHeaderRow = (rowCells.count > 0 && rowCells.firstObject.isHeader);
+ 
+     ENRMTableIOSRowData *rowData = [[ENRMTableIOSRowData alloc] init];
      rowData.backgroundColor = [self backgroundColorForRowIsHeader:isHeaderRow bodyRowIndex:bodyRowIndex];
 -    rowData.cellTexts = [self attributedTextsForRow:rowCells];
 +    NSArray<NSAttributedString *> *sourceCells = [self attributedTextsForRow:rowCells];
@@ -131,7 +642,11 @@ index bd73244..e0b1d62 100644
 +        ? [[sourceCells reverseObjectEnumerator] allObjects]
 +        : sourceCells;
      [rowDataArray addObject:rowData];
-@@ -389,4 +399,7 @@
+ 
+     if (!isHeaderRow) {
+@@ -387,8 +397,11 @@
+   }
+ 
    ENRMTableIOSGridView *gridView = (ENRMTableIOSGridView *)_gridContainer;
 +  NSArray<NSNumber *> *displayColumnWidths = isRightToLeft
 +      ? [[_colWidths reverseObjectEnumerator] allObjects]
@@ -140,7 +655,10 @@ index bd73244..e0b1d62 100644
 -               columnWidths:_colWidths
 +               columnWidths:displayColumnWidths
                   rowHeights:_rowHeights
-@@ -549,2 +562,12 @@
+                 borderColor:self.config.tableBorderColor
+                 borderWidth:_borderWidth
+@@ -548,6 +561,16 @@
+     [self computeLayout];
    return _totalTableHeight;
  }
 +#if !TARGET_OS_OSX
@@ -153,7 +671,12 @@ index bd73244..e0b1d62 100644
 +}
 +#endif
 +
-@@ -558,3 +581,18 @@
+ 
+ - (void)layoutSubviews
+ {
+@@ -556,7 +579,22 @@
+ #if !TARGET_OS_OSX
+   _scrollView.contentSize = CGSizeMake(MAX(_totalTableWidth, self.bounds.size.width), _totalTableHeight);
    _scrollView.scrollEnabled = (_totalTableWidth > self.bounds.size.width);
 -  _gridContainer.frame = CGRectMake(0, 0, _totalTableWidth, _totalTableHeight);
 +  BOOL isRightToLeft = _resolvedLayoutDirection == NSWritingDirectionRightToLeft;
@@ -173,7 +696,11 @@ index bd73244..e0b1d62 100644
 +    }
 +  }
  #else
-@@ -610,3 +648,8 @@
+   // For NSScrollView+documentView, the scrollable content area is determined by
+   // the documentView's frame. No contentSize property to set.
+@@ -608,7 +646,12 @@
+       element.accessibilityLabel =
+           [withN stringByReplacingOccurrencesOfString:@"{content}"
                                             withString:[cellTexts componentsJoinedByString:@", "]];
 -      element.accessibilityFrameInContainerSpace = CGRectMake(0, yOffset, _totalTableWidth, rowHeight);
 +      CGFloat gridOriginX = _resolvedLayoutDirection == NSWritingDirectionRightToLeft &&
@@ -183,3 +710,5 @@ index bd73244..e0b1d62 100644
 +      element.accessibilityFrameInContainerSpace =
 +          CGRectMake(gridOriginX, yOffset, _totalTableWidth, rowHeight);
        element.accessibilityTraits =
+           row.firstObject.isHeader ? UIAccessibilityTraitHeader : UIAccessibilityTraitStaticText;
+       [elements addObject:element];

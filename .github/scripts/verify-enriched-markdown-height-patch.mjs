@@ -175,6 +175,45 @@ if (!tableSource.includes('for (NSArray<TableCellData *> *row in _rows)') ||
   fail('copy and accessibility sources must retain original logical table order');
 }
 
+const nativeFiles = {
+  codeView: 'ios/views/ENRMCodeBlockContainerView.m',
+  codeLanguage: 'ios/utils/ENRMCodeLanguage.m',
+  segments: 'ios/utils/SegmentRenderer.m',
+  mathView: 'ios/views/ENRMMathContainerView.m',
+  bidi: 'ios/utils/ParagraphStyleUtils.m',
+};
+const native = Object.fromEntries(Object.entries(nativeFiles).map(([key, file]) => {
+  const location = path.join(packageRoot, file);
+  if (!fs.existsSync(location)) fail(`missing native renderer file ${file}`);
+  return [key, fs.readFileSync(location, 'utf8')];
+}));
+for (const [key, text] of Object.entries(native)) {
+  const masked = codeOnly(text);
+  let depth = 0;
+  for (const c of masked) { if (c === '{') depth++; else if (c === '}') depth--; if (depth < 0) fail(`${key} has an unmatched brace`); }
+  if (depth !== 0) fail(`${key} has unclosed method/block scope`);
+}
+const viewCode = codeOnly(native.codeView);
+const codeImplementation = oneMatch(viewCode, /@implementation\s+ENRMCodeBlockContainerView\b/g, 'code-block implementation');
+for (const name of ['applyCodeNode', 'measureHeight', 'layoutSubviews', 'copyCode']) {
+  const signature = oneMatch(viewCode, new RegExp(`^[ \\t]*-\\s*\\([^\\n]+\\)${name}(?::[^\\n]*)?[ \\t]*$`, 'gm'), `code ${name}`);
+  const body = methodBody(viewCode, signature, `code ${name}`);
+  if (depthAt(viewCode, viewCode.indexOf('{', codeImplementation.index), body.start) !== 0) fail(`code ${name} is nested in another method`);
+}
+for (const required of ['node.attributes[@"language"]', 'ENRMRawCodeContent(node)', 'copyStringToPasteboard(_rawCode)', 'NSLineBreakByClipping', '_codeView.scrollEnabled = NO', 'usedRectForTextContainer', 'UISemanticContentAttributeForceLeftToRight', 'MAX(44, headerHeight)', 'accessibilityLabel']) {
+  if (!native.codeView.includes(required)) fail(`code block lacks ${required}`);
+}
+if (!native.segments.includes('MarkdownNodeTypeCodeBlock') || !native.segments.includes('codeSegmentWithNode:segment') || !source.includes('handlerWithKind:ENRMSegmentKindCode')) fail('code AST segment registration is missing');
+if (!source.includes('[(ENRMCodeBlockContainerView *)segment measureHeight:width]')) fail('code must use the existing intrinsic segment layout');
+const touchStart = source.indexOf('touchEventEmitterAtPoint:');
+const touchSource = source.slice(touchStart);
+for (const cls of ['TableContainerView', 'ENRMMathContainerView', 'ENRMCodeBlockContainerView']) if (!touchSource.includes(`[${'segment'} isKindOfClass:[${cls} class]]`)) fail(`native touch ownership missing for ${cls}`);
+for (const required of ['_scrollView.scrollEnabled = overflows', 'UISemanticContentAttributeForceLeftToRight', 'alwaysBounceVertical = NO', 'alignedOriginXForWidth']) if (!native.mathView.includes(required)) fail(`math overflow contract missing ${required}`);
+if (!native.bidi.includes('NSWritingDirectionAttributeName') || !native.bidi.includes('NSAttachmentAttributeName') || !native.bidi.includes('NSLinkAttributeName') || !native.bidi.includes('CodeAttributeName')) fail('inline bidi must preserve parsed code/link/math regions');
+const parser = fs.readFileSync(path.join(packageRoot, 'cpp/parser/MD4CParser.cpp'), 'utf8');
+for (const required of ['MAX(14, font.pointSize)', 'MAX(44, ceil(_language.font.lineHeight + 16))', 'configurationWithPointSize:18', 'kCACornerCurveContinuous']) if (!native.codeView.includes(required)) fail(`code header visual/accessible geometry missing ${required}`);
+if (!parser.includes('codeDetail->lang') || !parser.includes('node->setAttribute(ATTR_LANGUAGE, lang)')) fail('code language must originate from MD4C, not content guesses');
+
 console.log([
   'Verified react-native-enriched-markdown@0.7.4 native height and RTL table patch structure.',
   `  class declaration: line ${lineAt(source, declaration.index)} inside the class extension`,
@@ -182,4 +221,5 @@ console.log([
   `  validateHeightForCurrentWidth: lines ${lineAt(source, validateBody.start)}-${lineAt(source, validateBody.close)}`,
   `  layoutSubviews: lines ${lineAt(source, layoutBody.start)}-${lineAt(source, layoutBody.close)}`,
   '  method scopes and brace depth are valid; RTL visual columns, leading position, user-scroll preservation, and logical copy order are verified.',
+  '  AST-backed code headers/copy/horizontal layout, wide-math native touch ownership, and attributed inline bidi protections are verified.',
 ].join('\n'));

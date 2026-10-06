@@ -10,6 +10,8 @@ import { useRouter } from 'expo-router';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import Agent1EnrichedMarkdown from '@/ai/assistant-enriched-markdown.ios';
+import { ChatUserMessageRow } from '@/ai/chat-composer.ios';
+import { CHAT_QUALITY_CASES, LONG_USER_FIXTURE } from '@/ai/renderer-quality-fixtures.dev';
 import { usePreferences } from '@/preferences/preferences-provider';
 import { getPalette } from '@/theme';
 
@@ -223,7 +225,13 @@ export default function RendererLabScreen() {
           Development-only native rendering review. This route is hidden outside development builds.
         </Text>
 
-        {LAB_CASES.map((item, index) => (
+        {['Collapsed long user', 'Expanded long user', 'Arabic / English long user'].map((title, index) => (
+          <View key={title} style={{ marginBottom: 22 }}>
+            <Text style={[titleStyle, { marginBottom: 10 }]}>{title}</Text>
+            <ChatUserMessageRow turnId={'lab-user-' + index} message={{ id: 'lab-user-message-' + index, role: 'user', content: LONG_USER_FIXTURE }} contentWidth={contentWidth} colorScheme={resolvedColorScheme} palette={palette} initiallyExpanded={index === 1} onLayout={() => undefined} onNativeLayout={() => undefined} />
+          </View>
+        ))}
+        {[...LAB_CASES, ...CHAT_QUALITY_CASES].map((item, index) => (
           <View
             key={item.title}
             style={{

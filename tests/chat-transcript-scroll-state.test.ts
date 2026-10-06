@@ -5,8 +5,11 @@ import {
   beginChatTranscriptTurn,
   beginChatTranscriptUserDrag,
   calculateChatTranscriptAnchorBlankSpace,
+  canPositionChatTranscriptAnchor,
+  consumeChatTranscriptAnchorSpace,
   createChatTranscriptScrollState,
   positionChatTranscriptTurn,
+  getChatTranscriptFollowTarget,
   shouldFollowChatTranscript,
   shouldRecalculateChatAnchorSpace,
   updateChatTranscriptEndVisibility,
@@ -70,7 +73,8 @@ test("manual drag pauses follow and only a user return to end re-arms it", () =>
   assert.equal(shouldFollowChatTranscript(state), false);
   assert.equal(shouldRecalculateChatAnchorSpace(state, true), false);
 
-  state = updateChatTranscriptEndVisibility(state, true, false);
+  assert.equal(updateChatTranscriptEndVisibility(state, true, false), state);
+  state = updateChatTranscriptEndVisibility(state, true, true);
   assert.equal(state.mode, "at-bottom");
   assert.equal(shouldFollowChatTranscript(state), true);
   assert.equal(shouldRecalculateChatAnchorSpace(state, true), true);
@@ -81,8 +85,83 @@ test("keyboard events and completion do not independently change scroll policy",
   const userAway = beginChatTranscriptUserDrag(following);
 
   assert.equal(updateChatTranscriptEndVisibility(following, false, false), following);
-  assert.equal(updateChatTranscriptEndVisibility(userAway, true, false).mode, "at-bottom");
+  assert.equal(updateChatTranscriptEndVisibility(userAway, true, false), userAway);
   assert.equal(shouldRecalculateChatAnchorSpace(following, false), false);
+});
+
+const viewport = {
+  streamIsActive: true, keyboardInMotion: false, assistantBottom: 800,
+  previousAssistantBottom: 750, contentHeight: 824, viewportHeight: 700,
+  scrollOffset: 150, bottomOcclusion: 130, documentBottomGap: 24,
+};
+
+test("anchor waits for nonzero user measurement AND the reported effective inset range", () => {
+  const state = beginChatTranscriptTurn(createChatTranscriptScrollState(), "second", true);
+  const geometry = { state, turnId: "second", userHeight: 50, userBottom: 600,
+    contentHeight: 650, viewportHeight: 700, targetOffset: 500, contentInsetBottom: 550 };
+  assert.equal(canPositionChatTranscriptAnchor(geometry), true);
+  assert.equal(canPositionChatTranscriptAnchor({ ...geometry, userHeight: 0 }), false);
+  assert.equal(canPositionChatTranscriptAnchor({ ...geometry, contentHeight: 500 }), false);
+  assert.equal(canPositionChatTranscriptAnchor({ ...geometry, contentInsetBottom: 130 }), false);
+  assert.equal(canPositionChatTranscriptAnchor({ ...geometry, state: positionChatTranscriptTurn(state, "second") }), false);
+  assert.equal(canPositionChatTranscriptAnchor({ ...geometry, state: beginChatTranscriptUserDrag(state) }), false);
+});
+
+test("assistant growth cannot write offsets during anchoring, manual reading, keyboard animation or completion", () => {
+  const anchoring = beginChatTranscriptTurn(createChatTranscriptScrollState(), "second", true);
+  assert.equal(getChatTranscriptFollowTarget(anchoring, viewport), null);
+  assert.equal(updateChatTranscriptEndVisibility(anchoring, true, false), anchoring);
+  const following = positionChatTranscriptTurn(anchoring, "second");
+  assert.equal(getChatTranscriptFollowTarget(beginChatTranscriptUserDrag(following), viewport), null);
+  assert.equal(getChatTranscriptFollowTarget(following, { ...viewport, keyboardInMotion: true }), null);
+  assert.equal(getChatTranscriptFollowTarget(following, { ...viewport, userGestureActive: true }), null);
+  assert.equal(getChatTranscriptFollowTarget(following, { ...viewport, controllerInsetShiftPending: true }), null);
+  assert.equal(getChatTranscriptFollowTarget(following, { ...viewport, streamIsActive: false }), null);
+});
+
+test("follow moves only for overflowing, genuinely grown, container-confirmed assistant content", () => {
+  const following = beginChatTranscriptTurn(createChatTranscriptScrollState(), "first", false);
+  assert.equal(getChatTranscriptFollowTarget(following, viewport), 254);
+  assert.equal(getChatTranscriptFollowTarget(following, { ...viewport, scrollOffset: 254 }), null);
+  assert.equal(getChatTranscriptFollowTarget(following, { ...viewport, assistantBottom: 500, previousAssistantBottom: 400 }), null);
+  assert.equal(getChatTranscriptFollowTarget(following, { ...viewport, previousAssistantBottom: 850 }), null);
+  assert.equal(getChatTranscriptFollowTarget(following, { ...viewport, contentHeight: 750 }), null);
+  assert.equal(getChatTranscriptFollowTarget(following, { ...viewport, assistantBottom: Number.NaN }), null);
+});
+
+test("following targets document end, not unused native blank-space end", () => {
+  const following = beginChatTranscriptTurn(createChatTranscriptScrollState(), "first", false);
+  const target = getChatTranscriptFollowTarget(following, viewport)!;
+  const oldScrollToEnd = viewport.contentHeight - viewport.viewportHeight + 700;
+  assert.equal(target, 254);
+  assert.equal(oldScrollToEnd, 824);
+  assert.ok(target < oldScrollToEnd);
+});
+
+test("passive end visibility after native shrink, keyboard or completion never pulls a manual reader", () => {
+  const away = beginChatTranscriptUserDrag(beginChatTranscriptTurn(createChatTranscriptScrollState(), "first", false));
+  assert.equal(updateChatTranscriptEndVisibility(away, true, false), away);
+  assert.equal(updateChatTranscriptEndVisibility(away, false, false), away);
+  assert.equal(updateChatTranscriptEndVisibility(away, true, true).mode, "at-bottom");
+});
+
+test("blank-space consumes monotonically and is not increased by native markdown shrink", () => {
+  const following = positionChatTranscriptTurn(beginChatTranscriptTurn(createChatTranscriptScrollState(), "second", true), "second");
+  let space = 600;
+  for (const contentHeight of [650, 900, 850, 1100, 1000, 1400]) {
+    const required = calculateChatTranscriptAnchorBlankSpace(500, contentHeight, 700, 130);
+    const next = consumeChatTranscriptAnchorSpace(following, space, required, 100, contentHeight, 700, 130);
+    assert.ok(next <= space); space = next;
+  }
+  assert.equal(space, 0);
+});
+
+test("completion preserves exactly the capacity needed to avoid native clamping at the reading anchor", () => {
+  const following = beginChatTranscriptTurn(createChatTranscriptScrollState(), "second", false);
+  assert.equal(consumeChatTranscriptAnchorSpace(following, 600, 0, 500, 650, 700, 130), 550);
+  assert.equal(consumeChatTranscriptAnchorSpace(following, 600, 0, 0, 900, 700, 130), 0);
+  assert.equal(consumeChatTranscriptAnchorSpace(beginChatTranscriptUserDrag(following), 600, 0, 100, 1400, 700, 130), 600);
+  assert.equal(calculateChatTranscriptAnchorBlankSpace(500, 1100, 700, 130), 0);
 });
 
 test("dragging during new-turn layout cancels the pending anchor", () => {
