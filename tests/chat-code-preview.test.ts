@@ -153,9 +153,17 @@ test('local viewport gate gives descendants priority over ancestor pans without 
   assert.ok(view.includes('_sourceGestureGate.enabled = !_previewing && verticalOverflow'));
   const scope = preview.slice(preview.indexOf('if !fullscreen {'), preview.indexOf('@objc public func prepareForPresentation'));
   assert.ok(scope.includes('if kind == "mermaid"'));
+  assert.ok(scope.includes('let gate = ENRMCodeGestureGate(viewport: view)'));
   assert.ok(scope.includes('tap.require(toFail: gate)'));
-  assert.ok(scope.includes('tap.allowableMovement = 8'));
+  assert.ok(scope.includes('let tap = UITapGestureRecognizer(target: self, action: #selector(openFullscreen))'));
   assert.ok(scope.includes('tap.numberOfTouchesRequired = 1'));
+  assert.ok(scope.includes('tap.cancelsTouchesInView = false'));
+  assert.ok(scope.includes('tap.delegate = self'));
+  assert.ok(scope.includes('view.addGestureRecognizer(tap)'));
+  assert.equal((preview.match(/UITapGestureRecognizer\(target:/gu) ?? []).length, 1);
+  assert.equal(preview.includes(['allowable', 'Movement'].join('')), false);
+  assert.ok(gate.includes('if state == .possible && touched.count > 1 { state = .began }'));
+  assert.match(gate, /squareRoot\(\) >= movementThreshold \{\s*state = \.began/u);
   assert.ok(view.includes('if (!_previewing || !_previewLanguage || !self.window) return'));
 });
 

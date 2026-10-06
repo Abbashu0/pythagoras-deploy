@@ -564,10 +564,10 @@ index 0000000..4a484ad
 +#endif
 diff --git a/node_modules/react-native-enriched-markdown/ios/code/ENRMCodePreviewController.swift b/node_modules/react-native-enriched-markdown/ios/code/ENRMCodePreviewController.swift
 new file mode 100644
-index 0000000..af06e5f
+index 0000000..170490d
 --- /dev/null
 +++ b/node_modules/react-native-enriched-markdown/ios/code/ENRMCodePreviewController.swift
-@@ -0,0 +1,433 @@
+@@ -0,0 +1,432 @@
 +#if canImport(UIKit)
 +import UIKit
 +import WebKit
@@ -723,7 +723,6 @@ index 0000000..af06e5f
 +    if !fullscreen {
 +      let tap = UITapGestureRecognizer(target: self, action: #selector(openFullscreen))
 +      tap.numberOfTouchesRequired = 1
-+      tap.allowableMovement = 8
 +      tap.cancelsTouchesInView = false
 +      tap.delegate = self
 +      view.addGestureRecognizer(tap)
