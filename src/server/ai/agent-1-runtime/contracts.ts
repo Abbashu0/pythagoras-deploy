@@ -1,5 +1,6 @@
 import type { AdminActor } from "../../admin-auth/contracts";
 import type { AIModelCapability } from "../model-registry";
+import type { Agent1InstructionAuthority } from "./instruction-conformance-contracts";
 
 export type AIAgent1RuntimeReadiness =
   | "INCOMPATIBLE_CAPABILITY"
@@ -7,6 +8,7 @@ export type AIAgent1RuntimeReadiness =
   | "MODEL_DISABLED"
   | "PROVIDER_DISABLED"
   | "CREDENTIAL_UNAVAILABLE"
+  | "STREAMING_UNAVAILABLE"
   | "ADAPTER_UNAVAILABLE";
 
 export interface AIAgent1RuntimeModel {
@@ -24,6 +26,8 @@ export interface AIAgent1RuntimeModel {
   readinessLabel: string;
   readinessReason: string | null;
   ready: boolean;
+  /** Advisory in dev chat; unavailable diagnostics must not make readiness false. */
+  instructionAuthority: Agent1InstructionAuthority | null;
 }
 
 export interface AIAgent1RuntimeSnapshot {

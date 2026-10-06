@@ -18,6 +18,8 @@ import type {
   AIAgent1RuntimeSnapshot,
   AIAgent1RuntimeEnabledUpdate,
 } from "./contracts";
+import { Agent1InstructionConformanceService } from "./instruction-conformance-service";
+import { canExecuteAgent1Model, type Agent1ExecutionBoundary } from "./instruction-qualification";
 
 const CONFIG_KEY = "agent-1";
 const MAX_FALLBACKS = 3;
@@ -29,18 +31,20 @@ export class AIAgent1RuntimeService {
   private readonly models: SQLiteAIModelConfigRepository;
   private readonly directAdmin: AIAdminDirectService;
   private readonly now: () => number;
+  private readonly executionBoundary: Agent1ExecutionBoundary;
 
   constructor(
     private readonly database: ContentDatabase,
-    options: { now?: () => number; adminService?: AIAdminDirectService } = {},
+    options: { now?: () => number; adminService?: AIAdminDirectService; executionBoundary?: Agent1ExecutionBoundary } = {},
   ) {
     this.models = new SQLiteAIModelConfigRepository(database);
     this.directAdmin = options.adminService ?? AIAdminDirectService.forDatabase(database);
     this.now = options.now ?? Date.now;
+    this.executionBoundary = options.executionBoundary ?? "STRICT_AGENT";
   }
 
-  static forDatabase(database: ContentDatabase): AIAgent1RuntimeService {
-    return new AIAgent1RuntimeService(database);
+  static forDatabase(database: ContentDatabase, options: { executionBoundary?: Agent1ExecutionBoundary } = {}): AIAgent1RuntimeService {
+    return new AIAgent1RuntimeService(database, options);
   }
 
   getSnapshot(): AIAgent1RuntimeSnapshot {
@@ -79,7 +83,7 @@ export class AIAgent1RuntimeService {
       return model;
     });
     const enabled = Boolean(stored?.enabled);
-    const canEnable = Boolean(primary?.ready);
+    const canEnable = Boolean(primary && canExecuteAgent1Model(primary, this.executionBoundary));
 
     return {
       config: {
@@ -181,6 +185,9 @@ export class AIAgent1RuntimeService {
             primary?.readinessReason ?? "The primary Generation model is not ready.",
             { modelConfigId: primaryModelConfigId, readiness: primary?.readiness ?? "MISSING" },
           );
+        }
+        if (input.enabled === true && !canExecuteAgent1Model(primary, this.executionBoundary)) {
+          throw new AIAgent1RuntimeError("AI_AGENT_1_RUNTIME_MODEL_NOT_READY", primary.instructionAuthority?.explanation ?? "Execution is unavailable for this server boundary.", { modelConfigId: primary.id, instructionAuthority: primary.instructionAuthority?.status ?? null });
         }
       }
 
@@ -309,6 +316,7 @@ export class AIAgent1RuntimeService {
   }
 
   private readModels(): AIAgent1RuntimeModel[] {
+    const conformance = new Agent1InstructionConformanceService(this.database);
     const providers = new Map(
       this.directAdmin.listProviders().map((provider) => [provider.id, provider]),
     );
@@ -329,7 +337,14 @@ export class AIAgent1RuntimeService {
         providerEnabled: provider.enabled,
         credentialStatus: provider.credentialStatus,
         adapterAvailable: expectedAdapter !== null && model.adapterKey === expectedAdapter,
+        supportsStreaming: model.supportsStreaming,
       });
+      let instructionAuthority: AIAgent1RuntimeModel["instructionAuthority"] = null;
+      try { instructionAuthority = conformance.getAuthority(model.id); }
+      catch (error) {
+        // Diagnostic persistence is not a prerequisite for stateless development execution.
+        if (this.executionBoundary !== "DEVELOPMENT_STATELESS_CHAT") throw error;
+      }
       return {
         id: model.id,
         displayName: model.displayName,
@@ -341,6 +356,7 @@ export class AIAgent1RuntimeService {
         enabled: model.enabled,
         providerEnabled: provider.enabled,
         credentialStatus: provider.credentialStatus,
+        instructionAuthority,
         ...readiness,
       };
     }).sort((left, right) =>
@@ -368,6 +384,7 @@ function resolveReadiness(input: {
   providerEnabled: boolean;
   credentialStatus: AIAgent1RuntimeModel["credentialStatus"];
   adapterAvailable: boolean;
+  supportsStreaming: boolean;
 }): Pick<
   AIAgent1RuntimeModel,
   "readiness" | "readinessLabel" | "readinessReason" | "ready"
@@ -416,6 +433,9 @@ function resolveReadiness(input: {
       readinessReason: "لا يوجد محوّل Generation مسجّل يطابق صيغة هذا المزوّد.",
       ready: false,
     };
+  }
+  if (!input.supportsStreaming) {
+    return { readiness: "STREAMING_UNAVAILABLE", readinessLabel: "البث غير مدعوم", readinessReason: "شات Agent 1 يتطلب نموذج Generation يدعم البث.", ready: false };
   }
   return {
     readiness: "READY",

@@ -13,6 +13,7 @@ import {
   Star,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { allowAdminNavigation } from "@/lib/admin-navigation-guard";
 import { transition } from "@/lib/motion";
 import { usePersistentState } from "@/lib/hooks";
 import { Tooltip } from "../primitives/tooltip";
@@ -614,7 +615,7 @@ function CollapsedNavItems({
             icon={Icon ? <Icon aria-hidden /> : undefined}
             aria-current={currentItemKey === item.key ? "page" : undefined}
             className={currentItemKey === item.key ? "bg-selected text-fg" : undefined}
-            onSelect={() => router.push(item.href)}
+            onSelect={() => { if (allowAdminNavigation(item.href)) router.push(item.href); }}
           >
             {item.label}
           </MenuItem>

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Agent1ActivityStore } from "../src/server/ai/agent-1-runtime/activity-store";
+import { failureCategory } from "../src/server/ai/agent-1-runtime/activity-store";
 import type { AIProviderAttemptTrace, NormalizedProviderUsage } from "../src/server/ai/gateway/contracts";
 
 function attempt(id: string, index = 0, completedAt: number | null = null): AIProviderAttemptTrace {
@@ -84,4 +85,143 @@ test("observation history stays bounded and expired requests are not reported as
   assert.equal(snapshot.stats.cancelledRequests, 0);
   assert.equal(snapshot.stats.activeRequests, 0);
   assert.ok(snapshot.points.length <= 720);
+});
+
+test("first-text latency records one nonempty text event, not thinking or repeated deltas", () => {
+  let now = 1000;
+  const store = new Agent1ActivityStore(() => now);
+  store.begin("a"); store.observeAttempt("a", attempt("primary"));
+  now = 2000; store.phase("a", "thinking");
+  assert.equal(store.snapshot({ window: "5m" }).stats.averageFirstTextMs, null);
+  now = 3000; store.firstText("a");
+  now = 5000; store.firstText("a"); store.finish("a", "completed");
+  const snapshot = store.snapshot({ window: "5m" });
+  assert.equal(snapshot.recent[0].firstTextMs, 2000);
+  assert.equal(snapshot.stats.averageFirstTextMs, 2000);
+  assert.equal(snapshot.modelPerformance[0].averageFirstTextMs, 2000);
+  assert.equal(snapshot.stats.averageLatencyMs, 4000);
+});
+
+test("fallback chain exposes sanitized reasons and actual transitions, which expire without fake motion", () => {
+  let now = 1000;
+  const store = new Agent1ActivityStore(() => now);
+  store.begin("private-request-id"); store.observeAttempt("private-request-id", attempt("primary"));
+  now = 2000; store.observeAttempt("private-request-id", { ...attempt("primary", 0, now), errorCode: "RATE_LIMITED", providerRequestId: "private-upstream" });
+  now = 2100; store.observeAttempt("private-request-id", attempt("fallback", 1));
+  assert.deepEqual(store.snapshot({ window: "5m" }).transitions[0], {
+    fromModelConfigId: "primary", toModelConfigId: "fallback", startedAt: now, reason: "rate-limit", active: true,
+  });
+  now = 3000; store.firstText("private-request-id");
+  store.observeAttempt("private-request-id", { ...attempt("fallback", 1, now), status: "SUCCEEDED" });
+  store.finish("private-request-id", "completed");
+  const snapshot = store.snapshot({ window: "5m" });
+  assert.equal(snapshot.recent[0].chain[0].reason, "rate-limit");
+  assert.equal(snapshot.recent[0].chain[1].status, "succeeded");
+  assert.equal(snapshot.recent[0].reason, null);
+  assert.equal(snapshot.stats.failedRequests, 0);
+  assert.equal(snapshot.transitions[0].active, false);
+  assert.equal(JSON.stringify(snapshot).includes("private-"), false);
+  snapshot.recent[0].chain[0].reason = "unknown";
+  assert.equal(store.snapshot().recent[0].chain[0].reason, "rate-limit");
+  now += 11_000;
+  assert.deepEqual(store.snapshot({ window: "5m" }).transitions, []);
+});
+
+test("a shared window and model filter scope terminal metrics, usage and recent records consistently", () => {
+  let now = 1000;
+  const store = new Agent1ActivityStore(() => now);
+  store.begin("old"); store.observeAttempt("old", attempt("primary"));
+  store.usage("old", usage(100, 200)); store.finish("old", "completed");
+  now = 120_000;
+  store.begin("new"); store.observeAttempt("new", attempt("fallback"));
+  store.usage("new", usage(10, 20)); store.usage("new", usage(10, 20));
+  now += 1000; store.firstText("new"); store.finish("new", "completed");
+  const short = store.snapshot({ window: "1m" });
+  assert.equal(short.stats.completedRequests, 1);
+  assert.equal(short.stats.outputTokens, 20);
+  assert.equal(short.recent.length, 1);
+  assert.equal(short.points.reduce((sum, point) => sum + (point.outputTokens ?? 0), 0), short.stats.outputTokens);
+  const primary = store.snapshot({ window: "5m", modelConfigId: "primary" });
+  assert.equal(primary.stats.outputTokens, 200);
+  assert.equal(primary.stats.completedRequests, 1);
+  assert.equal(primary.recent[0].modelConfigId, "primary");
+  const empty = store.snapshot({ window: "1m", modelConfigId: "primary" });
+  assert.equal(empty.stats.outputTokens, null);
+  assert.equal(empty.stats.completedRequests, 0);
+  assert.deepEqual(empty.recent, []);
+});
+
+test("per-model concurrency closes after finish and excludes another provider's usage", () => {
+  let now = 1000;
+  const store = new Agent1ActivityStore(() => now);
+  store.begin("a"); store.observeAttempt("a", attempt("primary"));
+  store.begin("b"); store.observeAttempt("b", attempt("fallback"));
+  store.usage("a", usage(10, 100)); store.usage("b", usage(20, 200));
+  now = 6000; store.finish("a", "completed");
+  now = 11_000;
+  const scoped = store.snapshot({ window: "5m", modelConfigId: "primary" });
+  assert.equal(scoped.stats.activeRequests, 0);
+  assert.equal(scoped.points.at(-1)!.concurrentRequests, 0);
+  assert.equal(scoped.stats.outputTokens, 100);
+  assert.equal(store.snapshot({ window: "5m" }).stats.activeRequests, 1);
+});
+
+test("p95 requires twenty successful actual durations and never mixes in failures or cancellation", () => {
+  let now = 1000;
+  const store = new Agent1ActivityStore(() => now);
+  for (let i = 1; i <= 20; i++) {
+    store.begin(String(i)); store.observeAttempt(String(i), attempt("primary"));
+    now += i * 100; store.finish(String(i), "completed");
+    if (i === 19) assert.equal(store.snapshot({ window: "5m" }).stats.p95LatencyMs, null);
+  }
+  store.begin("failed"); now += 10_000; store.finish("failed", "failed", "timeout");
+  store.begin("cancelled"); now += 10_000; store.finish("cancelled", "cancelled");
+  const snapshot = store.snapshot({ window: "5m" });
+  assert.equal(snapshot.stats.latencySamples, 20);
+  assert.equal(snapshot.stats.p95LatencyMs, 1900);
+  assert.equal(snapshot.recent[0].outcome, "cancelled");
+  assert.equal(snapshot.recent[1].reason, "timeout");
+});
+
+test("unknown usage remains null, input-only reporting is not mislabeled as no report", () => {
+  const store = new Agent1ActivityStore(() => 1000);
+  store.begin("a"); store.usage("a", usage(10, null)); store.finish("a", "completed");
+  const scoped = store.snapshot({ window: "5m" });
+  assert.equal(scoped.stats.missingUsageRequests, 0);
+  assert.equal(scoped.stats.outputTokens, null);
+  assert.equal(scoped.recent[0].usageReported, true);
+  assert.equal(failureCategory("AUTHENTICATION"), "authentication");
+  assert.equal(failureCategory("BAD_RESPONSE"), "bad-response");
+  assert.equal(failureCategory("UNAVAILABLE"), "unavailable");
+  assert.equal(failureCategory("PRIVATE RAW PROVIDER BODY"), "unknown");
+});
+
+test("bounded history reports truncation honestly and retained metrics do not claim the whole session", () => {
+  const store = new Agent1ActivityStore(() => 1000);
+  for (let i = 0; i < 10_002; i++) { store.begin(String(i)); store.finish(String(i), "completed"); }
+  const scoped = store.snapshot({ window: "1h" });
+  assert.equal(scoped.scope.historyLimited, true);
+  assert.equal(scoped.stats.completedRequests, 10_000);
+  assert.equal(scoped.recent.length, 12);
+  assert.equal(store.snapshot().stats.completedRequests, 10_002);
+});
+
+test("diagnostic filtering happens before the twelve-row limit and does not filter headline metrics", () => {
+  let now = 1000;
+  const store = new Agent1ActivityStore(() => now);
+  store.begin("failed"); store.finish("failed", "failed", "authentication");
+  now++;
+  store.begin("recovered"); store.observeAttempt("recovered", attempt("primary"));
+  store.observeAttempt("recovered", { ...attempt("primary", 0, now), errorCode: "TIMEOUT" });
+  store.observeAttempt("recovered", attempt("fallback", 1)); store.finish("recovered", "completed");
+  for (let i = 0; i < 15; i++) { now++; store.begin(String(i)); store.finish(String(i), "completed"); }
+  const failed = store.snapshot({ window: "5m", resultFilter: "authentication" });
+  assert.equal(failed.recent.length, 1);
+  assert.equal(failed.recent[0].reason, "authentication");
+  assert.equal(failed.stats.completedRequests, 16);
+  assert.equal(failed.stats.failedRequests, 1);
+  const recovered = store.snapshot({ window: "5m", resultFilter: "timeout" });
+  assert.equal(recovered.recent[0].outcome, "completed");
+  assert.equal(recovered.recent[0].chain[0].reason, "timeout");
+  assert.equal(store.snapshot({ window: "5m", resultFilter: "fallback" }).recent.length, 1);
 });

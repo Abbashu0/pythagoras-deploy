@@ -78,6 +78,8 @@ export interface GenerationMessage {
 }
 
 export interface GenerationProviderRequest {
+  /** Server-owned, per-attempt role policy; never a client message role. */
+  instructionRole?: "system" | "developer";
   requestId: string;
   providerModelId: string;
   instructions?: string;
@@ -342,6 +344,11 @@ export interface AIProviderGatewayDependencies {
 }
 
 export interface AIProviderGatewayOperationOptions {
+  /** Server-only transport framing for individual attempts; validated before dispatch.
+   * Generic callers keep the original common request unchanged. */
+  generationInputsByModel?: Readonly<Record<string, { readonly instructions?: string; readonly messages: readonly GenerationMessage[] }>>;
+  /** Optional exact chat instruction roles; generic callers retain system. */
+  instructionRolesByModel?: Readonly<Record<string, "system" | "developer">>;
   signal?: AbortSignal;
   timeoutMs?: number;
   /** Server-only observation; never emitted into the Product response stream. */

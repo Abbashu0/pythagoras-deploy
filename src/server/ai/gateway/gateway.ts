@@ -222,6 +222,13 @@ export class AIProviderGateway {
     try {
       validateSelectionPlan(plan, "GENERATION");
       validateGenerationRequest(request);
+      for (const [id, input] of Object.entries(options.generationInputsByModel ?? {})) {
+        if (!plan.attempts.includes(id)) throw this.gatewayError("INVALID_REQUEST");
+        validateGenerationRequest({ ...request, instructions: input.instructions, messages: input.messages });
+      }
+      if (options.instructionRolesByModel && Object.entries(options.instructionRolesByModel).some(([id, role]) => !plan.attempts.includes(id) || (role !== "system" && role !== "developer"))) {
+        throw this.gatewayError("INVALID_REQUEST");
+      }
       const timeoutMs = this.resolveTimeout(options.timeoutMs);
       const deadlineAt = this.clock() + timeoutMs;
       if (parentSignal.aborted) throw new GatewayAbortError();
@@ -274,11 +281,13 @@ export class AIProviderGateway {
           control = handshake.control;
           circuitPermit = handshake.circuitPermit;
           const attemptTimeoutMs = deadlineAt - this.clock();
+          const attemptInput = options.generationInputsByModel?.[prepared.model.id] ?? request;
           const providerRequest: GenerationProviderRequest = {
             requestId: request.requestId,
             providerModelId: prepared.model.providerModelId,
-            instructions: request.instructions,
-            messages: request.messages,
+            instructions: attemptInput.instructions,
+            instructionRole: options.instructionRolesByModel?.[prepared.model.id],
+            messages: attemptInput.messages,
             maxOutputTokens: request.maxOutputTokens,
             reasoningEffort: request.reasoningEffort,
             temperature: request.temperature,

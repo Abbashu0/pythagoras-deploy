@@ -351,6 +351,27 @@
       "when": 1790162588983,
       "tag": "0049_agent_1_runtime_routing",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "6",
+      "when": 1791202850491,
+      "tag": "0050_instruction_section_authoring",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "6",
+      "when": 1791213442793,
+      "tag": "0051_agent_1_instruction_conformance",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "6",
+      "when": 1791217473560,
+      "tag": "0052_agent_1_development_compatibility",
+      "breakpoints": true
     }
   ]
 }

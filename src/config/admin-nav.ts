@@ -1,4 +1,4 @@
-import { Archive, BookOpen, Bot, BrainCircuit, Images } from "lucide-react";
+import { Activity, Archive, BookOpen, Bot, BrainCircuit, FileText, Images } from "lucide-react";
 import type { NavSection } from "@/components/admin-ui/navigation/nav-config";
 
 export const ADMIN_NAV: NavSection[] = [
@@ -59,7 +59,15 @@ export const ADMIN_NAV: NavSection[] = [
             key: "ai-agent-1-runtime",
             label: "التشغيل",
             href: "/admin/ai/agent-1/runtime",
+            icon: Activity,
             keywords: ["runtime", "routing", "تشغيل", "النماذج"],
+          },
+          {
+            key: "ai-agent-1-instructions",
+            label: "التعليمات",
+            href: "/admin/ai/agent-1/instructions",
+            icon: FileText,
+            keywords: ["instructions", "prompt", "policy", "تعليمات", "التعليمات العامة"],
           },
         ],
       },

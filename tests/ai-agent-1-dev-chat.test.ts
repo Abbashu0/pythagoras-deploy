@@ -25,10 +25,16 @@ import { SQLiteAdminIdentityRepository } from "../src/server/admin-auth";
 import type { AdminActor } from "../src/server/admin-auth/contracts";
 import { openContentDatabase, type ContentDatabase } from "../src/server/content";
 import { assertDevAgent1Fields, isDevMobileChatEnabled } from "../src/app/api/dev/ai/agent-1/_shared";
+import { AIInstructionAdminService } from "../src/server/ai/policy/instruction-admin-service";
+import { qualifyAgent1Fixture } from "./helpers/agent-1-conformance";
+import { composeAgent1Instructions } from "../src/server/ai/agent-1-runtime/instruction-envelope";
 
 const migrationsDirectory = path.join(process.cwd(), "drizzle");
 const TEST_MASTER_KEY = Buffer.alloc(AI_SECRET_KEY_BYTES, 0x72);
 const BASE_TIME = 1_900_400_000_000;
+const previousNodeEnvironment = process.env.NODE_ENV;
+test.before(() => { Object.assign(process.env, { NODE_ENV: "development" }); });
+test.after(() => { if (previousNodeEnvironment === undefined) Reflect.deleteProperty(process.env, "NODE_ENV"); else Object.assign(process.env, { NODE_ENV: previousNodeEnvironment }); });
 
 function bytes(value: string): AsyncIterable<Uint8Array> {
   return (async function* () {
@@ -147,7 +153,7 @@ async function addProvider(f: Fixture) {
 }
 
 async function addModel(f: Fixture, providerId: string, providerModelId: string) {
-  return f.admin.createModel({
+  const model = await f.admin.createModel({
     providerId,
     providerModelId,
     contextWindowTokens: 16_384,
@@ -155,6 +161,8 @@ async function addModel(f: Fixture, providerId: string, providerModelId: string)
     inputModalities: ["TEXT"],
     actor: f.actor,
   });
+  await qualifyAgent1Fixture(f, model.id);
+  return model;
 }
 
 function aiTableCounts(database: ContentDatabase): Record<string, number> {
@@ -182,6 +190,7 @@ test("direct mobile chat is development-only and accepts only the server-owned r
   assert.doesNotThrow(() => assertDevAgent1Fields({ messages: [] }, ["messages"]));
   assert.throws(() => assertDevAgent1Fields({ messages: [], modelId: "client-choice" }, ["messages"]));
   assert.throws(() => assertDevAgent1Fields({ messages: [], instructions: "client prompt" }, ["messages"]));
+  for (const field of ["developerPrompt", "systemPrompt", "policyRevision", "policyId", "sections"]) assert.throws(() => assertDevAgent1Fields({ messages: [], [field]: "client override" }, ["messages"]));
 });
 
 test("development chat response flushes each NDJSON delta before generation completes", async () => {
@@ -320,7 +329,7 @@ test("Agent 1 temporary chat follows the saved route and creates no chat, accoun
     assert.equal(transport.requestBodies.length, 2);
     for (const requestBody of transport.requestBodies) {
       const systemMessage = requestBody.messages?.find((message) => message.role === "system");
-      assert.equal(systemMessage, undefined);
+      assert.equal(systemMessage?.content, composeAgent1Instructions({}).instructions);
     }
     assert.deepEqual(aiTableCounts(f.database), before);
     const live = activity.snapshot();
@@ -330,6 +339,9 @@ test("Agent 1 temporary chat follows the saved route and creates no chat, accoun
     assert.equal(live.stats.inputTokens, 1);
     assert.equal(live.stats.outputTokens, 2);
     assert.equal(live.recent[0].modelConfigId, fallback.id);
+    assert.notEqual(live.recent[0].firstTextMs, null);
+    assert.deepEqual(live.recent[0].chain.map(item => item.modelConfigId), [primary.id, fallback.id]);
+    assert.deepEqual(live.recent[0].chain.map(item => item.status), ["failed", "succeeded"]);
     assert.equal(JSON.stringify(live).includes("PRIVATE REASONING"), false);
     assert.equal(JSON.stringify(live).includes("مرحبا"), false);
 
@@ -343,6 +355,39 @@ test("Agent 1 temporary chat follows the saved route and creates no chat, accoun
   } finally {
     f.close();
   }
+});
+
+test("Published Global instructions are captured once across fallback; later publication affects only next request", async () => {
+  const f = fixture();
+  try {
+    const provider = await addProvider(f);
+    const primary = await addModel(f, provider.id, "test-primary");
+    const fallback = await addModel(f, provider.id, "test-fallback");
+    f.runtime.saveRoute({ actor: f.actor, expectedRevision: 0, primaryModelConfigId: primary.id, fallbackModelConfigIds: [fallback.id] });
+    f.runtime.setEnabled({ actor: f.actor, expectedRevision: 1, enabled: true });
+    const policies = new AIInstructionAdminService(f.database, () => BASE_TIME + 50);
+    const sections = [{ id: uuidv7(), title: "هوية", description: "NEVER_SENT_DESCRIPTION", body: "FIRST_INSTRUCTION_CONTENT", enabled: true }];
+    const first = policies.publish({ sections, enabled: true, expectedRevision: 0, actor: f.actor });
+    const base = new FallbackTransport("test-primary");
+    let second: ReturnType<AIInstructionAdminService["publish"]> | undefined;
+    const transport: AIProviderHttpTransport = { async request(target, request) {
+      if (!second) second = policies.publish({ sections: [{ ...sections[0], body: "SECOND_INSTRUCTION_CONTENT" }], enabled: true, expectedRevision: 1, actor: f.actor });
+      return base.request(target, request);
+    } };
+    const service = Agent1DevChatService.forDatabase(f.database, { runtimeService: f.runtime, secrets: f.secrets, outboundPolicy, transport, timeoutMs: 2_000 });
+    const events: Agent1DevChatStreamEvent[] = [];
+    for await (const event of service.stream({ messages: [{ role: "user", content: "مرحبا" }] })) events.push(event);
+    assert.equal(base.requestBodies.length, 2);
+    for (const body of base.requestBodies) assert.equal(body.messages?.find((message) => message.role === "system")?.content, composeAgent1Instructions({ general: first }).instructions);
+    assert.equal(JSON.stringify(base.requestBodies).includes("NEVER_SENT_DESCRIPTION"), false);
+    assert.equal(JSON.stringify(events).includes("FIRST_INSTRUCTION_CONTENT"), false);
+    for await (const _event of service.stream({ messages: [{ role: "user", content: "مرة أخرى" }] })) { /* exhaust */ }
+    for (const body of base.requestBodies.slice(2)) assert.equal(body.messages?.find((message) => message.role === "system")?.content, composeAgent1Instructions({ general: second! }).instructions);
+    policies.publish({ sections, enabled: false, expectedRevision: 2, actor: f.actor });
+    for await (const _event of service.stream({ messages: [{ role: "user", content: "معطلة" }] })) { /* exhaust */ }
+    for (const body of base.requestBodies.slice(4)) assert.equal(body.messages?.find((message) => message.role === "system")?.content, composeAgent1Instructions({}).instructions);
+    assert.equal(policies.repository.getRevision(first.policyId, 1)?.instructions, first.instructions);
+  } finally { f.close(); }
 });
 
 test("temporary Agent 1 chat refuses disabled runtime and malformed history before provider use", async () => {

@@ -1,4 +1,5 @@
 import type { AdminActor } from "../../admin-auth/contracts";
+import type { InstructionAuthoring } from "./instruction-compiler";
 
 export const AI_INSTRUCTION_POLICY_RESOURCE_TYPE = "ai.instruction-policy" as const;
 
@@ -14,6 +15,8 @@ export interface AIInstructionPolicyContent {
   displayName: string;
   instructions: string;
   enabled: boolean;
+  /** Absent for legacy revisions; instructions remains the execution contract. */
+  authoring?: InstructionAuthoring;
 }
 
 export interface AIInstructionPolicyRevision extends AIInstructionPolicyContent {

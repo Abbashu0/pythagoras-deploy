@@ -35,12 +35,14 @@ export class OpenAICompatibleGenerationAdapter {
       throw new AIProviderAdapterError("INVALID_REQUEST", { fallbackEligible: false });
     }
     const target = await this.dependencies.outboundPolicy.validate(context.providerBaseUrl);
+    const serializedMessages = request.messages.map(serializeChatMessage);
+    if (request.instructionRole !== undefined && request.instructionRole !== "system" && request.instructionRole !== "developer") throw new AIProviderAdapterError("INVALID_REQUEST");
     const messages = request.instructions
-      ? [{ role: "system" as const, content: request.instructions }, ...request.messages]
-      : request.messages;
+      ? [{ role: request.instructionRole ?? "system", content: request.instructions }, ...serializedMessages]
+      : serializedMessages;
     const payload = JSON.stringify({
       model: request.providerModelId,
-      messages: messages.map(serializeChatMessage),
+      messages,
       ...(request.maxOutputTokens === undefined ? {} : { max_tokens: request.maxOutputTokens }),
       ...(reasoningEffort === undefined ? {} : { reasoning_effort: reasoningEffort.toLowerCase() }),
       ...(request.temperature === undefined ? {} : { temperature: request.temperature }),

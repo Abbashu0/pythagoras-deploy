@@ -17,6 +17,7 @@ import { AI_SECRET_KEY_BYTES, createLocalAISecretStore } from "../src/server/ai/
 import { normalizeAIModelConfigContent, SQLiteAIModelConfigRepository } from "../src/server/ai/model-registry";
 import { SQLiteAIProviderConfigRepository } from "../src/server/ai/configuration";
 import { openContentDatabase, type ContentDatabase } from "../src/server/content";
+import { qualifyAgent1Fixture } from "./helpers/agent-1-conformance";
 
 const migrationsDirectory = path.join(process.cwd(), "drizzle");
 const TEST_MASTER_KEY = Buffer.alloc(AI_SECRET_KEY_BYTES, 0x39);
@@ -87,7 +88,7 @@ async function addProvider(f: Fixture, name: string) {
 }
 
 async function addModel(f: Fixture, providerId: string, providerModelId: string) {
-  return f.admin.createModel({
+  const model = await f.admin.createModel({
     providerId,
     providerModelId,
     contextWindowTokens: 16_384,
@@ -95,6 +96,8 @@ async function addModel(f: Fixture, providerId: string, providerModelId: string)
     inputModalities: ["TEXT"],
     actor: f.actor,
   });
+  await qualifyAgent1Fixture(f, model.id);
+  return model;
 }
 
 test("Agent 1 starts safely unconfigured and cannot be enabled without a ready primary", () => {

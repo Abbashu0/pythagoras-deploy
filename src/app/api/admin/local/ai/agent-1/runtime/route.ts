@@ -19,7 +19,7 @@ export async function GET(request: NextRequest) {
   try {
     requireLocalAdminRead(request);
     const snapshot = AIAgent1RuntimeService.forDatabase(
-      getContentDatabase(),
+      getContentDatabase(), { executionBoundary: "DEVELOPMENT_STATELESS_CHAT" },
     ).getSnapshot();
     return localJson({ ok: true, ...snapshot });
   } catch (error) {
@@ -49,7 +49,7 @@ export async function PUT(request: NextRequest) {
       );
     }
     const snapshot = AIAgent1RuntimeService.forDatabase(
-      getContentDatabase(),
+      getContentDatabase(), { executionBoundary: "DEVELOPMENT_STATELESS_CHAT" },
     ).saveRoute({
       actor,
       expectedRevision: requiredAgent1Revision(body.expectedRevision),
@@ -74,7 +74,7 @@ export async function PATCH(request: NextRequest) {
       );
     }
     const snapshot = AIAgent1RuntimeService.forDatabase(
-      getContentDatabase(),
+      getContentDatabase(), { executionBoundary: "DEVELOPMENT_STATELESS_CHAT" },
     ).setEnabled({
       actor,
       enabled: body.enabled,

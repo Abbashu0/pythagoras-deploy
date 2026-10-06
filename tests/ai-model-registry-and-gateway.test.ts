@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -57,6 +57,7 @@ import {
 } from "../src/server/content";
 
 const migrationsDirectory = path.join(process.cwd(), "drizzle");
+const migrationCount = (JSON.parse(readFileSync(path.join(migrationsDirectory, "meta", "_journal.json"), "utf8")) as { entries: unknown[] }).entries.length;
 const TEST_MASTER_KEY = Buffer.alloc(AI_SECRET_KEY_BYTES, 0x4d);
 
 interface Fixture {
@@ -341,7 +342,7 @@ function expectGatewayCode(code: string) {
 test("AI M2 migration creates a safe Model Registry table without credential material", () => {
   const fixture = createFixture();
   try {
-    assert.equal(getContentDatabaseStatus(fixture.database).migrationsApplied, 49);
+    assert.equal(getContentDatabaseStatus(fixture.database).migrationsApplied, migrationCount);
     const columns = fixture.database.client
       .prepare("pragma table_info(ai_model_configs)")
       .all() as Array<{ name: string }>;

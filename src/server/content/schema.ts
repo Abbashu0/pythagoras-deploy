@@ -701,6 +701,9 @@ export const aiInstructionPolicyRevisions = sqliteTable(
     revision: integer("revision").notNull(),
     displayName: text("display_name").notNull(),
     instructions: text("instructions").notNull(),
+    sectionsJson: text("sections_json"),
+    compilerVersion: integer("compiler_version"),
+    compiledHash: text("compiled_hash"),
     enabled: integer("enabled", { mode: "boolean" }).notNull(),
     createdAt: integer("created_at").notNull(),
     createdBy: text("created_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
@@ -2474,6 +2477,40 @@ export const aiAgentRuntimeFallbackModels = sqliteTable(
     check("ai_agent_runtime_fallback_created_nonnegative", sql`${table.createdAt} >= 0`),
   ],
 );
+
+/** Agent 1 route qualification. No test prompts, nonces, output, or reasoning. */
+export const aiAgentInstructionConformance = sqliteTable("ai_agent_instruction_conformance", {
+  id: text("id").primaryKey(),
+  modelConfigId: text("model_config_id").notNull().references(() => aiModelConfigs.id, { onDelete: "cascade" }),
+  modelRevision: integer("model_revision").notNull(),
+  providerId: text("provider_id").notNull().references(() => aiProviderConfigs.id, { onDelete: "cascade" }),
+  providerRevision: integer("provider_revision").notNull(),
+  adapterKey: text("adapter_key").notNull(),
+  apiFormat: text("api_format").notNull(),
+  channel: text("channel").notNull(),
+  assuranceTier: text("assurance_tier", { enum: ["STRICT", "DEVELOPMENT_FLATTENED"] }).notNull().default("STRICT"),
+  framingVersion: integer("framing_version").notNull().default(0),
+  transportFingerprint: text("transport_fingerprint").notNull(),
+  classifierVersion: integer("classifier_version").notNull(),
+  conformanceVersion: integer("conformance_version").notNull(),
+  frameworkVersion: integer("framework_version").notNull(),
+  frameworkHash: text("framework_hash").notNull(),
+  status: text("status", { enum: ["PASS", "FAIL", "ERROR"] }).notNull(),
+  reason: text("reason"),
+  source: text("source", { enum: ["LIVE_PROBE", "STATIC_ANALYSIS"] }).notNull(),
+  evidence: text("evidence", { mode: "json" }).$type<import("../ai/agent-1-runtime/instruction-conformance-contracts").Agent1ProbeEvidence[]>().notNull(),
+  createdAt: integer("created_at").notNull(),
+  createdBy: text("created_by").notNull().references(() => adminUsers.id, { onDelete: "restrict" }),
+}, (table) => [
+  index("ai_agent_conformance_model_latest").on(table.modelConfigId, table.createdAt, table.id),
+  check("ai_agent_conformance_status_valid", sql`${table.status} in ('PASS','FAIL','ERROR')`),
+  check("ai_agent_conformance_source_valid", sql`${table.source} in ('LIVE_PROBE','STATIC_ANALYSIS')`),
+  check("ai_agent_conformance_versions_positive", sql`${table.modelRevision} > 0 and ${table.providerRevision} > 0 and ${table.conformanceVersion} > 0 and ${table.frameworkVersion} > 0 and ${table.classifierVersion} > 0`),
+  check("ai_agent_conformance_created_nonnegative", sql`${table.createdAt} >= 0`),
+  check("ai_agent_conformance_hashes_valid", sql`length(${table.transportFingerprint}) = 64 and length(${table.frameworkHash}) = 64`),
+  check("ai_agent_conformance_evidence_json", sql`json_valid(${table.evidence}) and ((${table.assuranceTier} = 'STRICT' and json_array_length(${table.evidence}) = 3 and ${table.framingVersion} = 0) or (${table.assuranceTier} = 'DEVELOPMENT_FLATTENED' and json_array_length(${table.evidence}) = 4 and ${table.framingVersion} > 0))`),
+  check("ai_agent_conformance_pass_live", sql`${table.status} != 'PASS' or (${table.source} = 'LIVE_PROBE' and ${table.reason} is null)`),
+]);
 
 /** Governed Circuit Breaker policy identity; behavior lives in immutable revisions. */
 export const aiCircuitBreakerPolicies = sqliteTable(

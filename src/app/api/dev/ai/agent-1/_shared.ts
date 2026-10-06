@@ -1,4 +1,5 @@
 import { Agent1DevChatError } from "@/server/ai/agent-1-runtime/ephemeral-chat-service";
+import { isDevelopmentAgentExecution } from "@/server/ai/agent-1-runtime/instruction-qualification";
 
 export const DEV_CHAT_BODY_LIMIT_BYTES = 64 * 1_024;
 
@@ -102,7 +103,7 @@ export function devAgent1ErrorResponse(error: unknown): Response {
 }
 
 export function isDevMobileChatEnabled(nodeEnvironment = process.env.NODE_ENV): boolean {
-  return nodeEnvironment === "development";
+  return isDevelopmentAgentExecution("DEVELOPMENT_STATELESS_CHAT", nodeEnvironment);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

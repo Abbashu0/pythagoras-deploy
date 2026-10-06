@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, lt } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
 
 import type { AdminActor } from "../../admin-auth/contracts";
@@ -17,6 +17,7 @@ import type {
 } from "./instruction-contracts";
 import { AIPolicyError } from "./errors";
 import { normalizeAIInstructionPolicyContent } from "./instruction-validation";
+import { validateInstructionAuthoring } from "./instruction-compiler";
 
 export class SQLiteAIInstructionPolicyRepository implements AIInstructionPolicyRepository {
   constructor(private readonly database: ContentDatabase) {}
@@ -71,8 +72,16 @@ export class SQLiteAIInstructionPolicyRepository implements AIInstructionPolicyR
       });
   }
 
+  listRevisions(id: string, before?: number): AIInstructionPolicyRevision[] {
+    return this.database.db.select().from(aiInstructionPolicyRevisions).where(and(
+      eq(aiInstructionPolicyRevisions.policyId, id),
+      before === undefined ? undefined : lt(aiInstructionPolicyRevisions.revision, before),
+    )).orderBy(desc(aiInstructionPolicyRevisions.revision)).limit(20).all().map((row) => this.revisionFromRow(row));
+  }
+
   create(input: { id: string; content: AIInstructionPolicyContent; actor: AdminActor; now: number }): AIInstructionPolicyRevision {
     const content = normalizeAIInstructionPolicyContent(input.content);
+    return this.database.client.transaction(() => {
     try {
       this.database.db.insert(aiInstructionPolicies).values({
         id: input.id,
@@ -93,14 +102,18 @@ export class SQLiteAIInstructionPolicyRepository implements AIInstructionPolicyR
       if (error instanceof AIPolicyError) throw error;
       throw new AIPolicyError("AI_POLICY_SCOPE_CONFLICT", "The Instruction Policy could not be created.", {}, error);
     }
+    }).immediate();
   }
 
   appendRevision(input: { id: string; expectedRevision: number; content: AIInstructionPolicyContent; actor: AdminActor; now: number }): AIInstructionPolicyRevision {
+    return this.database.client.transaction(() => {
     const current = this.database.db.select({ currentRevision: aiInstructionPolicies.currentRevision })
       .from(aiInstructionPolicies).where(eq(aiInstructionPolicies.id, input.id)).get();
     if (!current) throw new AIPolicyError("AI_POLICY_NOT_FOUND", "The Instruction Policy was not found.");
     if (current.currentRevision !== input.expectedRevision) throw new AIPolicyError("AI_POLICY_CONFLICT", "The Instruction Policy changed before publication.");
     const content = normalizeAIInstructionPolicyContent(input.content);
+    const identity = this.getById(input.id)!;
+    if (identity.key !== content.key || identity.scope !== content.scope || identity.subjectKey !== content.subjectKey) throw new AIPolicyError("AI_POLICY_INVALID", "Instruction Policy identity is immutable.");
     const nextRevision = input.expectedRevision + 1;
     try {
       this.insertRevision(input.id, nextRevision, content, input.actor, input.now);
@@ -120,6 +133,7 @@ export class SQLiteAIInstructionPolicyRepository implements AIInstructionPolicyR
       if (error instanceof AIPolicyError) throw error;
       throw new AIPolicyError("AI_POLICY_CONFLICT", "The Instruction Policy revision could not be appended.", {}, error);
     }
+    }).immediate();
   }
 
   private insertRevision(policyId: string, revision: number, content: AIInstructionPolicyContent, actor: AdminActor, now: number): void {
@@ -129,6 +143,9 @@ export class SQLiteAIInstructionPolicyRepository implements AIInstructionPolicyR
       revision,
       displayName: content.displayName,
       instructions: content.instructions,
+      sectionsJson: content.authoring ? JSON.stringify(content.authoring.sections) : null,
+      compilerVersion: content.authoring?.compilerVersion ?? null,
+      compiledHash: content.authoring?.compiledHash ?? null,
       enabled: content.enabled,
       createdAt: now,
       createdBy: actor.actorUserId,
@@ -142,6 +159,12 @@ export class SQLiteAIInstructionPolicyRepository implements AIInstructionPolicyR
       subjectKey: aiInstructionPolicies.subjectKey,
     }).from(aiInstructionPolicies).where(eq(aiInstructionPolicies.id, row.policyId)).get();
     if (!policy) throw new AIPolicyError("AI_POLICY_INVALID", "The Instruction Policy identity is missing.");
+    let authoring;
+    if (row.sectionsJson !== null || row.compilerVersion !== null || row.compiledHash !== null) {
+      try {
+        authoring = validateInstructionAuthoring({ sections: JSON.parse(row.sectionsJson ?? "null"), compilerVersion: row.compilerVersion, compiledHash: row.compiledHash }, row.instructions);
+      } catch (error) { throw new AIPolicyError("AI_POLICY_INVALID", "Instruction revision integrity check failed.", {}, error); }
+    }
     return {
       policyId: row.policyId,
       revisionId: row.id,
@@ -151,6 +174,7 @@ export class SQLiteAIInstructionPolicyRepository implements AIInstructionPolicyR
       subjectKey: policy.subjectKey,
       displayName: row.displayName,
       instructions: row.instructions,
+      ...(authoring ? { authoring } : {}),
       enabled: row.enabled,
       createdAt: row.createdAt,
       createdBy: row.createdBy,

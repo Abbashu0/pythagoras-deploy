@@ -18,8 +18,12 @@ import { type AISecretStoreAdapter } from "../secrets";
 import { SQLiteAIProviderConfigRepository } from "../configuration";
 import { SQLiteAIModelConfigRepository } from "../model-registry";
 import { AIAgent1RuntimeService } from "./service";
-import { Agent1ActivityStore, getAgent1ActivityStore } from "./activity-store";
-import type { Agent1ActivityOutcome } from "./activity-contracts";
+import { Agent1ActivityStore, failureCategory, getAgent1ActivityStore } from "./activity-store";
+import type { Agent1ActivityOutcome, Agent1FailureCategory } from "./activity-contracts";
+import { captureAgent1Instructions } from "./instruction-envelope";
+import { canExecuteAgent1Model } from "./instruction-qualification";
+import { classifyAgent1InstructionTransport } from "./instruction-transport";
+import { composeAgent1FlattenedDevelopmentEnvelope } from "./flattened-development-envelope";
 
 export type Agent1DevChatErrorCode =
   | "AGENT_1_DISABLED"
@@ -87,7 +91,7 @@ export class Agent1DevChatService {
   ) {
     this.models = new SQLiteAIModelConfigRepository(database);
     this.providers = new SQLiteAIProviderConfigRepository(database);
-    this.runtime = options.runtimeService ?? AIAgent1RuntimeService.forDatabase(database);
+    this.runtime = options.runtimeService ?? AIAgent1RuntimeService.forDatabase(database, { executionBoundary: "DEVELOPMENT_STATELESS_CHAT" });
     this.outboundPolicy = options.outboundPolicy ?? createProviderOutboundPolicy();
     this.secrets = options.secrets ?? createLocalAISecretStore(database);
     this.activity = options.activity ?? getAgent1ActivityStore(database);
@@ -105,9 +109,11 @@ export class Agent1DevChatService {
     options: { signal?: AbortSignal } = {},
   ): AsyncGenerator<Agent1DevChatStreamEvent> {
     const messages = validateMessages(input.messages);
+    // Capture once before any await. Every fallback receives this same immutable revision.
+    const capturedEnvelope = captureAgent1Instructions(this.database);
     const route = this.runtime.getSnapshot();
     if (!route.config.enabled) throw new Agent1DevChatError("AGENT_1_DISABLED");
-    if (!route.primary?.ready || !route.config.primaryModelConfigId) {
+    if (!route.primary || !canExecuteAgent1Model(route.primary, "DEVELOPMENT_STATELESS_CHAT") || !route.config.primaryModelConfigId) {
       throw new Agent1DevChatError("AGENT_1_NOT_READY");
     }
 
@@ -121,6 +127,7 @@ export class Agent1DevChatService {
       const provider = model ? this.providers.getById(model.providerConfigId) : null;
       if (
         !readiness?.ready ||
+        !canExecuteAgent1Model(readiness, "DEVELOPMENT_STATELESS_CHAT") ||
         !model ||
         model.capability !== "GENERATION" ||
         !model.enabled ||
@@ -131,7 +138,7 @@ export class Agent1DevChatService {
         if (index === 0) throw new Agent1DevChatError("AGENT_1_NOT_READY");
         return [];
       }
-      return [{ id, model, provider }];
+      return [{ id, model, provider, transport: classifyAgent1InstructionTransport(model, provider) }];
     });
     if (selectedModels.length === 0 || selectedModels[0]?.id !== selectedIds[0]) {
       throw new Agent1DevChatError("AGENT_1_NOT_READY");
@@ -193,6 +200,7 @@ export class Agent1DevChatService {
       {
         requestId,
         messages,
+        instructions: capturedEnvelope.instructions,
         maxOutputTokens,
         stream: true,
       },
@@ -200,7 +208,13 @@ export class Agent1DevChatService {
         signal: options.signal,
         timeoutMs: this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         expectedIdentities,
-        onGenerationAttempt: (attempt) => this.activity.observeAttempt(requestId, attempt),
+        instructionRolesByModel: Object.fromEntries(selectedModels.map(({ id, transport }) => [id, transport.channel === "CHAT_DEVELOPER" ? "developer" : "system"])),
+        generationInputsByModel: Object.fromEntries(selectedModels.flatMap(({ id, transport }) => {
+          if (transport.assuranceTier !== "DEVELOPMENT_FLATTENED") return [];
+          const flat = composeAgent1FlattenedDevelopmentEnvelope(capturedEnvelope, messages);
+          return [[id, { messages: flat.messages }]];
+        })),
+        onGenerationAttempt: (attempt) => this.observeActivity(() => this.activity.observeAttempt(requestId, attempt)),
       },
     );
 
@@ -210,7 +224,15 @@ export class Agent1DevChatService {
     let sawCompleted = false;
     let emittedThinking = false;
     let outcome: Agent1ActivityOutcome = "failed";
-    this.activity.begin(requestId);
+    let failure: Agent1FailureCategory | undefined;
+    this.observeActivity(() => this.activity.begin(requestId, { ...capturedEnvelope.metadata,
+      instructionConformanceVersion: route.primary?.instructionAuthority?.identity.conformanceVersion ?? null,
+      instructionConformanceStatus: route.primary?.instructionAuthority?.qualification ?? null,
+      plannedModels: selectedModels.map(({ id, transport }) => {
+        const authority = route.models.find(item => item.id === id)?.instructionAuthority;
+        return { modelConfigId: id, conformanceRecordId: authority?.recordId ?? null, assuranceTier: transport.assuranceTier, qualification: authority?.qualification ?? null, conformanceStatus: authority?.status ?? null };
+      }),
+    }));
     try {
       for await (const event of execution.events) {
         if (options.signal?.aborted) throw new Agent1DevChatError("CANCELLED");
@@ -222,7 +244,7 @@ export class Agent1DevChatService {
           continue;
         }
         if (event.type === "REASONING_DELTA") {
-          this.activity.phase(requestId, "thinking");
+          this.observeActivity(() => this.activity.phase(requestId, "thinking"));
           if (!emittedThinking) {
             emittedThinking = true;
             yield { type: "phase", phase: "thinking" };
@@ -230,7 +252,8 @@ export class Agent1DevChatService {
           continue;
         }
         if (event.type === "TEXT_DELTA") {
-          this.activity.phase(requestId, "responding");
+          this.observeActivity(() => this.activity.phase(requestId, "responding"));
+          if (event.text.trim()) this.observeActivity(() => this.activity.firstText(requestId));
           responseBytes += Buffer.byteLength(event.text, "utf8");
           if (responseBytes > MAX_RESPONSE_BYTES) {
             throw new Agent1DevChatError("RESPONSE_TOO_LARGE");
@@ -240,12 +263,12 @@ export class Agent1DevChatService {
           continue;
         }
         if (event.type === "COMPLETED") {
-          this.activity.usage(requestId, event.usage);
+          this.observeActivity(() => this.activity.usage(requestId, event.usage));
           sawCompleted = true;
           continue;
         }
         if (event.type === "USAGE") {
-          this.activity.usage(requestId, event.usage);
+          this.observeActivity(() => this.activity.usage(requestId, event.usage));
           continue;
         }
         if (event.type === "MEMORY_COMMAND" || event.type === "TOOL_CALL_DELTA") {
@@ -259,6 +282,8 @@ export class Agent1DevChatService {
       outcome = "completed";
       yield { type: "completed" };
     } catch (error) {
+      if (isAIProviderGatewayError(error)) failure = failureCategory(error.code);
+      else if (error instanceof Agent1DevChatError) failure = failureCategory(error.code === "PROVIDER_FAILED" ? "BAD_RESPONSE" : error.code);
       if (options.signal?.aborted || (error instanceof Agent1DevChatError && error.code === "CANCELLED")) {
         outcome = "cancelled";
       }
@@ -270,8 +295,12 @@ export class Agent1DevChatService {
       throw new Agent1DevChatError("PROVIDER_FAILED");
     } finally {
       if (outcome !== "completed" && options.signal?.aborted) outcome = "cancelled";
-      this.activity.finish(requestId, outcome);
+      this.observeActivity(() => this.activity.finish(requestId, outcome, failure));
     }
+  }
+
+  private observeActivity(observe: () => void): void {
+    try { observe(); } catch { /* Advisory observation must not interrupt the Product stream. */ }
   }
 }
 

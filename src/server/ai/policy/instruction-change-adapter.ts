@@ -136,7 +136,8 @@ function snapshotFromContent(content: AIInstructionPolicy | AIInstructionPolicyC
     displayName: content.displayName,
     instructions: content.instructions,
     enabled: content.enabled,
-  }) as ChangeSnapshot;
+    ...(content.authoring ? { authoring: content.authoring } : {}),
+  }) as unknown as ChangeSnapshot;
 }
 
 function assertStableIdentity(current: Pick<AIInstructionPolicyContent, "key" | "scope" | "subjectKey"> | ChangeSnapshot, next: AIInstructionPolicyContent): void {

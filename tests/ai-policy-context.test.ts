@@ -26,8 +26,18 @@ import { AIConversationSummaryService } from "../src/server/ai/memory";
 import { createChangeManagementService } from "../src/server/change-management";
 import { SQLiteCanonicalContentRepository } from "../src/server/canonical-content";
 import { openContentDatabase, type ContentDatabase } from "../src/server/content";
+import { compileInstructionAuthoring } from "../src/server/ai/policy/instruction-compiler";
 
 const migrationsDirectory = path.join(process.cwd(), "drizzle");
+test("Historical Owner ChangeSets also preserve structured instruction snapshots and execution text", () => {
+  const fixture = createFixture();
+  try {
+    const compiled = compileInstructionAuthoring([{ id: uuidv7(), title: "هوية", body: "<rules>تعليمات عربية</rules>", description: "Admin metadata only", enabled: true }]);
+    const published = publishInstruction(fixture, instructionContent(compiled));
+    assert.deepEqual(fixture.instructions.getCurrentRevision(published.id)?.authoring, compiled.authoring);
+    assert.equal(fixture.instructions.getCurrentRevision(published.id)?.instructions, compiled.instructions);
+  } finally { fixture.close(); }
+});
 const BASE_TIME = 1_901_300_000_000;
 const PRINCIPAL: AIStudentPrincipal = { principalRef: "student-policy-context", status: "ACTIVE" };
 
