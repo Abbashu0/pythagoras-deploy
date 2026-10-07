@@ -50,8 +50,20 @@ index 4d31a7a..c2f68d5 100644
    end
 
    pod_xcconfig = {
+diff --git a/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdown.h b/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdown.h
+index 3e13bf9..b412abe 100644
+--- a/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdown.h
++++ b/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdown.h
+@@ -13,6 +13,7 @@ NS_ASSUME_NONNULL_BEGIN
+ - (void)renderMarkdownSynchronously:(NSString *)markdownString;
+ - (BOOL)hasRenderedMarkdown:(NSString *)markdown;
+ - (BOOL)hasRenderedWithStyleFingerprint:(size_t)fingerprint;
++- (BOOL)hasNativePresentationGeometryOverride;
+ @end
+
+ NS_ASSUME_NONNULL_END
 diff --git a/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdown.mm b/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdown.mm
-index 7ad95d7..316b7e9 100644
+index 7ad95d7..140d481 100644
 --- a/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdown.mm
 +++ b/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdown.mm
 @@ -40,6 +40,7 @@
@@ -64,7 +76,7 @@ index 7ad95d7..316b7e9 100644
  #import <React/RCTUtils.h>
 @@ -67,6 +68,8 @@ typedef NS_OPTIONS(NSUInteger, ENRMDirtyFlags) {
  static char kENRMSegmentFadeAnimatorKey;
- 
+
  @interface EnrichedMarkdown () <RCTEnrichedMarkdownViewProtocol, UITextViewDelegate>
 +- (void)validateHeightForCurrentWidth:(CGFloat)width;
 +- (void)codeBlockPresentationDidChange;
@@ -73,7 +85,7 @@ index 7ad95d7..316b7e9 100644
  - (void)emitTaskListItemPress:(NSInteger)index checked:(BOOL)checked text:(NSString *)text;
 @@ -90,6 +93,12 @@ static char kENRMSegmentFadeAnimatorKey;
    ENRMAsyncRenderCoordinator *_renderCoordinator;
- 
+
    EnrichedMarkdownShadowNode::ConcreteState::Shared _state;
 +  NSUInteger _renderRevision;
 +  NSUInteger _validatedRenderRevision;
@@ -82,7 +94,7 @@ index 7ad95d7..316b7e9 100644
 +  BOOL _pendingHeightValidation;
 +  BOOL _pendingForceHeightUpdate;
    int _heightUpdateCounter;
- 
+
    FontScaleObserver *_fontScaleObserver;
 @@ -130,6 +139,11 @@ static char kENRMSegmentFadeAnimatorKey;
      _props = defaultProps;
@@ -99,7 +111,7 @@ index 7ad95d7..316b7e9 100644
 @@ -219,6 +233,27 @@ static char kENRMSegmentFadeAnimatorKey;
                              }
                            }]];
- 
+
 +#if !TARGET_OS_OSX
 +  [handlers addObject:[ENRMSegmentViewHandler handlerWithKind:ENRMSegmentKindCode
 +    matchesView:^BOOL(RCTUIView *view, ENRMRenderedSegment *segment) {
@@ -127,7 +139,7 @@ index 7ad95d7..316b7e9 100644
 @@ -265,7 +300,15 @@ static char kENRMSegmentFadeAnimatorKey;
        segmentHeight = textSize.height;
        maxContentWidth = MAX(maxContentWidth, textSize.width);
- 
+
 -    } else if ([segment isKindOfClass:[TableContainerView class]]) {
 +    }
 +#if !TARGET_OS_OSX
@@ -143,17 +155,36 @@ index 7ad95d7..316b7e9 100644
        maxContentWidth = width;
 @@ -293,6 +336,11 @@ static char kENRMSegmentFadeAnimatorKey;
      }
- 
+
      yOffset += segmentHeight;
 +#if !TARGET_OS_OSX
 +    if ([segment isKindOfClass:[ENRMCodeBlockContainerView class]] && shouldAddBottomMargin) {
 +      yOffset += _config.codeBlockMarginBottom;
 +    }
 +#endif
- 
+
      if ([segment isKindOfClass:[TableContainerView class]] && shouldAddBottomMargin) {
        yOffset += _config.tableMarginBottom;
-@@ -413,6 +461,11 @@ static char kENRMSegmentFadeAnimatorKey;
+@@ -330,6 +378,18 @@ static char kENRMSegmentFadeAnimatorKey;
+   return _renderedStyleFingerprint == fingerprint;
+ }
+
++- (BOOL)hasNativePresentationGeometryOverride
++{
++  // Query current mounted segments, not a sticky counter or a code language.
++  for (RCTUIView *segment in _segmentViews) {
++    if ([segment respondsToSelector:@selector(hasNativePresentationGeometryOverride)] &&
++        [(id)segment hasNativePresentationGeometryOverride]) {
++      return YES;
++    }
++  }
++  return NO;
++}
++
+ - (BOOL)renderedSegmentsChangeTopology:(NSArray<ENRMRenderedSegment *> *)renderedSegments
+ {
+   if (renderedSegments.count != _segmentViews.count) {
+@@ -413,6 +473,11 @@ static char kENRMSegmentFadeAnimatorKey;
  - (void)pushSelectionMenuLabelsToSegments
  {
    for (RCTUIView *segment in _segmentViews) {
@@ -165,18 +196,18 @@ index 7ad95d7..316b7e9 100644
      if ([segment isKindOfClass:[TableContainerView class]]) {
        TableContainerView *tableView = (TableContainerView *)segment;
        tableView.copyLabel = _selectionMenuLabels.copyLabel;
-@@ -565,21 +618,66 @@ static char kENRMSegmentFadeAnimatorKey;
+@@ -565,21 +630,66 @@ static char kENRMSegmentFadeAnimatorKey;
    _dirtyFlags = ENRMDirtyNone;
- 
+
    _segmentViews = result.views;
 +  _renderRevision++;
 +  _pendingHeightValidation = YES;
 +  _pendingForceHeightUpdate = _pendingForceHeightUpdate || forceHeightUpdate || segmentTopologyChanged;
    _segmentSignatures = result.signatures;
- 
+
    if (self.bounds.size.width > 0) {
      [self setNeedsLayout];
- 
+
 -    if (forceHeightUpdate || segmentTopologyChanged) {
 +    if (_pendingForceHeightUpdate) {
        [self computeSegmentLayoutForWidth:self.bounds.size.width applyFrames:YES];
@@ -238,8 +269,8 @@ index 7ad95d7..316b7e9 100644
 +    [self requestHeightUpdate];
    }
  }
- 
-@@ -725,7 +823,9 @@ static char kENRMSegmentFadeAnimatorKey;
+
+@@ -725,7 +835,9 @@ static char kENRMSegmentFadeAnimatorKey;
  - (void)layoutSubviews
  {
    [super layoutSubviews];
@@ -248,12 +279,12 @@ index 7ad95d7..316b7e9 100644
 +  [self computeSegmentLayoutForWidth:width applyFrames:YES];
 +  [self validateHeightForCurrentWidth:width];
  }
- 
+
  - (void)updateProps:(Props::Shared const &)props oldProps:(Props::Shared const &)oldProps
-@@ -922,10 +1022,8 @@ static char kENRMSegmentFadeAnimatorKey;
+@@ -922,10 +1034,8 @@ static char kENRMSegmentFadeAnimatorKey;
        }
      }
- 
+
 -    CGSize measured = [self measureSize:self.bounds.size.width];
 -    if (needsHeightUpdate(measured, self.bounds)) {
 -      [self requestHeightUpdate];
@@ -262,10 +293,10 @@ index 7ad95d7..316b7e9 100644
 +    [self validateHeightForCurrentWidth:self.bounds.size.width];
    }
  }
- 
-@@ -948,6 +1046,12 @@ static char kENRMSegmentFadeAnimatorKey;
+
+@@ -948,6 +1058,12 @@ static char kENRMSegmentFadeAnimatorKey;
    [_segmentSignatures removeAllObjects];
- 
+
    _cachedMarkdown = nil;
 +  _renderRevision = 0;
 +  _validatedRenderRevision = 0;
@@ -276,7 +307,7 @@ index 7ad95d7..316b7e9 100644
    _renderedMarkdown = nil;
    _streamingAnimation = NO;
    _tableStreamingMode = ENRMTableStreamingModeProgressive;
-@@ -981,7 +1085,14 @@ Class<RCTComponentViewProtocol> EnrichedMarkdownCls(void)
+@@ -981,7 +1097,14 @@ Class<RCTComponentViewProtocol> EnrichedMarkdownCls(void)
  - (facebook::react::SharedTouchEventEmitter)touchEventEmitterAtPoint:(CGPoint)point
  {
    for (RCTUIView *segment in _segmentViews) {
@@ -292,6 +323,34 @@ index 7ad95d7..316b7e9 100644
        CGPoint segmentPoint = [self convertPoint:point toView:segment];
  #if !TARGET_OS_OSX
        if ([segment pointInside:segmentPoint withEvent:nil]) {
+diff --git a/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdownText.h b/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdownText.h
+index 6fe547b..dcc74a6 100644
+--- a/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdownText.h
++++ b/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdownText.h
+@@ -13,6 +13,7 @@ NS_ASSUME_NONNULL_BEGIN
+ - (void)renderMarkdownSynchronously:(NSString *)markdownString;
+ - (BOOL)hasRenderedMarkdown:(NSString *)markdown;
+ - (BOOL)hasRenderedWithStyleFingerprint:(size_t)fingerprint;
++- (BOOL)hasNativePresentationGeometryOverride;
+ @end
+
+ NS_ASSUME_NONNULL_END
+diff --git a/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdownText.mm b/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdownText.mm
+index 1dc1097..a175639 100644
+--- a/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdownText.mm
++++ b/node_modules/react-native-enriched-markdown/ios/EnrichedMarkdownText.mm
+@@ -139,6 +139,11 @@ typedef NS_OPTIONS(NSUInteger, ENRMDirtyFlags) {
+   return _renderedStyleFingerprint == fingerprint;
+ }
+
++- (BOOL)hasNativePresentationGeometryOverride
++{
++  return NO;
++}
++
+ - (void)updateState:(const facebook::react::State::Shared &)state
+            oldState:(const facebook::react::State::Shared &)oldState
+ {
 diff --git a/node_modules/react-native-enriched-markdown/ios/code/ENRMCodeFullscreenController.swift b/node_modules/react-native-enriched-markdown/ios/code/ENRMCodeFullscreenController.swift
 new file mode 100644
 index 0000000..5a3e8eb
@@ -485,10 +544,10 @@ index 0000000..5a3e8eb
 +#endif
 diff --git a/node_modules/react-native-enriched-markdown/ios/code/ENRMCodeGestureGate.swift b/node_modules/react-native-enriched-markdown/ios/code/ENRMCodeGestureGate.swift
 new file mode 100644
-index 0000000..4a484ad
+index 0000000..e136a61
 --- /dev/null
 +++ b/node_modules/react-native-enriched-markdown/ios/code/ENRMCodeGestureGate.swift
-@@ -0,0 +1,73 @@
+@@ -0,0 +1,96 @@
 +#if canImport(UIKit)
 +import UIKit
 +import UIKit.UIGestureRecognizerSubclass
@@ -501,6 +560,7 @@ index 0000000..4a484ad
 +  private var starts: [ObjectIdentifier: CGPoint] = [:]
 +  private var touched = Set<UITouch>()
 +  private let movementThreshold: CGFloat = 8
++  private let boundAncestorPans = NSHashTable<UIGestureRecognizer>.weakObjects()
 +
 +  @objc public init(viewport: UIView) {
 +    super.init(target: nil, action: nil)
@@ -511,6 +571,28 @@ index 0000000..4a484ad
 +    viewport.addGestureRecognizer(self)
 +  }
 +  required init?(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
++
++  /// Called from owned view mount/layout boundaries, never a timer. UIKit's
++  /// dependency is explicit; this recognizer participates only in its viewport.
++  @objc public func bindAncestorScrollViews() {
++    guard let viewport = view, viewport.window != nil else { return }
++    var ancestor = viewport.superview
++    while let current = ancestor {
++      if let scroll = current as? UIScrollView {
++        let pan = scroll.panGestureRecognizer
++        if boundAncestorPans.member(pan) == nil {
++          pan.require(toFail: self)
++          boundAncestorPans.add(pan)
++        }
++      }
++      ancestor = current.superview
++    }
++  }
++
++  public func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
++    guard isEnabled, let viewport = view, let touchedView = touch.view else { return false }
++    return touchedView === viewport || touchedView.isDescendant(of: viewport)
++  }
 +
 +  public override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
 +    for touch in touches {
@@ -564,10 +646,10 @@ index 0000000..4a484ad
 +#endif
 diff --git a/node_modules/react-native-enriched-markdown/ios/code/ENRMCodePreviewController.swift b/node_modules/react-native-enriched-markdown/ios/code/ENRMCodePreviewController.swift
 new file mode 100644
-index 0000000..170490d
+index 0000000..f853a2c
 --- /dev/null
 +++ b/node_modules/react-native-enriched-markdown/ios/code/ENRMCodePreviewController.swift
-@@ -0,0 +1,432 @@
+@@ -0,0 +1,608 @@
 +#if canImport(UIKit)
 +import UIKit
 +import WebKit
@@ -577,6 +659,24 @@ index 0000000..170490d
 +final class ENRMPreviewSegments: UISegmentedControl {
 +  override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
 +    bounds.insetBy(dx: 0, dy: -4).contains(point)
++  }
++}
++
++/// SwiftUI can materialize its representable after the preview parent's layout.
++/// Observe the owned child's layout/mount boundary instead of retrying on time.
++private final class ENRMMermaidHostingController: UIHostingController<AnyView> {
++  var onOwnedLayout: (() -> Void)?
++  override func viewDidLayoutSubviews() {
++    super.viewDidLayoutSubviews()
++    onOwnedLayout?()
++  }
++  override func viewDidAppear(_ animated: Bool) {
++    super.viewDidAppear(animated)
++    onOwnedLayout?()
++  }
++  override func didMove(toParent parent: UIViewController?) {
++    super.didMove(toParent: parent)
++    if parent != nil { onOwnedLayout?() }
 +  }
 +}
 +
@@ -630,7 +730,7 @@ index 0000000..170490d
 +      material.backgroundColor = .secondarySystemBackground
 +    } else if #available(iOS 26.0, *) {
 +      let glass = UIGlassEffect(style: .regular)
-+      glass.isInteractive = true
++      glass.isInteractive = false
 +      material.backgroundColor = .clear
 +      material.effect = glass
 +    } else {
@@ -662,7 +762,7 @@ index 0000000..170490d
 +public final class ENRMCodePreviewController: UIViewController, WKNavigationDelegate, UIGestureRecognizerDelegate {
 +  private let kind: String
 +  private var htmlWebView: WKWebView?
-+  private var mermaidHost: UIHostingController<AnyView>?
++  private var mermaidHost: ENRMMermaidHostingController?
 +  private let errorLabel = UILabel()
 +  private let loading = UIActivityIndicatorView(style: .medium)
 +  private let mermaidController = MermaidController()
@@ -670,6 +770,8 @@ index 0000000..170490d
 +  private weak var observedMermaidWebView: WKWebView?
 +  private var mermaidGate: ENRMCodeGestureGate?
 +  private var fitOnNextRender = true
++  private var mermaidInteractionActive = false
++  private var mermaidHasRendered = false
 +  private var enteringPreview = false
 +  @objc public var fullscreen = false
 +  @objc public var statusColor: UIColor = .secondaryLabel
@@ -769,6 +871,7 @@ index 0000000..170490d
 +      // Native navigation completion coalesces pending HTML updates; no timer.
 +      if activeNavigation == nil { loadLatestHTML() }
 +    } else if kind == "mermaid" {
++      mermaidHasRendered = false
 +      let revision = generation
 +      let configuration = MermaidConfiguration(theme: dark ? .dark : .default,
 +        securityLevel: .strict, source: .bundledDefault, backgroundColor: "transparent")
@@ -786,12 +889,13 @@ index 0000000..170490d
 +        host.rootView = root
 +      } else {
 +        fitOnNextRender = true
-+        let host = UIHostingController(rootView: root)
++        let host = ENRMMermaidHostingController(rootView: root)
++        host.onOwnedLayout = { [weak self] in self?.attachMermaidObservationIfNeeded() }
 +        host.view.backgroundColor = .clear
++        mermaidHost = host
 +        addChild(host)
 +        view.insertSubview(host.view, at: 0)
 +        host.didMove(toParent: self)
-+        mermaidHost = host
 +      }
 +      view.setNeedsLayout()
 +    }
@@ -840,6 +944,7 @@ index 0000000..170490d
 +    // Never display/log engine errors or raw student/model content.
 +    htmlWebView?.isHidden = true
 +    mermaidHost?.view.isHidden = true
++    mermaidHasRendered = false
 +    loading.stopAnimating()
 +    mermaidGate?.isEnabled = false
 +    errorLabel.isHidden = false
@@ -851,6 +956,12 @@ index 0000000..170490d
 +    errorLabel.isHidden = true
 +    mermaidHost?.view.isHidden = false
 +    mermaidGate?.isEnabled = !fullscreen
++    mermaidHasRendered = true
++    fitMermaidIfReady()
++  }
++
++  private func fitMermaidIfReady() {
++    guard !disposed, mermaidHasRendered, !mermaidInteractionActive else { return }
 +    if fitOnNextRender {
 +      fitOnNextRender = false
 +      mermaidController.zoomToFit()
@@ -858,14 +969,25 @@ index 0000000..170490d
 +  }
 +
 +  private func attachMermaidObservationIfNeeded() {
-+    guard kind == "mermaid", !disposed, observedMermaidWebView == nil,
-+          let host = mermaidHost, let web = Self.ownedWebView(in: host.view),
-+          let delegate = web.navigationDelegate else { return }
++    guard kind == "mermaid", !disposed, let host = mermaidHost else { return }
++    let ownedWeb = Self.ownedWebView(in: host.view)
++    if ownedWeb === observedMermaidWebView { return }
++    mermaidObservation?.detach()
++    mermaidObservation = nil
++    observedMermaidWebView = nil
++    mermaidInteractionActive = false
++    mermaidHasRendered = false
++    guard let web = ownedWeb, let delegate = web.navigationDelegate else { return }
++    fitOnNextRender = true
 +    observedMermaidWebView = web
-+    // Only inspect the owned hosting subtree during native layout. No global
-+    // web-view search, polling, private MermaidKit state or transcript measure.
-+    mermaidObservation = ENRMMermaidObservation(web: web, upstream: delegate, onRendered: { [weak self] in
++    // The owned hosting controller calls after its SwiftUI subtree layout/mount.
++    // Replaced WKWebViews release their handler/delegate before a new attachment.
++    mermaidObservation = ENRMMermaidObservation(web: web, upstream: delegate,
++      minScale: fullscreen ? 0.5 : 0.7, maxScale: fullscreen ? 5 : 3.5, onRendered: { [weak self] in
 +      self?.mermaidRendered()
++    }, onInteractionChanged: { [weak self] active in
++      self?.mermaidInteractionActive = active
++      if !active { self?.fitMermaidIfReady() }
 +    })
 +  }
 +  private static func ownedWebView(in root: UIView) -> WKWebView? {
@@ -878,7 +1000,7 @@ index 0000000..170490d
 +    super.viewDidLayoutSubviews()
 +    htmlWebView?.frame = view.bounds
 +    mermaidHost?.view.frame = view.bounds
-+    attachMermaidObservationIfNeeded()
++    mermaidGate?.bindAncestorScrollViews()
 +    loading.center = CGPoint(x: view.bounds.midX, y: view.bounds.midY)
 +    errorLabel.frame = view.bounds.insetBy(dx: 20, dy: 20)
 +  }
@@ -902,6 +1024,7 @@ index 0000000..170490d
 +    htmlWebView = nil
 +    activeNavigation = nil
 +    if let host = mermaidHost {
++      host.onOwnedLayout = nil
 +      // Root replacement invokes MermaidKit.dismantleUIView, which stops its
 +      // WKWebView and removes every engine script handler before release.
 +      host.rootView = AnyView(EmptyView())
@@ -929,6 +1052,9 @@ index 0000000..170490d
 +  private weak var web: WKWebView?
 +  private let upstream: WKNavigationDelegate
 +  private var onRendered: (() -> Void)?
++  private var onInteractionChanged: ((Bool) -> Void)?
++  private let minScale: Double
++  private let maxScale: Double
 +  private var attached = true
 +  private static let handler = "pythagorasMermaidRendered"
 +  private static let script = #"""
@@ -949,26 +1075,157 @@ index 0000000..170490d
 +  })();
 +  """#
 +
-+  init(web: WKWebView, upstream: WKNavigationDelegate, onRendered: @escaping () -> Void) {
++  // This runs only in the internally owned Mermaid engine content world.
++  // Capture precedes MermaidKit's viewport bubble handlers, keeping its pinned
++  // renderer/zoom-to-fit API while replacing the faulty pointer translation.
++  private static let interactionScript = #"""
++  (() => {
++    if (window.__pythagorasMermaidInteraction) return;
++    const minimumScale = __ENRM_MIN_SCALE__, maximumScale = __ENRM_MAX_SCALE__;
++    const pointers = new Map();
++    let gestureClaimed = false;
++    let stage = null, viewport = null, scale = 1, tx = 0, ty = 0, panStart = null, pinchStart = null;
++    const clampScale = value => Math.min(maximumScale, Math.max(minimumScale, value));
++    const status = value => { try { window.webkit.messageHandlers.pythagorasMermaidRendered.postMessage(value); } catch (_) {} };
++    const consume = event => { if (event.cancelable) event.preventDefault(); event.stopImmediatePropagation(); };
++    const findSurface = event => {
++      const candidate = document.getElementById('viewport');
++      const target = document.getElementById('stage');
++      if (!candidate || !target || !(event.target instanceof Node) || !candidate.contains(event.target)) return false;
++      viewport = candidate; stage = target; return true;
++    };
++    const position = event => {
++      const rect = viewport.getBoundingClientRect();
++      return { x: event.clientX - rect.left, y: event.clientY - rect.top };
++    };
++    const syncFromStage = () => {
++      const matrix = new DOMMatrixReadOnly(getComputedStyle(stage).transform);
++      const actualScale = Math.hypot(matrix.a, matrix.b);
++      scale = Number.isFinite(actualScale) && actualScale > 0 ? clampScale(actualScale) : 1;
++      tx = Number.isFinite(matrix.e) ? matrix.e : 0;
++      ty = Number.isFinite(matrix.f) ? matrix.f : 0;
++    };
++    const apply = () => { stage.style.transform = 'translate(' + tx + 'px,' + ty + 'px) scale(' + scale + ')'; };
++    const rebase = () => {
++      const points = [...pointers.values()];
++      panStart = null; pinchStart = null;
++      if (points.length === 1) panStart = { x: points[0].x, y: points[0].y, tx, ty };
++      else if (points.length >= 2) {
++        gestureClaimed = true;
++        pinchStart = Object.freeze({ scale, tx, ty,
++          x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2,
++          distance: Math.max(1, Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y)) });
++      }
++    };
++    const down = event => {
++      if (!findSurface(event)) return;
++      consume(event);
++      if (pointers.size === 0) { gestureClaimed = false; syncFromStage(); status('interaction-began'); }
++      pointers.set(event.pointerId, position(event));
++      rebase();
++      try { viewport.setPointerCapture(event.pointerId); } catch (_) {}
++    };
++    const move = event => {
++      if (!pointers.has(event.pointerId) || !stage || !viewport) return;
++      consume(event);
++      pointers.set(event.pointerId, position(event));
++      const points = [...pointers.values()];
++      if (points.length === 1 && panStart) {
++        const dx = points[0].x - panStart.x, dy = points[0].y - panStart.y;
++        if (!gestureClaimed && Math.hypot(dx, dy) < 8) return;
++        gestureClaimed = true;
++        tx = panStart.tx + dx; ty = panStart.ty + dy;
++      } else if (points.length >= 2 && pinchStart) {
++        const midX = (points[0].x + points[1].x) / 2, midY = (points[0].y + points[1].y) / 2;
++        const distance = Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
++        const nextScale = clampScale(pinchStart.scale * distance / pinchStart.distance);
++        const ratio = nextScale / pinchStart.scale;
++        tx = midX - (pinchStart.x - pinchStart.tx) * ratio;
++        ty = midY - (pinchStart.y - pinchStart.ty) * ratio;
++        scale = nextScale;
++      } else return;
++      apply();
++    };
++    const up = event => {
++      if (!pointers.has(event.pointerId)) return;
++      consume(event);
++      pointers.delete(event.pointerId);
++      try { viewport.releasePointerCapture(event.pointerId); } catch (_) {}
++      // A surviving pointer begins a NEW one-finger baseline at the current
++      // transform, not the origin recorded before the two-finger pinch.
++      rebase();
++      if (pointers.size === 0) { gestureClaimed = false; status('interaction-ended'); }
++    };
++    const wheel = event => {
++      if (!findSurface(event)) return;
++      consume(event);
++      if (pointers.size) return;
++      syncFromStage();
++      const point = position(event), nextScale = clampScale(scale * Math.exp(-event.deltaY * 0.0015));
++      const ratio = nextScale / scale;
++      tx = point.x - (point.x - tx) * ratio; ty = point.y - (point.y - ty) * ratio; scale = nextScale;
++      apply();
++    };
++    const doubleClick = event => {
++      if (!findSurface(event)) return;
++      consume(event);
++      if (pointers.size) return;
++      scale = clampScale(1); tx = 0; ty = 0; apply();
++    };
++    const clear = () => {
++      const wasActive = pointers.size > 0;
++      pointers.clear(); panStart = null; pinchStart = null;
++      gestureClaimed = false;
++      if (wasActive) status('interaction-ended');
++    };
++    const listeners = [['pointerdown', down], ['pointermove', move], ['pointerup', up],
++      ['pointercancel', up], ['lostpointercapture', up], ['wheel', wheel], ['dblclick', doubleClick]];
++    const options = { capture: true, passive: false };
++    for (const [name, handler] of listeners) document.addEventListener(name, handler, options);
++    window.addEventListener('pagehide', clear);
++    window.__pythagorasMermaidInteraction = { dispose: () => {
++      for (const [name, handler] of listeners) document.removeEventListener(name, handler, options);
++      window.removeEventListener('pagehide', clear);
++      clear(); stage = null; viewport = null;
++      delete window.__pythagorasMermaidInteraction;
++    } };
++  })();
++  """#
++
++  init(web: WKWebView, upstream: WKNavigationDelegate, minScale: Double, maxScale: Double,
++    onRendered: @escaping () -> Void, onInteractionChanged: @escaping (Bool) -> Void) {
 +    self.web = web
 +    self.upstream = upstream
 +    self.onRendered = onRendered
++    self.onInteractionChanged = onInteractionChanged
++    self.minScale = minScale
++    self.maxScale = maxScale
 +    super.init()
 +    let userContent = web.configuration.userContentController
 +    userContent.add(self, contentWorld: .defaultClient, name: Self.handler)
-+    userContent.addUserScript(WKUserScript(source: Self.script, injectionTime: .atDocumentEnd,
++    userContent.addUserScript(WKUserScript(source: ownedScript, injectionTime: .atDocumentEnd,
 +      forMainFrameOnly: true, in: .defaultClient))
 +    web.navigationDelegate = self
 +    bootstrap()
 +  }
 +  private func bootstrap() {
 +    guard attached else { return }
-+    web?.evaluateJavaScript(Self.script, in: nil, in: .defaultClient, completionHandler: { _ in })
++    web?.evaluateJavaScript(ownedScript, in: nil, in: .defaultClient, completionHandler: { _ in })
++  }
++  private var ownedScript: String {
++    Self.script + "\n" + Self.interactionScript
++      .replacingOccurrences(of: "__ENRM_MIN_SCALE__", with: String(minScale))
++      .replacingOccurrences(of: "__ENRM_MAX_SCALE__", with: String(maxScale))
 +  }
 +  func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
 +    guard attached, message.name == Self.handler, message.frameInfo.isMainFrame,
-+          message.webView === web, message.body as? String == "rendered" else { return }
-+    onRendered?()
++          message.webView === web, let status = message.body as? String else { return }
++    switch status {
++    case "rendered": onRendered?()
++    case "interaction-began": onInteractionChanged?(true)
++    case "interaction-ended": onInteractionChanged?(false)
++    default: break
++    }
 +  }
 +  func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
 +    decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
@@ -991,11 +1248,12 @@ index 0000000..170490d
 +    guard attached else { return }
 +    attached = false
 +    onRendered = nil
++    onInteractionChanged = nil
 +    if let web {
 +      if web.navigationDelegate === self { web.navigationDelegate = upstream }
 +      web.configuration.userContentController.removeScriptMessageHandler(forName: Self.handler, contentWorld: .defaultClient)
 +      web.configuration.userContentController.removeAllUserScripts()
-+      web.evaluateJavaScript("window.__pythagorasMermaidObserver && window.__pythagorasMermaidObserver.disconnect();", in: nil, in: .defaultClient, completionHandler: { _ in })
++      web.evaluateJavaScript("window.__pythagorasMermaidObserver && window.__pythagorasMermaidObserver.disconnect(); delete window.__pythagorasMermaidObserver; window.__pythagorasMermaidInteraction && window.__pythagorasMermaidInteraction.dispose();", in: nil, in: .defaultClient, completionHandler: { _ in })
 +    }
 +  }
 +}
@@ -1328,6 +1586,71 @@ index 0000000..5d25844
 +CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 +ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 +POSSIBILITY OF SUCH DAMAGE.
+diff --git a/node_modules/react-native-enriched-markdown/ios/internals/ShadowMeasurementUtils.h b/node_modules/react-native-enriched-markdown/ios/internals/ShadowMeasurementUtils.h
+index 5f1e597..be59021 100644
+--- a/node_modules/react-native-enriched-markdown/ios/internals/ShadowMeasurementUtils.h
++++ b/node_modules/react-native-enriched-markdown/ios/internals/ShadowMeasurementUtils.h
+@@ -88,7 +88,22 @@ static inline Size ENRMMeasureMarkdownContent(const PropsT &typedProps, const st
+     }
+   }
+
+-  const bool shouldUseMeasurementCache = !typedProps.streamingAnimation;
++  const bool needsExactLiveMeasurement = view != nil && receivedCounter > lastExactMeasurementCounter;
++  // The counter also advances on initial mount. Only the CURRENT semantic
++  // presentation override can keep live geometry authoritative after consumption.
++  __block bool nativePresentationGeometryOverride = false;
++  if (view && !typedProps.streamingAnimation && !needsExactLiveMeasurement) {
++    void (^readNativePresentationGeometry)(void) = ^{
++      nativePresentationGeometryOverride = [view hasNativePresentationGeometryOverride];
++    };
++    if ([NSThread isMainThread]) {
++      readNativePresentationGeometry();
++    } else {
++      dispatch_sync(dispatch_get_main_queue(), readNativePresentationGeometry);
++    }
++  }
++  const bool shouldUseMeasurementCache =
++      !typedProps.streamingAnimation && !needsExactLiveMeasurement && !nativePresentationGeometryOverride;
+   CGFloat fontScale = shouldUseMeasurementCache ? ENRMFontScaleForMeasurement(typedProps.allowFontScaling) : 1.0;
+
+   if (shouldUseMeasurementCache && !typedProps.markdown.empty()) {
+@@ -99,7 +114,8 @@ static inline Size ENRMMeasureMarkdownContent(const PropsT &typedProps, const st
+     }
+   }
+
+-  __block CGSize size;
++  __block CGSize size = CGSizeZero;
++  __block bool measuredLiveView = false;
+   NSString *currentMarkdown = typedProps.markdown.empty() ? nil : @(typedProps.markdown.c_str());
+   size_t styleFingerprint =
+       computeStyleFingerprint(typedProps.markdownStyle) ^ std::hash<bool>{}(typedProps.allowTrailingMargin);
+@@ -108,6 +124,7 @@ static inline Size ENRMMeasureMarkdownContent(const PropsT &typedProps, const st
+     if (view && (typedProps.streamingAnimation || ([view hasRenderedMarkdown:currentMarkdown] &&
+                                                    [view hasRenderedWithStyleFingerprint:styleFingerprint]))) {
+       size = [view measureSize:maxWidth];
++      measuredLiveView = true;
+     } else {
+       ViewT *mockView = createMockView(maxWidth);
+       size = [mockView measureSize:maxWidth];
+@@ -120,13 +137,15 @@ static inline Size ENRMMeasureMarkdownContent(const PropsT &typedProps, const st
+     dispatch_sync(dispatch_get_main_queue(), measureBlock);
+   }
+
+-  if (shouldUseMeasurementCache && !typedProps.markdown.empty()) {
++  // Only source-default mocks may populate this prop-only cache. A live view
++  // can carry presentation state even after its exact counter was consumed.
++  if (shouldUseMeasurementCache && !measuredLiveView && !typedProps.markdown.empty()) {
+     auto cacheKey = buildMeasurementCacheKey(typedProps, maxWidth, fontScale, flavor);
+     MeasurementCache::shared().set(cacheKey, {size.width, size.height});
+   }
+
+-  if (typedProps.streamingAnimation) {
+-    lastExactMeasurementCounter = receivedCounter;
++  if (measuredLiveView && std::isfinite(size.width) && std::isfinite(size.height) && size.width >= 0 && size.height >= 0) {
++    lastExactMeasurementCounter = std::max(lastExactMeasurementCounter, receivedCounter);
+   }
+
+   return ENRMClampMeasuredSize(size, layoutConstraints);
 diff --git a/node_modules/react-native-enriched-markdown/ios/utils/ENRMCodeLanguage.h b/node_modules/react-native-enriched-markdown/ios/utils/ENRMCodeLanguage.h
 new file mode 100644
 index 0000000..8a4d1f3
@@ -1533,10 +1856,10 @@ index d84d2e4..1208df6 100644
        ENRMRenderResult *rendered = ENRMRenderASTNodes(textSegment.nodes, config, allowTrailingMargin, allowFontScaling,
 diff --git a/node_modules/react-native-enriched-markdown/ios/views/ENRMCodeBlockContainerView.h b/node_modules/react-native-enriched-markdown/ios/views/ENRMCodeBlockContainerView.h
 new file mode 100644
-index 0000000..f025ddb
+index 0000000..c6cbffd
 --- /dev/null
 +++ b/node_modules/react-native-enriched-markdown/ios/views/ENRMCodeBlockContainerView.h
-@@ -0,0 +1,14 @@
+@@ -0,0 +1,15 @@
 +#import "ENRMUIKit.h"
 +#include <TargetConditionals.h>
 +@class StyleConfig;
@@ -1549,14 +1872,15 @@ index 0000000..f025ddb
 +- (instancetype)initWithConfig:(StyleConfig *)config;
 +- (void)applyCodeNode:(MarkdownASTNode *)node;
 +- (CGFloat)measureHeight:(CGFloat)width;
++- (BOOL)hasNativePresentationGeometryOverride;
 +@end
 +#endif
 diff --git a/node_modules/react-native-enriched-markdown/ios/views/ENRMCodeBlockContainerView.m b/node_modules/react-native-enriched-markdown/ios/views/ENRMCodeBlockContainerView.m
 new file mode 100644
-index 0000000..a9c4ff4
+index 0000000..0a413e5
 --- /dev/null
 +++ b/node_modules/react-native-enriched-markdown/ios/views/ENRMCodeBlockContainerView.m
-@@ -0,0 +1,375 @@
+@@ -0,0 +1,381 @@
 +#import "ENRMCodeBlockContainerView.h"
 +#import "ENRMCodeLanguage.h"
 +#import "MarkdownASTNode.h"
@@ -1781,6 +2105,10 @@ index 0000000..a9c4ff4
 +{
 +  return [self headerHeight] + [self visibleBodyHeightForWidth:width];
 +}
++- (BOOL)hasNativePresentationGeometryOverride
++{
++  return _previewing;
++}
 +- (CGFloat)inlineViewportCapForWidth:(CGFloat)width
 +{
 +  return MAX(260, MIN(330, round(width * 0.85)));
@@ -1830,6 +2158,7 @@ index 0000000..a9c4ff4
 +  if (!CGPointEqualToPoint(offset, clamped)) _horizontalScroll.contentOffset = clamped;
 +#if ENRICHED_MARKDOWN_PREVIEW
 +  _sourceGestureGate.enabled = !_previewing && verticalOverflow;
++  [_sourceGestureGate bindAncestorScrollViews];
 +  if (_previewing) _previewController.view.frame = _bodyContainer.bounds;
 +#endif
 +}
@@ -1911,6 +2240,7 @@ index 0000000..a9c4ff4
 +- (void)didMoveToWindow
 +{
 +  [super didMoveToWindow];
++  if (self.window) [_sourceGestureGate bindAncestorScrollViews];
 +  if (self.window && _previewing) [self updatePreviewPresentation];
 +}
 +#endif

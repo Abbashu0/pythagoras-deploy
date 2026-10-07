@@ -1,7 +1,15 @@
 const fence = String.fromCharCode(96).repeat(3);
 const block = (language: string, code: string) => `${fence}${language}\n${code}\n${fence}`;
+export const PREVIEW_HEIGHT_TAIL_FIXTURE = [
+  block('text', 'Block 1'), block('python', 'print(2)'),
+  block('html', '<p>HTML preview — كتلة قصيرة</p>'), block('json', '{"block":4}'),
+  block('typescript', 'const block = 5;'), block('mermaid', 'flowchart LR\n  A[Source] --> B[Preview]'),
+  block('bash', 'printf "block 7\\n"'), block('swift', 'let block = 8'),
+  block('custom-dsl', 'Block 9 — Unknown Language\nالمصدر الأخير كامل.'), 'انتهى اختبار العرض.',
+].join('\n\n');
 export const LONG_USER_FIXTURE = Array.from({ length: 26 }, (_, i) => `المطلب ${i + 1}: اشرح العلاقة بين API وTypeScript والمصطلح Newton's Second Law مع مثال عربي واضح، وحافظ على خطوات الحل كاملة.`).join('\n');
 export const CHAT_QUALITY_CASES = [
+  { title: 'Completed preview tail — nine code blocks', markdown: PREVIEW_HEIGHT_TAIL_FIXTURE },
   { title: 'Plain text fence', markdown: block('text', 'First line\n  Indented line\nآخر سطر') },
   { title: 'Python fence', markdown: block('python', 'def average(values):\n    return sum(values) / len(values)\n\nprint("مرحبا")') },
   { title: 'JSON fence', markdown: block('json', '{\n  "name": "Pi",\n  "message": "مرحبا",\n  "enabled": true\n}') },

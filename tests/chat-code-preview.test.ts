@@ -52,6 +52,8 @@ test('header hierarchy and real native glass control preserve copy target and So
   assert.ok(view.includes('44, MAX(44, headerHeight)'));
   assert.ok(view.includes('kCACornerCurveContinuous'));
   assert.equal(/setBackgroundImage|setDividerImage|selectedSegmentTintColor/u.test(preview), false);
+  assert.ok(preview.includes('glass.isInteractive = false'));
+  assert.equal(preview.includes('glass.isInteractive = true'), false);
   assert.ok(view.includes('CGFloat copySlot = 52'));
   assert.ok(view.includes('_copyButton.imageView.transform = CGAffineTransformMakeTranslation(1, 0)'));
 });
@@ -155,6 +157,12 @@ test('local viewport gate gives descendants priority over ancestor pans without 
   assert.ok(scope.includes('if kind == "mermaid"'));
   assert.ok(scope.includes('let gate = ENRMCodeGestureGate(viewport: view)'));
   assert.ok(scope.includes('tap.require(toFail: gate)'));
+  assert.ok(gate.includes('pan.require(toFail: self)'));
+  assert.ok(gate.includes('boundAncestorPans.member(pan) == nil'));
+  assert.ok(gate.includes('NSHashTable<UIGestureRecognizer>.weakObjects()'));
+  assert.ok(gate.includes('guard isEnabled, let viewport = view, let touchedView = touch.view'));
+  assert.ok(preview.includes('mermaidGate?.bindAncestorScrollViews()'));
+  assert.ok(view.includes('if (self.window) [_sourceGestureGate bindAncestorScrollViews]'));
   assert.ok(scope.includes('let tap = UITapGestureRecognizer(target: self, action: #selector(openFullscreen))'));
   assert.ok(scope.includes('tap.numberOfTouchesRequired = 1'));
   assert.ok(scope.includes('tap.cancelsTouchesInView = false'));
@@ -176,13 +184,42 @@ test('Mermaid actual-render status is isolated, event-driven and fits only a fre
   assert.ok(rendered.includes('if fitOnNextRender')); assert.ok(rendered.includes('fitOnNextRender = false'));
   assert.equal((preview.match(/mermaidController\.zoomToFit\(\)/gu) ?? []).length, 1);
   assert.ok(preview.includes('contentWorld: .defaultClient'));
-  assert.ok(preview.includes('message.body as? String == "rendered"'));
+  assert.ok(preview.includes('let status = message.body as? String'));
+  assert.ok(preview.includes('case "rendered": onRendered?()'));
+  assert.ok(preview.includes('case "interaction-began": onInteractionChanged?(true)'));
+  assert.ok(preview.includes('case "interaction-ended": onInteractionChanged?(false)'));
   assert.ok(preview.includes('new MutationObserver(rendered)'));
   assert.ok(preview.includes('childList: true, subtree: true'));
   assert.equal(/attributes: true|setInterval|setTimeout/u.test(preview), false);
   assert.ok(preview.includes('upstream.webView?(webView, decidePolicyFor: navigationAction, decisionHandler: decisionHandler)'));
   assert.ok(preview.includes('else { decisionHandler(.cancel) }'));
   assert.ok(preview.includes('removeScriptMessageHandler(forName: Self.handler, contentWorld: .defaultClient)'));
+});
+
+test('late owned Mermaid WKWebView layout can attach once, replace safely and bootstrap an already rendered SVG', () => {
+  const host = preview.slice(preview.indexOf('private final class ENRMMermaidHostingController'), preview.indexOf('/// One standard segmented control'));
+  for (const hook of ['viewDidLayoutSubviews()', 'viewDidAppear(_ animated: Bool)', 'didMove(toParent parent: UIViewController?)', 'onOwnedLayout?()']) assert.ok(host.includes(hook));
+  assert.ok(preview.includes('host.onOwnedLayout = { [weak self] in self?.attachMermaidObservationIfNeeded() }'));
+  const attach = preview.slice(preview.indexOf('private func attachMermaidObservationIfNeeded()'), preview.indexOf('private static func ownedWebView'));
+  assert.ok(attach.includes('Self.ownedWebView(in: host.view)'));
+  assert.ok(attach.includes('if ownedWeb === observedMermaidWebView { return }'));
+  assert.ok(attach.indexOf('mermaidObservation?.detach()') < attach.indexOf('mermaidObservation = ENRMMermaidObservation'));
+  assert.equal(attach.includes('observedMermaidWebView == nil'), false);
+  const layout = preview.slice(preview.indexOf('public override func viewDidLayoutSubviews()', preview.indexOf('public final class ENRMCodePreviewController')), preview.indexOf('@objc public func dispose()'));
+  assert.equal(layout.includes('attachMermaidObservationIfNeeded()'), false);
+  for (const text of ['host.onOwnedLayout = nil', 'bootstrap()', 'delete window.__pythagorasMermaidObserver', 'window.__pythagorasMermaidInteraction.dispose()', 'onRendered = nil', 'onInteractionChanged = nil']) assert.ok(preview.includes(text));
+  assert.equal(/Timer|asyncAfter|setInterval|setTimeout/u.test(preview), false);
+});
+
+test('Mermaid success/error stop loading; fresh fit waits for rendering and an idle interaction', () => {
+  const failure = preview.slice(preview.indexOf('private func showFailure()'), preview.indexOf('private func mermaidRendered()'));
+  assert.ok(failure.includes('loading.stopAnimating()'));
+  assert.ok(failure.includes('errorLabel.isHidden = false'));
+  const fit = preview.slice(preview.indexOf('private func fitMermaidIfReady()'), preview.indexOf('private func attachMermaidObservationIfNeeded()'));
+  assert.ok(fit.includes('guard !disposed, mermaidHasRendered, !mermaidInteractionActive else { return }'));
+  assert.ok(fit.indexOf('fitOnNextRender = false') < fit.indexOf('mermaidController.zoomToFit()'));
+  assert.ok(preview.includes('if !active { self?.fitMermaidIfReady() }'));
+  assert.equal(failure.includes('error.localizedDescription'), false);
 });
 
 test('fullScreen uses an immutable exact source snapshot, native text segments and the shared secure preview', () => {
@@ -247,4 +284,33 @@ test('exact pinned official Mermaid engine renders flowchart/sequence/class and 
   const document = await browserDocument(`<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"><body><div id="result">pending</div><div id="container"></div><script nonce="${nonce}">${engine}</script><script nonce="${nonce}">window.renderStatuses=[];window.webkit={messageHandlers:{pythagorasMermaidRendered:{postMessage:m=>window.renderStatuses.push(m)}}};${observer}
 (async()=>{mermaid.initialize({startOnLoad:false,securityLevel:'strict',theme:'dark'});let ok=0;const cases=JSON.parse(new TextDecoder().decode(Uint8Array.from(atob('${data}'),c=>c.charCodeAt(0))));for(let i=0;i<cases.length;i++){try{const r=await mermaid.render('diagram-'+i,cases[i].source);if(!cases[i].malformed&&r.svg.includes('<svg')){ok++;document.getElementById('container').innerHTML=r.svg;await Promise.resolve();}}catch(_){if(cases[i].malformed)ok++;}}const svg=document.querySelector('#container svg');svg.style.transform='scale(1.1)';await Promise.resolve();const safe=window.renderStatuses.every(m=>m==='rendered');document.getElementById('result').textContent='completed:'+ok+':rendered:'+window.renderStatuses.length+':safe:'+safe;document.querySelectorAll('script').forEach(s=>s.remove());})();</script>`);
   assert.match(document, /id="result">completed:4:rendered:3:safe:true/u);
+});
+
+test('browser oracle: late SVG bootstrap, idempotent observation and replacement teardown deliver only fixed status', { skip: !chrome && 'Set PYTHAGORAS_PREVIEW_CHROME.' }, async () => {
+  const observer = preview.match(/private static let script = #"""([\s\S]*?)"""#/u)![1];
+  const nonce = randomUUID().replaceAll('-', '');
+  const document = await browserDocument(`<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; connect-src 'none'"><div id="result">pending</div><div id="container"><svg xmlns="http://www.w3.org/2000/svg"></svg></div><script nonce="${nonce}">window.renderStatuses=[];window.webkit={messageHandlers:{pythagorasMermaidRendered:{postMessage:m=>window.renderStatuses.push(m)}}};function bootstrap(){${observer}}
+(async()=>{bootstrap();bootstrap();if(renderStatuses.length!==1)throw Error('late/idempotent bootstrap');window.__pythagorasMermaidObserver.disconnect();delete window.__pythagorasMermaidObserver;document.getElementById('container').innerHTML='<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>';await Promise.resolve();if(renderStatuses.length!==1)throw Error('detached observer retained');bootstrap();if(renderStatuses.length!==2||!renderStatuses.every(v=>v==='rendered'))throw Error('replacement bootstrap');document.getElementById('result').textContent='late:1:replacement:1:quiet:true';})();</script>`);
+  assert.match(document, /id="result">late:1:replacement:1:quiet:true/u);
+});
+
+test('browser oracle: owned correction intercepts pinned Mermaid handlers and keeps pinch/pan/clamps continuous', { skip: !(auditRoot && chrome) && 'Set PYTHAGORAS_MERMAID_AUDIT_ROOT and PYTHAGORAS_PREVIEW_CHROME.' }, async () => {
+  const builder = fs.readFileSync(path.join(auditRoot!, 'Sources/MermaidKit/MermaidHTMLBuilder.swift'), 'utf8');
+  const upstream = builder.slice(builder.indexOf('function setupGesturesOnce()'), builder.indexOf('// ---- Render lifecycle ----'));
+  assert.ok(upstream.includes('k = ns / scale'));
+  assert.ok(upstream.includes('tx = mX - (mX - tx) * k'));
+  const script = preview.match(/private static let interactionScript = #"""([\s\S]*?)"""#/u)![1];
+  for (const [minimum, maximum] of [[0.5, 5], [0.7, 3.5]]) {
+    const interaction = script.replaceAll('__ENRM_MIN_SCALE__', String(minimum)).replaceAll('__ENRM_MAX_SCALE__', String(maximum));
+    const nonce = randomUUID().replaceAll('-', '');
+    const document = await browserDocument(`<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; connect-src 'none'"><style>#viewport{position:relative;width:350px;height:298px}#stage{transform-origin:0 0}</style><div id="result">pending</div><div id="viewport"><div id="stage"><div id="container"><svg xmlns="http://www.w3.org/2000/svg" width="150" height="100"></svg></div></div></div><script nonce="${nonce}">
+window.renderStatuses=[];window.webkit={messageHandlers:{pythagorasMermaidRendered:{postMessage:m=>window.renderStatuses.push(m)}}};var scale=1,tx=20,ty=30,stage,viewport,gesturesReady=false,INTERACTIVE=true,TAPS=false,MINS=${minimum},MAXS=${maximum};function clampS(s){return Math.min(MAXS,Math.max(MINS,s));}function applyTransform(){stage.style.transform='translate('+tx+'px,'+ty+'px) scale('+scale+')';}function hitTest(){};const surface=document.getElementById('viewport');surface.setPointerCapture=()=>{};surface.releasePointerCapture=()=>{};${upstream}
+setupGesturesOnce();let upstreamMoves=0;surface.addEventListener('pointermove',()=>upstreamMoves++);function install(){${interaction}}
+const matrix=()=>{const m=new DOMMatrixReadOnly(getComputedStyle(stage).transform);return{s:m.a,x:m.e,y:m.f};};const near=(a,b)=>{if(Math.abs(a-b)>0.001)throw Error('transform discontinuity '+a+' vs '+b);};function pointer(type,id,x,y){const r=surface.getBoundingClientRect();surface.dispatchEvent(new PointerEvent(type,{pointerId:id,pointerType:'touch',clientX:r.left+x,clientY:r.top+y,bubbles:true,cancelable:true,buttons:type==='pointerup'?0:1}));}function seed(s,x,y){stage.style.transform='translate('+x+'px,'+y+'px) scale('+s+')';}function start(){pointer('pointerdown',1,50,100);pointer('pointerdown',2,150,100);}function end(){pointer('pointerup',2,200,130);pointer('pointerup',1,40,110);}install();install();
+seed(1,20,30);start();pointer('pointermove',1,40,110);pointer('pointermove',2,200,130);const first=matrix(),ratio=Math.hypot(160,20)/100;near(first.s,ratio);near(first.x,120-(100-20)*ratio);near(first.y,120-(100-30)*ratio);pointer('pointermove',2,200,130);const repeat=matrix();near(repeat.x,first.x);near(repeat.y,first.y);pointer('pointerup',2,200,130);pointer('pointermove',1,43,114);const pan=matrix();near(pan.x,first.x+3);near(pan.y,first.y+4);near(pan.s,first.s);pointer('pointerup',1,43,114);
+seed(1,20,30);start();pointer('pointermove',1,-200,50);pointer('pointermove',2,500,50);near(matrix().s,MAXS);pointer('pointermove',1,40,110);pointer('pointermove',2,200,130);const alternative=matrix();near(alternative.x,first.x);near(alternative.y,first.y);near(alternative.s,first.s);pointer('pointermove',2,40,110);near(matrix().s,MINS);end();
+seed(1.3,17,29);start();pointer('pointermove',1,0,100);pointer('pointermove',2,200,100);const fit=matrix();near(fit.s,2.6);near(fit.x,100-(100-17)*2);near(fit.y,100-(100-29)*2);end();
+const beforeTapStatuses=renderStatuses.length;seed(1,0,0);pointer('pointerdown',1,50,50);pointer('pointermove',1,52,53);pointer('pointerup',1,52,53);near(matrix().x,0);near(matrix().y,0);if(renderStatuses.length-beforeTapStatuses!==2||upstreamMoves!==0)throw Error('tap/idempotent/native capture');if(!renderStatuses.every(v=>v==='interaction-began'||v==='interaction-ended'))throw Error('raw status');window.__pythagorasMermaidInteraction.dispose();pointer('pointerdown',1,50,50);pointer('pointermove',1,100,100);pointer('pointerup',1,100,100);if(upstreamMoves!==1)throw Error('teardown did not restore upstream');document.getElementById('result').textContent='immutable:yes:midpoint:yes:rebase:yes:clamps:yes:fit:yes:tap:yes:capture:yes:teardown:yes';</script>`);
+    assert.match(document, /id="result">immutable:yes:midpoint:yes:rebase:yes:clamps:yes:fit:yes:tap:yes:capture:yes:teardown:yes/u);
+  }
 });
