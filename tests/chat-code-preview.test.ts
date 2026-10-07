@@ -51,7 +51,8 @@ test('header hierarchy and real native glass control preserve copy target and So
   assert.ok(view.includes('previewControlWidth = 88'));
   assert.ok(view.includes('44, MAX(44, headerHeight)'));
   assert.ok(view.includes('kCACornerCurveContinuous'));
-  assert.equal(/setBackgroundImage|setDividerImage|selectedSegmentTintColor/u.test(preview), false);
+  assert.equal(/setBackgroundImage|setDividerImage|selectedSegmentTintColor\s*=\s*\.clear/u.test(preview), false);
+  assert.ok(preview.includes('selectedSegmentTintColor = selectedSurface')); // color UIKit's capsule, never replace it
   assert.ok(preview.includes('glass.isInteractive = false'));
   assert.equal(preview.includes('glass.isInteractive = true'), false);
   assert.ok(view.includes('CGFloat copySlot = 52'));

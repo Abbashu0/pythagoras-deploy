@@ -9,7 +9,6 @@ import {
   useState,
   useSyncExternalStore,
   type ComponentRef,
-  type RefObject,
 } from 'react';
 import * as Clipboard from 'expo-clipboard';
 import {
@@ -32,17 +31,13 @@ import {
 import { runOnJS, useSharedValue } from 'react-native-reanimated';
 import {
   Button,
-  Circle,
   HStack,
   Host,
   Image,
-  Rectangle,
   Spacer,
   Text,
-  TextField,
   type TextFieldRef,
   VStack,
-  ZStack,
   useNativeState,
 } from '@expo/ui/swift-ui';
 import {
@@ -50,27 +45,21 @@ import {
   animation,
   Animation,
   background,
-  containerRelativeFrame,
   buttonStyle,
   contentShape,
-  disabled,
   fixedSize,
   font,
   frame,
   foregroundStyle,
-  glassEffect,
   lineSpacing,
   lineLimit,
   multilineTextAlignment,
-  onGeometryChange,
-  onTapGesture,
   onAppear,
   opacity,
   padding,
   shapes,
   strokeBorder,
   textSelection,
-  textFieldStyle,
 } from '@expo/ui/swift-ui/modifiers';
 import { getAgent1AssistantActionPolicy, toggleChatReaction } from './agent-1-chat-state';
 import { Agent1ChatStreamStore, agent1ChatStreamKey } from './agent-1-chat-stream-store';
@@ -98,6 +87,8 @@ import { presentUserMessage, USER_MESSAGE_PRESENTATION } from './user-message-pr
 import { captureUserMessageCollapseAnchor, resolveUserMessageCollapseOffset, recordUserMessageHeight, userMessageHeightFloor, type UserMessageCollapseAnchor, type UserMessageHeightCache, type UserMessageMode, type UserMessageRowGeometry } from './user-message-layout';
 import { ChatEdgeFades } from './chat-edge-fades.ios';
 import { ChatScrollToBottomAffordance } from './chat-scroll-to-bottom.ios';
+import { ChatComposerControls } from './chat-composer-controls.ios';
+import { COMPOSER_COMPACT_HEIGHT, COMPOSER_BOTTOM_PADDING } from './chat-composer-presentation';
 import type { ChatComposerProps, ChatReaction, ChatTurn } from './chat-types';
 import Agent1AssistantMarkdown from './assistant-enriched-markdown.ios';
 import { firstStrongTextDirection } from './rich-response/text-direction';
@@ -105,13 +96,6 @@ import { usePreferences } from '@/preferences/preferences-provider';
 import { getPalette } from '@/theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const COMPOSER_MIN_HEIGHT = 94;
-const COMPOSER_CORNER_RADIUS = 28;
-const ACTION_BUTTON_DIAMETER = 36;
-const ACTION_BUTTON_HIT_TARGET = 44;
-const ACTION_ROW_BOTTOM_INSET = 5;
-const COMPOSER_TEXT_FIELD_MIN_HEIGHT =
-  COMPOSER_MIN_HEIGHT - ACTION_BUTTON_HIT_TARGET - ACTION_ROW_BOTTOM_INSET;
 const CHAT_BUBBLE_CORNER_RADIUS = 24;
 const TRANSCRIPT_HORIZONTAL_INSET = 22;
 const CHAT_TURN_SPACING = 28;
@@ -121,7 +105,6 @@ const COPY_FEEDBACK_DURATION_MS = 1_300;
 const CHAT_TOP_CONTROLS_HEIGHT = 44;
 const CHAT_TRANSCRIPT_TOP_GAP = 20;
 const CHAT_TRANSCRIPT_COMPOSER_GAP = 24;
-const COMPOSER_BOTTOM_PADDING = 10;
 const ASSISTANT_ACTION_LAYOUT_SIZE = 32;
 const ASSISTANT_ACTION_ICON_SIZE = 17;
 const ASSISTANT_ACTION_SPACING = 3;
@@ -174,12 +157,12 @@ export function ChatComposer({
   const transcriptScrollRef = useRef<ComponentRef<typeof KeyboardChatScrollView> | null>(null);
   const blankSpace = useSharedValue(0);
   const composerScrollInset = useSharedValue(
-    COMPOSER_MIN_HEIGHT + COMPOSER_BOTTOM_PADDING + insets.bottom,
+    COMPOSER_COMPACT_HEIGHT + COMPOSER_BOTTOM_PADDING + insets.bottom,
   );
   const blankSpaceRef = useRef(0);
-  const composerHostHeightRef = useRef(COMPOSER_MIN_HEIGHT + COMPOSER_BOTTOM_PADDING);
+  const composerHostHeightRef = useRef(COMPOSER_COMPACT_HEIGHT + COMPOSER_BOTTOM_PADDING);
   const composerHeightRef = useRef(
-    COMPOSER_MIN_HEIGHT + COMPOSER_BOTTOM_PADDING + insets.bottom,
+    COMPOSER_COMPACT_HEIGHT + COMPOSER_BOTTOM_PADDING + insets.bottom,
   );
   const viewportHeightRef = useRef(0);
   const contentHeightRef = useRef(0);
@@ -635,7 +618,7 @@ export function ChatComposer({
   }, []);
   const handleSend = useCallback(() => {
     const text = draftRef.current;
-    if (!text.trim() || activeTurnId) return;
+    if (!text.trim() || activeTurnId) return false;
     const acceptedTurnId = onSend(text);
     if (acceptedTurnId) {
       pendingUserCollapseRef.current = null;
@@ -657,6 +640,7 @@ export function ChatComposer({
       message.set('');
       setHasSendableText(false);
     }
+    return Boolean(acceptedTurnId);
   }, [
     activeTurnId,
     message,
@@ -872,191 +856,24 @@ export function ChatComposer({
       >
         <ChatScrollToBottomAffordance visible={scrollToBottomVisible}
           composerHeight={composerScrollInset} safeAreaBottom={insets.bottom}
-          colorScheme={resolvedColorScheme} tint={palette.text}
+          colorScheme={resolvedColorScheme} tint={palette.controlForeground}
           onPress={handleScrollToBottom} />
-        <Host
+        <ChatComposerControls
+          message={message}
+          textFieldRef={textFieldRef}
+          palette={palette}
           colorScheme={resolvedColorScheme}
-          layoutDirection="leftToRight"
-          ignoreSafeArea="all"
-          matchContents={{ vertical: true, horizontal: false }}
-          pointerEvents="box-none"
-          style={{ width: '100%' }}
-        >
-          <ChatComposerControls
-            message={message}
-            textFieldRef={textFieldRef}
-            palette={palette}
-            onComposerHeightChange={handleComposerHeightChange}
-            hasSendableText={hasSendableText}
-            sendDisabled={activeTurnId !== null}
-            onTextChange={handleTextChange}
-            onFocus={focusTextField}
-            onSend={handleSend}
-          />
-        </Host>
+          onComposerHeightChange={handleComposerHeightChange}
+          hasSendableText={hasSendableText}
+          sendDisabled={activeTurnId !== null}
+          onTextChange={handleTextChange}
+          onFocus={focusTextField}
+          onSend={handleSend}
+        />
       </KeyboardStickyView>
     </View>
   );
 }
-
-const ChatComposerControls = memo(function ChatComposerControls({
-  message,
-  textFieldRef,
-  palette,
-  onComposerHeightChange,
-  hasSendableText,
-  sendDisabled,
-  onTextChange,
-  onFocus,
-  onSend,
-}: {
-  message: ReturnType<typeof useNativeState<string>>;
-  textFieldRef: RefObject<TextFieldRef | null>;
-  palette: ReturnType<typeof getPalette>;
-  onComposerHeightChange: (height: number) => void;
-  hasSendableText: boolean;
-  sendDisabled: boolean;
-  onTextChange: (text: string) => void;
-  onFocus: () => void;
-  onSend: () => void;
-}) {
-  return (
-    <VStack
-      alignment="leading"
-      spacing={0}
-      modifiers={[
-        padding({ horizontal: 16, bottom: COMPOSER_BOTTOM_PADDING }),
-        containerRelativeFrame({ axes: 'horizontal' }),
-        onGeometryChange(({ height }) => onComposerHeightChange(height)),
-      ]}
-    >
-      <ZStack
-        alignment="topLeading"
-        modifiers={[
-          fixedSize({ horizontal: false, vertical: true }),
-          frame({ minHeight: COMPOSER_MIN_HEIGHT, alignment: 'topLeading' }),
-          glassEffect({
-            glass: { variant: 'regular', interactive: true, tint: palette.surface },
-            shape: 'roundedRectangle',
-            cornerRadius: COMPOSER_CORNER_RADIUS,
-          }),
-        ]}
-      >
-        <Rectangle
-          modifiers={[
-            foregroundStyle('clear'),
-            frame({ minHeight: COMPOSER_MIN_HEIGHT, alignment: 'topLeading' }),
-            contentShape(shapes.rectangle()),
-            onTapGesture(onFocus),
-          ]}
-        />
-        <VStack alignment="leading" spacing={0}>
-          <TextField
-            ref={textFieldRef}
-            axis="vertical"
-            text={message}
-            onTextChange={onTextChange}
-            modifiers={[
-              textFieldStyle('plain'),
-              lineLimit({ min: 1, max: 5 }),
-              fixedSize({ horizontal: false, vertical: true }),
-              multilineTextAlignment('trailing'),
-              font({ textStyle: 'body' }),
-              padding({ top: 14, leading: 18, trailing: 18, bottom: 6 }),
-              frame({ minHeight: COMPOSER_TEXT_FIELD_MIN_HEIGHT, alignment: 'topLeading' }),
-              contentShape(shapes.rectangle()),
-            ]}
-          >
-            <TextField.Placeholder>
-              <Text
-                modifiers={[
-                  foregroundStyle(palette.textTertiary),
-                  font({ textStyle: 'body' }),
-                ]}
-              >
-                اكتب رسالتك...
-              </Text>
-            </TextField.Placeholder>
-          </TextField>
-          <HStack
-            alignment="center"
-            spacing={0}
-            modifiers={[padding({ horizontal: 8, bottom: ACTION_ROW_BOTTOM_INSET })]}
-          >
-            <Button
-              onPress={() => {}}
-              modifiers={[
-                frame({
-                  width: ACTION_BUTTON_HIT_TARGET,
-                  height: ACTION_BUTTON_HIT_TARGET,
-                  alignment: 'center',
-                }),
-                contentShape(shapes.circle()),
-                accessibilityLabel('إضافة مرفق'),
-              ]}
-            >
-              <ZStack
-                modifiers={[
-                  frame({
-                    width: ACTION_BUTTON_HIT_TARGET,
-                    height: ACTION_BUTTON_HIT_TARGET,
-                    alignment: 'center',
-                  }),
-                ]}
-              >
-                <Circle
-                  modifiers={[
-                    frame({ width: ACTION_BUTTON_DIAMETER, height: ACTION_BUTTON_DIAMETER }),
-                    foregroundStyle(palette.surfaceInset),
-                  ]}
-                />
-                <Image systemName="plus" size={18} color={palette.text} />
-              </ZStack>
-            </Button>
-            <Spacer minLength={0} />
-            <Button
-              onPress={onSend}
-              modifiers={[
-                disabled(!hasSendableText || sendDisabled),
-                frame({
-                  width: ACTION_BUTTON_HIT_TARGET,
-                  height: ACTION_BUTTON_HIT_TARGET,
-                  alignment: 'center',
-                }),
-                contentShape(shapes.circle()),
-                accessibilityLabel('إرسال'),
-              ]}
-            >
-              <ZStack
-                modifiers={[
-                  frame({
-                    width: ACTION_BUTTON_HIT_TARGET,
-                    height: ACTION_BUTTON_HIT_TARGET,
-                    alignment: 'center',
-                  }),
-                ]}
-              >
-                <Circle
-                  modifiers={[
-                    frame({ width: ACTION_BUTTON_DIAMETER, height: ACTION_BUTTON_DIAMETER }),
-                    foregroundStyle(
-                      hasSendableText ? palette.accent : palette.surfacePressed,
-                    ),
-                  ]}
-                />
-                <Image
-                  systemName="arrow.up"
-                  size={18}
-                  color={hasSendableText ? palette.accentText : palette.textTertiary}
-                />
-              </ZStack>
-            </Button>
-          </HStack>
-        </VStack>
-      </ZStack>
-    </VStack>
-  );
-});
 
 export const ChatUserMessageRow = memo(function ChatUserMessageRow({
   message,
@@ -1502,7 +1319,7 @@ const ChatAssistantActions = memo(function ChatAssistantActions({
             <Image
               systemName={copied ? 'checkmark' : 'square.on.square'}
               size={ASSISTANT_ACTION_ICON_SIZE}
-              color={palette.textSecondary}
+              color={palette.controlForeground}
             />
           </Button>
           <Button
@@ -1521,7 +1338,7 @@ const ChatAssistantActions = memo(function ChatAssistantActions({
             <Image
               systemName="hand.thumbsup"
               size={ASSISTANT_ACTION_ICON_SIZE}
-              color={reaction === 'like' ? palette.text : palette.textSecondary}
+              color={reaction === 'like' ? palette.text : palette.controlForeground}
             />
           </Button>
           <Button
@@ -1540,7 +1357,7 @@ const ChatAssistantActions = memo(function ChatAssistantActions({
             <Image
               systemName="hand.thumbsdown"
               size={ASSISTANT_ACTION_ICON_SIZE}
-              color={reaction === 'dislike' ? palette.text : palette.textSecondary}
+              color={reaction === 'dislike' ? palette.text : palette.controlForeground}
             />
           </Button>
         </>
@@ -1562,7 +1379,7 @@ const ChatAssistantActions = memo(function ChatAssistantActions({
           <Image
             systemName="arrow.clockwise"
             size={ASSISTANT_ACTION_ICON_SIZE}
-            color={palette.textSecondary}
+            color={palette.controlForeground}
           />
         </Button>
       ) : null}

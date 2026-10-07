@@ -19,6 +19,13 @@ export const palettes = {
     strongButton: '#1A1918',
     strongButtonText: '#FAF9F5',
     progressTrack: '#D1CFC5',
+    // Compact neutral chrome; primary/status actions keep their own roles.
+    controlSurface: '#F0EEE6',
+    controlSurfacePressed: '#E8E6DC',
+    controlSurfaceSelected: '#E3E1D8',
+    controlForeground: '#5E5D59',
+    controlForegroundSelected: '#1A1918',
+    controlBorder: '#D1CFC5',
     // Compatibility alias while remaining screens migrate to semantic levels.
     surfaceMuted: '#F5F4ED',
   },
@@ -40,6 +47,12 @@ export const palettes = {
     strongButton: '#F9F9F7',
     strongButtonText: '#1A1918',
     progressTrack: '#3B3B39',
+    controlSurface: '#272726',
+    controlSurfacePressed: '#32312F',
+    controlSurfaceSelected: '#454440',
+    controlForeground: '#C3C2B7',
+    controlForegroundSelected: '#FAF9F5',
+    controlBorder: '#4E4E4A',
     // Compatibility alias while remaining screens migrate to semantic levels.
     surfaceMuted: '#2C2C2A',
   },

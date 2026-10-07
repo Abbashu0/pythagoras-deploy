@@ -353,10 +353,10 @@ index 1dc1097..a175639 100644
  {
 diff --git a/node_modules/react-native-enriched-markdown/ios/code/ENRMCodeFullscreenController.swift b/node_modules/react-native-enriched-markdown/ios/code/ENRMCodeFullscreenController.swift
 new file mode 100644
-index 0000000..5a3e8eb
+index 0000000..07aed6a
 --- /dev/null
 +++ b/node_modules/react-native-enriched-markdown/ios/code/ENRMCodeFullscreenController.swift
-@@ -0,0 +1,185 @@
+@@ -0,0 +1,202 @@
 +#if canImport(UIKit)
 +import UIKit
 +
@@ -437,6 +437,12 @@ index 0000000..5a3e8eb
 +  private let surfaceColor: UIColor
 +  private let primaryColor: UIColor
 +  private let secondaryColor: UIColor
++  @objc public var controlSurfaceColor: UIColor?
++  @objc public var controlSelectedSurfaceColor: UIColor?
++  @objc public var controlPressedSurfaceColor: UIColor?
++  @objc public var controlForegroundColor: UIColor?
++  @objc public var controlSelectedForegroundColor: UIColor?
++  @objc public var controlBorderColor: UIColor?
 +  private let closeButton = UIButton(type: .system)
 +  private let modes = ENRMPreviewSegments(items: ["Code", "Preview"])
 +  private var sourceView: ENRMFullscreenSource?
@@ -471,15 +477,26 @@ index 0000000..5a3e8eb
 +    } else { configuration = .tinted() }
 +    var close = configuration
 +    close.image = UIImage(systemName: "xmark", withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .medium))
-+    close.baseForegroundColor = primaryColor
++    close.baseForegroundColor = controlForegroundColor ?? primaryColor
++    close.baseBackgroundColor = controlSurfaceColor
++    close.background.strokeColor = controlBorderColor
 +    close.cornerStyle = .capsule
 +    closeButton.configuration = close
++    closeButton.configurationUpdateHandler = { [weak self] button in
++      guard let self, var configuration = button.configuration else { return }
++      configuration.baseBackgroundColor = button.isHighlighted
++        ? (self.controlPressedSurfaceColor ?? self.controlSurfaceColor) : self.controlSurfaceColor
++      button.configuration = configuration
++    }
 +    closeButton.accessibilityLabel = "إغلاق العرض الكامل"
 +    closeButton.addTarget(self, action: #selector(closeViewer), for: .touchUpInside)
 +    view.addSubview(closeButton)
 +    modes.semanticContentAttribute = .forceLeftToRight
 +    modes.selectedSegmentIndex = 1
 +    modes.tintColor = primaryColor
++    modes.applyControlColors(surface: controlSurfaceColor, selectedSurface: controlSelectedSurfaceColor,
++      pressedSurface: controlPressedSurfaceColor, foreground: controlForegroundColor,
++      selectedForeground: controlSelectedForegroundColor, border: controlBorderColor)
 +    modes.accessibilityLabel = "Code / Preview"
 +    modes.addTarget(self, action: #selector(modeChanged), for: .valueChanged)
 +    view.addSubview(modes)
@@ -646,10 +663,10 @@ index 0000000..e136a61
 +#endif
 diff --git a/node_modules/react-native-enriched-markdown/ios/code/ENRMCodePreviewController.swift b/node_modules/react-native-enriched-markdown/ios/code/ENRMCodePreviewController.swift
 new file mode 100644
-index 0000000..f853a2c
+index 0000000..9d7ee2f
 --- /dev/null
 +++ b/node_modules/react-native-enriched-markdown/ios/code/ENRMCodePreviewController.swift
-@@ -0,0 +1,608 @@
+@@ -0,0 +1,658 @@
 +#if canImport(UIKit)
 +import UIKit
 +import WebKit
@@ -657,6 +674,43 @@ index 0000000..f853a2c
 +import MermaidKit
 +
 +final class ENRMPreviewSegments: UISegmentedControl {
++  private var controlForeground: UIColor?
++  private var selectedForeground: UIColor?
++  private var originalImages: [Int: UIImage] = [:]
++  private var appearanceTargetInstalled = false
++
++  // Optional app semantics color UIKit's own track/capsule, never replace them.
++  func applyControlColors(surface: UIColor?, selectedSurface: UIColor?, pressedSurface: UIColor?,
++    foreground: UIColor?, selectedForeground: UIColor?, border: UIColor?) {
++    backgroundColor = surface
++    selectedSegmentTintColor = selectedSurface
++    layer.borderColor = border?.cgColor
++    controlForeground = foreground
++    self.selectedForeground = selectedForeground
++    if let foreground { tintColor = foreground }
++    setTitleTextAttributes(foreground.map { [.foregroundColor: $0] }, for: .normal)
++    setTitleTextAttributes(selectedForeground.map { [.foregroundColor: $0] }, for: .selected)
++    setTitleTextAttributes(selectedForeground.map { [.foregroundColor: $0] }, for: .highlighted)
++    // UIKit retains pressed feedback; no touch or selected-indicator overrides.
++    if !appearanceTargetInstalled {
++      for index in 0..<numberOfSegments {
++        if let image = imageForSegment(at: index) { originalImages[index] = image }
++      }
++      addTarget(self, action: #selector(refreshControlForeground), for: .valueChanged)
++      appearanceTargetInstalled = true
++    }
++    refreshControlForeground()
++  }
++
++  @objc func refreshControlForeground() {
++    for (index, image) in originalImages {
++      let color = index == selectedSegmentIndex ? selectedForeground : controlForeground
++      let colored = color.map { image.withTintColor($0, renderingMode: .alwaysOriginal) } ?? image
++      colored.accessibilityLabel = image.accessibilityLabel
++      setImage(colored, forSegmentAt: index)
++    }
++  }
++
 +  override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
 +    bounds.insetBy(dx: 0, dy: -4).contains(point)
 +  }
@@ -686,11 +740,13 @@ index 0000000..f853a2c
 +public final class ENRMCodeModeControl: UIControl {
 +  private let material = UIVisualEffectView()
 +  private let segments: ENRMPreviewSegments
++  private var controlSurface: UIColor?
 +
 +  @objc public var previewSelected: Bool {
 +    get { segments.selectedSegmentIndex == 1 }
 +    set {
 +      segments.selectedSegmentIndex = newValue ? 1 : 0
++      segments.refreshControlForeground()
 +      segments.accessibilityValue = newValue ? "المعاينة" : "المصدر"
 +    }
 +  }
@@ -724,13 +780,24 @@ index 0000000..f853a2c
 +    updateMaterial()
 +  }
 +
++  @objc(applyControlSurfaceColor:selectedSurfaceColor:pressedSurfaceColor:foregroundColor:selectedForegroundColor:borderColor:)
++  public func applyControlColors(surfaceColor: UIColor?, selectedSurfaceColor: UIColor?,
++    pressedSurfaceColor: UIColor?, foregroundColor: UIColor?, selectedForegroundColor: UIColor?, borderColor: UIColor?) {
++    controlSurface = surfaceColor
++    segments.applyControlColors(surface: surfaceColor, selectedSurface: selectedSurfaceColor,
++      pressedSurface: pressedSurfaceColor, foreground: foregroundColor,
++      selectedForeground: selectedForegroundColor, border: borderColor)
++    updateMaterial()
++  }
++
 +  private func updateMaterial() {
 +    if UIAccessibility.isReduceTransparencyEnabled {
 +      material.effect = nil
-+      material.backgroundColor = .secondarySystemBackground
++      material.backgroundColor = controlSurface ?? .secondarySystemBackground
 +    } else if #available(iOS 26.0, *) {
 +      let glass = UIGlassEffect(style: .regular)
 +      glass.isInteractive = false
++      glass.tintColor = controlSurface
 +      material.backgroundColor = .clear
 +      material.effect = glass
 +    } else {
@@ -1877,10 +1944,10 @@ index 0000000..c6cbffd
 +#endif
 diff --git a/node_modules/react-native-enriched-markdown/ios/views/ENRMCodeBlockContainerView.m b/node_modules/react-native-enriched-markdown/ios/views/ENRMCodeBlockContainerView.m
 new file mode 100644
-index 0000000..0a413e5
+index 0000000..160ac11
 --- /dev/null
 +++ b/node_modules/react-native-enriched-markdown/ios/views/ENRMCodeBlockContainerView.m
-@@ -0,0 +1,381 @@
+@@ -0,0 +1,393 @@
 +#import "ENRMCodeBlockContainerView.h"
 +#import "ENRMCodeLanguage.h"
 +#import "MarkdownASTNode.h"
@@ -2024,7 +2091,7 @@ index 0000000..0a413e5
 +  _language.font = [UIFont systemFontOfSize:MAX(14, font.pointSize) weight:UIFontWeightMedium];
 +  _language.textColor = self.config.paragraphColor;
 +  _language.accessibilityLabel = [@"لغة الكود: " stringByAppendingString:_language.text];
-+  _copyButton.tintColor = self.config.codeBlockColor;
++  _copyButton.tintColor = self.config.codeBlockControlForegroundColor ?: self.config.codeBlockColor;
 +  _copyButton.accessibilityLabel = [NSString stringWithFormat:@"%@ الكود — %@", self.menuCopyLabel, _language.text];
 +  self.backgroundColor = [UIColor clearColor];
 +  _sourceSurface.backgroundColor = self.config.codeBlockBackgroundColor;
@@ -2062,6 +2129,12 @@ index 0000000..0a413e5
 +  CGFloat r = 1, g = 1, b = 1, a = 1;
 +  [self.config.codeBlockBackgroundColor getRed:&r green:&g blue:&b alpha:&a];
 +  [_modeControl applyPrimaryColor:self.config.paragraphColor dark:(0.2126 * r + 0.7152 * g + 0.0722 * b) < 0.5];
++  [_modeControl applyControlSurfaceColor:self.config.codeBlockControlSurfaceColor
++    selectedSurfaceColor:self.config.codeBlockControlSelectedSurfaceColor
++    pressedSurfaceColor:self.config.codeBlockControlPressedSurfaceColor
++    foregroundColor:self.config.codeBlockControlForegroundColor
++    selectedForegroundColor:self.config.codeBlockControlSelectedForegroundColor
++    borderColor:self.config.codeBlockControlBorderColor];
 +  _copyButton.hidden = _previewing;
 +  _horizontalScroll.hidden = _previewing;
 +  if (_previewing) [self updatePreviewPresentation];
@@ -2217,6 +2290,12 @@ index 0000000..0a413e5
 +    initWithSource:[_codeView.attributedText copy] kind:_previewLanguage
 +    language:ENRMCodeHighlightLanguage(_fenceLanguage) dark:(0.2126 * r + 0.7152 * g + 0.0722 * b) < 0.5
 +    backgroundColor:self.config.codeBlockBackgroundColor textColor:self.config.paragraphColor secondaryColor:self.config.codeBlockColor];
++  viewer.controlSurfaceColor = self.config.codeBlockControlSurfaceColor;
++  viewer.controlSelectedSurfaceColor = self.config.codeBlockControlSelectedSurfaceColor;
++  viewer.controlPressedSurfaceColor = self.config.codeBlockControlPressedSurfaceColor;
++  viewer.controlForegroundColor = self.config.codeBlockControlForegroundColor;
++  viewer.controlSelectedForegroundColor = self.config.codeBlockControlSelectedForegroundColor;
++  viewer.controlBorderColor = self.config.codeBlockControlBorderColor;
 +  [parent presentViewController:viewer animated:!UIAccessibilityIsReduceMotionEnabled() completion:nil];
 +}
 +- (void)detachPreviewController
@@ -2432,3 +2511,446 @@ index bd73244..8ce0d8c 100644
        element.accessibilityTraits =
            row.firstObject.isHeader ? UIAccessibilityTraitHeader : UIAccessibilityTraitStaticText;
        [elements addObject:element];
+diff --git a/node_modules/react-native-enriched-markdown/ios/generated/ReactCodegen/EnrichedMarkdownTextSpec/Props.h b/node_modules/react-native-enriched-markdown/ios/generated/ReactCodegen/EnrichedMarkdownTextSpec/Props.h
+index 4f5c368..2141c6f 100644
+--- a/node_modules/react-native-enriched-markdown/ios/generated/ReactCodegen/EnrichedMarkdownTextSpec/Props.h
++++ b/node_modules/react-native-enriched-markdown/ios/generated/ReactCodegen/EnrichedMarkdownTextSpec/Props.h
+@@ -764,6 +764,12 @@ struct EnrichedMarkdownMarkdownStyleCodeBlockStruct {
+   Float marginTop{0.0};
+   Float marginBottom{0.0};
+   Float lineHeight{0.0};
++  SharedColor controlSurfaceColor{};
++  SharedColor controlSelectedSurfaceColor{};
++  SharedColor controlPressedSurfaceColor{};
++  SharedColor controlForegroundColor{};
++  SharedColor controlSelectedForegroundColor{};
++  SharedColor controlBorderColor{};
+   SharedColor backgroundColor{};
+   SharedColor borderColor{};
+   Float borderRadius{0.0};
+@@ -783,6 +789,12 @@ struct EnrichedMarkdownMarkdownStyleCodeBlockStruct {
+     result["marginTop"] = marginTop;
+     result["marginBottom"] = marginBottom;
+     result["lineHeight"] = lineHeight;
++    result["controlSurfaceColor"] = ::facebook::react::toDynamic(controlSurfaceColor);
++    result["controlSelectedSurfaceColor"] = ::facebook::react::toDynamic(controlSelectedSurfaceColor);
++    result["controlPressedSurfaceColor"] = ::facebook::react::toDynamic(controlPressedSurfaceColor);
++    result["controlForegroundColor"] = ::facebook::react::toDynamic(controlForegroundColor);
++    result["controlSelectedForegroundColor"] = ::facebook::react::toDynamic(controlSelectedForegroundColor);
++    result["controlBorderColor"] = ::facebook::react::toDynamic(controlBorderColor);
+     result["backgroundColor"] = ::facebook::react::toDynamic(backgroundColor);
+     result["borderColor"] = ::facebook::react::toDynamic(borderColor);
+     result["borderRadius"] = borderRadius;
+@@ -824,6 +836,30 @@ static inline void fromRawValue(const PropsParserContext& context, const RawValu
+   if (tmp_lineHeight != map.end()) {
+     fromRawValue(context, tmp_lineHeight->second, result.lineHeight);
+   }
++  auto tmp_controlSurfaceColor = map.find("controlSurfaceColor");
++  if (tmp_controlSurfaceColor != map.end()) {
++    fromRawValue(context, tmp_controlSurfaceColor->second, result.controlSurfaceColor);
++  }
++  auto tmp_controlSelectedSurfaceColor = map.find("controlSelectedSurfaceColor");
++  if (tmp_controlSelectedSurfaceColor != map.end()) {
++    fromRawValue(context, tmp_controlSelectedSurfaceColor->second, result.controlSelectedSurfaceColor);
++  }
++  auto tmp_controlPressedSurfaceColor = map.find("controlPressedSurfaceColor");
++  if (tmp_controlPressedSurfaceColor != map.end()) {
++    fromRawValue(context, tmp_controlPressedSurfaceColor->second, result.controlPressedSurfaceColor);
++  }
++  auto tmp_controlForegroundColor = map.find("controlForegroundColor");
++  if (tmp_controlForegroundColor != map.end()) {
++    fromRawValue(context, tmp_controlForegroundColor->second, result.controlForegroundColor);
++  }
++  auto tmp_controlSelectedForegroundColor = map.find("controlSelectedForegroundColor");
++  if (tmp_controlSelectedForegroundColor != map.end()) {
++    fromRawValue(context, tmp_controlSelectedForegroundColor->second, result.controlSelectedForegroundColor);
++  }
++  auto tmp_controlBorderColor = map.find("controlBorderColor");
++  if (tmp_controlBorderColor != map.end()) {
++    fromRawValue(context, tmp_controlBorderColor->second, result.controlBorderColor);
++  }
+   auto tmp_backgroundColor = map.find("backgroundColor");
+   if (tmp_backgroundColor != map.end()) {
+     fromRawValue(context, tmp_backgroundColor->second, result.backgroundColor);
+@@ -3896,6 +3932,12 @@ struct EnrichedMarkdownTextMarkdownStyleCodeBlockStruct {
+   Float marginTop{0.0};
+   Float marginBottom{0.0};
+   Float lineHeight{0.0};
++  SharedColor controlSurfaceColor{};
++  SharedColor controlSelectedSurfaceColor{};
++  SharedColor controlPressedSurfaceColor{};
++  SharedColor controlForegroundColor{};
++  SharedColor controlSelectedForegroundColor{};
++  SharedColor controlBorderColor{};
+   SharedColor backgroundColor{};
+   SharedColor borderColor{};
+   Float borderRadius{0.0};
+@@ -3915,6 +3957,12 @@ struct EnrichedMarkdownTextMarkdownStyleCodeBlockStruct {
+     result["marginTop"] = marginTop;
+     result["marginBottom"] = marginBottom;
+     result["lineHeight"] = lineHeight;
++    result["controlSurfaceColor"] = ::facebook::react::toDynamic(controlSurfaceColor);
++    result["controlSelectedSurfaceColor"] = ::facebook::react::toDynamic(controlSelectedSurfaceColor);
++    result["controlPressedSurfaceColor"] = ::facebook::react::toDynamic(controlPressedSurfaceColor);
++    result["controlForegroundColor"] = ::facebook::react::toDynamic(controlForegroundColor);
++    result["controlSelectedForegroundColor"] = ::facebook::react::toDynamic(controlSelectedForegroundColor);
++    result["controlBorderColor"] = ::facebook::react::toDynamic(controlBorderColor);
+     result["backgroundColor"] = ::facebook::react::toDynamic(backgroundColor);
+     result["borderColor"] = ::facebook::react::toDynamic(borderColor);
+     result["borderRadius"] = borderRadius;
+@@ -3956,6 +4004,30 @@ static inline void fromRawValue(const PropsParserContext& context, const RawValu
+   if (tmp_lineHeight != map.end()) {
+     fromRawValue(context, tmp_lineHeight->second, result.lineHeight);
+   }
++  auto tmp_controlSurfaceColor = map.find("controlSurfaceColor");
++  if (tmp_controlSurfaceColor != map.end()) {
++    fromRawValue(context, tmp_controlSurfaceColor->second, result.controlSurfaceColor);
++  }
++  auto tmp_controlSelectedSurfaceColor = map.find("controlSelectedSurfaceColor");
++  if (tmp_controlSelectedSurfaceColor != map.end()) {
++    fromRawValue(context, tmp_controlSelectedSurfaceColor->second, result.controlSelectedSurfaceColor);
++  }
++  auto tmp_controlPressedSurfaceColor = map.find("controlPressedSurfaceColor");
++  if (tmp_controlPressedSurfaceColor != map.end()) {
++    fromRawValue(context, tmp_controlPressedSurfaceColor->second, result.controlPressedSurfaceColor);
++  }
++  auto tmp_controlForegroundColor = map.find("controlForegroundColor");
++  if (tmp_controlForegroundColor != map.end()) {
++    fromRawValue(context, tmp_controlForegroundColor->second, result.controlForegroundColor);
++  }
++  auto tmp_controlSelectedForegroundColor = map.find("controlSelectedForegroundColor");
++  if (tmp_controlSelectedForegroundColor != map.end()) {
++    fromRawValue(context, tmp_controlSelectedForegroundColor->second, result.controlSelectedForegroundColor);
++  }
++  auto tmp_controlBorderColor = map.find("controlBorderColor");
++  if (tmp_controlBorderColor != map.end()) {
++    fromRawValue(context, tmp_controlBorderColor->second, result.controlBorderColor);
++  }
+   auto tmp_backgroundColor = map.find("backgroundColor");
+   if (tmp_backgroundColor != map.end()) {
+     fromRawValue(context, tmp_backgroundColor->second, result.backgroundColor);
+diff --git a/node_modules/react-native-enriched-markdown/ios/styles/StyleConfig.h b/node_modules/react-native-enriched-markdown/ios/styles/StyleConfig.h
+index 6bf3e8e..90cf4cf 100644
+--- a/node_modules/react-native-enriched-markdown/ios/styles/StyleConfig.h
++++ b/node_modules/react-native-enriched-markdown/ios/styles/StyleConfig.h
+@@ -294,6 +294,18 @@ NS_ASSUME_NONNULL_BEGIN
+ - (RCTUIColor *)codeBlockBackgroundColor;
+ - (void)setCodeBlockBackgroundColor:(RCTUIColor *)newValue;
+ - (RCTUIColor *)codeBlockBorderColor;
++- (nullable RCTUIColor *)codeBlockControlSurfaceColor;
++- (void)setCodeBlockControlSurfaceColor:(nullable RCTUIColor *)newValue;
++- (nullable RCTUIColor *)codeBlockControlSelectedSurfaceColor;
++- (void)setCodeBlockControlSelectedSurfaceColor:(nullable RCTUIColor *)newValue;
++- (nullable RCTUIColor *)codeBlockControlPressedSurfaceColor;
++- (void)setCodeBlockControlPressedSurfaceColor:(nullable RCTUIColor *)newValue;
++- (nullable RCTUIColor *)codeBlockControlForegroundColor;
++- (void)setCodeBlockControlForegroundColor:(nullable RCTUIColor *)newValue;
++- (nullable RCTUIColor *)codeBlockControlSelectedForegroundColor;
++- (void)setCodeBlockControlSelectedForegroundColor:(nullable RCTUIColor *)newValue;
++- (nullable RCTUIColor *)codeBlockControlBorderColor;
++- (void)setCodeBlockControlBorderColor:(nullable RCTUIColor *)newValue;
+ - (void)setCodeBlockBorderColor:(RCTUIColor *)newValue;
+ - (CGFloat)codeBlockBorderRadius;
+ - (void)setCodeBlockBorderRadius:(CGFloat)newValue;
+diff --git a/node_modules/react-native-enriched-markdown/ios/styles/StyleConfig.mm b/node_modules/react-native-enriched-markdown/ios/styles/StyleConfig.mm
+index 2187d0b..065645d 100644
+--- a/node_modules/react-native-enriched-markdown/ios/styles/StyleConfig.mm
++++ b/node_modules/react-native-enriched-markdown/ios/styles/StyleConfig.mm
+@@ -179,6 +179,12 @@ static inline NSString *normalizedFontWeight(NSString *fontWeight)
+   CGFloat _codeBlockLineHeight;
+   RCTUIColor *_codeBlockBackgroundColor;
+   RCTUIColor *_codeBlockBorderColor;
++  RCTUIColor *_codeBlockControlSurfaceColor;
++  RCTUIColor *_codeBlockControlSelectedSurfaceColor;
++  RCTUIColor *_codeBlockControlPressedSurfaceColor;
++  RCTUIColor *_codeBlockControlForegroundColor;
++  RCTUIColor *_codeBlockControlSelectedForegroundColor;
++  RCTUIColor *_codeBlockControlBorderColor;
+   CGFloat _codeBlockBorderRadius;
+   CGFloat _codeBlockBorderWidth;
+   CGFloat _codeBlockPadding;
+@@ -444,6 +450,12 @@ static inline NSString *normalizedFontWeight(NSString *fontWeight)
+   copy->_codeBlockLineHeight = _codeBlockLineHeight;
+   copy->_codeBlockBackgroundColor = [_codeBlockBackgroundColor copy];
+   copy->_codeBlockBorderColor = [_codeBlockBorderColor copy];
++  copy->_codeBlockControlSurfaceColor = [_codeBlockControlSurfaceColor copy];
++  copy->_codeBlockControlSelectedSurfaceColor = [_codeBlockControlSelectedSurfaceColor copy];
++  copy->_codeBlockControlPressedSurfaceColor = [_codeBlockControlPressedSurfaceColor copy];
++  copy->_codeBlockControlForegroundColor = [_codeBlockControlForegroundColor copy];
++  copy->_codeBlockControlSelectedForegroundColor = [_codeBlockControlSelectedForegroundColor copy];
++  copy->_codeBlockControlBorderColor = [_codeBlockControlBorderColor copy];
+   copy->_codeBlockBorderRadius = _codeBlockBorderRadius;
+   copy->_codeBlockBorderWidth = _codeBlockBorderWidth;
+   copy->_codeBlockPadding = _codeBlockPadding;
+@@ -1977,6 +1989,66 @@ static const CGFloat kDefaultMinGap = 4.0;
+   _codeBlockBorderColor = newValue;
+ }
+
++- (RCTUIColor *)codeBlockControlSurfaceColor
++{
++  return _codeBlockControlSurfaceColor;
++}
++
++- (void)setCodeBlockControlSurfaceColor:(RCTUIColor *)newValue
++{
++  _codeBlockControlSurfaceColor = newValue;
++}
++
++- (RCTUIColor *)codeBlockControlSelectedSurfaceColor
++{
++  return _codeBlockControlSelectedSurfaceColor;
++}
++
++- (void)setCodeBlockControlSelectedSurfaceColor:(RCTUIColor *)newValue
++{
++  _codeBlockControlSelectedSurfaceColor = newValue;
++}
++
++- (RCTUIColor *)codeBlockControlPressedSurfaceColor
++{
++  return _codeBlockControlPressedSurfaceColor;
++}
++
++- (void)setCodeBlockControlPressedSurfaceColor:(RCTUIColor *)newValue
++{
++  _codeBlockControlPressedSurfaceColor = newValue;
++}
++
++- (RCTUIColor *)codeBlockControlForegroundColor
++{
++  return _codeBlockControlForegroundColor;
++}
++
++- (void)setCodeBlockControlForegroundColor:(RCTUIColor *)newValue
++{
++  _codeBlockControlForegroundColor = newValue;
++}
++
++- (RCTUIColor *)codeBlockControlSelectedForegroundColor
++{
++  return _codeBlockControlSelectedForegroundColor;
++}
++
++- (void)setCodeBlockControlSelectedForegroundColor:(RCTUIColor *)newValue
++{
++  _codeBlockControlSelectedForegroundColor = newValue;
++}
++
++- (RCTUIColor *)codeBlockControlBorderColor
++{
++  return _codeBlockControlBorderColor;
++}
++
++- (void)setCodeBlockControlBorderColor:(RCTUIColor *)newValue
++{
++  _codeBlockControlBorderColor = newValue;
++}
++
+ - (CGFloat)codeBlockBorderRadius
+ {
+   return _codeBlockBorderRadius;
+diff --git a/node_modules/react-native-enriched-markdown/ios/utils/StylePropsUtils.h b/node_modules/react-native-enriched-markdown/ios/utils/StylePropsUtils.h
+index 6cd3262..40efb52 100644
+--- a/node_modules/react-native-enriched-markdown/ios/utils/StylePropsUtils.h
++++ b/node_modules/react-native-enriched-markdown/ios/utils/StylePropsUtils.h
+@@ -841,6 +841,36 @@ BOOL applyMarkdownStyleToConfig(StyleConfig *config, const MarkdownStyle &newSty
+     changed = YES;
+   }
+
++  if (newStyle.codeBlock.controlSurfaceColor != oldStyle.codeBlock.controlSurfaceColor) {
++    [config setCodeBlockControlSurfaceColor:RCTUIColorFromSharedColor(newStyle.codeBlock.controlSurfaceColor)];
++    changed = YES;
++  }
++
++  if (newStyle.codeBlock.controlSelectedSurfaceColor != oldStyle.codeBlock.controlSelectedSurfaceColor) {
++    [config setCodeBlockControlSelectedSurfaceColor:RCTUIColorFromSharedColor(newStyle.codeBlock.controlSelectedSurfaceColor)];
++    changed = YES;
++  }
++
++  if (newStyle.codeBlock.controlPressedSurfaceColor != oldStyle.codeBlock.controlPressedSurfaceColor) {
++    [config setCodeBlockControlPressedSurfaceColor:RCTUIColorFromSharedColor(newStyle.codeBlock.controlPressedSurfaceColor)];
++    changed = YES;
++  }
++
++  if (newStyle.codeBlock.controlForegroundColor != oldStyle.codeBlock.controlForegroundColor) {
++    [config setCodeBlockControlForegroundColor:RCTUIColorFromSharedColor(newStyle.codeBlock.controlForegroundColor)];
++    changed = YES;
++  }
++
++  if (newStyle.codeBlock.controlSelectedForegroundColor != oldStyle.codeBlock.controlSelectedForegroundColor) {
++    [config setCodeBlockControlSelectedForegroundColor:RCTUIColorFromSharedColor(newStyle.codeBlock.controlSelectedForegroundColor)];
++    changed = YES;
++  }
++
++  if (newStyle.codeBlock.controlBorderColor != oldStyle.codeBlock.controlBorderColor) {
++    [config setCodeBlockControlBorderColor:RCTUIColorFromSharedColor(newStyle.codeBlock.controlBorderColor)];
++    changed = YES;
++  }
++
+   if (newStyle.codeBlock.borderRadius != oldStyle.codeBlock.borderRadius) {
+     [config setCodeBlockBorderRadius:newStyle.codeBlock.borderRadius];
+     changed = YES;
+diff --git a/node_modules/react-native-enriched-markdown/lib/typescript/src/EnrichedMarkdownNativeComponent.d.ts b/node_modules/react-native-enriched-markdown/lib/typescript/src/EnrichedMarkdownNativeComponent.d.ts
+index 722afe8..3477f0f 100644
+--- a/node_modules/react-native-enriched-markdown/lib/typescript/src/EnrichedMarkdownNativeComponent.d.ts
++++ b/node_modules/react-native-enriched-markdown/lib/typescript/src/EnrichedMarkdownNativeComponent.d.ts
+@@ -30,6 +30,12 @@ interface ListStyleInternal extends BaseBlockStyleInternal {
+     marginLeft: CodegenTypes.Float;
+ }
+ interface CodeBlockStyleInternal extends BaseBlockStyleInternal {
++    controlSurfaceColor?: ColorValue;
++    controlSelectedSurfaceColor?: ColorValue;
++    controlPressedSurfaceColor?: ColorValue;
++    controlForegroundColor?: ColorValue;
++    controlSelectedForegroundColor?: ColorValue;
++    controlBorderColor?: ColorValue;
+     backgroundColor: ColorValue;
+     borderColor: ColorValue;
+     borderRadius: CodegenTypes.Float;
+@@ -415,4 +421,4 @@ export interface NativeProps extends ViewProps {
+ }
+ declare const _default: import("react-native/types_generated/Libraries/Utilities/codegenNativeComponent").NativeComponentType<NativeProps>;
+ export default _default;
+-//# sourceMappingURL=EnrichedMarkdownNativeComponent.d.ts.map
+\ No newline at end of file
++//# sourceMappingURL=EnrichedMarkdownNativeComponent.d.ts.map
+diff --git a/node_modules/react-native-enriched-markdown/lib/typescript/src/EnrichedMarkdownTextNativeComponent.d.ts b/node_modules/react-native-enriched-markdown/lib/typescript/src/EnrichedMarkdownTextNativeComponent.d.ts
+index f10bc0a..66ef8d2 100644
+--- a/node_modules/react-native-enriched-markdown/lib/typescript/src/EnrichedMarkdownTextNativeComponent.d.ts
++++ b/node_modules/react-native-enriched-markdown/lib/typescript/src/EnrichedMarkdownTextNativeComponent.d.ts
+@@ -30,6 +30,12 @@ interface ListStyleInternal extends BaseBlockStyleInternal {
+     marginLeft: CodegenTypes.Float;
+ }
+ interface CodeBlockStyleInternal extends BaseBlockStyleInternal {
++    controlSurfaceColor?: ColorValue;
++    controlSelectedSurfaceColor?: ColorValue;
++    controlPressedSurfaceColor?: ColorValue;
++    controlForegroundColor?: ColorValue;
++    controlSelectedForegroundColor?: ColorValue;
++    controlBorderColor?: ColorValue;
+     backgroundColor: ColorValue;
+     borderColor: ColorValue;
+     borderRadius: CodegenTypes.Float;
+@@ -415,4 +421,4 @@ export interface NativeProps extends ViewProps {
+ }
+ declare const _default: import("react-native/types_generated/Libraries/Utilities/codegenNativeComponent").NativeComponentType<NativeProps>;
+ export default _default;
+-//# sourceMappingURL=EnrichedMarkdownTextNativeComponent.d.ts.map
+\ No newline at end of file
++//# sourceMappingURL=EnrichedMarkdownTextNativeComponent.d.ts.map
+diff --git a/node_modules/react-native-enriched-markdown/lib/typescript/src/types/MarkdownStyle.d.ts b/node_modules/react-native-enriched-markdown/lib/typescript/src/types/MarkdownStyle.d.ts
+index 76eef01..866027e 100644
+--- a/node_modules/react-native-enriched-markdown/lib/typescript/src/types/MarkdownStyle.d.ts
++++ b/node_modules/react-native-enriched-markdown/lib/typescript/src/types/MarkdownStyle.d.ts
+@@ -34,6 +34,12 @@ interface ListStyle extends BaseBlockStyle {
+     marginLeft?: number;
+ }
+ interface CodeBlockStyle extends BaseBlockStyle {
++    controlSurfaceColor?: string;
++    controlSelectedSurfaceColor?: string;
++    controlPressedSurfaceColor?: string;
++    controlForegroundColor?: string;
++    controlSelectedForegroundColor?: string;
++    controlBorderColor?: string;
+     backgroundColor?: string;
+     borderColor?: string;
+     borderRadius?: number;
+@@ -297,4 +303,4 @@ export interface Md4cFlags {
+     highlight?: boolean;
+ }
+ export {};
+-//# sourceMappingURL=MarkdownStyle.d.ts.map
+\ No newline at end of file
++//# sourceMappingURL=MarkdownStyle.d.ts.map
+diff --git a/node_modules/react-native-enriched-markdown/lib/typescript/src/types/MarkdownStyleInternal.d.ts b/node_modules/react-native-enriched-markdown/lib/typescript/src/types/MarkdownStyleInternal.d.ts
+index d0a0dd7..3f29211 100644
+--- a/node_modules/react-native-enriched-markdown/lib/typescript/src/types/MarkdownStyleInternal.d.ts
++++ b/node_modules/react-native-enriched-markdown/lib/typescript/src/types/MarkdownStyleInternal.d.ts
+@@ -31,6 +31,12 @@ interface ListStyleInternal extends BaseBlockStyleInternal {
+     marginLeft: number;
+ }
+ interface CodeBlockStyleInternal extends BaseBlockStyleInternal {
++    controlSurfaceColor?: string;
++    controlSelectedSurfaceColor?: string;
++    controlPressedSurfaceColor?: string;
++    controlForegroundColor?: string;
++    controlSelectedForegroundColor?: string;
++    controlBorderColor?: string;
+     backgroundColor: string;
+     borderColor: string;
+     borderRadius: number;
+@@ -175,4 +181,4 @@ export interface MarkdownStyleInternal {
+     highlight: HighlightStyleInternal;
+ }
+ export {};
+-//# sourceMappingURL=MarkdownStyleInternal.d.ts.map
+\ No newline at end of file
++//# sourceMappingURL=MarkdownStyleInternal.d.ts.map
+diff --git a/node_modules/react-native-enriched-markdown/src/EnrichedMarkdownNativeComponent.ts b/node_modules/react-native-enriched-markdown/src/EnrichedMarkdownNativeComponent.ts
+index 0df1ee2..b59e008 100644
+--- a/node_modules/react-native-enriched-markdown/src/EnrichedMarkdownNativeComponent.ts
++++ b/node_modules/react-native-enriched-markdown/src/EnrichedMarkdownNativeComponent.ts
+@@ -42,6 +42,12 @@ interface ListStyleInternal extends BaseBlockStyleInternal {
+ }
+
+ interface CodeBlockStyleInternal extends BaseBlockStyleInternal {
++  controlSurfaceColor?: ColorValue;
++  controlSelectedSurfaceColor?: ColorValue;
++  controlPressedSurfaceColor?: ColorValue;
++  controlForegroundColor?: ColorValue;
++  controlSelectedForegroundColor?: ColorValue;
++  controlBorderColor?: ColorValue;
+   backgroundColor: ColorValue;
+   borderColor: ColorValue;
+   borderRadius: CodegenTypes.Float;
+diff --git a/node_modules/react-native-enriched-markdown/src/EnrichedMarkdownTextNativeComponent.ts b/node_modules/react-native-enriched-markdown/src/EnrichedMarkdownTextNativeComponent.ts
+index 5026b9a..e20c5c5 100644
+--- a/node_modules/react-native-enriched-markdown/src/EnrichedMarkdownTextNativeComponent.ts
++++ b/node_modules/react-native-enriched-markdown/src/EnrichedMarkdownTextNativeComponent.ts
+@@ -42,6 +42,12 @@ interface ListStyleInternal extends BaseBlockStyleInternal {
+ }
+
+ interface CodeBlockStyleInternal extends BaseBlockStyleInternal {
++  controlSurfaceColor?: ColorValue;
++  controlSelectedSurfaceColor?: ColorValue;
++  controlPressedSurfaceColor?: ColorValue;
++  controlForegroundColor?: ColorValue;
++  controlSelectedForegroundColor?: ColorValue;
++  controlBorderColor?: ColorValue;
+   backgroundColor: ColorValue;
+   borderColor: ColorValue;
+   borderRadius: CodegenTypes.Float;
+diff --git a/node_modules/react-native-enriched-markdown/src/types/MarkdownStyle.ts b/node_modules/react-native-enriched-markdown/src/types/MarkdownStyle.ts
+index 6298e41..3e62ccc 100644
+--- a/node_modules/react-native-enriched-markdown/src/types/MarkdownStyle.ts
++++ b/node_modules/react-native-enriched-markdown/src/types/MarkdownStyle.ts
+@@ -40,6 +40,12 @@ interface ListStyle extends BaseBlockStyle {
+ }
+
+ interface CodeBlockStyle extends BaseBlockStyle {
++  controlSurfaceColor?: string;
++  controlSelectedSurfaceColor?: string;
++  controlPressedSurfaceColor?: string;
++  controlForegroundColor?: string;
++  controlSelectedForegroundColor?: string;
++  controlBorderColor?: string;
+   backgroundColor?: string;
+   borderColor?: string;
+   borderRadius?: number;
+diff --git a/node_modules/react-native-enriched-markdown/src/types/MarkdownStyleInternal.ts b/node_modules/react-native-enriched-markdown/src/types/MarkdownStyleInternal.ts
+index 4035da5..6d56802 100644
+--- a/node_modules/react-native-enriched-markdown/src/types/MarkdownStyleInternal.ts
++++ b/node_modules/react-native-enriched-markdown/src/types/MarkdownStyleInternal.ts
+@@ -42,6 +42,12 @@ interface ListStyleInternal extends BaseBlockStyleInternal {
+ }
+
+ interface CodeBlockStyleInternal extends BaseBlockStyleInternal {
++  controlSurfaceColor?: string;
++  controlSelectedSurfaceColor?: string;
++  controlPressedSurfaceColor?: string;
++  controlForegroundColor?: string;
++  controlSelectedForegroundColor?: string;
++  controlBorderColor?: string;
+   backgroundColor: string;
+   borderColor: string;
+   borderRadius: number;

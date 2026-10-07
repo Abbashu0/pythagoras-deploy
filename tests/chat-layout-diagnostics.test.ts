@@ -74,7 +74,7 @@ test("Arabic paragraph/list line heights scale with app font size before native 
   }
 });
 
-test("native scroll/inset tracking retains two architecture writers and one explicit collapse correction", () => {
+test("native scroll/inset tracking retains architecture writers, explicit collapse and explicit end navigation", () => {
   const source = readFileSync(new URL("../mobile/src/ai/chat-composer.ios.tsx", import.meta.url), "utf8");
   const tree = ts.createSourceFile("chat-composer.ios.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   let scrollView: ts.JsxOpeningElement | undefined;
@@ -104,7 +104,7 @@ test("native scroll/inset tracking retains two architecture writers and one expl
     assert.equal(attr.initializer.expression?.getText(tree), handler);
   }
   assert.equal(attrs.some(item => item.name.getText(tree) === "maintainVisibleContentPosition"), false);
-  assert.equal(offsetWrites, 3);
-  assert.deepEqual(offsetOwners.sort(), ['completeUserCollapse', 'followMeasuredAssistantGrowth', 'tryPositionPendingAnchor']);
+  assert.equal(offsetWrites, 4);
+  assert.deepEqual(offsetOwners.sort(), ['completeUserCollapse', 'followMeasuredAssistantGrowth', 'handleScrollToBottom', 'tryPositionPendingAnchor']);
   assert.equal(endWrites, 0);
 });

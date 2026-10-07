@@ -24,6 +24,21 @@ The Design System must never override an explicit Product Owner decision.
 
 ## Visual Philosophy
 
+### Neutral control chrome
+
+The app-level `controlSurface`, `controlSurfacePressed`, `controlSurfaceSelected`,
+`controlForeground`, `controlForegroundSelected` and `controlBorder` roles in
+`mobile/src/theme.ts` provide compact neutral UI chrome with consistent Warm
+Graphite contrast. Resting/pressed/selected surfaces are distinct from general
+content surfaces. The selected foreground retains primary text contrast.
+
+These roles are not a universal button palette: primary/accent, destructive,
+reaction selection and status actions retain their semantic colors. Native
+materials, selected indicators, pressed feedback and accessibility remain
+platform-owned; colors do not replace native glass or change control geometry.
+Light appearance uses the existing warm light surface/text/separator family,
+not dark tokens.
+
 Pythagoras is:
 
 - calm and focused;

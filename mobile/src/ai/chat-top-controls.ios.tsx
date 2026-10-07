@@ -7,8 +7,11 @@ import {
   controlSize,
   frame,
   foregroundStyle,
+  tint,
 } from '@expo/ui/swift-ui/modifiers';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { getPalette } from '@/theme';
 
 import type { ChatTopControlsProps } from './chat-top-controls.types';
 
@@ -19,6 +22,7 @@ export function ChatTopControls({
   onMenu,
 }: ChatTopControlsProps) {
   const insets = useSafeAreaInsets();
+  const palette = getPalette(colorScheme);
 
   return (
     <View pointerEvents="box-none" style={styles.overlay}>
@@ -26,12 +30,13 @@ export function ChatTopControls({
         matchContents
         colorScheme={colorScheme}
         layoutDirection="leftToRight"
-        seedColor={foregroundColor}
+        seedColor={palette.controlSurface}
         style={[styles.buttonHost, { top: insets.top, left: insets.left + 16 }]}
       >
         <NativeGlassIconButton
           accessibilityName="رجوع"
           foregroundColor={foregroundColor}
+          surfaceColor={palette.controlSurface}
           systemImage="chevron.left"
           onPress={onBack}
         />
@@ -40,12 +45,13 @@ export function ChatTopControls({
         matchContents
         colorScheme={colorScheme}
         layoutDirection="leftToRight"
-        seedColor={foregroundColor}
+        seedColor={palette.controlSurface}
         style={[styles.buttonHost, { top: insets.top, right: insets.right + 16 }]}
       >
         <NativeGlassIconButton
           accessibilityName="فتح القائمة"
           foregroundColor={foregroundColor}
+          surfaceColor={palette.controlSurface}
           systemImage="line.3.horizontal"
           onPress={onMenu}
         />
@@ -58,10 +64,12 @@ function NativeGlassIconButton({
   accessibilityName,
   foregroundColor,
   systemImage,
+  surfaceColor,
   onPress,
 }: {
   accessibilityName: string;
   foregroundColor: string;
+  surfaceColor: string;
   systemImage: 'chevron.left' | 'line.3.horizontal';
   onPress: () => void;
 }) {
@@ -70,6 +78,7 @@ function NativeGlassIconButton({
       onPress={onPress}
       modifiers={[
         buttonStyle('glass'),
+        tint(surfaceColor),
         buttonBorderShape('circle'),
         controlSize('regular'),
         frame({ width: 44, height: 44, alignment: 'center' }),

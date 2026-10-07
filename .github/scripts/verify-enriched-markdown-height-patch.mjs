@@ -237,7 +237,7 @@ const preview = native.previewBridge;
 for (const required of ['UIGlassEffect(style: .regular)', 'UISegmentedControl', '#available(iOS 26.0, *)', 'UIBlurEffect(style: .systemThinMaterial)', 'websiteDataStore = .nonPersistent()', 'allowsContentJavaScript = false', 'web.loadHTMLString(document, baseURL: nil)', 'navigationAction.targetFrame?.isMainFrame == true', 'decisionHandler(allowed ? .allow : .cancel, preferences)', "default-src 'none'", "script-src 'none'", "form-action 'none'", 'securityLevel: .strict, source: .bundledDefault', 'onLinkActivated: { _ in }', 'addChild(host)', 'host.didMove(toParent: self)', 'removeAllScriptMessageHandlers()', 'host.rootView = AnyView(EmptyView())', 'host.removeFromParent()']) if (!preview.includes(required)) fail(`preview policy/lifecycle lacks ${required}`);
 if (/\.cdn\(|print\(|NSLog|Timer|asyncAfter|scrollTo/u.test(preview)) fail('previews must remain offline, quiet, bounded and without scroll/timer ownership');
 for (const required of ['_language.textColor = self.config.paragraphColor', 'ENRMCodePreviewLanguage(node.attributes[@"language"])', 'if (!_previewing || !_previewLanguage || !self.window) return', '[self reactViewController]', '[parent addChildViewController:_previewController]', 'didMoveToParentViewController:parent', 'if (!newWindow) [self disposePreviewController]', 'self.onIntrinsicPresentationChanged()', 'MAX(260, MIN(330, round(width * 0.85)))', 'ENRMCodeCopySymbolName = @"square.on.square"', 'return _previewing ? cap : MIN(_bodyHeight, cap)', '[self headerHeight] + [self visibleBodyHeightForWidth:width]', '_horizontalScroll.frame = CGRectMake(0, 0, width, visibleBodyHeight)', '_horizontalScroll.contentSize = CGSizeMake(contentWidth, _bodyHeight)', 'contentWidth > width + 0.5 || verticalOverflow', '_bodyContainer.clipsToBounds = YES', '_copyButton.imageView.transform = CGAffineTransformMakeTranslation(1, 0)', 'CGFloat copySlot = 52', '_sourceGestureGate.enabled = !_previewing && verticalOverflow']) if (!native.codeView.includes(required)) fail(`native preview presentation lacks ${required}`);
-if (/setBackgroundImage|setDividerImage|selectedSegmentTintColor/u.test(preview)) fail('native segmented selection must not be erased/replaced');
+if (/setBackgroundImage|setDividerImage|selectedSegmentTintColor\s*=\s*\.clear/u.test(preview)) fail('native segmented selection must not be erased/replaced');
 if (!preview.includes('glass.isInteractive = false') || preview.includes('glass.isInteractive = true')) fail('inline glass must remain positionally stable while native segments own interaction');
 for (const required of ['ENRMMermaidHostingController: UIHostingController<AnyView>', 'host.onOwnedLayout = { [weak self]', 'if ownedWeb === observedMermaidWebView { return }', 'mermaidObservation?.detach()', 'host.onOwnedLayout = nil', 'mermaidHasRendered, !mermaidInteractionActive', 'window.__pythagorasMermaidInteraction.dispose()', 'delete window.__pythagorasMermaidObserver']) if (!preview.includes(required)) fail(`owned Mermaid lifecycle lacks ${required}`);
 const previewParentLayout = preview.slice(preview.indexOf('public override func viewDidLayoutSubviews()', preview.indexOf('public final class ENRMCodePreviewController')), preview.indexOf('@objc public func dispose()'));
@@ -279,6 +279,31 @@ for (const required of ['_renderRevision++', '_pendingHeightValidation = YES', '
 if (/requestHeightUpdate|scrollTo/u.test(presentationCode)) fail('preview cannot bypass reviewed height validation or own transcript scrolling');
 if (!source.includes('[currentOwner codeBlockPresentationDidChange]')) fail('code preview lacks a weak-owner height callback');
 for (const required of ["https://github.com/braddschick/MermaidKit.git", "kind: 'revision', revision: 'a6a5c15f3c91ff4061780c235a44716a988dc475'", "products: ['MermaidKit']", 'PythagorasCodePreviewNotices', 'ENRICHED_MARKDOWN_PREVIEW=1']) if (!podspec.includes(required)) fail(`reproducible preview integration lacks ${required}`);
+
+// Optional app control semantics must survive normalization, Fabric and config
+// copying. Colors never replace native glass or the selected segment geometry.
+const controlFields = ['Surface', 'SelectedSurface', 'PressedSurface', 'Foreground', 'SelectedForeground', 'Border'];
+const controlRead = file => fs.readFileSync(path.join(packageRoot, file), 'utf8');
+const controlConfig = controlRead('ios/styles/StyleConfig.mm');
+const controlHeader = controlRead('ios/styles/StyleConfig.h');
+const controlDiff = controlRead('ios/utils/StylePropsUtils.h');
+const controlProps = controlRead('ios/generated/ReactCodegen/EnrichedMarkdownTextSpec/Props.h');
+for (const field of controlFields) {
+  const name = `control${field}Color`;
+  for (const file of ['src/types/MarkdownStyle.ts', 'lib/typescript/src/types/MarkdownStyle.d.ts', 'src/EnrichedMarkdownNativeComponent.ts', 'src/EnrichedMarkdownTextNativeComponent.ts']) {
+    if (!controlRead(file).includes(`${name}?:`)) fail(`optional control color missing in ${file}: ${name}`);
+  }
+  if (!controlHeader.includes(`(nullable RCTUIColor *)codeBlockControl${field}Color`) ||
+      !controlConfig.includes(`copy->_codeBlockControl${field}Color = [_codeBlockControl${field}Color copy]`) ||
+      !controlDiff.includes(`RCTUIColorFromSharedColor(newStyle.codeBlock.${name})`)) fail(`control config bridge incomplete: ${name}`);
+  if ((controlProps.match(new RegExp(`SharedColor ${name}\\{\\};`, 'gu')) ?? []).length !== 2) fail(`Fabric control color missing: ${name}`);
+}
+const controlChrome = controlRead('ios/code/ENRMCodePreviewController.swift').split('@objc(ENRMCodePreviewController)')[0];
+for (const required of ['selectedSegmentTintColor = selectedSurface', 'glass.tintColor = controlSurface', 'controlSurface ?? .secondarySystemBackground']) {
+  if (!controlChrome.includes(required)) fail(`native semantic control color missing: ${required}`);
+}
+if (/setBackgroundImage|setDividerImage|#[0-9a-f]{6}|UIColor\(red:/iu.test(controlChrome)) fail('control chrome replaces native selection or duplicates app colors');
+if (!controlRead('ios/code/ENRMCodeFullscreenController.swift').includes('modes.applyControlColors(')) fail('fullscreen control family diverged');
 
 console.log([
   'Verified react-native-enriched-markdown@0.7.4 native height and RTL table patch structure.',

@@ -238,6 +238,12 @@ function createMarkdownStyle(palette: Palette, bodyFontSize: number, fontScale: 
       borderColor: palette.border,
     },
     codeBlock: {
+      controlSurfaceColor: palette.controlSurface,
+      controlSelectedSurfaceColor: palette.controlSurfaceSelected,
+      controlPressedSurfaceColor: palette.controlSurfacePressed,
+      controlForegroundColor: palette.controlForeground,
+      controlSelectedForegroundColor: palette.controlForegroundSelected,
+      controlBorderColor: palette.controlBorder,
       color: palette.textSecondary,
       fontFamily: monoFont,
       fontSize: Math.max(12, bodyFontSize - 3),

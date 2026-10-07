@@ -379,7 +379,7 @@ function ChatScreenContent() {
             {process.env.EXPO_OS === 'ios' ? (
               <StableChatTopControls
                 colorScheme={resolvedColorScheme}
-                foregroundColor={palette.text}
+                foregroundColor={palette.controlForeground}
                 onBack={handleBackPress}
                 onMenu={handleMenuPress}
               />
