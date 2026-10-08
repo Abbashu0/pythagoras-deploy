@@ -1,0 +1,6 @@
+{
+  "name": "pythagoras-chat-preview",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Native vector fitting for Pythagoras user-message context previews"
+}

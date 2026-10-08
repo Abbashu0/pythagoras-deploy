@@ -77,7 +77,7 @@ function NativeGlassIconButton({
     <Button
       onPress={onPress}
       modifiers={[
-        buttonStyle('glass'),
+        buttonStyle('glassProminent'),
         tint(surfaceColor),
         buttonBorderShape('circle'),
         controlSize('regular'),

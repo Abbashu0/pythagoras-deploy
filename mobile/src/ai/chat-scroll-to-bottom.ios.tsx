@@ -26,7 +26,7 @@ export const ChatScrollToBottomAffordance = memo(function ChatScrollToBottomAffo
       <Button label="الانتقال إلى نهاية المحادثة" systemImage="arrow.down" onPress={onPress}
         modifiers={[
           accessibilityLabel('الانتقال إلى نهاية المحادثة'), labelStyle('iconOnly'),
-          buttonStyle(nativeGlass ? 'glass' : 'bordered'), buttonBorderShape('circle'),
+          buttonStyle(nativeGlass ? 'glassProminent' : 'bordered'), buttonBorderShape('circle'),
           nativeTint(palette.controlSurface), foregroundStyle(tint), frame({ width: 44, height: 44 }),
         ]} />
     </Host>

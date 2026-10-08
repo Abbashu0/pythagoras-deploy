@@ -26,11 +26,11 @@ test('neutral chrome has warm dark reference roles and independent warm light ro
 test('Chat top and end controls retain native glass and fixed targets with neutral colors', () => {
   const top = app('mobile/src/ai/chat-top-controls.ios.tsx');
   const end = app('mobile/src/ai/chat-scroll-to-bottom.ios.tsx');
-  assert.ok(top.includes("buttonStyle('glass')"));
+  assert.ok(top.includes("buttonStyle('glassProminent')"));
   assert.ok(top.includes('tint(surfaceColor)'));
   assert.ok(top.includes('seedColor={palette.controlSurface}'));
   assert.ok(app('mobile/app/chat.tsx').includes('foregroundColor={palette.controlForeground}'));
-  assert.ok(end.includes("buttonStyle(nativeGlass ? 'glass' : 'bordered')"));
+  assert.ok(end.includes("buttonStyle(nativeGlass ? 'glassProminent' : 'bordered')"));
   assert.ok(end.includes('nativeTint(palette.controlSurface)'));
   assert.ok(end.includes('composerHeight.get() - safeAreaBottom'));
   assert.ok(app('mobile/src/ai/chat-composer.ios.tsx').includes('tint={palette.controlForeground}'));

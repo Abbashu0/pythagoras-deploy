@@ -113,7 +113,7 @@ test('scroll affordance uses existing reader/end state and never becomes measure
   const press = composer.slice(composer.indexOf('const handleScrollToBottom'), composer.indexOf('const handleContentSizeChange'));
   assert.equal((press.match(/scrollView\.scrollTo\(/gu) ?? []).length, 1);
   assert.equal(/setScrollState|blankSpace\.set|composerScrollInset\.set|setTimeout/u.test(press), false);
-  for (const snippet of ['position: \'absolute\'', "buttonStyle(nativeGlass ? 'glass' : 'bordered')", "systemImage=\"arrow.down\"", 'width: 44, height: 44', 'composerHeight.get() - safeAreaBottom']) assert.ok(affordance.includes(snippet), snippet);
+  for (const snippet of ['position: \'absolute\'', "buttonStyle(nativeGlass ? 'glassProminent' : 'bordered')", "systemImage=\"arrow.down\"", 'width: 44, height: 44', 'composerHeight.get() - safeAreaBottom']) assert.ok(affordance.includes(snippet), snippet);
   assert.equal(/Keyboard\.addListener|onGeometryChange|onLayout=|onScroll=/u.test(affordance), false);
 });
 

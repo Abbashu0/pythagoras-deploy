@@ -88,6 +88,7 @@ import { captureUserMessageCollapseAnchor, resolveUserMessageCollapseOffset, rec
 import { ChatEdgeFades } from './chat-edge-fades.ios';
 import { ChatScrollToBottomAffordance } from './chat-scroll-to-bottom.ios';
 import { ChatComposerControls } from './chat-composer-controls.ios';
+import { ChatUserMessageContextMenu } from './chat-user-context-menu.ios';
 import { COMPOSER_COMPACT_HEIGHT, COMPOSER_BOTTOM_PADDING } from './chat-composer-presentation';
 import type { ChatComposerProps, ChatReaction, ChatTurn } from './chat-types';
 import Agent1AssistantMarkdown from './assistant-enriched-markdown.ios';
@@ -1138,14 +1139,13 @@ const ChatUserBubble = memo(function ChatUserBubble({
 }) {
   const bubbleMaxWidth = contentWidth * 0.82;
   const messageAlignment = firstStrongTextDirection(message.content) === 'ltr' ? 'leading' : 'trailing';
-  if (presentation.collapsible) return (
-    <HStack alignment="top" spacing={0}>
-      <Spacer minLength={0} />
+  const bubbleShape = shapes.roundedRectangle({ cornerRadius: CHAT_BUBBLE_CORNER_RADIUS, roundedCornerStyle: 'continuous' });
+  const bubble = presentation.collapsible ? (
       <VStack alignment="trailing" spacing={0} modifiers={[
         padding({ horizontal: 15, vertical: 11 }),
         background(palette.surfaceInset, shapes.roundedRectangle({ cornerRadius: CHAT_BUBBLE_CORNER_RADIUS, roundedCornerStyle: 'continuous' })),
         strokeBorder({ color: palette.border, style: { lineWidth: 0.8 }, shape: 'roundedRectangle', cornerRadius: CHAT_BUBBLE_CORNER_RADIUS }),
-        frame({ maxWidth: bubbleMaxWidth, alignment: 'trailing' }),
+        contentShape(bubbleShape, ['interaction', 'contextMenuPreview']),
       ]}>
         <Text modifiers={[font({ textStyle: 'body' }), foregroundStyle(palette.text), multilineTextAlignment(messageAlignment), lineSpacing(3), textSelection(true), fixedSize({ horizontal: false, vertical: true }), ...(presentation.collapsed ? [lineLimit(USER_MESSAGE_PRESENTATION.previewVisualLines)] : [])]}>{presentation.text}</Text>
         <Button onPress={onToggle} modifiers={[buttonStyle('plain'), accessibilityLabel(presentation.collapsed ? 'عرض الرسالة كاملة' : 'عرض الرسالة مختصرة'), foregroundStyle(palette.textSecondary)]}>
@@ -1155,11 +1155,7 @@ const ChatUserBubble = memo(function ChatUserBubble({
           </HStack>
         </Button>
       </VStack>
-    </HStack>
-  );
-  return (
-    <HStack alignment="top" spacing={0}>
-      <Spacer minLength={0} />
+  ) : (
       <Text
         modifiers={[
           font({ textStyle: 'body' }),
@@ -1182,13 +1178,20 @@ const ChatUserBubble = memo(function ChatUserBubble({
             shape: 'roundedRectangle',
             cornerRadius: CHAT_BUBBLE_CORNER_RADIUS,
           }),
-          ...(contentWidth > 0
-            ? [frame({ maxWidth: bubbleMaxWidth, alignment: 'trailing' as const })]
-            : []),
+          contentShape(bubbleShape, ['interaction', 'contextMenuPreview']),
         ]}
       >
         {message.content}
       </Text>
+  );
+  return (
+    <HStack alignment="top" spacing={0}>
+      <Spacer minLength={0} />
+      <ChatUserMessageContextMenu content={message.content}
+        maxWidth={presentation.collapsible || contentWidth > 0 ? bubbleMaxWidth : undefined}
+        palette={palette} cornerRadius={CHAT_BUBBLE_CORNER_RADIUS}>
+        {bubble}
+      </ChatUserMessageContextMenu>
     </HStack>
   );
 });

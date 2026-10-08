@@ -1,0 +1,7 @@
+{
+  "platforms": ["apple"],
+  "coreFeatures": ["swiftui"],
+  "apple": {
+    "modules": ["PythagorasChatPreviewModule"]
+  }
+}
