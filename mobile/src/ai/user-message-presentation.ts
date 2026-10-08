@@ -1,4 +1,4 @@
-export const USER_MESSAGE_PRESENTATION = Object.freeze({ collapseCharacters: 700, collapseLogicalLines: 10, previewCharacters: 640, previewLogicalLines: 12, previewVisualLines: 14 });
+export const USER_MESSAGE_PRESENTATION = Object.freeze({ collapseCharacters: 12000, collapseLogicalLines: 80, previewCharacters: 640, previewLogicalLines: 12, previewVisualLines: 14 });
 function safePrefix(source: string, maximum: number): string {
   const Segmenter = Intl.Segmenter;
   if (typeof Segmenter === 'function') {
@@ -37,9 +37,8 @@ export function presentUserMessage(source: string, expanded = false) {
     const boundary = Math.max(preview.lastIndexOf(' '), preview.lastIndexOf('\n'), preview.lastIndexOf('\t'));
     if (boundary >= preview.length - 48) preview = preview.slice(0, boundary);
   }
-  // 11/12 short lines can be eligible yet fit the entire excerpt budget.
-  // In that case show only the eligibility budget (10 lines), so active collapse
-  // really omits original content. Prefixes retain the source's CR/LF bytes.
+  // If independently revised budgets ever expose the whole eligible source,
+  // keep active collapse truthful. Prefixes retain the source's CR/LF bytes.
   if (preview.length === source.length) {
     preview = logicalPrefix(source, USER_MESSAGE_PRESENTATION.collapseLogicalLines);
   }

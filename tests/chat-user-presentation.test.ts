@@ -6,40 +6,42 @@ import { LONG_USER_FIXTURE } from '../mobile/src/ai/renderer-quality-fixtures.de
 import { captureUserMessageCollapseAnchor, recordUserMessageHeight, resolveUserMessageCollapseOffset, userMessageHeightFloor } from '../mobile/src/ai/user-message-layout';
 import { readFileSync } from 'node:fs';
 
+const EXTREME_USER_FIXTURE = LONG_USER_FIXTURE.repeat(5);
+
 test('short and threshold-boundary user content is presented exactly', () => {
-  for (const source of ['مرحبا', 'API مع عربي', 'x'.repeat(700), Array(10).fill('سطر').join('\n')]) {
+  for (const source of ['مرحبا', 'API مع عربي', 'x'.repeat(700), 'x'.repeat(701), 'x'.repeat(12000), Array(80).fill('سطر').join('\n')]) {
     assert.deepEqual(presentUserMessage(source).text, source); assert.equal(presentUserMessage(source).collapsible, false);
   }
 });
 
-test('expanded excerpt uses 640 characters, 12 logical lines and 14 visual lines while eligibility stays 700/10', () => {
+test('extreme-message eligibility is 12000/80 while the excerpt remains 640/12/14', () => {
   assert.deepEqual(USER_MESSAGE_PRESENTATION, {
-    collapseCharacters: 700, collapseLogicalLines: 10,
+    collapseCharacters: 12000, collapseLogicalLines: 80,
     previewCharacters: 640, previewLogicalLines: 12, previewVisualLines: 14,
   });
-  const source = 'x'.repeat(1500);
+  const source = 'x'.repeat(12001);
   const collapsed = presentUserMessage(source);
   assert.equal(collapsed.text, source.slice(0, 640) + '…');
   assert.equal(collapsed.collapsible, true);
   assert.equal(presentUserMessage(source, true).text, source);
-  const lines = Array.from({ length: 20 }, (_, i) => `سطر ${i + 1}`).join('\n');
+  const lines = Array.from({ length: 81 }, (_, i) => `سطر ${i + 1}`).join('\n');
   assert.equal(presentUserMessage(lines).text, lines.split('\n').slice(0, 12).join('\n') + '…');
   assert.equal(presentUserMessage(lines, true).text, lines);
   const owner = readFileSync(new URL('../mobile/src/ai/chat-composer.ios.tsx', import.meta.url), 'utf8');
   assert.ok(owner.includes('lineLimit(USER_MESSAGE_PRESENTATION.previewVisualLines)'));
 });
 
-test('10/11/12/13 short logical lines have truthful collapse and ellipsis behavior', () => {
-  for (const count of [10, 11, 12, 13]) {
+test('ordinary lines remain fully visible; 79/80/81/82-line boundaries retain OR eligibility and exact separators', () => {
+  for (const count of [10, 11, 12, 13, 79, 80, 81, 82]) {
     for (const separator of ['\n', '\r\n', '\r']) {
       const source = Array.from({ length: count }, (_, i) => `سطر ${i + 1} 👨‍👩‍👧‍👦`).join(separator);
       const presentation = presentUserMessage(source);
-      assert.equal(presentation.collapsible, count > 10);
-      assert.equal(presentation.collapsed, count > 10);
-      if (count === 10) assert.equal(presentation.text, source);
+      assert.ok(source.length < 12000); // line eligibility works independently of length
+      assert.equal(presentation.collapsible, count > 80);
+      assert.equal(presentation.collapsed, count > 80);
+      if (count <= 80) assert.equal(presentation.text, source);
       else {
-        const visibleLines = count < 13 ? 10 : 12;
-        const prefix = source.split(separator).slice(0, visibleLines).join(separator);
+        const prefix = source.split(separator).slice(0, 12).join(separator);
         assert.equal(presentation.text, prefix + '…');
         assert.ok(source.startsWith(prefix));
         assert.ok(prefix.length < source.length);
@@ -49,17 +51,53 @@ test('10/11/12/13 short logical lines have truthful collapse and ellipsis behavi
   }
 });
 
-test('700/701-character boundary, original separators and final Unicode graphemes remain intact', () => {
-  for (const length of [700, 701]) {
+test('11999/12000/12001-character boundary and original Unicode separators remain intact', () => {
+  for (const length of [11999, 12000, 12001]) {
     const source = 'x'.repeat(length);
-    assert.equal(presentUserMessage(source).text, length === 700 ? source : 'x'.repeat(640) + '…');
+    const presentation = presentUserMessage(source);
+    assert.equal(presentation.collapsed, length > 12000);
+    assert.equal(presentation.text, length <= 12000 ? source : 'x'.repeat(640) + '…');
+    assert.equal(presentation.logicalLines, 1); // character eligibility also works independently
   }
-  const source = Array(11).fill('نَ 👨‍👩‍👧‍👦').join('\r\n') + '\r\n';
+  const source = Array(81).fill('نَ 👨‍👩‍👧‍👦').join('\r\n') + '\r\n';
   const preview = presentUserMessage(source).text.slice(0, -1);
   assert.ok(source.startsWith(preview));
   assert.equal(preview.includes('\r\n'), true);
   assert.equal(preview.endsWith('‍'), false);
   assert.equal(presentUserMessage(source, true).text, source);
+});
+
+test('the 3110-character / 26-line development story and ordinary Arabic paragraphs are never excerpted', () => {
+  assert.equal(LONG_USER_FIXTURE.length, 3110);
+  assert.equal(LONG_USER_FIXTURE.split(/\r\n|\r|\n/u).length, 26);
+  const paragraph = 'في صباح هادئ خرج الطالب إلى المكتبة، وقرأ قصةً عن المعرفة والصبر. '.repeat(12);
+  for (const source of [LONG_USER_FIXTURE, ...['\n\n', '\r\n\r\n', '\r\r'].map(separator => Array(8).fill(paragraph).join(separator))]) {
+    assert.ok(source.length > 700 && source.length <= 12000);
+    const presentation = presentUserMessage(source);
+    assert.equal(presentation.collapsible, false);
+    assert.equal(presentation.collapsed, false);
+    assert.equal(presentation.text, source);
+    assert.equal(presentUserMessage(source, true).text, source);
+  }
+});
+
+test('mixed CRLF/CR/LF separators count once each without rewriting the original excerpt', () => {
+  for (const count of [80, 81]) {
+    const separators = ['\r\n', '\r', '\n'];
+    let source = 'سطر 1 👨‍👩‍👧‍👦';
+    for (let i = 1; i < count; i++) source += separators[(i - 1) % 3] + `سطر ${i + 1} نَ`;
+    const presentation = presentUserMessage(source);
+    assert.equal(presentation.logicalLines, count);
+    assert.equal(presentation.collapsed, count > 80);
+    assert.equal(presentUserMessage(source, true).text, source);
+    if (count === 80) assert.equal(presentation.text, source);
+    else {
+      const prefix = presentation.text.slice(0, -1);
+      assert.ok(source.startsWith(prefix));
+      assert.equal(prefix.split(/\r\n|\r|\n/u).length, 12);
+      assert.ok(prefix.length < source.length);
+    }
+  }
 });
 
 test('collapsed and expanded measurements are independent; expansion retains the measured floor', () => {
@@ -119,7 +157,7 @@ test('presentation interaction keeps identity and follow suspension; collapse co
   assert.equal(source.includes('setNativeHeight(null)'), false);
 });
 test('long or multiline source gets a bounded real preview and can expand to its exact original', () => {
-  for (const source of ['x'.repeat(701), Array(11).fill('سطر').join('\n'), LONG_USER_FIXTURE]) {
+  for (const source of ['x'.repeat(12001), Array(81).fill('سطر').join('\n'), EXTREME_USER_FIXTURE]) {
     const collapsed = presentUserMessage(source);
     assert.equal(collapsed.collapsed, true); assert.equal(collapsed.collapsible, true);
     assert.ok(collapsed.text.length <= USER_MESSAGE_PRESENTATION.previewCharacters + 1);
@@ -128,7 +166,7 @@ test('long or multiline source gets a bounded real preview and can expand to its
   }
 });
 test('preview preserves surrogate pairs, composed Arabic marks, emoji sequences and nearby words', () => {
-  const sources = ['ا'.repeat(639) + '😀' + 'ب'.repeat(600), 'ا'.repeat(639) + 'نَ' + 'ب'.repeat(600), 'ا'.repeat(635) + '👨‍👩‍👧‍👦' + 'ب'.repeat(600), ('كلمة واحدة كاملة ').repeat(80)];
+  const sources = ['ا'.repeat(639) + '😀' + 'ب'.repeat(12000), 'ا'.repeat(639) + 'نَ' + 'ب'.repeat(12000), 'ا'.repeat(635) + '👨‍👩‍👧‍👦' + 'ب'.repeat(12000), ('كلمة واحدة كاملة ').repeat(1000)];
   for (const source of sources) {
     const preview = presentUserMessage(source).text.slice(0, -1);
     assert.ok(source.startsWith(preview)); assert.equal(/[\ud800-\udbff]$/u.test(preview), false);
@@ -144,7 +182,7 @@ test('Hermes fallback preserves Arabic marks, surrogate pairs and ZWJ families a
   try {
     Object.defineProperty(Intl, 'Segmenter', { configurable: true, value: undefined });
     for (const [prefix, cluster] of [[639, '😀'], [639, 'نَ'], [635, '👨‍👩‍👧‍👦']] as const) {
-      const source = 'ا'.repeat(prefix) + cluster + 'ب'.repeat(800);
+      const source = 'ا'.repeat(prefix) + cluster + 'ب'.repeat(12000);
       const presentation = presentUserMessage(source);
       assert.equal(presentation.text, 'ا'.repeat(prefix) + '…');
       assert.equal(presentUserMessage(source, true).text, source);
@@ -155,12 +193,12 @@ test('Hermes fallback preserves Arabic marks, surrogate pairs and ZWJ families a
   }
 });
 test('collapse is transient presentation only; turn, new request and regeneration use the complete source', () => {
-  const turn = createAcceptedAgent1ChatTurn('stable-id', LONG_USER_FIXTURE);
+  const turn = createAcceptedAgent1ChatTurn('stable-id', EXTREME_USER_FIXTURE);
   const saved = JSON.stringify(turn);
   const collapsed = presentUserMessage(turn.user.content);
   assert.notEqual(collapsed.text, turn.user.content);
-  assert.equal(presentUserMessage(turn.user.content, true).text, LONG_USER_FIXTURE);
+  assert.equal(presentUserMessage(turn.user.content, true).text, EXTREME_USER_FIXTURE);
   assert.equal(JSON.stringify(turn), saved); assert.equal(turn.id, 'stable-id');
-  assert.equal(buildAgent1HistoryForNewTurn([], turn.user)[0].content, LONG_USER_FIXTURE);
-  assert.equal(buildAgent1HistoryForRegenerate([turn], turn.id)?.[0].content, LONG_USER_FIXTURE);
+  assert.equal(buildAgent1HistoryForNewTurn([], turn.user)[0].content, EXTREME_USER_FIXTURE);
+  assert.equal(buildAgent1HistoryForRegenerate([turn], turn.id)?.[0].content, EXTREME_USER_FIXTURE);
 });

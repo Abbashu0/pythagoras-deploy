@@ -161,6 +161,18 @@ test('registered fitting module receives exact source/style props; Copy remains 
   assert.equal(f.trigger.props.children, inline);
 });
 
+test('the ordinary long-form story stays fully visible while native preview and Copy preserve its complete source', async () => {
+  const presentation = presentUserMessage(LONG_USER_FIXTURE);
+  assert.equal(presentation.collapsible, false);
+  assert.equal(presentation.text, LONG_USER_FIXTURE);
+  const inline: NativeNode = { type: 'VisibleFullBubble', props: { children: presentation.text } };
+  const f = fixture(LONG_USER_FIXTURE, inline, false, true);
+  assert.equal(f.trigger.props.children, inline);
+  assert.equal(f.preview.props.source, LONG_USER_FIXTURE);
+  await f.action.props.onPress!();
+  assert.deepEqual(Buffer.from(f.writes[0], 'utf8'), Buffer.from(LONG_USER_FIXTURE, 'utf8'));
+});
+
 test('owner keeps Spacer/Host/row outside the menu and preserves both inline text-selection and disclosure taps', () => {
   assert.ok(bubbleSource.includes('<ChatUserMessageContextMenu content={message.content}'));
   assert.ok(bubbleSource.indexOf('<Spacer minLength={0} />') < bubbleSource.indexOf('<ChatUserMessageContextMenu'));
