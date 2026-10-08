@@ -60,6 +60,47 @@ final class NativePreviewLayoutTests: XCTestCase {
   }
 
   @MainActor
+  func testPreviewOutlineMatchesTheScaledVectorBubble() throws {
+    let window = try testWindow()
+    defer { close(window) }
+    for source in ["مرحبا", String(repeating: "نَصّ عربي + API 👨‍👩‍👧‍👦\n", count: 1600) + "PYTHAGORAS_LONG_MESSAGE_END_2026\n\n"] {
+      let view = VectorPreviewView(frame: .zero)
+      let value = input(source)
+      let sizing = PreviewSizingState()
+      sizing.bind(view)
+      view.configure(value)
+      attach(view, to: window)
+      let fit = try XCTUnwrap(view.fit)
+      let natural = try XCTUnwrap(view.naturalSize)
+      let radius = try XCTUnwrap(sizing.recoveredCornerRadius(for: value))
+      XCTAssertEqual(radius, value.cornerRadius * fit.scale)
+      XCTAssertEqual(radius, view.layer.cornerRadius)
+      XCTAssertEqual(sizing.recoveredSize(for: value), fit.size)
+      XCTAssertEqual(view.accessibilityLabel, source)
+      let outer = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        .path(in: CGRect(origin: .zero, size: fit.size))
+      let vector = RoundedRectangle(cornerRadius: value.cornerRadius, style: .continuous)
+        .path(in: CGRect(origin: .zero, size: natural))
+        .applying(CGAffineTransform(scaleX: fit.scale, y: fit.scale))
+      // Compare shape containment in the fitted coordinate space. This tests
+      // the app-owned outline, not UIKit's live context-menu compositor.
+      let cornerExtent = min(fit.size.width / 2, min(fit.size.height / 2, radius * 2))
+      for x in 0..<20 {
+        for y in 0..<20 {
+          let dx = cornerExtent * (CGFloat(x) + 0.5) / 20
+          let dy = cornerExtent * (CGFloat(y) + 0.5) / 20
+          for point in [CGPoint(x: dx, y: dy), CGPoint(x: fit.size.width - dx, y: dy),
+            CGPoint(x: dx, y: fit.size.height - dy), CGPoint(x: fit.size.width - dx, y: fit.size.height - dy)] {
+            XCTAssertEqual(outer.contains(point), vector.contains(point))
+          }
+        }
+      }
+      view.removeFromSuperview()
+      view.dispose()
+    }
+  }
+
+  @MainActor
   func testMediumLongAndExtremeTextHaveFullCoverageAndScaledBounds() throws {
     let window = try testWindow()
     defer { close(window) }

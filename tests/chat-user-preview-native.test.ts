@@ -132,7 +132,7 @@ test('vector draw and sizeThatFits report fitted bounds, never a full-height bit
   for (const value of [
     'uiView.fittedSize(proposal: proposal)', 'intrinsicContentSize: CGSize { fittedSize(proposal: .unspecified) }',
     'return resolved.size', 'context.scaleBy(x: fit.scale, y: fit.scale)',
-    'manager.drawGlyphs(forGlyphRange: glyphRange', 'layer.cornerRadius = nonnegative(input.cornerRadius) * resolved.scale',
+    'manager.drawGlyphs(forGlyphRange: glyphRange', 'layer.cornerRadius = resolved.scaledCornerRadius(input.cornerRadius)',
     '.continuous).path(in: sourceRect).cgPath', 'context.setLineWidth(border)',
   ]) assert.ok(native.includes(value), value);
   assert.equal(/UIGraphicsImageRenderer|UIImage|drawHierarchy|render\(in:|drawingGroup|scaleEffect|frame.*naturalSize/u.test(native), false);
@@ -154,8 +154,9 @@ test('initial unavailable sizing recovers through observed SwiftUI fitted bounds
   for (const value of [
     '@StateObject private var sizing = PreviewSizingState()', '@Published private var recovery: Recovery?',
     '.frame(width: recovered?.width, height: recovered?.height)',
-    'sizing.bind(view)', 'view.onSizingRecovery = { [weak self]',
-    'self?.recovery = Recovery(input: input, size: size)',
+    'sizing.bind(view)', 'view.onSizingRecovery = { [weak self, weak view]',
+    'guard let fit = view?.fit, fit.size == size else { return }',
+    'self?.recovery = Recovery(input: input, geometry: fit)',
     'override func didMoveToWindow()', 'override func safeAreaInsetsDidChange()',
     'override func layoutSubviews()', 'recoverSizingIfNeeded()',
     'guard fit != nil else { return }', 'onSizingRecovery?(input, size)',
@@ -187,4 +188,36 @@ test('native appearance boundaries and actual input/window keys prevent stale re
     'testDetachReattachAndChangedStyle', 'removeFromSuperview()', 'UIHostingController',
   ]) assert.ok(tests.includes(value), value);
   assert.equal(/makeKeyAndVisible/u.test(tests), false);
+});
+
+test('the native context-preview outline uses the fitted radius without a separate mask or unscaled capsule', () => {
+  const body = geometry.match(/func scaledCornerRadius\(_ cornerRadius: CGFloat\) -> CGFloat \{\s*let radius = (.+)\s*return (.+)\s*\}/u)!;
+  assert.ok(body);
+  // Adapt CGFloat's isFinite/value coercion; evaluate the actual Swift expressions.
+  const radiusFormula = vm.runInNewContext(`(cornerRadius, scale) => {
+    const radius = ${body[1]}; return ${body[2]};
+  }`, { max: Math.max }) as (value: { isFinite: boolean; valueOf: () => number }, scale: number) => number;
+  const radius = (value: number, scale: number) => radiusFormula({ isFinite: Number.isFinite(value), valueOf: () => value }, scale);
+  for (const height of [48, 1000, 20000, 1000000]) {
+    const fit = fitFormula({ width: 320, height }, { width: 320, height: 400 });
+    const result = radius(24, fit.scale);
+    assert.equal(result, 24 * fit.scale);
+    assert.ok(Math.abs(result / fit.width - 24 / 320) < 1e-10);
+    assert.ok(result < fit.width / 2); // no default radius swallowing a narrow miniature
+  }
+  assert.equal(radius(24, 1), 24);
+  for (const value of [-1, NaN, Infinity]) assert.equal(radius(value, 0.02), 0);
+  for (const value of [
+    'let geometry: FittedPreviewGeometry', 'recovery?.geometry.size',
+    'return recovery.geometry.scaledCornerRadius(input.cornerRadius)',
+    '.contentShape(.contextMenuPreview, RoundedRectangle(',
+    'cornerRadius: sizing.recoveredCornerRadius(for: input) ?? 0, style: .continuous)',
+    'layer.cornerRadius = resolved.scaledCornerRadius(input.cornerRadius)',
+    'clipsToBounds = true',
+  ]) assert.ok(native.includes(value), value);
+  const surface = native.slice(native.indexOf('struct FittedPreviewSurface'), native.indexOf('private struct VectorPreviewRepresentable'));
+  assert.ok(surface.indexOf('.frame(') < surface.indexOf('.contentShape('));
+  assert.equal(/clipShape|mask\(|overlay\(|\.interaction/u.test(surface), false);
+  assert.ok(read('ios-tests/NativePreviewLayoutTests.swift').includes('testPreviewOutlineMatchesTheScaledVectorBubble'));
+  assert.ok(fs.readFileSync('mobile/node_modules/@expo/ui/ios/Modifiers/ContentShapeModifier.swift', 'utf8').includes('return .contextMenuPreview'));
 });

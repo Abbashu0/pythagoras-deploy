@@ -9,6 +9,18 @@ final class FittedPreviewGeometryTests: XCTestCase {
     XCTAssertEqual(fit.size, CGSize(width: 95, height: 48))
   }
 
+  func testCornerRadiusKeepsItsSourceProportionAtEveryFitScale() throws {
+    for height in [CGFloat(48), CGFloat(950), CGFloat(15000), CGFloat(1000000)] {
+      let fit = try XCTUnwrap(FittedPreviewGeometry.fit(natural: CGSize(width: 320, height: height), available: CGSize(width: 320, height: 400)))
+      XCTAssertEqual(fit.scaledCornerRadius(24), 24 * fit.scale)
+      XCTAssertEqual(fit.scaledCornerRadius(24) / fit.size.width, 24 / 320, accuracy: 0.000001)
+      XCTAssertLessThan(fit.scaledCornerRadius(24), fit.size.width / 2)
+      for invalid in [CGFloat(-1), CGFloat.nan, CGFloat.infinity] {
+        XCTAssertEqual(fit.scaledCornerRadius(invalid), 0)
+      }
+    }
+  }
+
   func testMediumLongAndExtremeAreUniformAndFinite() throws {
     for height in [CGFloat(950), CGFloat(15000), CGFloat(1000000)] {
       let natural = CGSize(width: 320, height: height)

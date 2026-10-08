@@ -2,8 +2,8 @@
 
 Local Expo module for Expo SDK 57 / ExpoUI 57.0.14. It changes the native child
 of the existing ContextMenu.Preview slot, not ContextMenu interaction itself.
-The existing IPA does not contain this module. JS keeps its original full-source
-Text preview on that IPA; the new fitter requires a reviewed native build.
+A Development Build containing this module uses the native fitter. Older builds
+keep the original full-source Text preview through the JS availability gate.
 
 ## Verified source integration gate
 
@@ -86,6 +86,19 @@ continuous shape and border, into that bounded canvas. TextKit's internal
 measurement container is tall, but no natural-height view/layer or huge bitmap
 is created. No drawingGroup, renderer snapshot, texture allocation or scaleEffect
 with an unscaled external frame is used. Copy is outside this view and unscaled.
+
+The fitted SwiftUI surface explicitly supplies a `.contextMenuPreview` content
+shape after its fitted frame. Recovery carries the successful fit geometry as
+well as size, so the continuous outline and UIView layer use the same
+`sourceCornerRadius * scale` value. An unavailable fit has no authoritative
+radius and supplies zero until successful native recovery. No unscaled 24pt
+radius is applied to a narrow miniature, and no extra padding or mask overlay
+is introduced. Vector fill/clipping/border and TextKit drawing are unchanged.
+The missing outer-shape contract is confirmed in source; a system-mask mismatch
+as the cause of physical clipping remains a hypothesis until device validation.
+Node tests cover scale/radius proportions. Hosted XCTest compares the supplied
+outline with the uniformly transformed vector path; it does not test the system
+context-menu compositor or finger motion. No movement-resistance API is added.
 
 Full layout is linear in source size, measured once per presentation (width/final
 alignment passes); memory holds one attributed source/glyph layout. Extremely

@@ -83,21 +83,27 @@ struct PreviewInput: Equatable {
 final class PreviewSizingState: ObservableObject {
   private struct Recovery: Equatable {
     let input: PreviewInput
-    let size: CGSize
+    let geometry: FittedPreviewGeometry
   }
   @Published private var recovery: Recovery?
   weak var view: VectorPreviewView?
 
   func recoveredSize(for input: PreviewInput) -> CGSize? {
-    recovery?.input == input ? recovery?.size : nil
+    recovery?.input == input ? recovery?.geometry.size : nil
+  }
+
+  func recoveredCornerRadius(for input: PreviewInput) -> CGFloat? {
+    guard let recovery, recovery.input == input else { return nil }
+    return recovery.geometry.scaledCornerRadius(input.cornerRadius)
   }
 
   func bind(_ view: VectorPreviewView) {
     self.view = view
-    view.onSizingRecovery = { [weak self] input, size in
+    view.onSizingRecovery = { [weak self, weak view] input, size in
+      guard let fit = view?.fit, fit.size == size else { return }
       // The UIView emits once per valid fit/lifecycle, including a reopen whose
       // dimensions happen to equal the prior presentation. Still invalidate it.
-      self?.recovery = Recovery(input: input, size: size)
+      self?.recovery = Recovery(input: input, geometry: fit)
     }
   }
 
@@ -124,6 +130,10 @@ struct FittedPreviewSurface: SwiftUI.View {
     VectorPreviewRepresentable(input: input, sizing: sizing,
       allowsKeyWindowFallback: allowsKeyWindowFallback)
       .frame(width: recovered?.width, height: recovered?.height)
+      // The system preview mask must match the uniformly scaled drawing, not
+      // the source's 24pt radius. Before a valid fit, no radius is authoritative.
+      .contentShape(.contextMenuPreview, RoundedRectangle(
+        cornerRadius: sizing.recoveredCornerRadius(for: input) ?? 0, style: .continuous))
       .onAppear(perform: sizing.beginPresentation)
       .onDisappear(perform: sizing.endPresentation)
   }
@@ -253,7 +263,7 @@ final class VectorPreviewView: UIView {
     naturalSize = natural
     fit = resolved
     accessibilityLabel = input.source
-    layer.cornerRadius = nonnegative(input.cornerRadius) * resolved.scale
+    layer.cornerRadius = resolved.scaledCornerRadius(input.cornerRadius)
     setNeedsDisplay()
     return resolved.size
   }

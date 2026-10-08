@@ -4,6 +4,13 @@ struct FittedPreviewGeometry: Equatable {
   let scale: CGFloat
   let size: CGSize
 
+  /// The presentation outline must use the same scale as the vector bubble.
+  /// Applying the unscaled source radius to a miniature can turn it into a capsule.
+  func scaledCornerRadius(_ cornerRadius: CGFloat) -> CGFloat {
+    let radius = cornerRadius.isFinite ? max(0, cornerRadius) : 0
+    return radius * scale
+  }
+
   static func positiveFinite(_ value: CGFloat?) -> CGFloat? {
     guard let value, value.isFinite, value > 0 else { return nil }
     return value
