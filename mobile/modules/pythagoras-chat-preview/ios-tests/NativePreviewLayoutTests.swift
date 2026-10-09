@@ -316,26 +316,88 @@ final class NativePreviewLayoutTests: XCTestCase {
   @MainActor
   func testRepresentableRecoversThroughSwiftUILayout() throws {
     let host = UIHostingController(rootView: FittedPreviewSurface(input: input("مرحبا"), allowsKeyWindowFallback: false))
-    host.loadViewIfNeeded()
-    let early = host.sizeThatFits(in: CGSize(width: 390, height: 844))
-    XCTAssertEqual(early, .zero)
-    let window = try testWindow(root: host)
-    defer { close(window) }
-    // This exercises the real represented view + observed SwiftUI frame, not
-    // just VectorPreviewView.fittedSize or an ambient runner window.
-    host.view.setNeedsLayout()
-    host.view.layoutIfNeeded()
-    let recovered = host.sizeThatFits(in: CGSize(width: 390, height: 844))
-    XCTAssertGreaterThan(recovered.width, 0)
-    XCTAssertGreaterThan(recovered.height, 0)
+    let timings = DiagnosticTimings()
+    var diagnosticWindow: UIWindow?
+    var sequence = 0
     func find(_ root: UIView) -> VectorPreviewView? {
       if let preview = root as? VectorPreviewView { return preview }
       return root.subviews.lazy.compactMap { find($0) }.first
     }
+    func record(_ stage: String, hostSize: CGSize? = nil, intrinsic: CGSize? = nil) {
+      sequence += 1
+      var data: [String: Any] = ["kind": "swiftui-sizing", "stage": stage,
+        "sequence": sequence, "elapsedSeconds": timings.elapsed]
+      if let window = diagnosticWindow {
+        data["windowFrame"] = diagnosticRect(window.frame)
+        data["windowBounds"] = diagnosticRect(window.bounds)
+        data["windowSafeAreaInsets"] = diagnosticInsets(window.safeAreaInsets)
+        data["windowSafeLayoutFrame"] = diagnosticRect(window.safeAreaLayoutGuide.layoutFrame)
+        data["windowLayoutMargins"] = diagnosticInsets(window.layoutMargins)
+      }
+      if let root = host.viewIfLoaded {
+        data["rootBounds"] = diagnosticRect(root.bounds)
+        data["rootSafeAreaInsets"] = diagnosticInsets(root.safeAreaInsets)
+        data["rootAdditionalSafeAreaInsets"] = diagnosticInsets(host.additionalSafeAreaInsets)
+        if let view = find(root) {
+          data["representedBounds"] = diagnosticRect(view.bounds)
+          data["representedBoundsInRoot"] = diagnosticRect(view.convert(view.bounds, to: root))
+          if let window = diagnosticWindow {
+            data["representedBoundsInWindow"] = diagnosticRect(view.convert(view.bounds, to: window))
+          }
+          data["fitStatus"] = String(describing: view.fitStatus)
+          if let fit = view.fit {
+            data["verifiedFitSize"] = diagnosticSize(fit.size)
+            if let hostSize {
+              data["hostMinusFit"] = diagnosticSize(CGSize(width: hostSize.width - fit.size.width,
+                height: hostSize.height - fit.size.height))
+            }
+          }
+        }
+        if let hostSize {
+          // Diagnostic arithmetic ONLY, not a new expected size or an assertion.
+          // UIView.convert above puts the actual child bounds in the root/window
+          // spaces; this subtraction exposes possible root safe-area accounting.
+          let safe = root.safeAreaInsets
+          data["hostSizeLessRootSafeInsetsDiagnosticOnly"] = diagnosticSize(CGSize(
+            width: hostSize.width - safe.left - safe.right,
+            height: hostSize.height - safe.top - safe.bottom))
+        }
+      }
+      if let hostSize { data["hostingSizeThatFits"] = diagnosticSize(hostSize) }
+      if let intrinsic { data["representedIntrinsicSize"] = diagnosticSize(intrinsic) }
+      emitDiagnostic(data)
+    }
+    defer { emitDiagnostic(["kind": "swiftui-sizing-timings", "seconds": timings.seconds,
+      "totalSeconds": timings.elapsed]) }
+    record("before-load")
+    timings.measure("load") { host.loadViewIfNeeded() }
+    record("after-load-before-early-query")
+    let early = timings.measure("early-host-size-query") { host.sizeThatFits(in: CGSize(width: 390, height: 844)) }
+    record("after-early-query", hostSize: early)
+    XCTAssertEqual(early, .zero)
+    record("before-window-attachment-and-fixture-layout")
+    let window = try timings.measure("window-attachment-and-fixture-layout") { try testWindow(root: host) }
+    diagnosticWindow = window
+    defer { timings.measure("window-cleanup") { close(window) } }
+    record("after-window-attachment-and-fixture-layout")
+    // This exercises the real represented view + observed SwiftUI frame, not
+    // just VectorPreviewView.fittedSize or an ambient runner window.
+    host.view.setNeedsLayout()
+    record("before-explicit-host-layout")
+    timings.measure("explicit-host-layout") { host.view.layoutIfNeeded() }
+    record("after-explicit-host-layout-before-recovery-query")
+    let recovered = timings.measure("recovered-host-size-query") { host.sizeThatFits(in: CGSize(width: 390, height: 844)) }
+    record("after-recovery-query", hostSize: recovered)
+    XCTAssertGreaterThan(recovered.width, 0)
+    XCTAssertGreaterThan(recovered.height, 0)
     let view = try XCTUnwrap(find(host.view))
     XCTAssertEqual(recovered, try XCTUnwrap(view.fit).size)
     XCTAssertEqual(view.intrinsicContentSize, recovered)
-    host.view.layoutIfNeeded()
+    // This read follows the original intrinsic assertion and reuses its valid
+    // cached fit; no extra sizeThatFits/window/layout request is introduced.
+    record("after-original-fit-and-intrinsic-assertions", hostSize: recovered, intrinsic: view.intrinsicContentSize)
+    timings.measure("final-host-layout") { host.view.layoutIfNeeded() }
+    record("after-final-host-layout", hostSize: recovered)
     XCTAssertEqual(view.bounds.size, recovered)
   }
 
@@ -387,7 +449,7 @@ final class NativePreviewLayoutTests: XCTestCase {
 
   @MainActor
   private func raster(_ view: VectorPreviewView, scale: CGFloat, clipInk: Bool,
-    throughLayer: Bool = false) throws -> CGImage {
+    throughLayer: Bool = false, capture: ((CGRect, CGAffineTransform) -> Void)? = nil) throws -> CGImage {
     let fit = try XCTUnwrap(view.fit)
     // ONLY the bounded fitted canvas is allocated, never the full source height.
     let canvas = CGSize(width: ceil(fit.size.width * scale) / scale,
@@ -400,6 +462,7 @@ final class NativePreviewLayoutTests: XCTestCase {
     view.setNeedsDisplay()
     view.layer.displayIfNeeded()
     let image = UIGraphicsImageRenderer(size: canvas, format: format).image { output in
+      capture?(view.bounds, output.cgContext.ctm)
       if throughLayer { view.layer.render(in: output.cgContext) }
       else { XCTAssertTrue(view.renderPreview(in: output.cgContext, canvas: view.bounds, clipInk: clipInk)) }
     }
@@ -419,24 +482,258 @@ final class NativePreviewLayoutTests: XCTestCase {
     XCTAssertEqual(actual.height, reference.height, file: file, line: line)
     // Normalize both images into the SAME explicit RGBA bitmap. Compare alpha
     // support, including first/last pixels and colored emoji, not only rectangles.
-    func alpha(_ image: CGImage) throws -> [UInt8] {
-      var bytes = [UInt8](repeating: 0, count: image.width * image.height * 4)
-      try bytes.withUnsafeMutableBytes { buffer in
-        let context = try XCTUnwrap(CGContext(data: buffer.baseAddress, width: image.width,
-          height: image.height, bitsPerComponent: 8, bytesPerRow: image.width * 4,
-          space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue |
-            CGImageAlphaInfo.premultipliedLast.rawValue))
-        context.interpolationQuality = .none
-        context.draw(image, in: CGRect(x: 0, y: 0, width: CGFloat(image.width), height: CGFloat(image.height)))
-      }
-      return stride(from: 3, to: bytes.count, by: 4).map { bytes[$0] }
-    }
-    let expected = try alpha(reference), found = try alpha(actual)
+    let expected = try normalizedAlpha(reference), found = try normalizedAlpha(actual)
     XCTAssertTrue(expected.contains { $0 > 0 }, "Reference must contain ink", file: file, line: line)
     // Strict comparison: do not dismiss a lost low-alpha endpoint pixel as
     // harmless rounding. Any layer-conversion mismatch must be investigated.
     let lost = zip(expected, found).filter { $0.0 > $0.1 }.count
     return lost
+  }
+
+  // Lifted unchanged from lostInkPixels so diagnostics and STRICT assertions
+  // normalize through exactly the same RGBA conversion (no alpha threshold).
+  private func normalizedAlpha(_ image: CGImage) throws -> [UInt8] {
+    var bytes = [UInt8](repeating: 0, count: image.width * image.height * 4)
+    try bytes.withUnsafeMutableBytes { buffer in
+      let context = try XCTUnwrap(CGContext(data: buffer.baseAddress, width: image.width,
+        height: image.height, bitsPerComponent: 8, bytesPerRow: image.width * 4,
+        space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue |
+          CGImageAlphaInfo.premultipliedLast.rawValue))
+      context.interpolationQuality = .none
+      context.draw(image, in: CGRect(x: 0, y: 0, width: CGFloat(image.width), height: CGFloat(image.height)))
+    }
+    return stride(from: 3, to: bytes.count, by: 4).map { bytes[$0] }
+  }
+
+  private final class DiagnosticTimings {
+    private let start = ProcessInfo.processInfo.systemUptime
+    private(set) var seconds: [String: Double] = [:]
+    var elapsed: Double { ProcessInfo.processInfo.systemUptime - start }
+    func measure<T>(_ name: String, _ block: () throws -> T) rethrows -> T {
+      let before = ProcessInfo.processInfo.systemUptime
+      defer { seconds[name, default: 0] += ProcessInfo.processInfo.systemUptime - before }
+      return try block()
+    }
+  }
+
+  private func diagnosticSize(_ size: CGSize) -> [String: Double] {
+    ["width": Double(size.width), "height": Double(size.height)]
+  }
+
+  private func diagnosticPoint(_ point: CGPoint) -> [String: Double] {
+    ["x": Double(point.x), "y": Double(point.y)]
+  }
+
+  private func diagnosticRect(_ rect: CGRect) -> [String: Double] {
+    ["x": Double(rect.origin.x), "y": Double(rect.origin.y),
+      "width": Double(rect.width), "height": Double(rect.height)]
+  }
+
+  private func diagnosticInsets(_ insets: UIEdgeInsets) -> [String: Double] {
+    ["top": Double(insets.top), "left": Double(insets.left),
+      "bottom": Double(insets.bottom), "right": Double(insets.right)]
+  }
+
+  private func diagnosticTransform(_ transform: CGAffineTransform) -> [String: Double] {
+    ["a": Double(transform.a), "b": Double(transform.b), "c": Double(transform.c),
+      "d": Double(transform.d), "tx": Double(transform.tx), "ty": Double(transform.ty)]
+  }
+
+  private func emitDiagnostic(_ data: [String: Any]) {
+    do {
+      let bytes = try JSONSerialization.data(withJSONObject: data, options: [.sortedKeys])
+      print("NATIVE_PREVIEW_DIAGNOSTIC " + String(decoding: bytes, as: UTF8.self))
+    } catch { XCTFail("Diagnostic serialization failed: \(error)") }
+  }
+
+  private struct RasterCapture {
+    let image: CGImage
+    let canvas: CGRect
+    let ctm: CGAffineTransform
+  }
+
+  @MainActor
+  private func capturedRaster(_ view: VectorPreviewView, scale: CGFloat, clipInk: Bool,
+    throughLayer: Bool = false) throws -> RasterCapture {
+    var captured: (CGRect, CGAffineTransform)?
+    let image = try raster(view, scale: scale, clipInk: clipInk, throughLayer: throughLayer) {
+      captured = ($0, $1)
+    }
+    let metadata = try XCTUnwrap(captured)
+    return RasterCapture(image: image, canvas: metadata.0, ctm: metadata.1)
+  }
+
+  private struct RasterAxisMapping {
+    let columnsIncreaseDeviceX: Bool
+    let rowsIncreaseDeviceY: Bool
+    func devicePoint(column: CGFloat, row: CGFloat, width: Int, height: Int) -> CGPoint {
+      CGPoint(x: columnsIncreaseDeviceX ? column : CGFloat(width) - column,
+        y: rowsIncreaseDeviceY ? row : CGFloat(height) - row)
+    }
+  }
+
+  private enum DiagnosticError: Error {
+    case invalidPixelMapping
+    case incompatibleRasters
+  }
+
+  @MainActor
+  private func calibratedRasterAxes() throws -> RasterAxisMapping {
+    // Two unequal-alpha 1px fiducials at UIKit TOP-left and BOTTOM-left.
+    // Use the SAME normalization as the comparisons. Observe, do not assume,
+    // which data row/column corresponds to the renderer's device coordinates.
+    let format = UIGraphicsImageRendererFormat()
+    format.scale = 1
+    format.opaque = false
+    format.preferredRange = .standard
+    var ctm = CGAffineTransform.identity
+    let image = UIGraphicsImageRenderer(size: CGSize(width: 3, height: 3), format: format).image {
+      let context = $0.cgContext
+      ctm = context.ctm
+      context.setShouldAntialias(false)
+      context.setFillColor(UIColor.white.cgColor)
+      context.fill(CGRect(x: 0, y: 0, width: 1, height: 1))
+      context.setFillColor(UIColor.white.withAlphaComponent(0.5).cgColor)
+      context.fill(CGRect(x: 0, y: 2, width: 1, height: 1))
+    }
+    let alpha = try normalizedAlpha(XCTUnwrap(image.cgImage))
+    let occupied = alpha.indices.filter { alpha[$0] > 0 }
+    XCTAssertEqual(occupied.count, 2, "Unexpected calibration support; pixel mapping cannot be assumed")
+    let top = try XCTUnwrap(occupied.first { alpha[$0] == 255 })
+    let bottom = try XCTUnwrap(occupied.first { alpha[$0] != 255 })
+    let topDevice = CGPoint(x: 0.5, y: 0.5).applying(ctm)
+    let mapping = RasterAxisMapping(columnsIncreaseDeviceX: CGFloat(top % 3) + 0.5 == topDevice.x,
+      rowsIncreaseDeviceY: CGFloat(top / 3) + 0.5 == topDevice.y)
+    let mappedTop = mapping.devicePoint(column: CGFloat(top % 3) + 0.5,
+      row: CGFloat(top / 3) + 0.5, width: 3, height: 3)
+    let mappedBottom = mapping.devicePoint(column: CGFloat(bottom % 3) + 0.5,
+      row: CGFloat(bottom / 3) + 0.5, width: 3, height: 3)
+    let bottomDevice = CGPoint(x: 0.5, y: 2.5).applying(ctm)
+    XCTAssertEqual(mappedTop, topDevice)
+    XCTAssertEqual(mappedBottom, bottomDevice)
+    emitDiagnostic(["kind": "raster-axis-calibration", "alphaRows": alpha.map { Int($0) },
+      "rendererCTM": diagnosticTransform(ctm), "columnsIncreaseDeviceX": mapping.columnsIncreaseDeviceX,
+      "rowsIncreaseDeviceY": mapping.rowsIncreaseDeviceY])
+    guard occupied.count == 2, mappedTop == topDevice, mappedBottom == bottomDevice else {
+      throw DiagnosticError.invalidPixelMapping // no unverified coordinate reporting
+    }
+    return mapping
+  }
+
+  private func approximateBoundary(_ path: CGPath, displayScale: CGFloat) -> [(CGPoint, CGPoint)]? {
+    // Failure diagnostics ONLY. Public path flattening with a stated threshold,
+    // not an analytic distance or a new clipping/acceptance policy. Bound work.
+    var segments: [(CGPoint, CGPoint)] = []
+    var current = CGPoint.zero, start = CGPoint.zero
+    var valid = true
+    let flattened = path.flattened(threshold: 1 / (displayScale * 64))
+    flattened.applyWithBlock { pointer in
+      let element = pointer.pointee
+      switch element.type {
+      case .moveToPoint: current = element.points[0]; start = current
+      case .addLineToPoint:
+        if segments.count < 4096 { segments.append((current, element.points[0])) }
+        else { valid = false }
+        current = element.points[0]
+      case .closeSubpath:
+        if segments.count < 4096 { segments.append((current, start)) }
+        else { valid = false }
+        current = start
+      default: valid = false // never guess a distance from unflattened curves
+      }
+    }
+    return valid && !segments.isEmpty ? segments : nil
+  }
+
+  private func distance(_ point: CGPoint, to segments: [(CGPoint, CGPoint)]) -> CGFloat {
+    var minimum = CGFloat.infinity
+    for (a, b) in segments {
+      let dx = b.x - a.x, dy = b.y - a.y
+      let squared = dx * dx + dy * dy
+      let projection = squared > 0 ? ((point.x - a.x) * dx + (point.y - a.y) * dy) / squared : 0
+      let t = min(1, max(0, projection))
+      minimum = min(minimum, hypot(point.x - a.x - t * dx, point.y - a.y - t * dy))
+    }
+    return minimum
+  }
+
+  private func rasterComparison(_ actual: RasterCapture, reference: RasterCapture,
+    kind: String, axes: RasterAxisMapping, layout: FittedPreviewInkLayout,
+    displayScale: CGFloat, timings: DiagnosticTimings) throws -> (record: [String: Any], differs: Bool) {
+    XCTAssertEqual(actual.image.width, reference.image.width)
+    XCTAssertEqual(actual.image.height, reference.image.height)
+    XCTAssertEqual(actual.canvas, reference.canvas)
+    XCTAssertEqual(actual.ctm, reference.ctm)
+    let determinant = reference.ctm.a * reference.ctm.d - reference.ctm.b * reference.ctm.c
+    guard actual.image.width == reference.image.width, actual.image.height == reference.image.height,
+      actual.canvas == reference.canvas, actual.ctm == reference.ctm,
+      [reference.ctm.a, reference.ctm.b, reference.ctm.c, reference.ctm.d,
+        reference.ctm.tx, reference.ctm.ty, determinant].allSatisfy({ $0.isFinite }), determinant != 0,
+      reference.ctm.b == 0, reference.ctm.c == 0 else {
+      // Current UIGraphics renderer CTMs are axis-aligned. Do not label an
+      // AABB as the exact pixel cell if a future renderer rotates/shears it.
+      throw DiagnosticError.incompatibleRasters
+    }
+    let expected = try timings.measure(kind + "-reference-alpha-extraction") { try normalizedAlpha(reference.image) }
+    let found = try timings.measure(kind + "-actual-alpha-extraction") { try normalizedAlpha(actual.image) }
+    guard expected.count == found.count else { throw DiagnosticError.incompatibleRasters }
+    return timings.measure(kind + "-alpha-comparison-and-sample-geometry") {
+      let width = reference.image.width, height = reference.image.height
+      let offset = CGPoint(x: reference.canvas.midX - layout.geometry.size.width / 2,
+        y: reference.canvas.midY - layout.geometry.size.height / 2)
+      let inverse = reference.ctm.inverted()
+      var lower = 0, higher = 0, samples: [[String: Any]] = []
+      var boundary: [(CGPoint, CGPoint)]?
+      var boundaryAttempted = false
+      for index in expected.indices {
+        let delta = Int(expected[index]) - Int(found[index])
+        if delta > 0 { lower += 1 }
+        if delta < 0 { higher += 1 }
+        let shouldSample = kind == "unclipped-repeat" ? delta != 0 : delta > 0
+        guard shouldSample, samples.count < 32 else { continue }
+        if !boundaryAttempted {
+          boundary = approximateBoundary(layout.outline, displayScale: displayScale)
+          boundaryAttempted = true
+        }
+        let x = index % width, y = index / width
+        // Normalized memory row -> calibrated device pixel -> INVERSE captured
+        // renderer CTM -> UIKit canvas -> subtract production center placement.
+        // Optical offsets/fit scale already belong to layout.inkRects; do not
+        // apply them twice. Report centers AND whole pixel cells for overhang.
+        let device = axes.devicePoint(column: CGFloat(x) + 0.5, row: CGFloat(y) + 0.5, width: width, height: height)
+        let canvasPoint = device.applying(inverse)
+        let fittedPoint = CGPoint(x: canvasPoint.x - offset.x, y: canvasPoint.y - offset.y)
+        let deviceCorner = axes.devicePoint(column: CGFloat(x), row: CGFloat(y), width: width, height: height)
+        let opposite = axes.devicePoint(column: CGFloat(x + 1), row: CGFloat(y + 1), width: width, height: height)
+        let deviceRect = CGRect(x: min(deviceCorner.x, opposite.x), y: min(deviceCorner.y, opposite.y),
+          width: abs(opposite.x - deviceCorner.x), height: abs(opposite.y - deviceCorner.y))
+        let fittedPixel = deviceRect.applying(inverse).offsetBy(dx: -offset.x, dy: -offset.y)
+        let inside = layout.outline.contains(fittedPoint, using: .winding, transform: .identity)
+        var sample: [String: Any] = ["pixelColumn": x, "normalizedMemoryRow": y,
+          "referenceAlpha": Int(expected[index]), "actualAlpha": Int(found[index]), "referenceMinusActualAlpha": delta,
+          "canvasPoint": diagnosticPoint(canvasPoint), "fittedPoint": diagnosticPoint(fittedPoint),
+          "imageTopLeftPixelCenter": diagnosticPoint(CGPoint(
+            x: (canvasPoint.x - reference.canvas.minX) * displayScale,
+            y: (canvasPoint.y - reference.canvas.minY) * displayScale)),
+          "fittedPixelCell": diagnosticRect(fittedPixel), "insideRoundedPathAtCenter": inside,
+          "pixelCellInsideRoundedPath": FittedPreviewInkLayout.contains(fittedPixel, in: layout.outline, clearance: 0),
+          "intersectsTransformedInkEnvelope": layout.inkRects.contains { $0.intersects(fittedPixel) },
+          "centerInsideTransformedInkEnvelope": layout.inkRects.contains { $0.contains(fittedPoint) }]
+        if let boundary {
+          let signed = distance(fittedPoint, to: boundary) * (inside ? 1 : -1)
+          if signed.isFinite { sample["approximateSignedBoundaryDistancePoints"] = Double(signed) }
+        }
+        samples.append(sample)
+      }
+      let record: [String: Any] = ["comparison": kind, "totalPixelsInspected": expected.count,
+        "lowerAlphaPixels": lower, "higherAlphaPixels": higher, "differentAlphaPixels": lower + higher,
+        "sampleLimit": 32, "samples": samples, "samplePolicy": kind == "unclipped-repeat" ? "any-difference" : "lower-alpha",
+        "canvasBounds": diagnosticRect(reference.canvas), "rendererCTM": diagnosticTransform(reference.ctm),
+        "centerPlacementOffset": diagnosticPoint(offset), "rasterWidthPixels": width, "rasterHeightPixels": height,
+        "pixelCoordinateSpace": "normalized-RGBA memory column/row; calibrated device axes; inverse renderer CTM; fittedPoint excludes center offset",
+        "distanceMethod": "approximate-polyline; positive-inside; flatten-threshold=1/64-display-pixel; max-4096-segments; absent-if-unavailable"]
+      return (record, lower + higher > 0)
+    }
   }
 
   @MainActor
@@ -470,39 +767,116 @@ final class NativePreviewLayoutTests: XCTestCase {
   func testActualBoundedRasterKeepsAllInkWithoutOpticalHeuristics() throws {
     let window = try testWindow()
     defer { close(window) }
+    let axes = try calibratedRasterAxes()
     let paragraph = "نَصّ عَرَبِيّ بِالتَّشْكِيلِ + API 123 👨‍👩‍👧‍👦 😀\r\n\t"
     let sources = ["مرحبا", String(repeating: paragraph, count: 30),
       String(repeating: paragraph, count: 1500), String(repeating: paragraph, count: 5000)]
-    for source in sources {
+    let variants = ["short", "paragraphs-30", "paragraphs-1500", "paragraphs-5000"]
+    for (sourceIndex, source) in sources.enumerated() {
       for scale in [CGFloat(1), CGFloat(2), CGFloat(3)] {
         for category in [UIContentSizeCategory.large, .accessibilityLarge] {
           let complete = source + "\nPYTHAGORAS_LONG_MESSAGE_END_2026\n\n"
-          var value = input(complete, category: category)
-          value.opticalTuning = .validated(opticalSafetyEnabled: false)
-          // Transparent surface/border isolates glyph ink. No bitmap snapshot is
-          // added to production. Exact typography/source match production input.
-          value = PreviewInput(source: value.source, logicalMaxWidth: value.logicalMaxWidth,
-            foreground: .white, background: .clear, border: .clear, rtl: value.rtl,
-            fontStyle: value.fontStyle, lineSpacing: value.lineSpacing,
-            horizontalPadding: value.horizontalPadding, verticalPadding: value.verticalPadding,
-            borderWidth: value.borderWidth, cornerRadius: value.cornerRadius,
-            category: value.category, appearance: value.appearance, opticalTuning: value.opticalTuning)
-          let view = VectorPreviewView(frame: .zero, testDisplayScale: scale)
-          view.configure(value)
-          attach(view, to: window)
-          let verified = try XCTUnwrap(view.inkLayout)
-          XCTAssertEqual(view.accessibilityLabel, complete)
-          XCTAssertTrue(verified.inkRects.allSatisfy {
-            FittedPreviewInkLayout.contains($0, in: verified.outline, clearance: verified.rasterClearance)
-          })
-          let reference = try raster(view, scale: scale, clipInk: false)
-          try assertNoLostInk(raster(view, scale: scale, clipInk: true), reference)
-          try assertNoLostInk(raster(view, scale: scale, clipInk: true, throughLayer: true), reference)
-          try assertEndpointInk(view, scale: scale)
-          XCTAssertEqual(view.fittedSize(proposal: .zero), verified.geometry.size)
-          XCTAssertEqual(view.fit, verified.geometry)
-          view.dispose()
-          view.removeFromSuperview()
+          let utf16Length = (complete as NSString).length
+          let identity = "\(variants[sourceIndex])-utf16-\(utf16Length)-scale-\(Int(scale))-\(category.rawValue)"
+          try XCTContext.runActivity(named: identity) { activity in
+            let timings = DiagnosticTimings()
+            let failuresBefore = testRun?.failureCount ?? 0
+            var data: [String: Any] = ["kind": "raster-case", "case": identity,
+              "sourceVariant": variants[sourceIndex], "sourceUTF16Length": utf16Length,
+              "dynamicTypeCategory": category.rawValue, "displayScale": Double(scale)]
+            var images: [(String, CGImage)] = []
+            var lowerAlphaDetected = false
+            var referenceUnstable = false
+            let view = VectorPreviewView(frame: .zero, testDisplayScale: scale)
+            defer {
+              timings.measure("cleanup") { view.dispose(); view.removeFromSuperview() }
+              data["seconds"] = timings.seconds
+              data["totalCaseSecondsBeforeEvidenceEncoding"] = timings.elapsed
+              let failed = lowerAlphaDetected || (testRun?.failureCount ?? failuresBefore) > failuresBefore
+              data["caseHasRecordedFailure"] = failed
+              data["referenceReproducibilityMismatch"] = referenceUnstable
+              // Only a failing case/comparison retains images. Reference-repeat
+              // inequality is failed reproducibility evidence, NOT an excuse to
+              // change the original clipping assertions. Successful cases add
+              // no attachments. PNG/original quality introduces no JPEG loss.
+              if failed || referenceUnstable {
+                timings.measure("failure-image-attachments") {
+                  for (name, image) in images {
+                    let attachment = XCTAttachment(image: UIImage(cgImage: image, scale: scale, orientation: .up), quality: .original)
+                    attachment.name = identity + "-" + name
+                    attachment.lifetime = .keepAlways
+                    activity.add(attachment)
+                  }
+                }
+              }
+              data["seconds"] = timings.seconds
+              data["totalCaseSeconds"] = timings.elapsed
+              emitDiagnostic(data) // one bounded summary even after thrown XCTest failures
+            }
+            var value = input(complete, category: category)
+            value.opticalTuning = .validated(opticalSafetyEnabled: false)
+            // Transparent surface/border isolates glyph ink. No bitmap snapshot is
+            // added to production. Exact typography/source match production input.
+            value = PreviewInput(source: value.source, logicalMaxWidth: value.logicalMaxWidth,
+              foreground: .white, background: .clear, border: .clear, rtl: value.rtl,
+              fontStyle: value.fontStyle, lineSpacing: value.lineSpacing,
+              horizontalPadding: value.horizontalPadding, verticalPadding: value.verticalPadding,
+              borderWidth: value.borderWidth, cornerRadius: value.cornerRadius,
+              category: value.category, appearance: value.appearance, opticalTuning: value.opticalTuning)
+            timings.measure("configure-attach-initial-fit") { view.configure(value); attach(view, to: window) }
+            let verified = try XCTUnwrap(view.inkLayout)
+            data["naturalSize"] = diagnosticSize(try XCTUnwrap(view.naturalSize))
+            data["fittedSize"] = diagnosticSize(verified.geometry.size)
+            data["uniformFitScale"] = Double(verified.geometry.scale)
+            data["opticalInsets"] = diagnosticSize(verified.geometry.opticalInsets)
+            data["effectiveCornerRadius"] = Double(verified.geometry.scaledCornerRadius(value.cornerRadius))
+            data["rasterClearance"] = Double(verified.rasterClearance)
+            data["logicalMaxWidth"] = Double(value.logicalMaxWidth)
+            data["transformedInkEnvelopeCount"] = verified.inkRects.count
+            data["hullVertexCount"] = verified.hullVertexCount
+            XCTAssertEqual(view.accessibilityLabel, complete)
+            let envelopesVerified = timings.measure("existing-envelope-assertion") {
+              verified.inkRects.allSatisfy {
+                FittedPreviewInkLayout.contains($0, in: verified.outline, clearance: verified.rasterClearance)
+              }
+            }
+            XCTAssertTrue(envelopesVerified)
+            data["allInkEnvelopesVerifiedInsidePath"] = envelopesVerified
+            let reference = try timings.measure("unclipped-raster") { try capturedRaster(view, scale: scale, clipInk: false) }
+            images.append(("unclipped-reference", reference.image))
+            data["actualCanvasBounds"] = diagnosticRect(reference.canvas)
+            data["centerPlacementOffset"] = diagnosticPoint(CGPoint(
+              x: reference.canvas.midX - verified.geometry.size.width / 2,
+              y: reference.canvas.midY - verified.geometry.size.height / 2))
+            data["rendererCTM"] = diagnosticTransform(reference.ctm)
+            let direct = try timings.measure("clipped-raster") { try capturedRaster(view, scale: scale, clipInk: true) }
+            images.append(("app-clipped-direct", direct.image))
+            // Keep the ORIGINAL render/assert ordering and zero-lost-alpha
+            // assertions. Diagnostic work never substitutes for acceptance.
+            try timings.measure("original-direct-alpha-extraction-and-assertion") { try assertNoLostInk(direct.image, reference.image) }
+            let layer = try timings.measure("layer-raster") { try capturedRaster(view, scale: scale, clipInk: true, throughLayer: true) }
+            images.append(("uiview-layer", layer.image))
+            try timings.measure("original-layer-alpha-extraction-and-assertion") { try assertNoLostInk(layer.image, reference.image) }
+            // Repeated reference comes AFTER the original draw/assert ordering.
+            // A mismatch is recorded as instability, not excused as clip success.
+            let repeated = try timings.measure("repeated-unclipped-raster") { try capturedRaster(view, scale: scale, clipInk: false) }
+            images.append(("repeated-unclipped-reference", repeated.image))
+            var comparisons: [[String: Any]] = []
+            for (kind, actual) in [("unclipped-repeat", repeated), ("direct-CGContext", direct), ("UIView-layer", layer)] {
+              let result = try rasterComparison(actual, reference: reference, kind: kind,
+                axes: axes, layout: verified, displayScale: scale, timings: timings)
+              comparisons.append(result.record)
+              if kind == "unclipped-repeat" {
+                referenceUnstable = result.differs
+                data["repeatedUnclippedAlphaIdentical"] = !result.differs
+              }
+              else if let lower = result.record["lowerAlphaPixels"] as? Int { lowerAlphaDetected = lowerAlphaDetected || lower > 0 }
+              data["comparisons"] = comparisons // retain completed evidence if a later probe throws
+            }
+            try timings.measure("endpoint-probes") { try assertEndpointInk(view, scale: scale) }
+            XCTAssertEqual(view.fittedSize(proposal: .zero), verified.geometry.size)
+            XCTAssertEqual(view.fit, verified.geometry)
+          }
         }
       }
     }
