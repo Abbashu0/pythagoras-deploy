@@ -14,10 +14,17 @@ struct FittedPreviewInkLayout {
   /// A convex clipping path contains all envelopes iff it contains their convex
   /// hull. Build once, not 4 * lineCount path queries on every search candidate.
   static func convexHull(_ rects: [CGRect]) -> [CGPoint] {
-    let points = rects.flatMap { box in
-      [CGPoint(x: box.minX, y: box.minY), CGPoint(x: box.maxX, y: box.minY),
-        CGPoint(x: box.minX, y: box.maxY), CGPoint(x: box.maxX, y: box.maxY)]
-    }.sorted { $0.x == $1.x ? $0.y < $1.y : $0.x < $1.x }
+    var points: [CGPoint] = []
+    for box in rects {
+      points.append(CGPoint(x: box.minX, y: box.minY))
+      points.append(CGPoint(x: box.maxX, y: box.minY))
+      points.append(CGPoint(x: box.minX, y: box.maxY))
+      points.append(CGPoint(x: box.maxX, y: box.maxY))
+    }
+    points.sort { (lhs: CGPoint, rhs: CGPoint) -> Bool in
+      if lhs.x == rhs.x { return lhs.y < rhs.y }
+      return lhs.x < rhs.x
+    }
     var unique: [CGPoint] = []
     for point in points where unique.last != point { unique.append(point) }
     guard unique.count > 1 else { return unique }

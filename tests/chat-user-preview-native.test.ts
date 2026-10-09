@@ -500,6 +500,56 @@ test('search uses a source ink hull and allocates fitted line envelopes only aft
   assert.ok(read('ios-tests/NativePreviewLayoutTests.swift').includes('testHullReductionKeepsEveryOriginalLineEnvelopeSafe'));
 });
 
+test('compiler-friendly hull point construction preserves every corner and the original lexicographic order', () => {
+  // Execute the actual generation/comparison expressions with a syntax adapter.
+  // This checks input equivalence, NOT Swift compilation or UIKit execution.
+  type Point = { x: number; y: number };
+  type Rect = { minX: number; minY: number; maxX: number; maxY: number };
+  const start = inkLayout.indexOf('    var points: [CGPoint] = []');
+  const end = inkLayout.indexOf('    var unique: [CGPoint] = []', start);
+  assert.ok(start >= 0 && end > start);
+  const block = inkLayout.slice(start, end);
+  assert.equal(/flatMap|\.sorted/u.test(block), false);
+  assert.equal((block.match(/points\.append\(/gu) ?? []).length, 4);
+  const generation = block.slice(0, block.indexOf('    points.sort'))
+    .replace('var points: [CGPoint] = []', 'const points = [];')
+    .replace('for box in rects {', 'for (const box of rects) {')
+    .replace(/points\.append\(CGPoint\(x: box\.(\w+), y: box\.(\w+)\)\)/gu,
+      'points.push({ x: box.$1, y: box.$2 });');
+  const generate = vm.runInNewContext(`rects => { ${generation} return points; }`) as (rects: Rect[]) => Point[];
+  const comparison = block.match(/points\.sort \{ \(lhs: CGPoint, rhs: CGPoint\) -> Bool in\s*([\s\S]*?)\n    \}/u)![1]
+    .replace('if lhs.x == rhs.x {', 'if (lhs.x === rhs.x) {');
+  const less = vm.runInNewContext(`(lhs, rhs) => { ${comparison} }`) as (lhs: Point, rhs: Point) => boolean;
+  const legacyLess = (a: Point, b: Point) => a.x === b.x ? a.y < b.y : a.x < b.x;
+  const compare = (predicate: typeof less) => (a: Point, b: Point) => predicate(a, b) ? -1 : predicate(b, a) ? 1 : 0;
+  const ordinary = { minX: -3, minY: 2, maxX: 9, maxY: 12 };
+  const cases: Rect[][] = [[], [ordinary], [ordinary, ordinary],
+    [{ minX: 0, minY: 0, maxX: 0, maxY: 0 }],
+    [{ minX: 4, minY: -9, maxX: 4, maxY: 8 }],
+    [{ minX: -9, minY: 4, maxX: 8, maxY: 4 }],
+    [{ minX: -0, minY: -0, maxX: 0, maxY: 0 }],
+    [{ minX: -1e200, minY: -1e200, maxX: 1e200, maxY: 1e200 }]];
+  // Deterministic finite rectangles, deliberately including zero extents/ties.
+  for (let sample = 0; sample < 64; sample++) {
+    cases.push(Array.from({ length: sample % 13 }, (_, index) => {
+      const minX = ((sample * 17 + index * 7) % 31) - 15;
+      const minY = ((sample * 11 + index * 3) % 29) - 14;
+      return { minX, minY, maxX: minX + index % 5, maxY: minY + sample % 7 };
+    }));
+  }
+  for (const rects of cases) {
+    const actual = Array.from(generate(rects), point => ({ x: point.x, y: point.y }));
+    const expected = rects.flatMap(box => [
+      { x: box.minX, y: box.minY }, { x: box.maxX, y: box.minY },
+      { x: box.minX, y: box.maxY }, { x: box.maxX, y: box.maxY },
+    ]);
+    assert.equal(actual.length, rects.length * 4);
+    assert.deepEqual(actual, expected); // no early deduplication or corner loss
+    for (const a of actual) for (const b of actual) assert.equal(less(a, b), legacyLess(a, b));
+    assert.deepEqual(actual.sort(compare(less)), expected.sort(compare(legacyLess)));
+  }
+});
+
 test('hosted raster guards inspect magnified endpoints strictly and are not mistaken for an executable test target', () => {
   const hosted = read('ios-tests/NativePreviewLayoutTests.swift');
   assert.ok(hosted.includes('let lost = zip(expected, found).filter { $0.0 > $0.1 }.count'));
