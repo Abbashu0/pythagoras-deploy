@@ -7,7 +7,7 @@ let package = Package(
   products: [.library(name: "PreviewGeometry", targets: ["PreviewGeometry"])],
   targets: [
     .target(name: "PreviewGeometry", path: "ios",
-      exclude: ["PythagorasChatPreviewModule.swift", "PythagorasFittedUserMessagePreview.swift", "PythagorasChatPreview.podspec"],
+      exclude: ["PythagorasChatPreviewModule.swift", "PythagorasFittedUserMessagePreview.swift", "FittedPreviewInkLayout.swift", "PythagorasChatPreview.podspec"],
       sources: ["FittedPreviewGeometry.swift"]),
     .testTarget(name: "PreviewGeometryTests", dependencies: ["PreviewGeometry"], path: "tests")
   ]

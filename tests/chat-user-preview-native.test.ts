@@ -11,6 +11,7 @@ const moduleRoot = 'mobile/modules/pythagoras-chat-preview';
 const read = (file: string) => fs.readFileSync(path.join(moduleRoot, file), 'utf8');
 const native = read('ios/PythagorasFittedUserMessagePreview.swift');
 const geometry = read('ios/FittedPreviewGeometry.swift');
+const inkLayout = read('ios/FittedPreviewInkLayout.swift');
 
 test('local module resolves as a named ExpoUIView SwiftUI child through SDK 57 autolinking', () => {
   const data = JSON.parse(execFileSync(process.execPath, [
@@ -123,7 +124,10 @@ test('TextKit measures complete styled source at fixed logical width without str
     'preferredContentSizeCategory: input.category', 'paragraph.lineSpacing', 'paragraph.baseWritingDirection = .natural',
     'textContainer.maximumNumberOfLines = 0', 'layout.ensureLayout(for: textContainer)',
     'layout.usedRect(for: textContainer)', 'NSMaxRange(covered) == textStorage.length',
-    'layout.extraLineFragmentRect.maxY', 'occupiedWidth + horizontal * 2',
+    'layout.extraLineFragmentRect.maxY', '(right - left).rounded(.up) + horizontal * 2',
+    'layout.enumerateLineFragments(forGlyphRange: allGlyphs)',
+    'layout.boundingRect(forGlyphRange: range, in: textContainer)',
+    'coveredGlyphs == allGlyphs.length', 'covered.location == 0',
   ]) assert.ok(native.includes(value), value);
   assert.equal(/source\.(prefix|suffix|count|split|substring)|boundingRect.*source\.count/u.test(native), false);
   assert.equal(/#[a-f0-9]{6}|UIColor\(red:/iu.test(native), false);
@@ -133,8 +137,8 @@ test('vector draw and sizeThatFits report fitted bounds, never a full-height bit
   for (const value of [
     'uiView.fittedSize(proposal: proposal)', 'intrinsicContentSize: CGSize { fittedSize(proposal: .unspecified) }',
     'return resolved.size', 'context.scaleBy(x: fit.scale, y: fit.scale)',
-    'manager.drawGlyphs(forGlyphRange: glyphRange', 'layer.cornerRadius = resolved.scaledCornerRadius(input.cornerRadius)',
-    '.continuous).path(in: sourceRect).cgPath', 'context.setLineWidth(border)',
+    'manager.drawGlyphs(forGlyphRange: glyphRange', 'layer.cornerRadius = 0',
+    'let shape = inkLayout.outline', 'context.setLineWidth(border)',
   ]) assert.ok(native.includes(value), value);
   assert.equal(/UIGraphicsImageRenderer|UIImage|drawHierarchy|render\(in:|drawingGroup|scaleEffect|frame.*naturalSize/u.test(native), false);
 });
@@ -160,16 +164,20 @@ test('initial unavailable sizing recovers through observed SwiftUI fitted bounds
     'self?.recovery = Recovery(input: input, geometry: fit)',
     'override func didMoveToWindow()', 'override func safeAreaInsetsDidChange()',
     'override func layoutSubviews()', 'recoverSizingIfNeeded()',
-    'guard fit != nil else { return }', 'onSizingRecovery?(input, size)',
+    'guard fit != nil else {', 'onSizingRecovery?(input, size)',
     'notifiedFit = true', 'notifiedFit = false', 'invalidateIntrinsicContentSize()',
   ]) assert.ok(native.includes(value), value);
   const recovery = native.slice(native.indexOf('private func recoverSizingIfNeeded()'), native.indexOf('func beginPresentation()', native.indexOf('private func recoverSizingIfNeeded()')));
   assert.ok(recovery.indexOf('guard fit != nil') < recovery.indexOf('onSizingRecovery?'));
+  assert.ok(recovery.includes('onSizingFailure?(input, fitStatus)'));
+  assert.ok(native.includes('@Published private(set) var failure: PreviewFitStatus?'));
+  assert.ok(native.includes('if self?.recovery != nil { self?.recovery = nil }'));
+  assert.ok(native.includes('measurementAttempted && notifiedFailure'));
   assert.ok(recovery.includes('notifiedFit'));
   assert.equal(/setNeedsLayout|setNeedsDisplay/u.test(recovery), false);
   // No publishing from sizeThatFits, updateUIView, or intrinsic sizing itself.
   const fitting = native.slice(native.indexOf('func fittedSize('), native.indexOf('private func nonnegative'));
-  assert.equal(/onSizingRecovery\?|recovery =/u.test(fitting), false);
+  assert.equal(/onSizingRecovery\?|onSizingFailure\?|recovery =/u.test(fitting), false);
 });
 
 test('native appearance boundaries and actual input/window keys prevent stale reuse without proposal churn', () => {
@@ -213,7 +221,7 @@ test('the native context-preview outline uses the fitted radius without a separa
     'return recovery.geometry.scaledCornerRadius(input.cornerRadius)',
     '.contentShape(.contextMenuPreview, RoundedRectangle(',
     'cornerRadius: sizing.recoveredCornerRadius(for: input) ?? 0, style: .continuous)',
-    'layer.cornerRadius = resolved.scaledCornerRadius(input.cornerRadius)',
+    'layer.cornerRadius = 0',
     'clipsToBounds = true',
   ]) assert.ok(native.includes(value), value);
   const surface = native.slice(native.indexOf('struct FittedPreviewSurface'), native.indexOf('private struct VectorPreviewRepresentable'));
@@ -225,14 +233,13 @@ test('the native context-preview outline uses the fitted radius without a separa
 
 type PreviewSize = { width: number; height: number };
 type OpticalFit = { scale: number; size: PreviewSize; opticalInsets: PreviewSize };
-const opticalSource = geometry.slice(geometry.indexOf('static func fitPreview('));
+const opticalSource = geometry.slice(geometry.indexOf('static func fitPreview('), geometry.indexOf('enum PreviewCorrectionSearch'));
 const opticalCondition = opticalSource.match(/let needsOpticalSafety = (.+)/u)![1];
 const insetSource = geometry.slice(geometry.indexOf('func insets('), geometry.indexOf('struct FittedPreviewGeometry'));
 const opticalInsets = insetSource.match(/CGSize\(width: (.+),\s*height: (.+)\)/u)!;
 const opticalAvailable = opticalSource.match(/let innerAvailable = CGSize\(width: (.+),\s*height: (.+)\)/u)!;
 const opticalOuter = opticalSource.match(/let outerSize = CGSize\(width: (.+),\s*height: (.+)\)/u)!;
 const oversizedCondition = opticalSource.match(/if (.+) \{/u)![1];
-const defaultEligibility = opticalSource.match(/guard (defaults.opticalSafetyEnabled.+) else/u)![1];
 const nativeDefaults = Object.fromEntries(geometry.match(/static let defaults = PreviewOpticalTuning\(([\s\S]*?)\)/u)![1]
   .split(',').map(field => { const [key, value] = field.trim().split(':'); return [key, JSON.parse(value.trim())]; })) as NativePreviewTuning;
 // Execute the actual Swift arithmetic with a thin optional/CGSize adapter.
@@ -251,10 +258,7 @@ const opticalFormula = vm.runInNewContext(`(natural, available, radius, displayS
   };
   let insets = insetPolicy(tuning);
   if (${oversizedCondition}) {
-    if (JSON.stringify(tuning) === JSON.stringify(defaults)) return null;
-    if (!(${defaultEligibility})) return { ...base, opticalInsets: { width: 0, height: 0 } };
-    insets = insetPolicy(defaults);
-    if (insets.width * 2 >= available.width || insets.height * 2 >= available.height) return null;
+    return { ...base, opticalInsets: { width: 0, height: 0 } };
   }
   const innerAvailable = { width: ${opticalAvailable[1]}, height: ${opticalAvailable[2]} };
   if (![innerAvailable.width, innerAvailable.height].every(value => Number.isFinite(value) && value > 0)) return null;
@@ -263,10 +267,12 @@ const opticalFormula = vm.runInNewContext(`(natural, available, radius, displayS
   return { scale: content.scale, size: { width: ${opticalOuter[1]}, height: ${opticalOuter[2]} }, opticalInsets: insets };
 }`, { fit: fitFormula, min: Math.min, defaults: nativeDefaults }) as (natural: PreviewSize, available: PreviewSize, radius: number, displayScale: number, tuning?: NativePreviewTuning) => OpticalFit | null;
 
-test('optical safety leaves short and wide previews unchanged while protecting a complete narrow content box', () => {
+const legacyOpticalPolicy = { ...nativeDefaults, opticalSafetyEnabled: true };
+
+test('optional legacy optical safety retains its documented bands only when explicitly enabled', () => {
   const available = { width: 300, height: 400 };
   for (const natural of [{ width: 90, height: 48 }, { width: 320, height: 800 }]) {
-    const fit = opticalFormula(natural, available, 24, 3)!;
+    const fit = opticalFormula(natural, available, 24, 3, legacyOpticalPolicy)!;
     const base = fitFormula(natural, available);
     assert.equal(fit.scale, base.scale);
     assert.equal(fit.size.width, base.width);
@@ -277,7 +283,7 @@ test('optical safety leaves short and wide previews unchanged while protecting a
   for (const displayScale of [1, 2, 3]) {
     for (const height of [3000, 20000, 1000000]) {
       const natural = { width: 320, height };
-      const fit = opticalFormula(natural, available, 24, displayScale)!;
+      const fit = opticalFormula(natural, available, 24, displayScale, legacyOpticalPolicy)!;
       const pixel = 1 / displayScale;
       const contentWidth = fit.size.width - fit.opticalInsets.width * 2;
       const contentHeight = fit.size.height - fit.opticalInsets.height * 2;
@@ -288,22 +294,25 @@ test('optical safety leaves short and wide previews unchanged while protecting a
       assert.ok(Math.abs(contentWidth / contentHeight - natural.width / natural.height) < 1e-8);
       assert.ok(fit.size.width <= available.width && fit.size.height <= available.height);
       assert.ok(fit.size.width > 0 && fit.size.height > 0 && Number.isFinite(fit.scale));
-      assert.equal(JSON.stringify(opticalFormula(natural, available, 24, displayScale)), JSON.stringify(fit));
+      assert.equal(JSON.stringify(opticalFormula(natural, available, 24, displayScale, legacyOpticalPolicy)), JSON.stringify(fit));
     }
   }
   for (const value of [0, -1, NaN, Infinity]) assert.equal(opticalFormula({ width: 320, height: 20000 }, available, 24, value), null);
-  assert.equal(opticalFormula({ width: 320, height: 20000 }, { width: 1, height: 1 }, 24, 3), null);
+  // The OPTIONAL diagnostic falls back; mandatory native containment can still reject this viewport.
+  const tiny = { width: 1, height: 1 };
+  assert.equal(JSON.stringify(opticalFormula({ width: 320, height: 20000 }, tiny, 24, 3, legacyOpticalPolicy)),
+    JSON.stringify(opticalFormula({ width: 320, height: 20000 }, tiny, 24, 3)));
 });
 
 test('native optical margins belong to measured preview bounds and glyph drawing, not transcript geometry', () => {
   for (const value of [
-    'FittedPreviewGeometry.fitPreview(natural: natural, available: available',
-    'sourceCornerRadius: input.cornerRadius, displayScale: displayScale, tuning: input.opticalTuning)',
-    'positiveFinite(currentWindow?.screen.scale)', 'displayScale: window.screen.scale',
+    'FittedPreviewInkLayout.resolve(natural: natural, available: available',
+    'sourceBorderWidth: input.borderWidth, displayScale: displayScale, tuning: input.opticalTuning)',
+    'positiveFinite(testDisplayScale ?? currentWindow?.screen.scale)', 'displayScale: testDisplayScale ?? window.screen.scale',
     'let sourceRect = CGRect(origin: .zero, size: fit.size)',
     'context.translateBy(x: fit.opticalInsets.width, y: fit.opticalInsets.height)',
     'let border = nonnegative(input.borderWidth) * fit.scale',
-    'var fittedGlyphBounds: CGRect?', 'manager.boundingRect(forGlyphRange: glyphRange, in: container)',
+    'var fittedGlyphBounds: CGRect?', 'return inkLayout.inkBounds',
   ]) assert.ok(native.includes(value), value);
   const drawing = native.slice(native.indexOf('override func draw('), native.indexOf('override func didMoveToWindow()'));
   assert.ok(drawing.indexOf('context.fillPath()') < drawing.indexOf('context.scaleBy('));
@@ -313,9 +322,54 @@ test('native optical margins belong to measured preview bounds and glyph drawing
   assert.ok(read('ios-tests/NativePreviewLayoutTests.swift').includes('testActualArabicGlyphBoundsStayOutsideOpticalCapsAndKeepTheEndMarker'));
 });
 
-test('five native Debug props, validated effective input and Release defaults preserve the existing optical policy', () => {
+test('a fit is successful only after TextKit ink passes the actual continuous clipping path', () => {
+  for (const value of ['let box = rect.insetBy(dx: -clearance, dy: -clearance)',
+    'outline.contains($0, using: .winding, transform: .identity)',
+    '.allSatisfy { outline.contains', 'pixel + border * geometry.scale',
+    'guard hull.allSatisfy({ contains(CGRect(origin: $0.applying(transform), size: .zero)',
+    'if let unchanged = candidate(0)', 'PreviewCorrectionSearch.refinementSteps', 'return finish(valid)',
+  ]) assert.ok(inkLayout.includes(value), value);
+  assert.ok(native.indexOf('let validated = FittedPreviewInkLayout.resolve') < native.indexOf('fit = resolved'));
+  assert.ok(native.includes('inkLayout = validated'));
+  assert.ok(native.includes('let shape = inkLayout.outline')); // draw and proof share one path
+  assert.ok(native.includes('inkLayout.containsInk(in: canvas) else { return false }'));
+  assert.ok(native.includes('lastDrawingContainedInk = renderPreview'));
+  assert.ok(native.includes('naturalInkRects = inkRects.map'));
+  assert.ok(native.includes('glyphOrigin = CGPoint(x: horizontal - left, y: vertical - top)'));
+  assert.ok(native.includes('manager.drawGlyphs(forGlyphRange: glyphRange, at: glyphOrigin)'));
+  assert.equal(/base\.size\.width\s*\*|source\.(count|split)|Timer|DispatchQueue/u.test(inkLayout), false);
+});
+
+test('app clip proof is independent of optional diagnostic optics and a second rounded layer mask', () => {
+  assert.equal(/tuning\.opticalSafetyEnabled/u.test(inkLayout), false); // proof cannot be disabled
+  assert.deepEqual([...native.matchAll(/layer\.cornerRadius\s*=\s*([^\r\n]+)/gu)].map(match => match[1]), ['0']);
+  assert.equal(/layer\.mask\s*=|clipShape|\.mask\(/u.test(native), false);
+  assert.ok(native.includes('clipsToBounds = true')); // finite rectangular canvas still enforced
+  assert.ok(native.includes('inkLayout = nil'));
+  assert.ok(native.includes('naturalInkRects = []'));
+  assert.ok(native.includes('lastDrawingContainedInk = false'));
+  assert.ok(native.includes('guard pendingInput != input else { return }'));
+  assert.ok(read('Package.swift').includes('"FittedPreviewInkLayout.swift"')); // excluded from Foundation target
+});
+
+test('hosted raster tests compare real vector and UIView output against unclipped ink, not regex success', () => {
+  const hosted = read('ios-tests/NativePreviewLayoutTests.swift');
+  for (const value of ['testRectangleContainmentDoesNotProveRoundedInkContainment',
+    'testActualBoundedRasterKeepsAllInkWithoutOpticalHeuristics',
+    'testRasterLossProbeRejectsAnExtraUnverifiedMask',
+    'testActualUndersizedCanvasCannotReportSuccessfulInkDrawing',
+    'UIGraphicsImageRenderer(size: canvas', 'view.layer.render(in: output.cgContext)',
+    'clipInk: false', 'testDisplayScale: scale', '.accessibilityLarge', 'count: 5000',
+    'PYTHAGORAS_LONG_MESSAGE_END_2026', 'let lost = zip(expected, found)',
+    'XCTAssertEqual(try lostInkPixels(actual, reference), 0', 'XCTAssertTrue(view.lastDrawingContainedInk)',
+  ]) assert.ok(hosted.includes(value), value);
+  assert.equal(/UIGraphicsImageRenderer|UIImage|render\(in:/u.test(native), false);
+  // This guard only checks that the hosted tests exist. It does NOT execute UIKit.
+});
+
+test('Debug and Release default to mandatory containment with optional legacy optics disabled', () => {
   assert.deepEqual(NATIVE_PREVIEW_TUNING, {
-    opticalSafetyEnabled: true, sideSafetyPixels: 1, endSafetyWidthFactor: 1,
+    opticalSafetyEnabled: false, sideSafetyPixels: 1, endSafetyWidthFactor: 1,
     endSafetyExtraPixels: 3, narrowEligibilityFactor: 2,
   });
   assert.deepEqual(nativeDefaults, NATIVE_PREVIEW_TUNING);
@@ -334,7 +388,7 @@ test('five native Debug props, validated effective input and Release defaults pr
   assert.equal(/\.id\(|setTimeout|setInterval|onGeometryChange|onLayout/u.test(wrapper), false);
 });
 
-test('default tuning exactly matches the pre-parameter optical math; tuning changes only the fitted geometry', () => {
+test('default policy has no heuristic bands; opt-in diagnostics independently retain the original optical math', () => {
   for (const height of [48, 800, 3000, 20000, 1000000]) {
     for (const displayScale of [1, 2, 3]) {
       const natural = { width: 320, height }, available = { width: 300, height: 400 };
@@ -348,18 +402,20 @@ test('default tuning exactly matches the pre-parameter optical math; tuning chan
             height: Math.min(available.height, inner.height + insets.height * 2) }, opticalInsets: insets };
         })()
         : { scale: base.scale, size: { width: base.width, height: base.height }, opticalInsets: { width: 0, height: 0 } };
-      assert.deepEqual(JSON.parse(JSON.stringify(opticalFormula(natural, available, 24, displayScale, NATIVE_PREVIEW_TUNING))), expected);
+      assert.deepEqual(JSON.parse(JSON.stringify(opticalFormula(natural, available, 24, displayScale, legacyOpticalPolicy))), expected);
+      assert.deepEqual(JSON.parse(JSON.stringify(opticalFormula(natural, available, 24, displayScale, NATIVE_PREVIEW_TUNING))),
+        { scale: base.scale, size: { width: base.width, height: base.height }, opticalInsets: { width: 0, height: 0 } });
     }
   }
   const natural = { width: 320, height: 20000 }, available = { width: 300, height: 400 };
-  const baseline = opticalFormula(natural, available, 24, 3)!;
+  const baseline = opticalFormula(natural, available, 24, 3, legacyOpticalPolicy)!;
   for (const patch of [{ sideSafetyPixels: 2 }, { endSafetyWidthFactor: 1.5 }, { endSafetyExtraPixels: 6 }, { opticalSafetyEnabled: false }]) {
-    assert.notEqual(JSON.stringify(opticalFormula(natural, available, 24, 3, { ...NATIVE_PREVIEW_TUNING, ...patch })), JSON.stringify(baseline));
+    assert.notEqual(JSON.stringify(opticalFormula(natural, available, 24, 3, { ...legacyOpticalPolicy, ...patch })), JSON.stringify(baseline));
   }
   assert.equal(opticalFormula({ width: 320, height: 800 }, available, 24, 3)!.opticalInsets.width, 0);
-  assert.ok(opticalFormula({ width: 320, height: 800 }, available, 24, 3, { ...NATIVE_PREVIEW_TUNING, narrowEligibilityFactor: 8 })!.opticalInsets.width > 0);
+  assert.ok(opticalFormula({ width: 320, height: 800 }, available, 24, 3, { ...legacyOpticalPolicy, narrowEligibilityFactor: 8 })!.opticalInsets.width > 0);
   const oversized = opticalFormula(natural, { width: 300, height: 20 }, 24, 3,
-    { ...NATIVE_PREVIEW_TUNING, sideSafetyPixels: 8, endSafetyWidthFactor: 4, endSafetyExtraPixels: 32 });
+    { ...legacyOpticalPolicy, sideSafetyPixels: 8, endSafetyWidthFactor: 4, endSafetyExtraPixels: 32 });
   assert.equal(JSON.stringify(oversized), JSON.stringify(opticalFormula(natural, { width: 300, height: 20 }, 24, 3)));
 });
 
@@ -381,4 +437,78 @@ test('native numeric normalization returns defaults for negative, nonfinite and 
     assert.ok(Number.isFinite(fit.size.width) && Number.isFinite(fit.size.height));
     assert.ok(fit.size.width > 0 && fit.size.width <= 300 && fit.size.height > 0 && fit.size.height <= 400);
   }
+});
+
+test('bounded native probe arithmetic finds smaller valid corrections without a valid initial high', () => {
+  const search = geometry.slice(geometry.indexOf('enum PreviewCorrectionSearch'));
+  const loops = [...search.matchAll(/for step in 1\.\.\.([0-9]+) \{ probes\.append\((.+)\) \}/gu)];
+  assert.equal(loops.length, 3);
+  const upperExpression = search.match(/let upper = (.+)/u)![1].replace('spaceLimit.nextDown', 'spaceLimitNextDown');
+  const probeFormula = vm.runInNewContext(`(preferred, spaceLimit, spaceLimitNextDown) => {
+    const upper = ${upperExpression}; const probes = [];
+    ${loops.map(loop => `for (let step = 1; step <= ${loop[1]}; step++) probes.push(${loop[2].replaceAll('CGFloat(step)', 'step')});`).join('\n')}
+    return [...new Set(probes.filter(value => Number.isFinite(value) && value > 0 && value < spaceLimit))].sort((a,b) => a-b);
+  }`, { min: Math.min, pow: Math.pow }) as (preferred: number, space: number, nextDown: number) => number[];
+  const nextDown = (value: number) => {
+    const data = new DataView(new ArrayBuffer(8));
+    data.setFloat64(0, value); data.setBigUint64(0, data.getBigUint64(0) - BigInt(1));
+    return data.getFloat64(0);
+  };
+  const steps = Number(search.match(/refinementSteps = ([0-9]+)/u)![1]);
+  for (const [preferred, space, validLow, validHigh] of [[1e6, 12, 1, 4], [60, 8, 0.4, 2], [0.5, 8, 0.2, 0.4]]) {
+    const probes = probeFormula(preferred, space, nextDown(space));
+    assert.ok(probes.length <= 28 && probes.every(value => value > 0 && value < space && Number.isFinite(value)));
+    assert.deepEqual(probes, probeFormula(preferred, space, nextDown(space)));
+    const candidate = (value: number) => value >= validLow && value <= validHigh;
+    assert.equal(candidate(preferred), false);
+    let high = probes.find(candidate)!;
+    assert.ok(Number.isFinite(high));
+    let low = 0;
+    for (let step = 0; step < steps; step++) {
+      const midpoint = (low + high) / 2;
+      if (candidate(midpoint)) high = midpoint; else low = midpoint;
+    }
+    assert.ok(candidate(high)); // accepted results still independently validated
+    assert.ok(high - validLow <= space / 2 ** steps);
+  }
+  assert.ok(inkLayout.includes('spaceLimit: spaceLimit'));
+  assert.ok(inkLayout.includes('guard var valid = candidate(probe) else { continue }'));
+  assert.equal(/guard[^\n]*candidate\(high\)/u.test(inkLayout), false);
+});
+
+test('failure status distinguishes initial geometry from no verified fit without publishing empty success', () => {
+  for (const value of ['enum PreviewFitStatus', 'case unavailableGeometry', 'case invalidTextLayout',
+    'case noVerifiedInkFit', 'fitStatus = .invalidTextLayout', 'fitStatus = .noVerifiedInkFit',
+    'fitStatus = .fitted', 'fitStatus = .suspended']) assert.ok(native.includes(value), value);
+  const fit = native.slice(native.indexOf('func fittedSize('), native.indexOf('private func nonnegative'));
+  assert.ok(fit.indexOf('fitStatus = .noVerifiedInkFit') < fit.indexOf('fit = resolved'));
+  assert.ok(fit.includes('if measurementAttempted { return .zero }'));
+  const recovery = native.slice(native.indexOf('private func recoverSizingIfNeeded()'), native.indexOf('func beginPresentation()', native.indexOf('private func recoverSizingIfNeeded()')));
+  assert.ok(recovery.indexOf('guard fit != nil') < recovery.indexOf('onSizingRecovery?'));
+  assert.ok(read('ios-tests/NativePreviewLayoutTests.swift').includes('testKnownWindowFailureIsNotUnavailableGeometryOrSuccessfulEmptyFit'));
+  // The UI failure limitation is intentional and documented, NOT a tested fallback.
+  assert.equal(/fallback|Placeholder|ScrollView\(/u.test(native.slice(native.indexOf('struct FittedPreviewSurface'), native.indexOf('private struct VectorPreviewRepresentable'))), false);
+});
+
+test('search uses a source ink hull and allocates fitted line envelopes only after verified refinement', () => {
+  for (const value of ['let hull = convexHull(inkRects)', 'guard hull.allSatisfy',
+    'func finish(_ verified: Candidate)', 'let transformed = inkRects.map',
+    'guard transformed.allSatisfy({ contains($0, in: verified.outline, clearance: verified.clearance) })',
+    'inkBounds: transformed.reduce(CGRect.null)', 'return bounds.contains(inkBounds.offsetBy']) assert.ok(inkLayout.includes(value), value);
+  const candidate = inkLayout.slice(inkLayout.indexOf('func candidate('), inkLayout.indexOf('func finish('));
+  assert.equal(candidate.includes('inkRects.map'), false);
+  assert.ok(read('ios-tests/NativePreviewLayoutTests.swift').includes('testHullReductionKeepsEveryOriginalLineEnvelopeSafe'));
+});
+
+test('hosted raster guards inspect magnified endpoints strictly and are not mistaken for an executable test target', () => {
+  const hosted = read('ios-tests/NativePreviewLayoutTests.swift');
+  assert.ok(hosted.includes('let lost = zip(expected, found).filter { $0.0 > $0.1 }.count'));
+  for (const value of ['private func assertEndpointInk', 'let zoom = 1 / layout.geometry.scale',
+    'for endpoint in [first, last]', 'try assertEndpointInk(view, scale: scale)',
+    'testConstrainedSearchLargeRadiusAndExtremeBodyHaveVerifiedFits']) assert.ok(hosted.includes(value), value);
+  const pod = read('ios/PythagorasChatPreview.podspec');
+  assert.ok(pod.includes("s.source_files = '*.swift'"));
+  assert.ok(fs.existsSync(path.join(moduleRoot, 'ios/FittedPreviewInkLayout.swift')));
+  assert.equal(/test_spec|ios-tests/u.test(pod), false); // NOT wired; do not claim execution
+  assert.equal(/ios-tests/u.test(read('Package.swift')), false);
 });

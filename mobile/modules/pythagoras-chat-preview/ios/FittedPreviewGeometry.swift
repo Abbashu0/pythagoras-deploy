@@ -8,7 +8,7 @@ struct PreviewOpticalTuning: Equatable {
   let endSafetyExtraPixels: CGFloat
   let narrowEligibilityFactor: CGFloat
 
-  static let defaults = PreviewOpticalTuning(opticalSafetyEnabled: true,
+  static let defaults = PreviewOpticalTuning(opticalSafetyEnabled: false,
     sideSafetyPixels: 1, endSafetyWidthFactor: 1, endSafetyExtraPixels: 3,
     narrowEligibilityFactor: 2)
 
@@ -105,8 +105,9 @@ struct FittedPreviewGeometry: Equatable {
     return FittedPreviewGeometry(scale: scale, size: size)
   }
 
-  /// Only scaled, cap-sized strips need extra optical clearance. Reserve it
-  /// BEFORE the final fit; never shift text into an unreported larger frame.
+  /// Optional optical policy retained for the existing development contract.
+  /// This is NOT an ink-containment proof. FittedPreviewInkLayout independently
+  /// validates the actual rendered ink/path, even with optical safety disabled.
   static func fitPreview(
     natural: CGSize, available: CGSize, sourceCornerRadius: CGFloat,
     displayScale: CGFloat, tuning: PreviewOpticalTuning = .defaults
@@ -120,15 +121,13 @@ struct FittedPreviewGeometry: Equatable {
     // Defaults: one physical pixel at each side. Each end clears the largest possible
     // resulting width (a conservative continuous-cap band), plus one pixel:
     // finalWidth <= baseWidth + 2 * pixel, so endInset >= finalWidth + pixel.
-    var insets = tuning.insets(baseWidth: base.size.width, pixel: pixel)
+    let insets = tuning.insets(baseWidth: base.size.width, pixel: pixel)
     if insets.width * 2 >= available.width || insets.height * 2 >= available.height {
       // Oversized experiments cannot collapse an otherwise valid preview.
-      // Resolve the stable default policy once, without another TextKit layout.
-      let defaults = PreviewOpticalTuning.defaults
-      guard tuning != defaults else { return nil }
-      guard defaults.opticalSafetyEnabled && base.scale < 1 && base.size.width <= radius * defaults.narrowEligibilityFactor else { return base }
-      insets = defaults.insets(baseWidth: base.size.width, pixel: pixel)
-      guard insets.width * 2 < available.width && insets.height * 2 < available.height else { return nil }
+      // An optional diagnostic cannot veto a potentially valid mandatory fit.
+      // The disabled production policy falls back to the plain body fit; the
+      // independent ink/path validator still runs and may reject it.
+      return base
     }
     let innerAvailable = CGSize(width: available.width - insets.width * 2,
       height: available.height - insets.height * 2)
@@ -136,5 +135,24 @@ struct FittedPreviewGeometry: Equatable {
     let outerSize = CGSize(width: min(available.width, content.size.width + insets.width * 2),
       height: min(available.height, content.size.height + insets.height * 2))
     return FittedPreviewGeometry(scale: content.scale, size: outerSize, opticalInsets: insets)
+  }
+}
+
+/// Bounded discovery probes, not a claim that every real-valued valid interval
+/// can be found. No verified candidate means failure, never unchecked success.
+enum PreviewCorrectionSearch {
+  static let refinementSteps = 12
+
+  static func probes(preferred: CGFloat, spaceLimit: CGFloat) -> [CGFloat] {
+    guard preferred.isFinite, preferred > 0, spaceLimit.isFinite, spaceLimit > 0 else { return [] }
+    let upper = min(preferred, spaceLimit.nextDown)
+    guard upper > 0 else { return [] }
+    var probes: [CGFloat] = []
+    // Include small corrections AND samples near the space boundary. In
+    // particular, an oversized initial estimate need never pass containment.
+    for step in 1...12 { probes.append(upper / pow(2, CGFloat(step))) }
+    for step in 1...8 { probes.append(upper * CGFloat(step) / 8) }
+    for step in 1...8 { probes.append(upper * (1 - 1 / pow(2, CGFloat(step)))) }
+    return Array(Set(probes.filter { $0.isFinite && $0 > 0 && $0 < spaceLimit })).sorted()
   }
 }

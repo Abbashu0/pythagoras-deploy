@@ -47,7 +47,7 @@ final class FittedPreviewGeometryTests: XCTestCase {
       for height in [CGFloat(3000), CGFloat(20000), CGFloat(1000000)] {
         let natural = CGSize(width: 320, height: height)
         let fit = try XCTUnwrap(FittedPreviewGeometry.fitPreview(natural: natural, available: available,
-          sourceCornerRadius: 24, displayScale: displayScale))
+          sourceCornerRadius: 24, displayScale: displayScale, tuning: .validated(opticalSafetyEnabled: true)))
         let pixel = 1 / displayScale
         XCTAssertEqual(fit.opticalInsets.width, pixel)
         XCTAssertGreaterThanOrEqual(fit.contentRect.minY, fit.size.width + pixel)
@@ -66,8 +66,10 @@ final class FittedPreviewGeometryTests: XCTestCase {
       XCTAssertNil(FittedPreviewGeometry.fitPreview(natural: CGSize(width: 320, height: 20000),
         available: CGSize(width: 300, height: 400), sourceCornerRadius: 24, displayScale: displayScale))
     }
-    XCTAssertNil(FittedPreviewGeometry.fitPreview(natural: CGSize(width: 320, height: 20000),
-      available: CGSize(width: 1, height: 1), sourceCornerRadius: 24, displayScale: 3))
+    XCTAssertEqual(FittedPreviewGeometry.fitPreview(natural: CGSize(width: 320, height: 20000),
+      available: CGSize(width: 1, height: 1), sourceCornerRadius: 24, displayScale: 3,
+      tuning: .validated(opticalSafetyEnabled: true)),
+      FittedPreviewGeometry.fit(natural: CGSize(width: 320, height: 20000), available: CGSize(width: 1, height: 1)))
   }
 
   func testTuningDefaultsAndInvalidNativeNumbersNormalizeToTheOriginalPolicy() {
@@ -84,7 +86,7 @@ final class FittedPreviewGeometryTests: XCTestCase {
     let defaults = try XCTUnwrap(FittedPreviewGeometry.fitPreview(natural: natural, available: available,
       sourceCornerRadius: 24, displayScale: 3))
     let tuned = try XCTUnwrap(FittedPreviewGeometry.fitPreview(natural: natural, available: available,
-      sourceCornerRadius: 24, displayScale: 3, tuning: .validated(sideSafetyPixels: 2,
+      sourceCornerRadius: 24, displayScale: 3, tuning: .validated(opticalSafetyEnabled: true, sideSafetyPixels: 2,
         endSafetyWidthFactor: 1.5, endSafetyExtraPixels: 6, narrowEligibilityFactor: 3)))
     XCTAssertNotEqual(tuned, defaults)
     XCTAssertEqual(tuned.contentRect.width / tuned.contentRect.height, natural.width / natural.height, accuracy: 0.000001)
@@ -93,7 +95,7 @@ final class FittedPreviewGeometryTests: XCTestCase {
     XCTAssertEqual(disabled, FittedPreviewGeometry.fit(natural: natural, available: available))
     let tight = CGSize(width: 300, height: 20)
     XCTAssertEqual(FittedPreviewGeometry.fitPreview(natural: natural, available: tight,
-      sourceCornerRadius: 24, displayScale: 3, tuning: .validated(sideSafetyPixels: 8,
+      sourceCornerRadius: 24, displayScale: 3, tuning: .validated(opticalSafetyEnabled: true, sideSafetyPixels: 8,
         endSafetyWidthFactor: 4, endSafetyExtraPixels: 32, narrowEligibilityFactor: 8)),
       FittedPreviewGeometry.fitPreview(natural: natural, available: tight, sourceCornerRadius: 24, displayScale: 3))
   }
@@ -118,5 +120,27 @@ final class FittedPreviewGeometryTests: XCTestCase {
     let size = try XCTUnwrap(FittedPreviewGeometry.budget(viewport: CGSize(width: 700, height: 250), horizontalMargins: 32, verticalMargins: 20, menuLineHeight: 60))
     XCTAssertEqual(size.height, 50)
     XCTAssertTrue(size.width.isFinite && size.height.isFinite)
+  }
+
+  func testProductionOpticsAreDisabledAndDiagnosticsRequireExplicitOptIn() throws {
+    XCTAssertFalse(PreviewOpticalTuning.defaults.opticalSafetyEnabled)
+    let natural = CGSize(width: 320, height: 20000), available = CGSize(width: 300, height: 400)
+    XCTAssertEqual(FittedPreviewGeometry.fitPreview(natural: natural, available: available,
+      sourceCornerRadius: 24, displayScale: 3), FittedPreviewGeometry.fit(natural: natural, available: available))
+    XCTAssertGreaterThan(try XCTUnwrap(FittedPreviewGeometry.fitPreview(natural: natural, available: available,
+      sourceCornerRadius: 24, displayScale: 3, tuning: .validated(opticalSafetyEnabled: true))).opticalInsets.height, 0)
+  }
+
+  func testSearchProbesIncludeSmallerCorrectionsWhenPreferredConsumesViewport() {
+    let probes = PreviewCorrectionSearch.probes(preferred: 1000000, spaceLimit: 12)
+    XCTAssertLessThanOrEqual(probes.count, 28)
+    XCTAssertTrue(probes.allSatisfy { $0.isFinite && $0 > 0 && $0 < 12 })
+    XCTAssertTrue(probes.contains { $0 >= 1 && $0 <= 4 })
+    XCTAssertEqual(probes, probes.sorted())
+    XCTAssertEqual(probes, PreviewCorrectionSearch.probes(preferred: 1000000, spaceLimit: 12))
+    for value in [CGFloat(0), CGFloat(-1), CGFloat.nan, CGFloat.infinity] {
+      XCTAssertTrue(PreviewCorrectionSearch.probes(preferred: value, spaceLimit: 12).isEmpty)
+      XCTAssertTrue(PreviewCorrectionSearch.probes(preferred: 12, spaceLimit: value).isEmpty)
+    }
   }
 }

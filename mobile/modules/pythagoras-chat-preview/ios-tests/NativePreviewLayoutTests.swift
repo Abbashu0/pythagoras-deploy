@@ -76,7 +76,8 @@ final class NativePreviewLayoutTests: XCTestCase {
       XCTAssertEqual(fit.contentRect.height, natural.height * fit.scale, accuracy: 0.000001)
       let radius = try XCTUnwrap(sizing.recoveredCornerRadius(for: value))
       XCTAssertEqual(radius, value.cornerRadius * fit.scale)
-      XCTAssertEqual(radius, view.layer.cornerRadius)
+      XCTAssertEqual(view.layer.cornerRadius, 0) // no independent rounded layer mask
+      XCTAssertNotNil(view.inkLayout)
       XCTAssertEqual(sizing.recoveredSize(for: value), fit.size)
       XCTAssertEqual(view.accessibilityLabel, source)
       let outer = RoundedRectangle(cornerRadius: radius, style: .continuous)
@@ -155,7 +156,9 @@ final class NativePreviewLayoutTests: XCTestCase {
       let source = "بداية نَصّ عربي\n" + String(repeating: "نَصّ عربي + API 👨‍👩‍👧‍👦\r\n", count: 1600)
         + "PYTHAGORAS_LONG_MESSAGE_END_2026\n\n"
       let view = VectorPreviewView(frame: .zero)
-      view.configure(input(source, category: category))
+      var diagnostic = input(source, category: category)
+      diagnostic.opticalTuning = .validated(opticalSafetyEnabled: true)
+      view.configure(diagnostic)
       attach(view, to: window)
       let fit = try XCTUnwrap(view.fit)
       let glyphs = try XCTUnwrap(view.fittedGlyphBounds)
@@ -186,11 +189,12 @@ final class NativePreviewLayoutTests: XCTestCase {
     props.narrowEligibilityFactor = .nan
     XCTAssertEqual(props.activeOpticalTuning, .defaults)
     props.sideSafetyPixels = 2
+    props.opticalSafetyEnabled = true
     props.endSafetyWidthFactor = 1.5
     props.endSafetyExtraPixels = 6
     props.narrowEligibilityFactor = 3
     #if DEBUG
-    XCTAssertEqual(props.activeOpticalTuning, .validated(sideSafetyPixels: 2,
+    XCTAssertEqual(props.activeOpticalTuning, .validated(opticalSafetyEnabled: true, sideSafetyPixels: 2,
       endSafetyWidthFactor: 1.5, endSafetyExtraPixels: 6, narrowEligibilityFactor: 3))
     #else
     XCTAssertEqual(props.activeOpticalTuning, .defaults)
@@ -210,7 +214,7 @@ final class NativePreviewLayoutTests: XCTestCase {
     attach(view, to: window)
     let before = try XCTUnwrap(view.fit)
     var changed = original
-    changed.opticalTuning = .validated(sideSafetyPixels: 2, endSafetyWidthFactor: 1.5,
+    changed.opticalTuning = .validated(opticalSafetyEnabled: true, sideSafetyPixels: 2, endSafetyWidthFactor: 1.5,
       endSafetyExtraPixels: 6, narrowEligibilityFactor: 3)
     XCTAssertNotEqual(changed, original)
     view.configure(changed)
@@ -294,6 +298,7 @@ final class NativePreviewLayoutTests: XCTestCase {
     XCTAssertEqual(view.fittedSize(proposal: .unspecified), .zero)
     XCTAssertEqual(view.intrinsicContentSize, .zero)
     XCTAssertNil(view.fit)
+    XCTAssertEqual(view.fitStatus, .unavailableGeometry)
     let sizing = PreviewSizingState()
     sizing.bind(view)
     let window = try testWindow()
@@ -357,5 +362,270 @@ final class NativePreviewLayoutTests: XCTestCase {
     XCTAssertGreaterThan(recovered.height, 0)
     XCTAssertEqual(sizing.recoveredSize(for: source), recovered)
     XCTAssertEqual(view.intrinsicContentSize, recovered)
+  }
+
+  @MainActor
+  func testRectangleContainmentDoesNotProveRoundedInkContainment() throws {
+    let canvas = CGRect(x: 0, y: 0, width: 30, height: 300)
+    let outline = RoundedRectangle(cornerRadius: 12, style: .continuous).path(in: canvas).cgPath
+    let cornerInk = CGRect(x: 0.25, y: 0.25, width: 2, height: 2)
+    XCTAssertTrue(canvas.contains(cornerInk))
+    XCTAssertFalse(FittedPreviewInkLayout.contains(cornerInk, in: outline, clearance: 0))
+    let resolved = try XCTUnwrap(FittedPreviewInkLayout.resolve(natural: canvas.size,
+      available: CGSize(width: 100, height: 400), inkRects: [cornerInk],
+      sourceCornerRadius: 12, sourceBorderWidth: 0, displayScale: 3,
+      tuning: .validated(opticalSafetyEnabled: false)))
+    XCTAssertGreaterThan(resolved.geometry.opticalInsets.height, 0)
+    XCTAssertTrue(resolved.inkRects.allSatisfy {
+      FittedPreviewInkLayout.contains($0, in: resolved.outline, clearance: resolved.rasterClearance)
+    })
+    XCTAssertNil(FittedPreviewInkLayout.resolve(natural: canvas.size,
+      available: CGSize(width: 0.1, height: 0.1), inkRects: [cornerInk],
+      sourceCornerRadius: 12, sourceBorderWidth: 0, displayScale: 1,
+      tuning: .validated(opticalSafetyEnabled: false)))
+  }
+
+  @MainActor
+  private func raster(_ view: VectorPreviewView, scale: CGFloat, clipInk: Bool,
+    throughLayer: Bool = false) throws -> CGImage {
+    let fit = try XCTUnwrap(view.fit)
+    // ONLY the bounded fitted canvas is allocated, never the full source height.
+    let canvas = CGSize(width: ceil(fit.size.width * scale) / scale,
+      height: ceil(fit.size.height * scale) / scale)
+    view.bounds = CGRect(origin: .zero, size: canvas)
+    let format = UIGraphicsImageRendererFormat()
+    format.scale = scale
+    format.opaque = false
+    format.preferredRange = .standard
+    view.setNeedsDisplay()
+    view.layer.displayIfNeeded()
+    let image = UIGraphicsImageRenderer(size: canvas, format: format).image { output in
+      if throughLayer { view.layer.render(in: output.cgContext) }
+      else { XCTAssertTrue(view.renderPreview(in: output.cgContext, canvas: view.bounds, clipInk: clipInk)) }
+    }
+    if throughLayer { XCTAssertTrue(view.lastDrawingContainedInk) }
+    return try XCTUnwrap(image.cgImage)
+  }
+
+  private func assertNoLostInk(_ actual: CGImage, _ reference: CGImage,
+    file: StaticString = #filePath, line: UInt = #line) throws {
+    XCTAssertEqual(try lostInkPixels(actual, reference), 0,
+      "App clipping/layer lost rasterized ink", file: file, line: line)
+  }
+
+  private func lostInkPixels(_ actual: CGImage, _ reference: CGImage,
+    file: StaticString = #filePath, line: UInt = #line) throws -> Int {
+    XCTAssertEqual(actual.width, reference.width, file: file, line: line)
+    XCTAssertEqual(actual.height, reference.height, file: file, line: line)
+    // Normalize both images into the SAME explicit RGBA bitmap. Compare alpha
+    // support, including first/last pixels and colored emoji, not only rectangles.
+    func alpha(_ image: CGImage) throws -> [UInt8] {
+      var bytes = [UInt8](repeating: 0, count: image.width * image.height * 4)
+      try bytes.withUnsafeMutableBytes { buffer in
+        let context = try XCTUnwrap(CGContext(data: buffer.baseAddress, width: image.width,
+          height: image.height, bitsPerComponent: 8, bytesPerRow: image.width * 4,
+          space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue |
+            CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.interpolationQuality = .none
+        context.draw(image, in: CGRect(x: 0, y: 0, width: CGFloat(image.width), height: CGFloat(image.height)))
+      }
+      return stride(from: 3, to: bytes.count, by: 4).map { bytes[$0] }
+    }
+    let expected = try alpha(reference), found = try alpha(actual)
+    XCTAssertTrue(expected.contains { $0 > 0 }, "Reference must contain ink", file: file, line: line)
+    // Strict comparison: do not dismiss a lost low-alpha endpoint pixel as
+    // harmless rounding. Any layer-conversion mismatch must be investigated.
+    let lost = zip(expected, found).filter { $0.0 > $0.1 }.count
+    return lost
+  }
+
+  @MainActor
+  func testRasterLossProbeRejectsAnExtraUnverifiedMask() throws {
+    let window = try testWindow()
+    let view = VectorPreviewView(frame: .zero, testDisplayScale: 3)
+    defer { view.dispose(); close(window) }
+    let value = input(String(repeating: "نَصّ عَرَبِيّ API 😀\n", count: 50))
+    view.configure(PreviewInput(source: value.source, logicalMaxWidth: value.logicalMaxWidth,
+      foreground: .white, background: .clear, border: .clear, rtl: value.rtl,
+      fontStyle: value.fontStyle, lineSpacing: value.lineSpacing,
+      horizontalPadding: value.horizontalPadding, verticalPadding: value.verticalPadding,
+      borderWidth: value.borderWidth, cornerRadius: value.cornerRadius,
+      category: value.category, appearance: value.appearance,
+      opticalTuning: .validated(opticalSafetyEnabled: false)))
+    attach(view, to: window)
+    let reference = try raster(view, scale: 3, clipInk: false)
+    let format = UIGraphicsImageRendererFormat()
+    format.scale = 3
+    format.opaque = false
+    format.preferredRange = .standard
+    let damaged = UIGraphicsImageRenderer(size: view.bounds.size, format: format).image {
+      // Negative control ONLY: this is not a claim about UIKit's actual mask.
+      $0.cgContext.clip(to: CGRect(x: 0, y: 0, width: view.bounds.width, height: view.bounds.height / 2))
+      XCTAssertTrue(view.renderPreview(in: $0.cgContext, canvas: view.bounds, clipInk: true))
+    }
+    XCTAssertGreaterThan(try lostInkPixels(XCTUnwrap(damaged.cgImage), reference), 0)
+  }
+
+  @MainActor
+  func testActualBoundedRasterKeepsAllInkWithoutOpticalHeuristics() throws {
+    let window = try testWindow()
+    defer { close(window) }
+    let paragraph = "نَصّ عَرَبِيّ بِالتَّشْكِيلِ + API 123 👨‍👩‍👧‍👦 😀\r\n\t"
+    let sources = ["مرحبا", String(repeating: paragraph, count: 30),
+      String(repeating: paragraph, count: 1500), String(repeating: paragraph, count: 5000)]
+    for source in sources {
+      for scale in [CGFloat(1), CGFloat(2), CGFloat(3)] {
+        for category in [UIContentSizeCategory.large, .accessibilityLarge] {
+          let complete = source + "\nPYTHAGORAS_LONG_MESSAGE_END_2026\n\n"
+          var value = input(complete, category: category)
+          value.opticalTuning = .validated(opticalSafetyEnabled: false)
+          // Transparent surface/border isolates glyph ink. No bitmap snapshot is
+          // added to production. Exact typography/source match production input.
+          value = PreviewInput(source: value.source, logicalMaxWidth: value.logicalMaxWidth,
+            foreground: .white, background: .clear, border: .clear, rtl: value.rtl,
+            fontStyle: value.fontStyle, lineSpacing: value.lineSpacing,
+            horizontalPadding: value.horizontalPadding, verticalPadding: value.verticalPadding,
+            borderWidth: value.borderWidth, cornerRadius: value.cornerRadius,
+            category: value.category, appearance: value.appearance, opticalTuning: value.opticalTuning)
+          let view = VectorPreviewView(frame: .zero, testDisplayScale: scale)
+          view.configure(value)
+          attach(view, to: window)
+          let verified = try XCTUnwrap(view.inkLayout)
+          XCTAssertEqual(view.accessibilityLabel, complete)
+          XCTAssertTrue(verified.inkRects.allSatisfy {
+            FittedPreviewInkLayout.contains($0, in: verified.outline, clearance: verified.rasterClearance)
+          })
+          let reference = try raster(view, scale: scale, clipInk: false)
+          try assertNoLostInk(raster(view, scale: scale, clipInk: true), reference)
+          try assertNoLostInk(raster(view, scale: scale, clipInk: true, throughLayer: true), reference)
+          try assertEndpointInk(view, scale: scale)
+          XCTAssertEqual(view.fittedSize(proposal: .zero), verified.geometry.size)
+          XCTAssertEqual(view.fit, verified.geometry)
+          view.dispose()
+          view.removeFromSuperview()
+        }
+      }
+    }
+  }
+
+  @MainActor
+  func testActualUndersizedCanvasCannotReportSuccessfulInkDrawing() throws {
+    let window = try testWindow()
+    let view = VectorPreviewView(frame: .zero)
+    defer { view.dispose(); close(window) }
+    view.configure(input("مرحبا\nEND"))
+    attach(view, to: window)
+    let format = UIGraphicsImageRendererFormat()
+    format.scale = 3
+    _ = UIGraphicsImageRenderer(size: CGSize(width: 1, height: 1), format: format).image {
+      XCTAssertFalse(view.renderPreview(in: $0.cgContext,
+        canvas: CGRect(x: 0, y: 0, width: 1, height: 1), clipInk: true))
+    }
+  }
+
+  @MainActor
+  private func assertEndpointInk(_ view: VectorPreviewView, scale: CGFloat) throws {
+    let layout = try XCTUnwrap(view.inkLayout)
+    let source = try XCTUnwrap(view.accessibilityLabel) as NSString
+    let ending = source.range(of: "PYTHAGORAS_LONG_MESSAGE_END_2026", options: .backwards)
+    XCTAssertNotEqual(ending.location, NSNotFound)
+    let first = try XCTUnwrap(view.fittedInkBounds(forCharacters: source.rangeOfComposedCharacterSequence(at: 0)))
+    let last = try XCTUnwrap(view.fittedInkBounds(forCharacters:
+      source.rangeOfComposedCharacterSequence(at: NSMaxRange(ending) - 1)))
+    // Actual first/last composed-character envelopes. Whole-preview 8-bit
+    // alpha alone can hide quantized details when many lines share one pixel.
+    // Magnify the SAME production vector + clipping path back to natural scale
+    // into small bounded crops; never allocate the natural full source image.
+    let zoom = 1 / layout.geometry.scale
+    for endpoint in [first, last] {
+      let extent = CGSize(width: endpoint.width * zoom + 4, height: endpoint.height * zoom + 4)
+      XCTAssertTrue(extent.width.isFinite && extent.height.isFinite)
+      let format = UIGraphicsImageRendererFormat()
+      format.scale = scale
+      format.opaque = false
+      format.preferredRange = .standard
+      func image(clipped: Bool) throws -> CGImage {
+        let output = UIGraphicsImageRenderer(size: extent, format: format).image {
+          $0.cgContext.translateBy(x: 2 - endpoint.minX * zoom, y: 2 - endpoint.minY * zoom)
+          $0.cgContext.scaleBy(x: zoom, y: zoom)
+          // Bounds already set by raster() to a pixel-aligned output canvas.
+          // Undo its center-placement offset for this exact endpoint crop.
+          $0.cgContext.translateBy(x: -(view.bounds.width - layout.geometry.size.width) / 2,
+            y: -(view.bounds.height - layout.geometry.size.height) / 2)
+          XCTAssertTrue(view.renderPreview(in: $0.cgContext, canvas: view.bounds, clipInk: clipped))
+        }
+        return try XCTUnwrap(output.cgImage)
+      }
+      try assertNoLostInk(image(clipped: true), image(clipped: false))
+    }
+  }
+
+  @MainActor
+  func testConstrainedSearchLargeRadiusAndExtremeBodyHaveVerifiedFits() throws {
+    for (natural, available, radius, ink) in [
+      (CGSize(width: 96, height: 96), CGSize(width: 30, height: 30), CGFloat(1000000), CGRect(x: 8, y: 8, width: 80, height: 80)),
+      (CGSize(width: 320, height: 1000000), CGSize(width: 16, height: 20), CGFloat(24), CGRect(x: 15, y: 11, width: 290, height: 999978)),
+      (CGSize(width: 90, height: 48), CGSize(width: 300, height: 400), CGFloat(24), CGRect(x: 15, y: 11, width: 60, height: 26))
+    ] {
+      let result = try XCTUnwrap(FittedPreviewInkLayout.resolve(natural: natural, available: available,
+        inkRects: [ink], sourceCornerRadius: radius, sourceBorderWidth: 0, displayScale: 3, tuning: .defaults))
+      XCTAssertTrue(result.inkRects.allSatisfy {
+        FittedPreviewInkLayout.contains($0, in: result.outline, clearance: result.rasterClearance)
+      })
+      XCTAssertLessThanOrEqual(result.geometry.size.width, available.width + 0.000001)
+      XCTAssertLessThanOrEqual(result.geometry.size.height, available.height + 0.000001)
+      XCTAssertEqual(result.geometry.contentRect.width / result.geometry.contentRect.height,
+        natural.width / natural.height, accuracy: 0.000001)
+      if natural.height == 48 { XCTAssertEqual(result.geometry.scale, 1) }
+    }
+  }
+
+  @MainActor
+  func testHullReductionKeepsEveryOriginalLineEnvelopeSafe() throws {
+    let lines = (0..<5000).map { CGRect(x: 15, y: CGFloat($0) * 25 + 11, width: 290, height: 20) }
+    let result = try XCTUnwrap(FittedPreviewInkLayout.resolve(natural: CGSize(width: 320, height: 125022),
+      available: CGSize(width: 300, height: 400), inkRects: lines, sourceCornerRadius: 24,
+      sourceBorderWidth: 0.8, displayScale: 3, tuning: .defaults))
+    XCTAssertEqual(result.hullVertexCount, 4) // repeated search uses four vertices, not 5000 lines
+    XCTAssertEqual(result.inkRects.count, lines.count)
+    XCTAssertTrue(result.inkRects.allSatisfy {
+      FittedPreviewInkLayout.contains($0, in: result.outline, clearance: result.rasterClearance)
+    })
+  }
+
+  @MainActor
+  func testKnownWindowFailureIsNotUnavailableGeometryOrSuccessfulEmptyFit() throws {
+    let window = try testWindow()
+    let view = VectorPreviewView(frame: .zero, testDisplayScale: 1)
+    let sizing = PreviewSizingState()
+    sizing.bind(view)
+    let value = input("نَصّ كامل END")
+    view.configure(value)
+    defer { view.dispose(); close(window) }
+    attach(view, to: window)
+    XCTAssertNotNil(sizing.recoveredSize(for: value))
+    XCTAssertNil(sizing.failure)
+    window.frame.size.width = 1
+    window.layoutIfNeeded()
+    XCTAssertGreaterThan(window.safeAreaLayoutGuide.layoutFrame.width, 0)
+    view.setNeedsLayout()
+    view.layoutIfNeeded()
+    // Positive, known viewport, but a one-point-wide canvas cannot contain ink
+    // expanded by one physical pixel on EACH side. Not an attachment retry.
+    XCTAssertEqual(view.fittedSize(proposal: .unspecified), .zero)
+    XCTAssertEqual(view.fitStatus, .noVerifiedInkFit)
+    XCTAssertNil(view.fit)
+    XCTAssertNil(sizing.recoveredSize(for: value))
+    XCTAssertEqual(sizing.failure, .noVerifiedInkFit)
+    XCTAssertNil(view.accessibilityLabel)
+    XCTAssertEqual(view.fittedSize(proposal: .zero), .zero)
+    XCTAssertEqual(view.fitStatus, .noVerifiedInkFit) // failed work is not repeated
+    window.frame.size.width = 390
+    window.layoutIfNeeded()
+    view.setNeedsLayout()
+    view.layoutIfNeeded()
+    XCTAssertEqual(view.fitStatus, .fitted)
+    XCTAssertNotNil(sizing.recoveredSize(for: value))
+    XCTAssertNil(sizing.failure)
   }
 }

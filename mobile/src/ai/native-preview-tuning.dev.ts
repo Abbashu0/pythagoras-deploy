@@ -11,11 +11,12 @@ export type NativePreviewTuning = Readonly<{
   narrowEligibilityFactor: number; // Multiple of source corner radius, 0–8.
 }>;
 
-/** Defaults reproduce the current opticalInsets correction exactly.
- * Lower safety values can reintroduce visual clipping during experimentation.
+/** Intentional Debug/Release baseline: mandatory native ink/path containment.
+ * The old width-based optical bands are an optional diagnostic, OFF by default.
+ * Enabling them never bypasses native containment validation.
  */
 export const NATIVE_PREVIEW_TUNING: NativePreviewTuning = Object.freeze({
-  opticalSafetyEnabled: true,
+  opticalSafetyEnabled: false,
   sideSafetyPixels: 1,
   endSafetyWidthFactor: 1,
   endSafetyExtraPixels: 3,
