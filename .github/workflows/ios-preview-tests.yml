@@ -1,0 +1,68 @@
+name: Native preview XCTest (no IPA)
+
+on:
+  workflow_call:
+    inputs:
+      expected_sha:
+        description: Approved spike checkpoint SHA to test
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Approved spike checkpoint SHA to test
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-native-preview-tests
+  cancel-in-progress: false
+
+jobs:
+  native-preview-tests:
+    runs-on: macos-26
+    timeout-minutes: 75
+    steps:
+      - name: Checkout the reviewed spike
+        uses: actions/checkout@v4
+        with:
+          ref: ios-dev-build-spike
+          persist-credentials: false
+      - name: Verify exact checkout provenance
+        env:
+          PREVIEW_EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          [[ "$PREVIEW_EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$PREVIEW_EXPECTED_SHA"
+          git log -1 --format='%H %s'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - name: Install locked mobile dependencies
+        working-directory: mobile
+        env:
+          CI: true
+          EXPO_NO_TELEMETRY: 1
+        run: npm ci
+      - name: Verify the persistent native Markdown patch
+        run: node .github/scripts/verify-enriched-markdown-height-patch.mjs
+      - name: Allocate isolated test reports
+        run: echo "PREVIEW_TEST_REPORTS=$(mktemp -d "$RUNNER_TEMP/pythagoras-preview-tests.XXXXXX")" >> "$GITHUB_ENV"
+      - name: Foundation and hosted Simulator XCTest
+        env:
+          CI: true
+          EXPO_NO_TELEMETRY: 1
+        run: bash .github/scripts/ios-preview-tests.sh
+      - name: Preserve test evidence, including failures
+        if: ${{ always() && env.PREVIEW_TEST_REPORTS != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: Pythagoras-native-preview-tests-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.PREVIEW_TEST_REPORTS }}
+          if-no-files-found: error
+          retention-days: 7
