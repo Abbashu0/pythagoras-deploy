@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 /// Small optical policy, normalized before it enters a preview cache key.
 struct PreviewOpticalTuning: Equatable {
