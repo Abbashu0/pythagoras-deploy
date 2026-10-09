@@ -6,6 +6,7 @@ import ts from 'typescript';
 import { presentUserMessage } from '../mobile/src/ai/user-message-presentation';
 import { firstStrongTextDirection } from '../mobile/src/ai/rich-response/text-direction';
 import { LONG_USER_FIXTURE } from '../mobile/src/ai/renderer-quality-fixtures.dev';
+import { NATIVE_PREVIEW_TUNING } from '../mobile/src/ai/native-preview-tuning.dev';
 
 const owner = fs.readFileSync('mobile/src/ai/chat-composer.ios.tsx', 'utf8').replace(/\r\n/g, '\n');
 const helper = fs.readFileSync('mobile/src/ai/chat-user-context-menu.ios.tsx', 'utf8').replace(/\r\n/g, '\n');
@@ -16,7 +17,8 @@ type NativeNode = {
   props: { [name: string]: unknown; children?: NativeNode | NativeNode[] | string; modifiers?: Modifier[]; label?: string; systemImage?: string; onPress?: () => Promise<void> };
 };
 
-function fixture(content: string, inline: NativeNode, failCopy = false, nativeAvailable = false) {
+function fixture(content: string, inline: NativeNode, failCopy = false, nativeAvailable = false,
+  options: { development?: boolean; tuning?: Record<string, unknown> } = {}) {
   const writes: string[] = [];
   const menuType = Object.assign(() => {}, { Trigger: 'NativeTrigger', Items: 'NativeItems', Preview: 'NativePreview' });
   const modifiers = new Proxy({
@@ -30,6 +32,7 @@ function fixture(content: string, inline: NativeNode, failCopy = false, nativeAv
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
   }).outputText, {
     exports: moduleExports,
+    __DEV__: options.development ?? true,
     require: (name: string) => {
       if (name === 'expo-clipboard') return { setStringAsync: async (value: string) => {
         writes.push(value);
@@ -40,6 +43,7 @@ function fixture(content: string, inline: NativeNode, failCopy = false, nativeAv
       if (name === '@expo/ui/swift-ui/modifiers') return modifiers;
       if (name === './rich-response/text-direction') return { firstStrongTextDirection };
       if (name === './fitted-user-message-preview.ios') return { hasFittedUserMessagePreview: nativeAvailable, PythagorasFittedUserMessagePreview: 'NativeFittedPreview' };
+      if (name === './native-preview-tuning.dev') return { NATIVE_PREVIEW_TUNING: options.tuning ?? NATIVE_PREVIEW_TUNING };
       if (name === 'react/jsx-runtime') return { jsx: (type: unknown, props: NativeNode['props']) => ({ type, props }), jsxs: (type: unknown, props: NativeNode['props']) => ({ type, props }) };
       throw new Error('unexpected import: ' + name);
     },
@@ -171,6 +175,25 @@ test('the ordinary long-form story stays fully visible while native preview and 
   assert.equal(f.preview.props.source, LONG_USER_FIXTURE);
   await f.action.props.onPress!();
   assert.deepEqual(Buffer.from(f.writes[0], 'utf8'), Buffer.from(LONG_USER_FIXTURE, 'utf8'));
+});
+
+test('Debug tuning propagates on the next preview render; production omits it and source cannot be overridden', async () => {
+  const source = ' نَصّ عربي\r\n\t👨‍👩‍👧‍👦 PYTHAGORAS_LONG_MESSAGE_END_2026 ';
+  const inline: NativeNode = { type: 'VisibleBubble', props: { children: source } };
+  const defaults = fixture(source, inline, false, true);
+  for (const [key, value] of Object.entries(NATIVE_PREVIEW_TUNING)) assert.equal(defaults.preview.props[key], value);
+  const changed = { ...NATIVE_PREVIEW_TUNING, sideSafetyPixels: 2, endSafetyWidthFactor: 1.5,
+    endSafetyExtraPixels: 6, narrowEligibilityFactor: 3, source: 'DO_NOT_COPY', logicalMaxWidth: 9999 };
+  const refreshed = fixture(source, inline, false, true, { tuning: changed });
+  for (const key of Object.keys(NATIVE_PREVIEW_TUNING)) assert.equal(refreshed.preview.props[key], changed[key as keyof typeof changed]);
+  assert.equal(refreshed.preview.props.source, source);
+  assert.equal(refreshed.preview.props.logicalMaxWidth, 320);
+  assert.equal(refreshed.trigger.props.children, inline);
+  await refreshed.action.props.onPress!();
+  assert.deepEqual(Buffer.from(refreshed.writes[0]), Buffer.from(source));
+  const release = fixture(source, inline, false, true, { development: false, tuning: changed });
+  for (const key of Object.keys(NATIVE_PREVIEW_TUNING)) assert.equal(key in release.preview.props, false);
+  assert.equal(release.preview.props.source, source);
 });
 
 test('owner keeps Spacer/Host/row outside the menu and preserves both inline text-selection and disclosure taps', () => {

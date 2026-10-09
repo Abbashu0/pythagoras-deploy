@@ -72,6 +72,8 @@ final class NativePreviewLayoutTests: XCTestCase {
       attach(view, to: window)
       let fit = try XCTUnwrap(view.fit)
       let natural = try XCTUnwrap(view.naturalSize)
+      XCTAssertEqual(fit.contentRect.width, natural.width * fit.scale, accuracy: 0.000001)
+      XCTAssertEqual(fit.contentRect.height, natural.height * fit.scale, accuracy: 0.000001)
       let radius = try XCTUnwrap(sizing.recoveredCornerRadius(for: value))
       XCTAssertEqual(radius, value.cornerRadius * fit.scale)
       XCTAssertEqual(radius, view.layer.cornerRadius)
@@ -80,7 +82,8 @@ final class NativePreviewLayoutTests: XCTestCase {
       let outer = RoundedRectangle(cornerRadius: radius, style: .continuous)
         .path(in: CGRect(origin: .zero, size: fit.size))
       let vector = RoundedRectangle(cornerRadius: value.cornerRadius, style: .continuous)
-        .path(in: CGRect(origin: .zero, size: natural))
+        // The padded outer canvas is distinct from the unchanged TextKit body.
+        .path(in: CGRect(origin: .zero, size: CGSize(width: fit.size.width / fit.scale, height: fit.size.height / fit.scale)))
         .applying(CGAffineTransform(scaleX: fit.scale, y: fit.scale))
       // Compare shape containment in the fitted coordinate space. This tests
       // the app-owned outline, not UIKit's live context-menu compositor.
@@ -117,8 +120,8 @@ final class NativePreviewLayoutTests: XCTestCase {
       XCTAssertTrue(size.width.isFinite && size.height.isFinite)
       XCTAssertGreaterThan(size.width, 0)
       XCTAssertGreaterThan(size.height, 0)
-      XCTAssertEqual(size.width, natural.width * fit.scale)
-      XCTAssertEqual(size.height, natural.height * fit.scale)
+      XCTAssertEqual(size.width, natural.width * fit.scale + fit.opticalInsets.width * 2, accuracy: 0.000001)
+      XCTAssertEqual(size.height, natural.height * fit.scale + fit.opticalInsets.height * 2, accuracy: 0.000001)
       XCTAssertEqual(view.intrinsicContentSize, size)
       XCTAssertLessThanOrEqual(fit.scale, 1)
       view.dispose()
@@ -142,6 +145,87 @@ final class NativePreviewLayoutTests: XCTestCase {
     view.configure(input(String(repeating: "سطر عربي\n", count: 80)))
     XCTAssertEqual(try XCTUnwrap(view.naturalSize), original)
     XCTAssertEqual(view.fittedSize(proposal: .unspecified), first)
+  }
+
+  @MainActor
+  func testActualArabicGlyphBoundsStayOutsideOpticalCapsAndKeepTheEndMarker() throws {
+    let window = try testWindow()
+    defer { close(window) }
+    for category in [UIContentSizeCategory.large, .accessibilityLarge] {
+      let source = "بداية نَصّ عربي\n" + String(repeating: "نَصّ عربي + API 👨‍👩‍👧‍👦\r\n", count: 1600)
+        + "PYTHAGORAS_LONG_MESSAGE_END_2026\n\n"
+      let view = VectorPreviewView(frame: .zero)
+      view.configure(input(source, category: category))
+      attach(view, to: window)
+      let fit = try XCTUnwrap(view.fit)
+      let glyphs = try XCTUnwrap(view.fittedGlyphBounds)
+      let pixel = 1 / window.screen.scale
+      XCTAssertGreaterThan(fit.opticalInsets.height, 0)
+      XCTAssertGreaterThanOrEqual(glyphs.minY, fit.size.width + pixel)
+      XCTAssertGreaterThanOrEqual(fit.size.height - glyphs.maxY, fit.size.width + pixel)
+      XCTAssertGreaterThanOrEqual(glyphs.minX, fit.contentRect.minX)
+      XCTAssertLessThanOrEqual(glyphs.maxX, fit.contentRect.maxX)
+      XCTAssertEqual(view.accessibilityLabel, source)
+      XCTAssertEqual(view.intrinsicContentSize, fit.size)
+      for proposal in [ProposedViewSize.unspecified, .zero, ProposedViewSize(width: 1, height: 1)] {
+        XCTAssertEqual(view.fittedSize(proposal: proposal), fit.size)
+        XCTAssertEqual(view.fit, fit)
+        XCTAssertEqual(view.fittedGlyphBounds, glyphs)
+      }
+      view.removeFromSuperview()
+      view.dispose()
+    }
+  }
+
+  @MainActor
+  func testNativePropsUseDebugOverridesAndReleaseDefaults() {
+    let props = FittedUserMessageProps()
+    props.sideSafetyPixels = -CGFloat.infinity
+    props.endSafetyWidthFactor = -1
+    props.endSafetyExtraPixels = 1000000
+    props.narrowEligibilityFactor = .nan
+    XCTAssertEqual(props.activeOpticalTuning, .defaults)
+    props.sideSafetyPixels = 2
+    props.endSafetyWidthFactor = 1.5
+    props.endSafetyExtraPixels = 6
+    props.narrowEligibilityFactor = 3
+    #if DEBUG
+    XCTAssertEqual(props.activeOpticalTuning, .validated(sideSafetyPixels: 2,
+      endSafetyWidthFactor: 1.5, endSafetyExtraPixels: 6, narrowEligibilityFactor: 3))
+    #else
+    XCTAssertEqual(props.activeOpticalTuning, .defaults)
+    #endif
+  }
+
+  @MainActor
+  func testChangedTuningInvalidatesFitOnTheSameNativeView() throws {
+    let window = try testWindow()
+    let view = VectorPreviewView(frame: .zero)
+    defer { view.dispose(); close(window) }
+    let source = String(repeating: "نَصّ عربي + API 👨‍👩‍👧‍👦\n", count: 1600) + "PYTHAGORAS_LONG_MESSAGE_END_2026\n"
+    let original = input(source)
+    let sizing = PreviewSizingState()
+    sizing.bind(view)
+    view.configure(original)
+    attach(view, to: window)
+    let before = try XCTUnwrap(view.fit)
+    var changed = original
+    changed.opticalTuning = .validated(sideSafetyPixels: 2, endSafetyWidthFactor: 1.5,
+      endSafetyExtraPixels: 6, narrowEligibilityFactor: 3)
+    XCTAssertNotEqual(changed, original)
+    view.configure(changed)
+    XCTAssertNil(view.fit)
+    XCTAssertNil(sizing.recoveredSize(for: changed)) // old recovery cannot own new props
+    let size = view.fittedSize(proposal: .unspecified)
+    let after = try XCTUnwrap(view.fit)
+    XCTAssertNotEqual(after, before)
+    XCTAssertEqual(view.accessibilityLabel, source)
+    view.setNeedsLayout()
+    view.layoutIfNeeded()
+    XCTAssertEqual(sizing.recoveredSize(for: changed), size)
+    view.configure(changed)
+    XCTAssertEqual(view.fit, after)
+    XCTAssertEqual(view.fittedSize(proposal: ProposedViewSize(width: 1, height: 1)), size)
   }
 
   @MainActor

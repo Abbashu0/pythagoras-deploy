@@ -79,10 +79,12 @@ as described above. Neither sizing path invents viewport dimensions. UIKit can
 attach a window before its safe viewport is usable, so layoutSubviews also checks
 for initial recovery, but does nothing once the unchanged valid fit is notified.
 
-Uniform s=min(1, availableWidth/naturalWidth, availableHeight/naturalHeight).
-The reported size is (naturalWidth*s, naturalHeight*s). UIView.bounds are fitted
-bounds. CGContext scales the entire vector drawing, including glyphs, padding,
-continuous shape and border, into that bounded canvas. TextKit's internal
+The basic fit uses s=min(1, availableWidth/naturalWidth, availableHeight/naturalHeight).
+Ordinary previews report (naturalWidth*s, naturalHeight*s). Narrow miniatures
+add the fitted-space optical safety margins described below. UIView.bounds are
+the reported outer size. Glyphs, native text spacing and original padding use
+one uniform CGContext scale inside that canvas. The continuous surface is drawn
+in fitted coordinates with scaled radius/border width. TextKit's internal
 measurement container is tall, but no natural-height view/layer or huge bitmap
 is created. No drawingGroup, renderer snapshot, texture allocation or scaleEffect
 with an unscaled external frame is used. Copy is outside this view and unscaled.
@@ -92,13 +94,96 @@ shape after its fitted frame. Recovery carries the successful fit geometry as
 well as size, so the continuous outline and UIView layer use the same
 `sourceCornerRadius * scale` value. An unavailable fit has no authoritative
 radius and supplies zero until successful native recovery. No unscaled 24pt
-radius is applied to a narrow miniature, and no extra padding or mask overlay
-is introduced. Vector fill/clipping/border and TextKit drawing are unchanged.
-The missing outer-shape contract is confirmed in source; a system-mask mismatch
-as the cause of physical clipping remains a hypothesis until device validation.
-Node tests cover scale/radius proportions. Hosted XCTest compares the supplied
-outline with the uniformly transformed vector path; it does not test the system
-context-menu compositor or finger motion. No movement-resistance API is added.
+radius is applied to a narrow miniature. Product physical QA reported that this
+outline alignment alone did not eliminate clipped caps. It is retained; the
+additional correction protects the content region rather than retuning the mask.
+
+## Preview-only optical content safety
+
+Original padding shrinks with the text: 11pt becomes 0.22pt at scale 0.02.
+For a scaled preview whose basic fitted width is within the source corner
+diameter, `fitPreview` reserves symmetric FITTED-space margins before the final
+fit. Short unscaled and wider previews retain their exact previous geometry.
+Each side receives one physical pixel from the actual measurement window's
+screen scale. Each end receives the basic fitted width plus three pixels: two
+account for the side margins in the maximum resulting outer width, and one is
+raster clearance. Thus endInset >= finalOuterWidth + onePixel, a conservative
+safe band beyond even full-width continuous cap regions.
+
+The available budget is reduced by these margins, then the same complete
+TextKit body is uniformly fitted once inside the remainder. Reported dimensions
+include both margins; the text origin includes them before the uniform scale.
+The source is not rewrapped or cropped, and no unreported drawing overflow is
+created. The outer surface/border and clipping follow those reported bounds.
+This is constant-time geometry after the single TextKit measurement, with no
+iteration, timer, JS callback or extra row. Insufficient space or invalid pixel
+metrics fails closed, never producing a successful partial/zero fit. Window
+display scale is part of the native cache key; ordinary proposals remain frozen.
+
+Node tests cover complete content-box dimensions, cap clearance, pixel metrics
+and unchanged short/wide cases. Hosted XCTest additionally checks actual
+NSLayoutManager glyph bounds for Arabic/combining marks and the end marker.
+These tests have not been run on Windows and do not validate the system menu
+compositor or finger motion. Physical QA must confirm the first/last visible
+lines and whether the conservative strip margins look appropriate. No
+movement-resistance API is added, and inline collapse thresholds are unchanged.
+
+## Fast Refresh optical tuning (development only)
+
+`mobile/src/ai/native-preview-tuning.dev.ts` is the single editable JS tuning
+location. The ContextMenu passes these five optional props only when `__DEV__`
+is true. The local native view uses the SDK 57 `@Field` mechanism, validates
+values into `PreviewOpticalTuning`, and captures that value in `PreviewInput`.
+
+| Parameter | Default | Accepted native range |
+| --- | --- | --- |
+| `opticalSafetyEnabled` | `true` | Boolean |
+| `sideSafetyPixels` | `1` | 0–8 physical pixels |
+| `endSafetyWidthFactor` | `1` | 0–4 |
+| `endSafetyExtraPixels` | `3` | 0–32 physical pixels |
+| `narrowEligibilityFactor` | `2` | 0–8 |
+
+Nonfinite, negative or excessive numeric fields use that field's default.
+Wrong types are rejected by Expo's typed field decoder. If a valid experiment
+would consume the viewport, fitting uses the default optical policy once
+instead; it never publishes negative/invalid bounds. Disabling safety or using
+weaker margins may reproduce visual clipping deliberately during experimentation.
+The exact previous defaults remain the stable production policy.
+
+The existing unsigned workflow uses `xcodebuild -configuration Debug`. Native
+overrides are also protected by `#if DEBUG`; a Release module always supplies
+`.defaults` even if JS sends overrides. The first native build must verify
+the local pod compiles with the expected Debug conditions and the props link.
+No developer controls, preferences, storage, network request or remount key is
+introduced. The source/style props follow the tuning spread, so tuning cannot
+replace the original source or bubble width.
+
+Validated tuning participates in synthesized `PreviewInput` equality. A changed
+effective parameter therefore takes the existing `configure -> resetPresentation
+-> sizeThatFits` path; old recovery bounds are rejected by their input identity.
+Unchanged/normalized-to-default inputs reuse valid geometry. The window metrics,
+native recovery callback and context-preview outline retain their existing
+ownership. Dismiss the menu around edits; exact behavior while actively holding
+the menu during Fast Refresh still requires device QA.
+
+Developer workflow:
+
+1. After independent review, build/install one Development IPA containing these
+   native props. An older fitter build cannot gain them from JavaScript alone.
+2. Start Metro from `mobile/` using the existing LAN Development Build workflow:
+   `npx expo start --dev-client --lan`. Keep the existing API/LAN environment.
+3. Edit the five constants in `mobile/src/ai/native-preview-tuning.dev.ts`.
+4. Let Metro/Fast Refresh deliver the updated JS.
+5. Dismiss and reopen the native ContextMenu; it receives the updated validated
+   inputs without changing the inline message or transcript measurements.
+6. Compare screenshots and tune again without rebuilding the IPA.
+
+Swift implementation changes, new native prop definitions, or geometry behaviors
+not expressible by these five controls still require a native rebuild. Once
+values are accepted, promote them to `PreviewOpticalTuning.defaults` and align the
+JS constants in a reviewed native checkpoint/build. Fast Refresh does not reload
+compiled Swift. Neither native compilation nor these lifecycle guarantees have
+been verified on a device by the Windows structural tests.
 
 Full layout is linear in source size, measured once per presentation (width/final
 alignment passes); memory holds one attributed source/glyph layout. Extremely

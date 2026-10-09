@@ -21,6 +21,21 @@ final class FittedUserMessageProps: UIBaseViewProps {
   @Field var verticalPadding: CGFloat = 11
   @Field var borderWidth: CGFloat = 0.8
   @Field var cornerRadius: CGFloat = 24
+  @Field var opticalSafetyEnabled: Bool = PreviewOpticalTuning.defaults.opticalSafetyEnabled
+  @Field var sideSafetyPixels: CGFloat = PreviewOpticalTuning.defaults.sideSafetyPixels
+  @Field var endSafetyWidthFactor: CGFloat = PreviewOpticalTuning.defaults.endSafetyWidthFactor
+  @Field var endSafetyExtraPixels: CGFloat = PreviewOpticalTuning.defaults.endSafetyExtraPixels
+  @Field var narrowEligibilityFactor: CGFloat = PreviewOpticalTuning.defaults.narrowEligibilityFactor
+
+  var activeOpticalTuning: PreviewOpticalTuning {
+    #if DEBUG
+    return .validated(opticalSafetyEnabled: opticalSafetyEnabled, sideSafetyPixels: sideSafetyPixels,
+      endSafetyWidthFactor: endSafetyWidthFactor, endSafetyExtraPixels: endSafetyExtraPixels,
+      narrowEligibilityFactor: narrowEligibilityFactor)
+    #else
+    return .defaults
+    #endif
+  }
 }
 
 struct PythagorasFittedUserMessagePreview: ExpoSwiftUI.View {
@@ -37,7 +52,8 @@ struct PythagorasFittedUserMessagePreview: ExpoSwiftUI.View {
       rtl: props.direction == "rtl", fontStyle: props.fontStyle.native, lineSpacing: props.lineSpacing,
       horizontalPadding: props.horizontalPadding, verticalPadding: props.verticalPadding,
       borderWidth: props.borderWidth, cornerRadius: props.cornerRadius,
-      category: contentCategory(dynamicTypeSize), appearance: colorScheme == .dark ? .dark : .light
+      category: contentCategory(dynamicTypeSize), appearance: colorScheme == .dark ? .dark : .light,
+      opticalTuning: props.activeOpticalTuning
     ))
   }
 }
@@ -75,6 +91,7 @@ struct PreviewInput: Equatable {
   let cornerRadius: CGFloat
   let category: UIContentSizeCategory
   let appearance: UIUserInterfaceStyle
+  var opticalTuning: PreviewOpticalTuning = .defaults
 }
 
 // Local SwiftUI sizing state, never a JS event or transcript measurement.
@@ -174,6 +191,7 @@ final class VectorPreviewView: UIView {
     let size: CGSize
     let safeInsets: UIEdgeInsets
     let margins: UIEdgeInsets
+    let displayScale: CGFloat
   }
   // Test hosts may disable ambient fallback; production prefers its own window.
   var allowsKeyWindowFallback = true
@@ -256,9 +274,11 @@ final class VectorPreviewView: UIView {
       verticalMargins: margins.top + margins.bottom, menuLineHeight: font.lineHeight
     ) else { return .zero }
     let sourceWidth = min(available.width, FittedPreviewGeometry.positiveFinite(input.logicalMaxWidth) ?? available.width)
+    guard let displayScale = FittedPreviewGeometry.positiveFinite(currentWindow?.screen.scale) else { return .zero }
     measurementAttempted = true
     guard let natural = measure(input: input, traits: traits, font: font, width: sourceWidth),
-      let resolved = FittedPreviewGeometry.fit(natural: natural, available: available) else { return .zero }
+      let resolved = FittedPreviewGeometry.fitPreview(natural: natural, available: available,
+        sourceCornerRadius: input.cornerRadius, displayScale: displayScale, tuning: input.opticalTuning) else { return .zero }
     snapshot = input
     naturalSize = natural
     fit = resolved
@@ -317,26 +337,37 @@ final class VectorPreviewView: UIView {
     return measured
   }
 
+  /// Read-only native diagnostic for actual glyph placement, including Arabic
+  /// marks and trailing lines; no transcript measurement or JS callback.
+  var fittedGlyphBounds: CGRect? {
+    guard let fit, let input = snapshot, let manager, let container else { return nil }
+    let ink = manager.boundingRect(forGlyphRange: glyphRange, in: container)
+      .offsetBy(dx: nonnegative(input.horizontalPadding), dy: nonnegative(input.verticalPadding))
+    return ink.applying(CGAffineTransform(scaleX: fit.scale, y: fit.scale))
+      .offsetBy(dx: fit.opticalInsets.width, dy: fit.opticalInsets.height)
+  }
+
   override func draw(_ rect: CGRect) {
-    guard let fit, let naturalSize, let input = snapshot, let manager,
+    guard let fit, let input = snapshot, let manager,
       let context = UIGraphicsGetCurrentContext() else { return }
     let traits = UITraitCollection(userInterfaceStyle: input.appearance)
-    let sourceRect = CGRect(origin: .zero, size: naturalSize)
-    let radius = nonnegative(input.cornerRadius)
+    let sourceRect = CGRect(origin: .zero, size: fit.size)
+    let radius = fit.scaledCornerRadius(input.cornerRadius)
     let shape = RoundedRectangle(cornerRadius: radius, style: .continuous).path(in: sourceRect).cgPath
     context.saveGState()
     defer { context.restoreGState() }
     context.translateBy(x: (bounds.width - fit.size.width) / 2, y: (bounds.height - fit.size.height) / 2)
-    context.scaleBy(x: fit.scale, y: fit.scale)
     context.addPath(shape)
     context.setFillColor(input.background.resolvedColor(with: traits).cgColor)
     context.fillPath()
     context.saveGState()
     context.addPath(shape)
     context.clip()
+    context.translateBy(x: fit.opticalInsets.width, y: fit.opticalInsets.height)
+    context.scaleBy(x: fit.scale, y: fit.scale)
     manager.drawGlyphs(forGlyphRange: glyphRange, at: CGPoint(x: nonnegative(input.horizontalPadding), y: nonnegative(input.verticalPadding)))
     context.restoreGState()
-    let border = nonnegative(input.borderWidth)
+    let border = nonnegative(input.borderWidth) * fit.scale
     if border > 0 {
       let borderPath = RoundedRectangle(cornerRadius: max(0, radius - border / 2), style: .continuous)
         .path(in: sourceRect.insetBy(dx: border / 2, dy: border / 2)).cgPath
@@ -372,7 +403,7 @@ final class VectorPreviewView: UIView {
 
   private func windowGeometry(of window: UIWindow) -> WindowGeometry {
     WindowGeometry(identity: ObjectIdentifier(window), size: window.bounds.size,
-      safeInsets: window.safeAreaInsets, margins: window.layoutMargins)
+      safeInsets: window.safeAreaInsets, margins: window.layoutMargins, displayScale: window.screen.scale)
   }
 
   private func recoverSizingIfNeeded() {

@@ -19,6 +19,7 @@ import {
 import type { Palette } from '@/theme';
 import { firstStrongTextDirection } from './rich-response/text-direction';
 import { hasFittedUserMessagePreview, PythagorasFittedUserMessagePreview } from './fitted-user-message-preview.ios';
+import { NATIVE_PREVIEW_TUNING } from './native-preview-tuning.dev';
 
 /** Must be rendered inside the row's existing SwiftUI Host.
  * The width constraint is outside the native menu interaction: its Trigger
@@ -58,7 +59,8 @@ export function ChatUserMessageContextMenu({
       </ContextMenu.Items>
       <ContextMenu.Preview>
         {hasFittedUserMessagePreview ? (
-          <PythagorasFittedUserMessagePreview source={content} logicalMaxWidth={maxWidth}
+          <PythagorasFittedUserMessagePreview {...(__DEV__ ? NATIVE_PREVIEW_TUNING : {})}
+            source={content} logicalMaxWidth={maxWidth}
             foregroundColor={palette.text} backgroundColor={palette.surfaceInset} borderColor={palette.border}
             direction={firstStrongTextDirection(content) === 'ltr' ? 'ltr' : 'rtl'} fontStyle="body" lineSpacing={3}
             horizontalPadding={15} verticalPadding={11} borderWidth={0.8} cornerRadius={cornerRadius} />

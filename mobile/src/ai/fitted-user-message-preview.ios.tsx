@@ -1,4 +1,5 @@
 import { requireNativeView, requireOptionalNativeModule } from 'expo';
+import type { NativePreviewTuning } from './native-preview-tuning.dev';
 
 export type FittedUserMessagePreviewProps = {
   source: string;
@@ -13,10 +14,10 @@ export type FittedUserMessagePreviewProps = {
   verticalPadding: number;
   borderWidth: number;
   cornerRadius: number;
-};
+} & Partial<NativePreviewTuning>;
 
-// The current installed Development IPA predates this local module. Preserve
-// the existing preview there; fitting activates only in a build that links it.
+// Older builds keep the existing Text fallback. Optical tuning additionally
+// requires the one-time native baseline containing the five new @Field props.
 export const hasFittedUserMessagePreview = requireOptionalNativeModule('PythagorasChatPreview') !== null;
 const NativePreview = hasFittedUserMessagePreview
   ? requireNativeView<FittedUserMessagePreviewProps>('PythagorasChatPreview', 'PythagorasFittedUserMessagePreview')

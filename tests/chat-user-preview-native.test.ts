@@ -5,6 +5,7 @@ import vm from 'node:vm';
 import { execFileSync } from 'node:child_process';
 import test from 'node:test';
 import ts from 'typescript';
+import { NATIVE_PREVIEW_TUNING, type NativePreviewTuning } from '../mobile/src/ai/native-preview-tuning.dev';
 
 const moduleRoot = 'mobile/modules/pythagoras-chat-preview';
 const read = (file: string) => fs.readFileSync(path.join(moduleRoot, file), 'utf8');
@@ -220,4 +221,164 @@ test('the native context-preview outline uses the fitted radius without a separa
   assert.equal(/clipShape|mask\(|overlay\(|\.interaction/u.test(surface), false);
   assert.ok(read('ios-tests/NativePreviewLayoutTests.swift').includes('testPreviewOutlineMatchesTheScaledVectorBubble'));
   assert.ok(fs.readFileSync('mobile/node_modules/@expo/ui/ios/Modifiers/ContentShapeModifier.swift', 'utf8').includes('return .contextMenuPreview'));
+});
+
+type PreviewSize = { width: number; height: number };
+type OpticalFit = { scale: number; size: PreviewSize; opticalInsets: PreviewSize };
+const opticalSource = geometry.slice(geometry.indexOf('static func fitPreview('));
+const opticalCondition = opticalSource.match(/let needsOpticalSafety = (.+)/u)![1];
+const insetSource = geometry.slice(geometry.indexOf('func insets('), geometry.indexOf('struct FittedPreviewGeometry'));
+const opticalInsets = insetSource.match(/CGSize\(width: (.+),\s*height: (.+)\)/u)!;
+const opticalAvailable = opticalSource.match(/let innerAvailable = CGSize\(width: (.+),\s*height: (.+)\)/u)!;
+const opticalOuter = opticalSource.match(/let outerSize = CGSize\(width: (.+),\s*height: (.+)\)/u)!;
+const oversizedCondition = opticalSource.match(/if (.+) \{/u)![1];
+const defaultEligibility = opticalSource.match(/guard (defaults.opticalSafetyEnabled.+) else/u)![1];
+const nativeDefaults = Object.fromEntries(geometry.match(/static let defaults = PreviewOpticalTuning\(([\s\S]*?)\)/u)![1]
+  .split(',').map(field => { const [key, value] = field.trim().split(':'); return [key, JSON.parse(value.trim())]; })) as NativePreviewTuning;
+// Execute the actual Swift arithmetic with a thin optional/CGSize adapter.
+// This is a portable geometry oracle, not a UIKit or Swift execution claim.
+const opticalFormula = vm.runInNewContext(`(natural, available, radius, displayScale, tuning = defaults) => {
+  if (![natural.width, natural.height, available.width, available.height, displayScale].every(value => Number.isFinite(value) && value > 0)) return null;
+  const plain = fit(natural, available);
+  const base = { scale: plain.scale, size: { width: plain.width, height: plain.height } };
+  const pixel = 1 / displayScale;
+  const needsOpticalSafety = ${opticalCondition};
+  if (!needsOpticalSafety) return { ...base, opticalInsets: { width: 0, height: 0 } };
+  const insetPolicy = tuning => {
+    const { sideSafetyPixels, endSafetyWidthFactor, endSafetyExtraPixels } = tuning;
+    const baseWidth = base.size.width;
+    return { width: ${opticalInsets[1]}, height: ${opticalInsets[2]} };
+  };
+  let insets = insetPolicy(tuning);
+  if (${oversizedCondition}) {
+    if (JSON.stringify(tuning) === JSON.stringify(defaults)) return null;
+    if (!(${defaultEligibility})) return { ...base, opticalInsets: { width: 0, height: 0 } };
+    insets = insetPolicy(defaults);
+    if (insets.width * 2 >= available.width || insets.height * 2 >= available.height) return null;
+  }
+  const innerAvailable = { width: ${opticalAvailable[1]}, height: ${opticalAvailable[2]} };
+  if (![innerAvailable.width, innerAvailable.height].every(value => Number.isFinite(value) && value > 0)) return null;
+  const inner = fit(natural, innerAvailable);
+  const content = { scale: inner.scale, size: { width: inner.width, height: inner.height } };
+  return { scale: content.scale, size: { width: ${opticalOuter[1]}, height: ${opticalOuter[2]} }, opticalInsets: insets };
+}`, { fit: fitFormula, min: Math.min, defaults: nativeDefaults }) as (natural: PreviewSize, available: PreviewSize, radius: number, displayScale: number, tuning?: NativePreviewTuning) => OpticalFit | null;
+
+test('optical safety leaves short and wide previews unchanged while protecting a complete narrow content box', () => {
+  const available = { width: 300, height: 400 };
+  for (const natural of [{ width: 90, height: 48 }, { width: 320, height: 800 }]) {
+    const fit = opticalFormula(natural, available, 24, 3)!;
+    const base = fitFormula(natural, available);
+    assert.equal(fit.scale, base.scale);
+    assert.equal(fit.size.width, base.width);
+    assert.equal(fit.size.height, base.height);
+    assert.equal(fit.opticalInsets.width, 0);
+    assert.equal(fit.opticalInsets.height, 0);
+  }
+  for (const displayScale of [1, 2, 3]) {
+    for (const height of [3000, 20000, 1000000]) {
+      const natural = { width: 320, height };
+      const fit = opticalFormula(natural, available, 24, displayScale)!;
+      const pixel = 1 / displayScale;
+      const contentWidth = fit.size.width - fit.opticalInsets.width * 2;
+      const contentHeight = fit.size.height - fit.opticalInsets.height * 2;
+      assert.equal(fit.opticalInsets.width, pixel);
+      assert.ok(fit.opticalInsets.height >= fit.size.width + pixel);
+      assert.ok(Math.abs(contentWidth - natural.width * fit.scale) < 1e-8);
+      assert.ok(Math.abs(contentHeight - natural.height * fit.scale) < 1e-8);
+      assert.ok(Math.abs(contentWidth / contentHeight - natural.width / natural.height) < 1e-8);
+      assert.ok(fit.size.width <= available.width && fit.size.height <= available.height);
+      assert.ok(fit.size.width > 0 && fit.size.height > 0 && Number.isFinite(fit.scale));
+      assert.equal(JSON.stringify(opticalFormula(natural, available, 24, displayScale)), JSON.stringify(fit));
+    }
+  }
+  for (const value of [0, -1, NaN, Infinity]) assert.equal(opticalFormula({ width: 320, height: 20000 }, available, 24, value), null);
+  assert.equal(opticalFormula({ width: 320, height: 20000 }, { width: 1, height: 1 }, 24, 3), null);
+});
+
+test('native optical margins belong to measured preview bounds and glyph drawing, not transcript geometry', () => {
+  for (const value of [
+    'FittedPreviewGeometry.fitPreview(natural: natural, available: available',
+    'sourceCornerRadius: input.cornerRadius, displayScale: displayScale, tuning: input.opticalTuning)',
+    'positiveFinite(currentWindow?.screen.scale)', 'displayScale: window.screen.scale',
+    'let sourceRect = CGRect(origin: .zero, size: fit.size)',
+    'context.translateBy(x: fit.opticalInsets.width, y: fit.opticalInsets.height)',
+    'let border = nonnegative(input.borderWidth) * fit.scale',
+    'var fittedGlyphBounds: CGRect?', 'manager.boundingRect(forGlyphRange: glyphRange, in: container)',
+  ]) assert.ok(native.includes(value), value);
+  const drawing = native.slice(native.indexOf('override func draw('), native.indexOf('override func didMoveToWindow()'));
+  assert.ok(drawing.indexOf('context.fillPath()') < drawing.indexOf('context.scaleBy('));
+  assert.ok(drawing.indexOf('context.clip()') < drawing.indexOf('fit.opticalInsets.width'));
+  assert.ok(geometry.includes('let content = fit(natural: natural, available: innerAvailable)'));
+  assert.equal(/for\s|while\s|source\.count|source\.split/u.test(opticalSource), false);
+  assert.ok(read('ios-tests/NativePreviewLayoutTests.swift').includes('testActualArabicGlyphBoundsStayOutsideOpticalCapsAndKeepTheEndMarker'));
+});
+
+test('five native Debug props, validated effective input and Release defaults preserve the existing optical policy', () => {
+  assert.deepEqual(NATIVE_PREVIEW_TUNING, {
+    opticalSafetyEnabled: true, sideSafetyPixels: 1, endSafetyWidthFactor: 1,
+    endSafetyExtraPixels: 3, narrowEligibilityFactor: 2,
+  });
+  assert.deepEqual(nativeDefaults, NATIVE_PREVIEW_TUNING);
+  for (const key of Object.keys(NATIVE_PREVIEW_TUNING)) assert.ok(native.includes(`@Field var ${key}:`), key);
+  const boundary = native.slice(native.indexOf('var activeOpticalTuning:'), native.indexOf('struct PythagorasFittedUserMessagePreview'));
+  assert.ok(boundary.includes('#if DEBUG\n    return .validated('));
+  assert.ok(boundary.includes('#else\n    return .defaults\n    #endif'));
+  assert.ok(native.includes('opticalTuning: props.activeOpticalTuning'));
+  const input = native.slice(native.indexOf('struct PreviewInput: Equatable'), native.indexOf('// Local SwiftUI sizing state'));
+  assert.ok(input.includes('var opticalTuning: PreviewOpticalTuning = .defaults'));
+  assert.ok(native.includes('guard pendingInput != input else { return }'));
+  assert.ok(read('ios-tests/NativePreviewLayoutTests.swift').includes('testChangedTuningInvalidatesFitOnTheSameNativeView'));
+  assert.ok(fs.readFileSync('.github/scripts/ios-unsigned-build.sh', 'utf8').includes('-configuration Debug'));
+  const wrapper = fs.readFileSync('mobile/src/ai/fitted-user-message-preview.ios.tsx', 'utf8');
+  assert.ok(wrapper.includes('& Partial<NativePreviewTuning>'));
+  assert.equal(/\.id\(|setTimeout|setInterval|onGeometryChange|onLayout/u.test(wrapper), false);
+});
+
+test('default tuning exactly matches the pre-parameter optical math; tuning changes only the fitted geometry', () => {
+  for (const height of [48, 800, 3000, 20000, 1000000]) {
+    for (const displayScale of [1, 2, 3]) {
+      const natural = { width: 320, height }, available = { width: 300, height: 400 };
+      const base = fitFormula(natural, available);
+      const expected = base.scale < 1 && base.width <= 48
+        ? (() => {
+          const pixel = 1 / displayScale;
+          const insets = { width: pixel, height: base.width + pixel * 3 };
+          const inner = fitFormula(natural, { width: available.width - insets.width * 2, height: available.height - insets.height * 2 });
+          return { scale: inner.scale, size: { width: Math.min(available.width, inner.width + insets.width * 2),
+            height: Math.min(available.height, inner.height + insets.height * 2) }, opticalInsets: insets };
+        })()
+        : { scale: base.scale, size: { width: base.width, height: base.height }, opticalInsets: { width: 0, height: 0 } };
+      assert.deepEqual(JSON.parse(JSON.stringify(opticalFormula(natural, available, 24, displayScale, NATIVE_PREVIEW_TUNING))), expected);
+    }
+  }
+  const natural = { width: 320, height: 20000 }, available = { width: 300, height: 400 };
+  const baseline = opticalFormula(natural, available, 24, 3)!;
+  for (const patch of [{ sideSafetyPixels: 2 }, { endSafetyWidthFactor: 1.5 }, { endSafetyExtraPixels: 6 }, { opticalSafetyEnabled: false }]) {
+    assert.notEqual(JSON.stringify(opticalFormula(natural, available, 24, 3, { ...NATIVE_PREVIEW_TUNING, ...patch })), JSON.stringify(baseline));
+  }
+  assert.equal(opticalFormula({ width: 320, height: 800 }, available, 24, 3)!.opticalInsets.width, 0);
+  assert.ok(opticalFormula({ width: 320, height: 800 }, available, 24, 3, { ...NATIVE_PREVIEW_TUNING, narrowEligibilityFactor: 8 })!.opticalInsets.width > 0);
+  const oversized = opticalFormula(natural, { width: 300, height: 20 }, 24, 3,
+    { ...NATIVE_PREVIEW_TUNING, sideSafetyPixels: 8, endSafetyWidthFactor: 4, endSafetyExtraPixels: 32 });
+  assert.equal(JSON.stringify(oversized), JSON.stringify(opticalFormula(natural, { width: 300, height: 20 }, 24, 3)));
+});
+
+test('native numeric normalization returns defaults for negative, nonfinite and excessive overrides', () => {
+  const expression = geometry.match(/private static func bounded\([^\n]+\) -> CGFloat \{\s*(.+)\s*\}/u)![1];
+  const bound = vm.runInNewContext(`(value, maximum, fallback) => Number(${expression})`) as
+    (value: { isFinite: boolean; valueOf: () => number }, maximum: number, fallback: number) => number;
+  for (const key of ['sideSafetyPixels', 'endSafetyWidthFactor', 'endSafetyExtraPixels', 'narrowEligibilityFactor'] as const) {
+    const max = Number(geometry.match(new RegExp(`${key}: bounded\\(${key}, maximum: ([0-9]+),`))![1]);
+    for (const value of [-1, NaN, Infinity, max + 1, 1e100]) {
+      assert.equal(bound({ isFinite: Number.isFinite(value), valueOf: () => value }, max, nativeDefaults[key]), nativeDefaults[key]);
+    }
+    for (const value of [0, 0.5, max]) assert.equal(bound({ isFinite: true, valueOf: () => value }, max, nativeDefaults[key]), value);
+  }
+  // Largest accepted settings remain bounded; unusable experiments fall back.
+  for (const height of [3000, 20000, 1000000]) {
+    const fit = opticalFormula({ width: 320, height }, { width: 300, height: 400 }, 24, 3,
+      { opticalSafetyEnabled: true, sideSafetyPixels: 8, endSafetyWidthFactor: 4, endSafetyExtraPixels: 32, narrowEligibilityFactor: 8 })!;
+    assert.ok(Number.isFinite(fit.size.width) && Number.isFinite(fit.size.height));
+    assert.ok(fit.size.width > 0 && fit.size.width <= 300 && fit.size.height > 0 && fit.size.height <= 400);
+  }
 });
