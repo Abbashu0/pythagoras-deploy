@@ -9,8 +9,8 @@ permissions:
 jobs:
   native-preview-validation:
     name: Run Native Preview XCTest on macOS
-    uses: Abbashu0/pythagoras-deploy/.github/workflows/ios-preview-tests.yml@9fc21d652ed6d1ae30c96af9eb68fbe305e2a279
+    uses: Abbashu0/pythagoras-deploy/.github/workflows/ios-preview-tests.yml@7961fb201c402ac7a7deaf51bd29205d05177217
     with:
-      expected_sha: 9fc21d652ed6d1ae30c96af9eb68fbe305e2a279
+      expected_sha: 7961fb201c402ac7a7deaf51bd29205d05177217
     permissions:
       contents: read
