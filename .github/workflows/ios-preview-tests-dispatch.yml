@@ -1,0 +1,16 @@
+name: iOS Native Preview XCTest Dispatcher
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-preview-validation:
+    name: Run Native Preview XCTest on macOS
+    uses: Abbashu0/pythagoras-deploy/.github/workflows/ios-preview-tests.yml@d0574943c3a6554a7dc14296a87521eb0d151329
+    with:
+      expected_sha: d0574943c3a6554a7dc14296a87521eb0d151329
+    permissions:
+      contents: read
