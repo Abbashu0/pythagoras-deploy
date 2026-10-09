@@ -143,3 +143,22 @@ test('test-only workflow has fatal discovery/execution gates and no IPA or produ
     'PREVIEW_TEST_EXIT', 'PREVIEW_REPORT_EXIT', 'PREVIEW_LOG_EXIT', '--disable-swift-testing']) assert.ok(driver.includes(value), value);
   assert.equal(/-retry-tests-on-failure|\barchive\s+2>|-exportArchive/u.test(driver), false);
 });
+
+test('Foundation XCTest XML uses the parallel runner with one worker, without changing discovery or hosted concurrency', () => {
+  const driver = read('.github/scripts/ios-preview-tests.sh');
+  const commands = driver.replace(/\\\r?\n\s*/gu, ' ').split(/\r?\n/u)
+    .filter(line => line.startsWith('swift test '));
+  assert.equal(commands.length, 2);
+  const execution = commands.filter(line => line.includes('--xunit-output='));
+  assert.equal(execution.length, 1);
+  assert.match(execution[0], /(?:^|\s)--parallel(?:\s|$)/u);
+  assert.match(execution[0], /(?:^|\s)--num-workers(?:=|\s+)1(?:\s|$)/u);
+  assert.ok(execution[0].includes('--disable-swift-testing'));
+  assert.ok(execution[0].includes('--xunit-output="$PREVIEW_TEST_REPORTS/foundation.xml"'));
+  assert.equal(execution[0].includes('--list-tests'), false);
+  const discovery = commands.find(line => line.includes('--list-tests'))!;
+  assert.ok(discovery);
+  assert.equal(/--parallel|--num-workers|--xunit-output/u.test(discovery), false);
+  assert.ok(driver.includes('test-without-building -parallel-testing-enabled NO'));
+  assert.ok(driver.includes('--xml "$PREVIEW_TEST_REPORTS/foundation.xml"'));
+});

@@ -23,6 +23,7 @@ swift test --package-path "$PREVIEW_MODULE_ROOT" --disable-swift-testing --list-
   2>&1 | tee "$PREVIEW_TEST_REPORTS/foundation-discovery.txt"
 PREVIEW_FOUNDATION_START="$(python3 -c 'import time; print(time.time())')"
 swift test --package-path "$PREVIEW_MODULE_ROOT" --disable-swift-testing \
+  --parallel --num-workers 1 \
   --xunit-output="$PREVIEW_TEST_REPORTS/foundation.xml" \
   2>&1 | tee "$PREVIEW_TEST_REPORTS/foundation.log"
 PREVIEW_FOUNDATION_SECONDS="$(python3 -c 'import time,sys; print(time.time()-float(sys.argv[1]))' "$PREVIEW_FOUNDATION_START")"
